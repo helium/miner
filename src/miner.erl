@@ -278,13 +278,13 @@ handle_cast(create_hbbft_group, State=#state{privkey=PrivKey}) ->
     N = length(blockchain_worker:consensus_addrs()),
     F = ((N-1) div 3),
     {ok, BatchSize} = application:get_env(blockchain, batch_size),
-    GroupArg = [blockchain_hbbft_handler, [blockchain_worker:consensus_addrs(),
-                                           State#state.consensus_worker_pos,
-                                           N,
-                                           F,
-                                           BatchSize,
-                                           PrivKey,
-                                           self()]],
+    GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
+                                      State#state.consensus_worker_pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      PrivKey,
+                                      self()]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
@@ -317,7 +317,7 @@ handle_cast({set_consensus_worker_pos, Pos}, State) ->
 %%     N = length(ConsensusAddrs),
 %%     F = (N div 3),
 %%     {ok, BatchSize} = application:get_env(blockchain, batch_size),
-%%     GroupArg = [blockchain_hbbft_handler, [ConsensusAddrs,
+%%     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
 %%                                            Pos,
 %%                                            N,
 %%                                            F,
@@ -374,15 +374,15 @@ do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
             GenesisTransactions = InitialPaymentTransactions ++ [blockchain_transaction:new_genesis_consensus_group(ConsensusAddrs)],
             %% forge the genesis block
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
-            GroupArg = [blockchain_dkg_handler, [ConsensusAddrs,
-                                                 blockchain_util:index_of(MyAddress, ConsensusAddrs),
-                                                 N,
-                                                 0, %% NOTE: F for DKG is 0
-                                                 F, %% NOTE: T for DKG is the byzantine F
-                                                 Curve,
-                                                 term_to_binary(GenesisBlock), %% TODO we need real block serialization
-                                                 {miner, sign_genesis_block},
-                                                 {miner, genesis_block_done}]],
+            GroupArg = [miner_dkg_handler, [ConsensusAddrs,
+                                            blockchain_util:index_of(MyAddress, ConsensusAddrs),
+                                            N,
+                                            0, %% NOTE: F for DKG is 0
+                                            F, %% NOTE: T for DKG is the byzantine F
+                                            Curve,
+                                            term_to_binary(GenesisBlock), %% TODO we need real block serialization
+                                            {miner, sign_genesis_block},
+                                            {miner, genesis_block_done}]],
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "dkg-"++DKGHash, libp2p_group_relcast, GroupArg),
