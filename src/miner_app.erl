@@ -15,7 +15,12 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    miner_sup:start_link().
+    case miner_sup:start_link() of
+        {ok, Pid} ->
+            miner_cli_registry:register_cli(),
+            {ok, Pid};
+        {error, Reason} -> {error, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 stop(_State) ->

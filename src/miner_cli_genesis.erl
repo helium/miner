@@ -16,21 +16,21 @@ register_all_usage() ->
     lists:foreach(fun(Args) ->
                           apply(clique, register_usage, Args)
                   end,
-                 [
-                  genesis_usage(),
-                  genesis_create_usage(),
-                  genesis_load_usage()
-                 ]).
+                  [
+                   genesis_usage(),
+                   genesis_create_usage(),
+                   genesis_load_usage()
+                  ]).
 
 register_all_cmds() ->
     lists:foreach(fun(Cmds) ->
                           [apply(clique, register_command, Cmd) || Cmd <- Cmds]
                   end,
-                 [
-                  genesis_cmd(),
-                  genesis_create_cmd(),
-                  genesis_load_cmd()
-                 ]).
+                  [
+                   genesis_cmd(),
+                   genesis_create_cmd(),
+                   genesis_load_cmd()
+                  ]).
 %%
 %% genesis
 %%
