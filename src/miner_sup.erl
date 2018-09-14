@@ -20,7 +20,7 @@ init(_Args) ->
     {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     BaseDir = "data",
-    Opts = [
+    BlockchainOpts = [
         {key, {PubKey, SigFun}}
         ,{seed_nodes, []}
         ,{port, 0}
@@ -28,13 +28,17 @@ init(_Args) ->
         ,{base_dir, BaseDir}
     ],
 
+    MinerOpts = [
+                 {curve, "SS512"}
+                ],
+
     ChildSpecs =  [#{id => blockchain
-                    ,start => {blockchain_sup, start_link, Opts}
+                    ,start => {blockchain_sup, start_link, BlockchainOpts}
                     ,restart => permanent
                     ,type => supervisor
                     },
                    #{id => miner
-                     ,start => {miner, start_link, []}
+                     ,start => {miner, start_link, [MinerOpts]}
                      ,restart => permanent
                      ,type => worker
                      ,modules => [miner]}],

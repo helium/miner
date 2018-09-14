@@ -4,8 +4,17 @@
   {registered, []},
   {mod, { miner_app, []}},
   {applications,
-   [kernel,
-    stdlib
+   [
+	kernel,
+	stdlib,
+	syntax_tools,
+	compiler,
+	crypto,
+	ssl,
+	lager,
+	ranch,
+	libp2p,
+	erl_base58
    ]},
   {env,[]},
   {modules, []},

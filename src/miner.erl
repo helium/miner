@@ -7,16 +7,21 @@
 -behavior(gen_server).
 
 -record(state, {
+          %% NOTE: a miner may or may not participate in consensus
           consensus_group :: undefined | pid()
           ,dkg_group :: undefined | pid()
           ,consensus_worker_pos :: undefined | pos_integer()
           ,tempblock :: undefined | blockchain_block:block()
           ,privkey :: undefined | tpke_privkey:privkey()
-          ,block_timer = make_ref() :: reference()
           ,candidate_genesis_block :: undefined | blockchain_block:block()
+
+          %% but every miner keeps a timer reference?
+          ,block_timer = make_ref() :: reference()
+          ,curve :: string()
          }).
 
--export([start_link/0
+-export([start_link/1
+         ,initial_dkg/1
          ,relcast_info/0
          ,relcast_queue/0
          ,consensus_worker_pos/0
@@ -27,7 +32,7 @@
          ,hbbft_status/0
          ,set_consensus_worker_pos/1
          ,create_hbbft_group/0
-         ,start_dkg/0
+         ,start_dkg/1
          ,add_block/1
          ,restore_state/0
          ,set_dkg_group/1
@@ -39,11 +44,20 @@
 %% ==================================================================
 %% API calls
 %% ==================================================================
-init([]) ->
-    {ok, #state{}}.
+start_link(Args) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+init(Args) ->
+    Curve = proplists:get_value(curve, Args),
+    {ok, #state{curve=Curve}}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+%% TODO: spec
+initial_dkg(Addrs) ->
+    gen_server:call(?MODULE, {initial_dkg, Addrs}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -132,8 +146,8 @@ create_hbbft_group() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-start_dkg() ->
-    gen_server:cast(?MODULE, start_dkg).
+start_dkg(DKGGroup) ->
+    gen_server:cast(?MODULE, {start_dkg, DKGGroup}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -167,6 +181,17 @@ sign_block(Signatures) ->
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
+handle_call({initial_dkg, Addrs}, From, State=#state{consensus_group=ConsensusGroup}) when ConsensusGroup /= undefined ->
+    %% NOTE: only if the miner is in the consensus group it runs the DKG
+    case do_initial_dkg(Addrs, State) of
+        undefined ->
+            gen_server:reply(From, ok);
+        Group ->
+            %% send yourself a message to start dkg
+            self() ! {start_dkg, Group},
+            erlang:put(dkg_await, From)
+    end,
+    {noreply, State};
 handle_call(relcast_info, _From, State) ->
     case State#state.consensus_group of
         undefined -> {reply, ok, State};
@@ -272,9 +297,9 @@ handle_cast(create_hbbft_group, State=#state{privkey=PrivKey}) ->
     %% ok = blockchain_util:write_data_to_file("pbc_pubkey", tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey))),
 
     {noreply, State#state{consensus_group=Group, block_timer=Ref}};
-handle_cast(start_dkg, State=#state{dkg_group=DKGGroup}) when DKGGroup /= undefined ->
+handle_cast({start_dkg, DKGGroup}, State) when DKGGroup /= undefined ->
     libp2p_group_relcast:handle_input(DKGGroup, start),
-    {noreply, State};
+    {noreply, State#state{dkg_group=DKGGroup}};
 handle_cast({add_block, Block}, State=#state{consensus_group=ConsensusGroup}) when ConsensusGroup /= undefined ->
     %% delete the TempBlock if we had one
     %% tell hbbft to go to the next round
@@ -329,3 +354,42 @@ handle_info(block_timeout, State) ->
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
+
+
+%% ==================================================================
+%% Internal functions
+%% ==================================================================
+do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
+    SortedAddrs = lists:sort(Addrs),
+    {ok, N} = application:get_env(blockchain, num_consensus_members),
+    F = ((N-1) div 3),
+    ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
+    ok = blockchain_worker:consensus_addrs(ConsensusAddrs),
+    MyAddress = blockchain_worker:address(),
+    case lists:member(MyAddress, ConsensusAddrs) of
+        true ->
+            %% in the consensus group, run the dkg
+            %% TODO: set initial balance elsewhere
+            InitialPaymentTransactions = [ blockchain_transaction:new_coinbase_txn(Addr, 5000) || Addr <- Addrs],
+            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_transaction:new_genesis_consensus_group(ConsensusAddrs)],
+            %% forge the genesis block
+            GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
+            GroupArg = [blockchain_dkg_handler, [ConsensusAddrs,
+                                                 blockchain_util:index_of(MyAddress, ConsensusAddrs),
+                                                 N,
+                                                 0, %% NOTE: F for DKG is 0
+                                                 F, %% NOTE: T for DKG is the byzantine F
+                                                 Curve,
+                                                 term_to_binary(GenesisBlock), %% TODO we need real block serialization
+                                                 {miner, sign_genesis_block},
+                                                 {miner, genesis_block_done}]],
+            %% make a simple hash of the consensus members
+            DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
+            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "dkg-"++DKGHash, libp2p_group_relcast, GroupArg),
+            Pos = blockchain_util:index_of(MyAddress, ConsensusAddrs),
+            lager:info("Address: ~p, ConsensusWorker pos: ~p", [MyAddress, Pos]),
+            self() ! {consensus_worker_pos, Pos},
+            Group;
+        false ->
+            undefined
+    end.
