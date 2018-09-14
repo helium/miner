@@ -14,6 +14,7 @@
 	lager,
 	ranch,
 	libp2p,
+    blockchain,
 	erl_base58
    ]},
   {env,[]},
