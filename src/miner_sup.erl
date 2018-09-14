@@ -33,7 +33,7 @@ init(_Args) ->
                 ],
 
     ChildSpecs =  [#{id => blockchain
-                    ,start => {blockchain_sup, start_link, BlockchainOpts}
+                    ,start => {blockchain_sup, start_link, [BlockchainOpts]}
                     ,restart => permanent
                     ,type => supervisor
                     },
