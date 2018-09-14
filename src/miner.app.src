@@ -1,0 +1,16 @@
+{application, miner,
+ [{description, "Helium Miner OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { miner_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, ["Helium"]},
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
