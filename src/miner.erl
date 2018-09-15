@@ -17,7 +17,8 @@
 
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
-          ,curve :: string()
+          %% TODO: this probably doesn't have to be here
+          ,curve :: 'SS512'
          }).
 
 -export([start_link/1
@@ -181,8 +182,7 @@ sign_block(Signatures) ->
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
-handle_call({initial_dkg, Addrs}, From, State=#state{consensus_group=ConsensusGroup}) when ConsensusGroup /= undefined ->
-    %% NOTE: only if the miner is in the consensus group it runs the DKG
+handle_call({initial_dkg, Addrs}, From, State) ->
     case do_initial_dkg(Addrs, State) of
         undefined ->
             gen_server:reply(From, ok);
@@ -313,7 +313,7 @@ handle_cast({set_consensus_worker_pos, Pos}, State) ->
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 %% handle_cast(restore_state, State) ->
 %%     ConsensusAddrs = blockchain_worker:consensus_addrs(),
-%%     Pos = blockchain_util:index_of(blockchain_worker:address(), ConsensusAddrs),
+%%     Pos = blockchain_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
 %%     N = length(ConsensusAddrs),
 %%     F = (N div 3),
 %%     {ok, BatchSize} = application:get_env(blockchain, batch_size),
@@ -361,11 +361,12 @@ handle_info(_Msg, State) ->
 %% ==================================================================
 do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
     SortedAddrs = lists:sort(Addrs),
-    {ok, N} = application:get_env(blockchain, num_consensus_members),
+    %% TODO: fix this in the core
+    {state, _Chain, _Swarm, _ConsensusAddrs, N, _Dir, _Trim} = sys:get_state(blockchain_worker),
     F = ((N-1) div 3),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     ok = blockchain_worker:consensus_addrs(ConsensusAddrs),
-    MyAddress = blockchain_worker:address(),
+    MyAddress = blockchain_swarm:address(),
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
             %% in the consensus group, run the dkg

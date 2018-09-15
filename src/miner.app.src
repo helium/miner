@@ -15,7 +15,11 @@
     ranch,
     libp2p,
     blockchain,
-    erl_base58
+    erl_base58,
+    dkg,
+    rand_compat, %% nat_upnp has a missing dep
+    inets, %% nat_upnp has a missing dep
+    xmerl  %% nat_upnp has a missing dep
    ]},
   {env,[]},
   {modules, []},

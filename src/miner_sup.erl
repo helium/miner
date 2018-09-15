@@ -29,7 +29,7 @@ init(_Args) ->
     ],
 
     MinerOpts = [
-                 {curve, "SS512"}
+                 {curve, 'SS512'}
                 ],
 
     ChildSpecs =  [#{id => blockchain
