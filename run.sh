@@ -3,7 +3,6 @@ set -x
 
 # default to 8 dev releases
 nodes=$(seq 8)
-owner="$1"
 
 # remove existing artifacts
 rm -rf _build/dev
@@ -48,14 +47,6 @@ export -f create_genesis_block
 parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $(join_by , ${peer_addrs[@]})
 
 # show which node is in the consensus group
-# for node in ${nodes[@]}; do
-#     if [[ $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node ledger consensus -s) = *true* ]]; then
-#         echo "miner-dev$node, in_consensus: true"
-#     else
-#         echo "miner-dev$node, in_consensus: false"
-#         # load genesis block on this node
-#         block=$(ls -d $PWD/$(find ./_build/dev/rel/miner-dev*/ -type f -name "*-genesis.block" | head -n 1))
-#         echo "loading genesis block $block on miner-dev$node"
-#         ./_build/dev/rel/miner-dev$node/bin/miner-dev$node genesis load $block
-#     fi
-# done
+for node in ${nodes[@]}; do
+    echo "miner-dev$node in_consensus: $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node status in_consensus)"
+done

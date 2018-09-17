@@ -31,12 +31,8 @@
          ,sign_genesis_block/2
          ,genesis_block_done/3
          ,hbbft_status/0
-         ,set_consensus_worker_pos/1
-         ,create_hbbft_group/0
-         ,start_dkg/1
          ,add_block/1
          ,restore_state/0
-         ,set_dkg_group/1
          ,sign_block/1
         ]).
 
@@ -133,27 +129,6 @@ hbbft_status() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-set_consensus_worker_pos(Pos) ->
-    gen_server:cast(?MODULE, {set_consensus_worker_pos, Pos}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-create_hbbft_group() ->
-    gen_server:cast(?MODULE, create_hbbft_group).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-start_dkg(DKGGroup) ->
-    gen_server:cast(?MODULE, {start_dkg, DKGGroup}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 add_block(Block) ->
     gen_server:cast(?MODULE, {add_block, Block}).
 
@@ -168,30 +143,15 @@ restore_state() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-set_dkg_group(Group) ->
-    gen_server:cast(?MODULE, {set_dkg_group, Group}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 sign_block(Signatures) ->
     gen_server:cast(?MODULE, {sign_block, Signatures}).
-
 
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
-handle_call({initial_dkg, Addrs}, From, State) ->
-    case do_initial_dkg(Addrs, State) of
-        undefined ->
-            gen_server:reply(From, ok);
-        Group ->
-            %% send yourself a message to start dkg
-            self() ! {start_dkg, Group},
-            erlang:put(dkg_await, From)
-    end,
-    {noreply, State};
+handle_call({initial_dkg, Addrs}, _From, State) ->
+    NewState = do_initial_dkg(Addrs, State),
+    {noreply, NewState};
 handle_call(relcast_info, _From, State) ->
     case State#state.consensus_group of
         undefined -> {reply, ok, State};
@@ -241,11 +201,8 @@ handle_call({create_block, Transactions}, _From, State) ->
 
     {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
     Signature = SignFun(term_to_binary(NewBlock)),
-
-    %% TODO: do this in restore state somehow
-    %% ok = blockchain_util:write_data_to_file("tempblock", NewBlock),
-    %% XXX can we lose state here if we crash and recover later?
-
+    %% XXX: can we lose state here if we crash and recover later?
+    %% XXX: We were writing this tempblock to file before, but not loading it aywhere
     lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
     %% return both valid and invalid transactions to be deleted from the buffer
     {reply, {ok, libp2p_crypto:pubkey_to_address(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State#state{tempblock=NewBlock}};
@@ -265,7 +222,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     %% TODO this can only happen at most once
     SignedGenesisBlock = blockchain_block:sign_block(GenesisBlock, term_to_binary(Signatures)),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
-    blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
+    ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
     {reply, ok, State#state{privkey=PrivKey}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -274,32 +231,6 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
-handle_cast(create_hbbft_group, State=#state{privkey=PrivKey}) ->
-    N = length(blockchain_worker:consensus_addrs()),
-    F = ((N-1) div 3),
-    {ok, BatchSize} = application:get_env(blockchain, batch_size),
-    GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
-                                      State#state.consensus_worker_pos,
-                                      N,
-                                      F,
-                                      BatchSize,
-                                      PrivKey,
-                                      self()]],
-    %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-    Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
-    lager:info("~p. Group: ~p~n", [self(), Group]),
-
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
-                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-
-    %% TODO: handle restore state better
-    %% ok = blockchain_util:write_data_to_file("pbc_pubkey", tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey))),
-
-    {noreply, State#state{consensus_group=Group, block_timer=Ref}};
-handle_cast({start_dkg, DKGGroup}, State) when DKGGroup /= undefined ->
-    libp2p_group_relcast:handle_input(DKGGroup, start),
-    {noreply, State#state{dkg_group=DKGGroup}};
 handle_cast({add_block, Block}, State=#state{consensus_group=ConsensusGroup}) when ConsensusGroup /= undefined ->
     %% delete the TempBlock if we had one
     %% tell hbbft to go to the next round
@@ -307,8 +238,6 @@ handle_cast({add_block, Block}, State=#state{consensus_group=ConsensusGroup}) wh
     libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, blockchain_block:transactions(Block)}),
     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
     {noreply, State#state{tempblock=undefined, block_timer=Ref}};
-handle_cast({set_consensus_worker_pos, Pos}, State) ->
-    {noreply, State#state{consensus_worker_pos=Pos}};
 %% TODO: how to restore state when consensus group changes
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 %% handle_cast(restore_state, State) ->
@@ -331,8 +260,6 @@ handle_cast({set_consensus_worker_pos, Pos}, State) ->
 %%                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
 %%     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
 %%     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_worker_pos=Pos}};
-handle_cast({set_dkg_group, Group}, State) ->
-    {noreply, State#state{dkg_group=Group}};
 handle_cast({set_candidate_genesis_block, Block}, State) ->
     %% TODO add an interlock so this is only possible once
     {noreply, State#state{candidate_genesis_block=Block}};
@@ -351,6 +278,29 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
+handle_info({start_dkg, DKGGroup}, State) ->
+    libp2p_group_relcast:handle_input(DKGGroup, start),
+    {noreply, State#state{dkg_group=DKGGroup}};
+handle_info(create_hbbft_group, State=#state{privkey=PrivKey}) ->
+    N = length(blockchain_worker:consensus_addrs()),
+    F = ((N-1) div 3),
+    {ok, BatchSize} = application:get_env(blockchain, batch_size),
+    GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
+                                      State#state.consensus_worker_pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      PrivKey,
+                                      self()]],
+    %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
+    Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
+    lager:info("~p. Group: ~p~n", [self(), Group]),
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
+                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+    %% TODO: handle restore state better
+    ok = blockchain_util:atomic_save("pbc_pubkey", tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey))),
+    {noreply, State#state{consensus_group=Group, block_timer=Ref}};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
@@ -359,13 +309,15 @@ handle_info(_Msg, State) ->
 %% ==================================================================
 %% Internal functions
 %% ==================================================================
-do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
+do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
     SortedAddrs = lists:sort(Addrs),
     %% TODO: fix this in the core
     {state, _Chain, _Swarm, _ConsensusAddrs, N, _Dir, _Trim} = sys:get_state(blockchain_worker),
     F = ((N-1) div 3),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
+    lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
     ok = blockchain_worker:consensus_addrs(ConsensusAddrs),
+    lager:info("WorkerConsensusAddrs: ~p", [blockchain_worker:consensus_addrs()]),
     MyAddress = blockchain_swarm:address(),
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
@@ -373,7 +325,6 @@ do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
             %% TODO: set initial balance elsewhere
             InitialPaymentTransactions = [ blockchain_transaction:new_coinbase_txn(Addr, 5000) || Addr <- Addrs],
             GenesisTransactions = InitialPaymentTransactions ++ [blockchain_transaction:new_genesis_consensus_group(ConsensusAddrs)],
-            %% forge the genesis block
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             blockchain_util:index_of(MyAddress, ConsensusAddrs),
@@ -386,11 +337,11 @@ do_initial_dkg(Addrs, _State=#state{curve=Curve}) ->
                                             {miner, genesis_block_done}]],
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
-            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "dkg-"++DKGHash, libp2p_group_relcast, GroupArg),
+            {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "dkg-"++DKGHash, libp2p_group_relcast, GroupArg),
+            ok = libp2p_group_relcast:handle_input(DKGGroup, start),
             Pos = blockchain_util:index_of(MyAddress, ConsensusAddrs),
             lager:info("Address: ~p, ConsensusWorker pos: ~p", [MyAddress, Pos]),
-            self() ! {consensus_worker_pos, Pos},
-            Group;
+            State#state{consensus_worker_pos=Pos, dkg_group=DKGGroup};
         false ->
-            undefined
+            State
     end.

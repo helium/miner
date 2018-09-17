@@ -1,0 +1,5 @@
+#!/bin/sh
+if [ -t 0 ] ; then
+    export CLIQUE_COLUMNS=`stty size | cut -d ' ' -f 2`
+fi
+relx_nodetool rpc miner_console command status $@

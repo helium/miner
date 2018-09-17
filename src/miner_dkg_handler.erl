@@ -21,12 +21,13 @@
           ,privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized()
           ,members = [] :: [libp2p_crypto:address()]
           ,artifact :: binary()
-          ,signatures = []
+          ,signatures = [] :: {libp2p_crypto:address(), binary()}
           ,signatures_required :: pos_integer()
           ,sigmod :: atom()
           ,sigfun :: atom()
           ,donemod :: atom()
           ,donefun :: atom()
+          ,sent_conf = false :: boolean()
          }).
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
@@ -42,16 +43,32 @@ handle_input(start, State) ->
 handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
     lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
     case binary_to_term(Msg) of
+        {conf, Signatures} ->
+            case enough_signatures(State#state{signatures=Signatures}) of
+                {ok, GoodSignatures} ->
+                    case State#state.sent_conf of
+                        false ->
+                            {State#state{sent_conf=true, signatures=GoodSignatures},
+                             {send, [{multicast, term_to_binary({conf, GoodSignatures})}]}};
+                        true ->
+                            %% this needs to be a call so we know the callback succeeded so we can terminate
+                            ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures, State#state.privkey),
+                            %% TODO stop the handler
+                            {State, ok}
+                    end;
+                false ->
+                    {State, ok}
+            end;
         {signature, Address, Signature} ->
             NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
             case enough_signatures(NewState) of
-                {ok, Signatures} ->
-                    %% this needs to be a call so we know the callback succeeded so we can terminate
-                    ok = DoneMod:DoneFun(State#state.artifact, Signatures, State#state.privkey);
-                false ->
-                    ok
-            end,
-            {NewState, ok};
+                {ok, Signatures} when State#state.sent_conf == false ->
+                    {NewState#state{sent_conf=true},
+                     {send, [{multicast, term_to_binary({conf, Signatures})}]}};
+                _ ->
+                    %% already sent a CONF, or not enough signatures
+                    {NewState, ok}
+            end;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, binary_to_term(Msg)) of
                 {NewDKG, ok} ->

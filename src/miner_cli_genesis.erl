@@ -18,8 +18,7 @@ register_all_usage() ->
                   end,
                   [
                    genesis_usage(),
-                   genesis_create_usage(),
-                   genesis_load_usage()
+                   genesis_create_usage()
                   ]).
 
 register_all_cmds() ->
@@ -28,8 +27,7 @@ register_all_cmds() ->
                   end,
                   [
                    genesis_cmd(),
-                   genesis_create_cmd(),
-                   genesis_load_cmd()
+                   genesis_create_cmd()
                   ]).
 %%
 %% genesis
@@ -38,8 +36,7 @@ register_all_cmds() ->
 genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
-      "  genesis create <addrs> - Create genesis block.\n",
-      "  genesis load <genesis_block>  - Load genesis block for this peer.\n"
+      "  genesis create <addrs> - Create genesis block.\n"
      ]
     ].
 
@@ -72,27 +69,4 @@ genesis_create(["genesis", "create", Addrs], [], []) ->
     miner:initial_dkg([libp2p_crypto:p2p_to_address(Addr) || Addr <- List]),
     [clique_status:text("ok")];
 genesis_create([_, _, _], [], []) ->
-    usage.
-
-%%
-%% genesis load
-%%
-
-genesis_load_cmd() ->
-    [
-     [["genesis", "load", '*'], [], [], fun genesis_load/3]
-    ].
-
-genesis_load_usage() ->
-    [["genesis", "load"],
-     ["genesis load <genesis_block> \n\n",
-      "  load a new genesis block on the node.\n\n"
-     ]
-    ].
-
-genesis_load(["genesis", "load", GenesisBlockFile], [], []) ->
-    {ok, GenesisBlock} = miner_util:load_block_from_file(GenesisBlockFile),
-    blockchain_worker:integrate_genesis_block(GenesisBlock),
-    [clique_status:text("ok")];
-genesis_load([], [], []) ->
     usage.
