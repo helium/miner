@@ -48,5 +48,5 @@ parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $(join_b
 
 # show which node is in the consensus group
 for node in ${nodes[@]}; do
-    echo "miner-dev$node in_consensus: $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node status in_consensus)"
+    echo "miner-dev$node in_consensus: $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info in_consensus)"
 done

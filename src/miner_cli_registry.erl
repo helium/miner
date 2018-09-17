@@ -7,7 +7,7 @@
 -define(CLI_MODULES, [
                       miner_cli_hbbft
                       ,miner_cli_genesis
-                      ,miner_cli_status
+                      ,miner_cli_info
                      ]).
 
 -export([register_cli/0]).

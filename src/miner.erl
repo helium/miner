@@ -34,7 +34,6 @@
          ,add_block/1
          ,restore_state/0
          ,sign_block/1
-         ,create_hbbft_group/0
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -147,13 +146,6 @@ restore_state() ->
 sign_block(Signatures) ->
     gen_server:cast(?MODULE, {sign_block, Signatures}).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-create_hbbft_group() ->
-    gen_server:cast(?MODULE, create_hbbft_group).
-
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
@@ -205,11 +197,11 @@ handle_call(hbbft_status, _From, State) ->
              end,
     {reply, Status, State};
 handle_call({create_block, Transactions}, _From, State) ->
-    CurrentBlock = maps:get(blockchain_worker:head(), blockchain_worker:blocks(), blockchain_worker:genesis_hash()),
+    CurrentBlock = blockchain_worker:head_block(),
     SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
     {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
 
-    NewBlock = blockchain_block:new(blockchain_worker:head(),
+    NewBlock = blockchain_block:new(blockchain_worker:head_hash(),
                                     blockchain_block:height(CurrentBlock) + 1,
                                     ValidTransactions,
                                     << >>),
@@ -238,6 +230,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     SignedGenesisBlock = blockchain_block:sign_block(GenesisBlock, term_to_binary(Signatures)),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
     ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
+    self() ! create_hbbft_group,
     {reply, ok, State#state{privkey=PrivKey}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -269,9 +262,9 @@ handle_cast({add_block, Block}, State=#state{consensus_group=ConsensusGroup}) wh
 %%                                            undefined,
 %%                                            self()]],
 %%     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-%%     {ok, Group} = libp2p_swarm:add_group(blockchain_worker:swarm(), "consensus", libp2p_group_relcast, GroupArg),
+%%     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
 %%     lager:info("~p. Group: ~p~n", [self(), Group]),
-%%     ok = libp2p_swarm:add_stream_handler(blockchain_worker:swarm(), "blockchain_txn/1.0.0",
+%%     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
 %%                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
 %%     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
 %%     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_worker_pos=Pos}};
@@ -282,7 +275,18 @@ handle_cast({sign_block, Signatures}, State=#state{tempblock=Tempblock}) when Te
     Block = blockchain_block:sign_block(Tempblock, term_to_binary(Signatures)),
     blockchain_worker:add_block(Block, blockchain_swarm:address()),
     {noreply, State#state{tempblock=undefined}};
-handle_cast(create_hbbft_group, State=#state{privkey=PrivKey}) ->
+handle_cast(_Msg, State) ->
+    lager:warning("unhandled cast ~p, tempblock: ~p", [_Msg, State#state.tempblock]),
+    {noreply, State}.
+
+%% ==================================================================
+%% handle_info functions
+%% ==================================================================
+handle_info(block_timeout, State) ->
+    lager:info("block timeout"),
+    libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
+    {noreply, State};
+handle_info(create_hbbft_group, State=#state{privkey=PrivKey}) ->
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
     BatchSize = 500,
@@ -302,20 +306,6 @@ handle_cast(create_hbbft_group, State=#state{privkey=PrivKey}) ->
     %% TODO: handle restore state better
     ok = blockchain_util:atomic_save("data/pbc_pubkey", term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey)))),
     {noreply, State#state{consensus_group=Group, block_timer=Ref}};
-handle_cast(_Msg, State) ->
-    lager:warning("unhandled cast ~p, tempblock: ~p", [_Msg, State#state.tempblock]),
-    {noreply, State}.
-
-%% ==================================================================
-%% handle_info functions
-%% ==================================================================
-handle_info(block_timeout, State) ->
-    lager:info("block timeout"),
-    libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
-    {noreply, State};
-handle_info({start_dkg, DKGGroup}, State) ->
-    libp2p_group_relcast:handle_input(DKGGroup, start),
-    {noreply, State#state{dkg_group=DKGGroup}};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
