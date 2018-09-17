@@ -32,7 +32,7 @@ init(_Args) ->
                  {curve, 'SS512'}
                 ],
 
-    ChildSpecs =  [#{id => blockchain
+    ChildSpecs =  [#{id => blockchain_sup
                     ,start => {blockchain_sup, start_link, [BlockchainOpts]}
                     ,restart => permanent
                     ,type => supervisor

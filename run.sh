@@ -2,7 +2,7 @@
 set -x
 
 # default to 8 dev releases
-nodes=$(seq 8)
+nodes=$(seq 7)
 
 # remove existing artifacts
 rm -rf _build/dev
