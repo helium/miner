@@ -88,6 +88,6 @@ info_in_consensus_usage() ->
     ].
 
 info_in_consensus(["info", "in_consensus"], [], []) ->
-    [clique_status:text(atom_to_list(miner:in_consensus_group()))];
+    [clique_status:text(atom_to_list(miner:in_consensus()))];
 info_in_consensus([_, _, _], [], []) ->
     usage.
