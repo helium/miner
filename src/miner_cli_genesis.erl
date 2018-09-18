@@ -17,8 +17,9 @@ register_all_usage() ->
                           apply(clique, register_usage, Args)
                   end,
                   [
-                   genesis_usage(),
-                   genesis_create_usage()
+                   genesis_usage()
+                   ,genesis_create_usage()
+                   ,genesis_load_usage()
                   ]).
 
 register_all_cmds() ->
@@ -26,8 +27,9 @@ register_all_cmds() ->
                           [apply(clique, register_command, Cmd) || Cmd <- Cmds]
                   end,
                   [
-                   genesis_cmd(),
-                   genesis_create_cmd()
+                   genesis_cmd()
+                   ,genesis_create_cmd()
+                   ,genesis_load_cmd()
                   ]).
 %%
 %% genesis
@@ -36,7 +38,8 @@ register_all_cmds() ->
 genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
-      "  genesis create <addrs> - Create genesis block.\n"
+      "  genesis create <addrs> - Create genesis block.\n",
+      "  genesis load <genesis_file> - Load genesis block from file.\n"
      ]
     ].
 
@@ -69,4 +72,32 @@ genesis_create(["genesis", "create", Addrs], [], []) ->
     miner:initial_dkg([libp2p_crypto:p2p_to_address(Addr) || Addr <- List]),
     [clique_status:text("ok")];
 genesis_create([_, _, _], [], []) ->
+    usage.
+
+%%
+%% genesis load
+%%
+
+genesis_load_cmd() ->
+    [
+     [["genesis", "load", '*'], [], [], fun genesis_load/3]
+    ].
+
+genesis_load_usage() ->
+    [["genesis", "load"],
+     ["genesis load <genesis_file> \n\n",
+      "  load a genesis block from file.\n\n"
+     ]
+    ].
+
+genesis_load(["genesis", "load", GenesisFile], [], []) ->
+    case file:read_file(GenesisFile) of
+        {ok, GenesisBlock} ->
+            io:format("Integrating genesis block from file..."),
+            blockchain_worker:integrate_genesis_block(binary_to_term(GenesisBlock));
+        {error, Reason} ->
+            io:format("Error, Reason: ~p", [Reason])
+    end,
+    [clique_status:text("ok")];
+genesis_load([_, _, _], [], []) ->
     usage.

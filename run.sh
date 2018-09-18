@@ -1,8 +1,7 @@
 #!/bin/bash
-set -x
 
 # default to 8 dev releases
-nodes=$(seq 7)
+nodes=$(seq 8)
 
 # remove existing artifacts
 rm -rf _build/dev
@@ -48,5 +47,13 @@ parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $(join_b
 
 # show which node is in the consensus group
 for node in ${nodes[@]}; do
-    echo "miner-dev$node in_consensus: $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info in_consensus)"
+    if [[ $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info in_consensus) = *true* ]]; then
+        echo "miner-dev$node, in_consensus: true"
+    else
+        echo "miner-dev$node, in_consensus: false"
+        # load genesis block from file on this node
+        genesis_file=$(ls -d $PWD/$(find ./_build/dev/rel/miner-dev*/data/blockchain -type f -name "genesis" | head -n 1))
+        echo "loading genesis file $genesis_file on miner-dev$node"
+        ./_build/dev/rel/miner-dev$node/bin/miner-dev$node genesis load $genesis_file
+    fi
 done

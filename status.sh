@@ -1,7 +1,7 @@
 #!/bin/bash
 
 check_height() {
-    nodes=(1 2 3 4 5 6 7)
+    nodes=$(seq 8)
     for node in ${nodes[@]}; do
         echo "miner-dev$node, height: "$(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info height)
     done
