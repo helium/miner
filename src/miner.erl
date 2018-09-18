@@ -17,8 +17,10 @@
 
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
+          ,block_time = 15000 :: pos_integer
           %% TODO: this probably doesn't have to be here
           ,curve :: 'SS512'
+          ,dkg_await :: undefined | {reference(), term()}
          }).
 
 -export([start_link/1
@@ -27,7 +29,7 @@
          ,relcast_queue/0
          ,consensus_pos/0
          ,in_consensus/0
-         ,create_block/1
+         ,create_block/2
          ,sign_genesis_block/2
          ,genesis_block_done/3
          ,hbbft_status/0
@@ -45,7 +47,9 @@ start_link(Args) ->
 
 init(Args) ->
     Curve = proplists:get_value(curve, Args),
-    {ok, #state{curve=Curve}}.
+    BlockTime = proplists:get_value(block_time, Args),
+    ok = blockchain_event:add_handler(self()),
+    {ok, #state{curve=Curve, block_time=BlockTime}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,9 +95,9 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block(blockchain_transaction:transactions()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
-create_block(Txns) ->
-    gen_server:call(?MODULE, {create_block, Txns}).
+-spec create_block(blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
+create_block(Txns, HBBFTRound) ->
+    gen_server:call(?MODULE, {create_block, Txns, HBBFTRound}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -145,11 +149,10 @@ handle_call({initial_dkg, Addrs}, From, State) ->
     case do_initial_dkg(Addrs, State) of
         {true, DKGState} ->
             lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
-            erlang:put(dkg_await, From),
-            {noreply, DKGState};
-        {false, _NonDKGState} ->
+            {noreply, DKGState#state{dkg_await=From}};
+        {false, NonDKGState} ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
-            gen_server:reply(From, ok)
+            {reply, ok, NonDKGState}
     end;
 handle_call(relcast_info, _From, State) ->
     case State#state.consensus_group of
@@ -188,15 +191,16 @@ handle_call(hbbft_status, _From, State) ->
                      end
              end,
     {reply, Status, State};
-handle_call({create_block, Transactions}, _From, State) ->
+handle_call({create_block, Transactions, HBBFTRound}, _From, State) ->
     CurrentBlock = blockchain_worker:head_block(),
     SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
     {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
-
+    MetaData = #{hbbft_round => HBBFTRound},
     NewBlock = blockchain_block:new(blockchain_worker:head_hash(),
                                     blockchain_block:height(CurrentBlock) + 1,
                                     ValidTransactions,
-                                    << >>),
+                                    << >>,
+                                    MetaData),
 
     {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
     Signature = SignFun(term_to_binary(NewBlock)),
@@ -218,9 +222,14 @@ handle_call({sign_genesis_block, GenesisBlock, PrivateKey}, _From, State) ->
     {reply, {ok, Address, Signature}, State#state{privkey=PrivateKey}};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State) ->
     GenesisBlock = binary_to_term(BinaryGenesisBlock),
-    %% TODO this can only happen at most once
     SignedGenesisBlock = blockchain_block:sign_block(GenesisBlock, term_to_binary(Signatures)),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
+
+    case State#state.dkg_await of
+        undefined -> ok;
+        From -> gen_server:reply(From, ok)
+    end,
+
     ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
     self() ! create_hbbft_group,
     {reply, ok, State#state{privkey=PrivKey}};
@@ -256,7 +265,10 @@ handle_call(_Msg, _From, State) ->
 handle_cast({set_candidate_genesis_block, Block}, State) ->
     %% TODO add an interlock so this is only possible once
     {noreply, State#state{candidate_genesis_block=Block}};
-handle_cast({sign_block, Signatures}, State=#state{consensus_group=ConsensusGroup, tempblock=Tempblock}) when Tempblock /= undefined andalso ConsensusGroup /= undefined ->
+handle_cast({sign_block, Signatures}, State=#state{consensus_group=ConsensusGroup,
+                                                   block_time=BlockTime,
+                                                   tempblock=Tempblock}) when Tempblock /= undefined
+                                                                              andalso ConsensusGroup /= undefined ->
     %% NOTE: there's no add_block needed in the miner anymore
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
     %% * cancel the block timer
@@ -266,8 +278,9 @@ handle_cast({sign_block, Signatures}, State=#state{consensus_group=ConsensusGrou
     %% * make tempblock undefined
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(Tempblock, term_to_binary(Signatures)),
-    libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, blockchain_block:transactions(Block)}),
-    Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+    NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
+    libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
+    Ref = erlang:send_after(BlockTime, self(), block_timeout),
     ok = blockchain_worker:add_block(Block, blockchain_swarm:address()),
     {noreply, State#state{tempblock=undefined, block_timer=Ref}};
 handle_cast(_Msg, State) ->
@@ -281,7 +294,7 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info(create_hbbft_group, State=#state{privkey=PrivKey}) ->
+handle_info(create_hbbft_group, State=#state{privkey=PrivKey, block_time=BlockTime}) ->
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
     BatchSize = 500,
@@ -293,7 +306,7 @@ handle_info(create_hbbft_group, State=#state{privkey=PrivKey}) ->
                                       PrivKey,
                                       self()]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-    Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+    Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
@@ -302,6 +315,14 @@ handle_info(create_hbbft_group, State=#state{privkey=PrivKey}) ->
     ok = blockchain_util:atomic_save(filename:join(blockchain:dir(blockchain_worker:blockchain()), "pbc_pubkey"),
                                      term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey)))),
     {noreply, State#state{consensus_group=Group, block_timer=Ref}};
+handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=ConsensusGroup,
+                                                                block_time=BlockTime}) when ConsensusGroup /= undefined ->
+    erlang:cancel_timer(State#state.block_timer),
+    {ok, Block} = blockchain_worker:get_block(Hash),
+    NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
+    libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
+    Ref = erlang:send_after(BlockTime, self(), block_timeout),
+    {noreply, State#state{block_timer=Ref}};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.

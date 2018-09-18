@@ -49,36 +49,45 @@ handle_input({status, Ref, Worker}, State) ->
     Worker ! {Ref, maps:put(deferred, [ {Index - 1, binary_to_term(Msg)} || {Index, Msg} <- State#state.deferred], Map)},
     {State, ok};
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_input({next_round, TxnsToRemove}, State=#state{hbbft=HBBFT}) ->
-    lager:info("advancing to next round and emptying hbbft buffer"),
-    Round = maps:get(round, hbbft:status(HBBFT)) + 1,
-    %% filter any stale messages
-    libp2p_group_relcast_server:filter(self(), fun(_Index, Key) ->
-                                                       case binary_to_term(Key) of
-                                                           {{acs, R}, _} when R >= Round ->
-                                                               done;
-                                                           {dec, R, _, _} when R >= Round ->
-                                                               done;
-                                                           {signature, R, _, _} when R >= Round ->
-                                                               done;
-                                                           {{acs, _}, _} ->
-                                                               %% stale message
-                                                               false;
-                                                           {dec, _, _, _} ->
-                                                               %% stale message
-                                                               false;
-                                                           {signature, _, _, _} ->
-                                                               false;
-                                                           _ ->
-                                                               %% unknown message, keep it
-                                                               true
-                                                       end
-                                               end),
-    case hbbft:next_round(HBBFT, TxnsToRemove) of
-        {NextHBBFT, ok} ->
-            maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, ok);
-        {NextHBBFT, {send, NextMsgs}} ->
-            maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, {send, fixup_msgs(NextMsgs)})
+handle_input({next_round, NextRound, TxnsToRemove}, State=#state{hbbft=HBBFT}) ->
+    PrevRound = hbbft:round(HBBFT),
+    case NextRound - PrevRound of
+        1 ->
+            lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
+            %% filter any stale messages
+            libp2p_group_relcast_server:filter(self(), fun(_Index, Key) ->
+                                                               case binary_to_term(Key) of
+                                                                   {{acs, R}, _} when R >= NextRound ->
+                                                                       done;
+                                                                   {dec, R, _, _} when R >= NextRound ->
+                                                                       done;
+                                                                   {signature, R, _, _} when R >= NextRound ->
+                                                                       done;
+                                                                   {{acs, _}, _} ->
+                                                                       %% stale message
+                                                                       false;
+                                                                   {dec, _, _, _} ->
+                                                                       %% stale message
+                                                                       false;
+                                                                   {signature, _, _, _} ->
+                                                                       false;
+                                                                   _ ->
+                                                                       %% unknown message, keep it
+                                                                       true
+                                                               end
+                                                       end),
+            case hbbft:next_round(HBBFT, TxnsToRemove) of
+                {NextHBBFT, ok} ->
+                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, ok);
+                {NextHBBFT, {send, NextMsgs}} ->
+                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, {send, fixup_msgs(NextMsgs)})
+            end;
+        0 ->
+            lager:warning("Already at the current Round: ~p", [NextRound]),
+            {State, ok};
+        _ ->
+            lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
+            {State, ok}
     end;
 handle_input(Txn, State) ->
     case hbbft:input(State#state.hbbft, Txn) of
@@ -129,7 +138,7 @@ handle_message(Index, Msg, State=#state{hbbft=HBBFT}) ->
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
-                    {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns),
+                    {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns, hbbft:round(NewHBBFT)),
                     %% call hbbft finalize round
                     Round = maps:get(round, hbbft:status(NewHBBFT)),
                     NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
@@ -187,7 +196,7 @@ maybe_deliver_deferred(State, Resp, [{Index, Msg}|Tail]) ->
             %% send agreed upon Txns to the parent blockchain worker
             %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
             %% transactions depending on its buffer
-            {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns),
+            {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns, hbbft:round(NewHBBFT)),
             %% call hbbft finalize round
             NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
             Msgs = [{multicast, {signature, Address, Signature}}],

@@ -30,6 +30,7 @@ init(_Args) ->
 
     MinerOpts = [
                  {curve, 'SS512'}
+                 ,{block_time, 15000}
                 ],
 
     ChildSpecs =  [#{id => blockchain_sup

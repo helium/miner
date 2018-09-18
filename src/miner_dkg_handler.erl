@@ -53,8 +53,8 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                         true ->
                             %% this needs to be a call so we know the callback succeeded so we can terminate
                             ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures, State#state.privkey),
-                            %% TODO stop the handler
-                            {State, ok}
+                            %% stop the handler
+                            {State, {close, 60000}}
                     end;
                 false ->
                     {State, ok}
