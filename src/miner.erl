@@ -316,12 +316,21 @@ handle_info(create_hbbft_group, State=#state{privkey=PrivKey, block_time=BlockTi
     {noreply, State#state{consensus_group=Group, block_timer=Ref}};
 handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=ConsensusGroup,
                                                                 block_time=BlockTime}) when ConsensusGroup /= undefined ->
+    %% NOTE: only the consensus group member must do this
+    %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
-    {ok, Block} = blockchain_worker:get_block(Hash),
-    NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
-    libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
-    Ref = erlang:send_after(BlockTime, self(), block_timeout),
-    {noreply, State#state{block_timer=Ref}};
+    NewState = case blockchain_worker:get_block(Hash) of
+                   {ok, Block} ->
+                       %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
+                       NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
+                       libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
+                       Ref = erlang:send_after(BlockTime, self(), block_timeout),
+                       State#state{block_timer=Ref};
+                   {error, Reason} ->
+                       lager:error("Error, Reason: ~p", [Reason]),
+                       State
+               end,
+    {noreply, NewState};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
