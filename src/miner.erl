@@ -222,7 +222,7 @@ handle_call({sign_genesis_block, GenesisBlock, PrivateKey}, _From, State) ->
     {reply, {ok, Address, Signature}, State#state{privkey=PrivateKey}};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State) ->
     GenesisBlock = binary_to_term(BinaryGenesisBlock),
-    SignedGenesisBlock = blockchain_block:sign_block(GenesisBlock, term_to_binary(Signatures)),
+    SignedGenesisBlock = blockchain_block:sign_block(term_to_binary(Signatures), GenesisBlock),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
 
     case State#state.dkg_await of
@@ -269,7 +269,6 @@ handle_cast({sign_block, Signatures}, State=#state{consensus_group=ConsensusGrou
                                                    block_time=BlockTime,
                                                    tempblock=Tempblock}) when Tempblock /= undefined
                                                                               andalso ConsensusGroup /= undefined ->
-    %% NOTE: there's no add_block needed in the miner anymore
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
     %% * cancel the block timer
     %% * sign the block
@@ -277,7 +276,7 @@ handle_cast({sign_block, Signatures}, State=#state{consensus_group=ConsensusGrou
     %% * add the block to blockchain
     %% * make tempblock undefined
     erlang:cancel_timer(State#state.block_timer),
-    Block = blockchain_block:sign_block(Tempblock, term_to_binary(Signatures)),
+    Block = blockchain_block:sign_block(term_to_binary(Signatures), Tempblock),
     NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
     libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
     Ref = erlang:send_after(BlockTime, self(), block_timeout),

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+make clean && make
+
 # default to 8 dev releases
 nodes=$(seq 8)
 
