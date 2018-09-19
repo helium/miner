@@ -244,7 +244,7 @@ handle_call(_Msg, _From, State) ->
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 %% handle_cast(restore_state, State) ->
 %%     ConsensusAddrs = blockchain_worker:consensus_addrs(),
-%%     Pos = blockchain_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
+%%     Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
 %%     N = length(ConsensusAddrs),
 %%     F = (N div 3),
 %%     {ok, BatchSize} = application:get_env(blockchain, batch_size),
@@ -353,7 +353,7 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             GenesisTransactions = InitialPaymentTransactions ++ [blockchain_transaction:new_genesis_consensus_group(ConsensusAddrs)],
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
-                                            blockchain_util:index_of(MyAddress, ConsensusAddrs),
+                                            miner_util:index_of(MyAddress, ConsensusAddrs),
                                             N,
                                             0, %% NOTE: F for DKG is 0
                                             F, %% NOTE: T for DKG is the byzantine F
@@ -365,7 +365,7 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
             {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "dkg-"++DKGHash, libp2p_group_relcast, GroupArg),
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
-            Pos = blockchain_util:index_of(MyAddress, ConsensusAddrs),
+            Pos = miner_util:index_of(MyAddress, ConsensusAddrs),
             lager:info("Address: ~p, ConsensusWorker pos: ~p", [MyAddress, Pos]),
             {true, State#state{consensus_pos=Pos, dkg_group=DKGGroup}};
         false ->
