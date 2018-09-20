@@ -51,7 +51,7 @@ init(Args) ->
     BlockTime = proplists:get_value(block_time, Args),
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
-    {ok, #state{curve=Curve, block_time=BlockTime}}.
+    {ok, #state{curve=Curve, block_time=BlockTime, batch_size=BatchSize}}.
 
 %%--------------------------------------------------------------------
 %% @doc
