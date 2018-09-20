@@ -49,11 +49,15 @@ init(_Args) ->
     Curve = application:get_env(miner, curve, 'SS512'),
     BlockTime = application:get_env(miner, block_time, 15000),
     BatchSize = application:get_env(miner, batch_size, 500),
+    RadioDevice = application:get_env(miner, radio_device, undefined),
+    GPSDevice = application:get_env(miner, gps_device, undefined),
 
     MinerOpts = [
                  {curve, Curve}
                  ,{block_time, BlockTime}
                  ,{batch_size, BatchSize}
+                 ,{radio_device, RadioDevice}
+                 ,{gps_device, GPSDevice}
                 ],
 
     ChildSpecs =  [#{id => blockchain_sup

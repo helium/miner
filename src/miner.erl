@@ -15,6 +15,8 @@
           ,privkey :: undefined | tpke_privkey:privkey()
           ,candidate_genesis_block :: undefined | blockchain_block:block()
           ,batch_size = 500 :: pos_integer()
+          ,gps_handle = undefined :: undefined | pid()
+          ,gps_lock = false :: boolean()
 
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -51,7 +53,22 @@ init(Args) ->
     BlockTime = proplists:get_value(block_time, Args),
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
-    {ok, #state{curve=Curve, block_time=BlockTime, batch_size=BatchSize}}.
+
+    %% TODO: put this elsewhere
+    GPSHandle = case proplists:get_value(gps_device, Args) of
+                    {Type, Device, Options} ->
+                        {ok, Pid} = ubx:start_link(Type, Device, Options, self()),
+                        ubx:enable_message(nav_posllh, 5, Pid),
+                        ubx:enable_message(nav_sol, 5, Pid),
+                        Pid;
+                    undefined ->
+                        undefined
+                end,
+
+    {ok, #state{curve=Curve,
+                block_time=BlockTime,
+                batch_size=BatchSize,
+                gps_handle=GPSHandle}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -198,7 +215,7 @@ handle_call({create_block, Transactions, HBBFTRound}, _From, State) ->
     SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
     {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
     MetaData = #{hbbft_round => HBBFTRound},
-    NewBlock = blockchain_block:new(blockchain_worker:head_hash(),
+    NewBlock = blockchain_block:new(blockchain_block:hash_block(CurrentBlock),
                                     blockchain_block:height(CurrentBlock) + 1,
                                     ValidTransactions,
                                     << >>,
@@ -333,6 +350,24 @@ handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=
                        State
                end,
     {noreply, NewState};
+handle_info({nav_sol, GPSFix}, State) ->
+    case GPSFix == 3 of
+        true ->
+            {noreply, State#state{gps_lock=true}};
+        false ->
+            {noreply, State#state{gps_lock=false}}
+    end;
+handle_info({nav_posllh, {Lat, Lon, Height, HorizontalAcc, _VerticalAcc}}, State=#state{gps_lock=GPSLock}) ->
+    case GPSLock andalso blockchain_worker:blockchain() /= undefined of
+        true ->
+            %% pick the best h3 index we can for the resolution
+            {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
+            lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
+            maybe_assert_location(H3Index, Resolution);
+        false ->
+            ok
+    end,
+    {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
@@ -380,4 +415,42 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             {true, State#state{consensus_pos=Pos, dkg_group=DKGGroup}};
         false ->
             {false, State}
+    end.
+
+-spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
+maybe_assert_location(Location, Resolution) ->
+    Address = blockchain_swarm:address(),
+    Ledger = blockchain_worker:ledger(),
+    case blockchain_ledger:find_gateway_info(Address, Ledger) of
+        undefined ->
+            ok;
+        GwInfo ->
+            case blockchain_ledger:gateway_location(GwInfo) of
+                undefined ->
+                    %% no location, try submitting the transaction
+                    blockchain_worker:assert_location_txn(Location);
+                OldLocation ->
+                    case {OldLocation, Location} of
+                        {Old, New} when Old == New ->
+                            ok;
+                        {Old, New} ->
+                            try h3:parent(Old, h3:get_resolution(New)) == New of
+                                true ->
+                                    %% new index is a parent of the old one
+                                    ok;
+                                false ->
+                                    %% check whether New Index is a child of the old one, more precise
+                                    case lists:member(New, h3:children(Old, Resolution)) of
+                                        true ->
+                                            blockchain_worker:assert_location_txn(New);
+                                        false ->
+                                            ok
+                                    end
+                            catch
+                                TypeOfError:Exception ->
+                                    lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
+                                    ok
+                            end
+                    end
+            end
     end.
