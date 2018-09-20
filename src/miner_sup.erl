@@ -17,8 +17,6 @@ init(_Args) ->
                  ,period => 5},
 
     %% Blockchain Supervisor Options
-    {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
 	SeedNodes = case application:get_env(blockchain, seed_nodes) of
 					{ok, ""} -> [];
 					{ok, Seeds} -> string:split(Seeds, ",", all);
@@ -27,8 +25,20 @@ init(_Args) ->
     Port = application:get_env(blockchain, port, 0),
     NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
+
+    SwarmKey = filename:join(BaseDir, "swarm_key"),
+    ok = filelib:ensure_dir(SwarmKey),
+    {PublicKey, SigFun} = case libp2p_crypto:load_keys(SwarmKey) of
+                              {ok, PrivKey, PubKey} ->
+                                  {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)};
+                              {error, enoent} ->
+                                  {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
+                                  ok = libp2p_crypto:save_keys({PrivKey, PubKey}, SwarmKey),
+                                  {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)}
+                          end,
+
     BlockchainOpts = [
-        {key, {PubKey, SigFun}}
+        {key, {PublicKey, SigFun}}
         ,{seed_nodes, SeedNodes}
         ,{port, Port}
         ,{num_consensus_members, NumConsensusMembers}
