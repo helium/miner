@@ -14,6 +14,7 @@
           ,tempblock :: undefined | blockchain_block:block()
           ,privkey :: undefined | tpke_privkey:privkey()
           ,candidate_genesis_block :: undefined | blockchain_block:block()
+          ,batch_size = 500 :: pos_integer()
 
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -48,6 +49,7 @@ start_link(Args) ->
 init(Args) ->
     Curve = proplists:get_value(curve, Args),
     BlockTime = proplists:get_value(block_time, Args),
+    BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
     {ok, #state{curve=Curve, block_time=BlockTime}}.
 
@@ -293,10 +295,9 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info(create_hbbft_group, State=#state{privkey=PrivKey, block_time=BlockTime}) ->
+handle_info(create_hbbft_group, State=#state{privkey=PrivKey, block_time=BlockTime, batch_size=BatchSize}) ->
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
-    BatchSize = 500,
     GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
                                       State#state.consensus_pos,
                                       N,

@@ -19,18 +19,31 @@ init(_Args) ->
     %% Blockchain Supervisor Options
     {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    BaseDir = "data",
+	SeedNodes = case application:get_env(blockchain, seed_nodes) of
+					{ok, ""} -> [];
+					{ok, Seeds} -> string:split(Seeds, ",", all);
+					_ -> []
+				end,
+    Port = application:get_env(blockchain, port, 0),
+    NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
     BlockchainOpts = [
         {key, {PubKey, SigFun}}
-        ,{seed_nodes, []}
-        ,{port, 0}
-        ,{num_consensus_members, 7}
+        ,{seed_nodes, SeedNodes}
+        ,{port, Port}
+        ,{num_consensus_members, NumConsensusMembers}
         ,{base_dir, BaseDir}
     ],
 
+    %% Miner Options
+    Curve = application:get_env(miner, curve, 'SS512'),
+    BlockTime = application:get_env(miner, block_time, 15000),
+    BatchSize = application:get_env(miner, batch_size, 500),
+
     MinerOpts = [
-                 {curve, 'SS512'}
-                 ,{block_time, 15000}
+                 {curve, Curve}
+                 ,{block_time, BlockTime}
+                 ,{batch_size, BatchSize}
                 ],
 
     ChildSpecs =  [#{id => blockchain_sup
