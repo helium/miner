@@ -26,7 +26,7 @@ init(_Args) ->
     NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
 
-    SwarmKey = filename:join(BaseDir, "swarm_key"),
+    SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
     {PublicKey, SigFun} = case libp2p_crypto:load_keys(SwarmKey) of
                               {ok, PrivKey, PubKey} ->

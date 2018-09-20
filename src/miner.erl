@@ -260,8 +260,8 @@ handle_call(_Msg, _From, State) ->
 %%     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
 %%     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
 %%     lager:info("~p. Group: ~p~n", [self(), Group]),
-%%     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
-%%                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+%%     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
+%%                                          {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
 %%     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
 %%     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
 handle_cast({set_candidate_genesis_block, Block}, State) ->
@@ -309,10 +309,11 @@ handle_info(create_hbbft_group, State=#state{privkey=PrivKey, block_time=BlockTi
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
-                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
+                                         {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
     %% TODO: handle restore state better
-    ok = blockchain_util:atomic_save(filename:join(blockchain:dir(blockchain_worker:blockchain()), "pbc_pubkey"),
+    Dir = application:get_env(blockchain, base_dir, "data"),
+    ok = blockchain_util:atomic_save(filename:join([Dir, "miner", "pbc_pubkey"]),
                                      term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(PrivKey)))),
     {noreply, State#state{consensus_group=Group, block_timer=Ref}};
 handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=ConsensusGroup,
