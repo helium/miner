@@ -32,7 +32,7 @@
          ,hbbft_status/0
          ,sign_genesis_block/2
          ,genesis_block_done/3
-         ,create_block/2
+         ,create_block/3
          ,signed_block/2
         ]).
 
@@ -112,9 +112,9 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block(blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
-create_block(Txns, HBBFTRound) ->
-    gen_server:call(?MODULE, {create_block, Txns, HBBFTRound}).
+-spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
+create_block(Stamps, Txns, HBBFTRound) ->
+    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -201,23 +201,39 @@ handle_call(hbbft_status, _From, State) ->
                      end
              end,
     {reply, Status, State};
-handle_call({create_block, Transactions, HBBFTRound}, _From, State) ->
+handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
+    %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
+    %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
+    %% by checking for a stale hash
     CurrentBlock = blockchain_worker:head_block(),
-    SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
-    {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
-    MetaData = #{hbbft_round => HBBFTRound},
-    NewBlock = blockchain_block:new(blockchain_block:hash_block(CurrentBlock),
-                                    blockchain_block:height(CurrentBlock) + 1,
-                                    ValidTransactions,
-                                    << >>,
-                                    MetaData),
-
-    {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
-    Signature = SignFun(term_to_binary(NewBlock)),
-    %% XXX: can we lose state here if we crash and recover later?
-    lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
-    %% return both valid and invalid transactions to be deleted from the buffer
-    {reply, {ok, libp2p_crypto:pubkey_to_address(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
+    CurrentBlockHash = blockchain_block:hash_block(CurrentBlock),
+    %% we expect every stamp to contain the same block hash
+    case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
+        [CurrentBlockHash] ->
+            SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
+            {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
+            %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
+            LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
+            BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
+            lager:info("new block time is ~p", [BlockTime]),
+            MetaData = #{hbbft_round => HBBFTRound, block_time => BlockTime},
+            NewBlock = blockchain_block:new(CurrentBlockHash,
+                                            blockchain_block:height(CurrentBlock) + 1,
+                                            ValidTransactions,
+                                            << >>,
+                                            MetaData),
+            {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
+            Signature = SignFun(term_to_binary(NewBlock)),
+            %% XXX: can we lose state here if we crash and recover later?
+            lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
+            %% return both valid and invalid transactions to be deleted from the buffer
+            {reply, {ok, libp2p_crypto:pubkey_to_address(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
+        [_OtherBlockHash] ->
+            {reply, {error, stale_hash}, State};
+        List ->
+            lager:warning("got unexpected block hashes in stamp information ~p", [List]),
+            {reply, {error, multiple_hashes}, State}
+    end;
 handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus_group=ConsensusGroup,
                                                    block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):

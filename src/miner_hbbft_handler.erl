@@ -7,7 +7,7 @@
 
 -behavior(libp2p_group_relcast_handler).
 
--export([init/1, handle_message/3, handle_input/2, serialize_state/1, deserialize_state/1]).
+-export([init/1, handle_message/3, handle_input/2, serialize_state/1, deserialize_state/1, stamp/0]).
 
 -record(state, {
           n :: non_neg_integer()
@@ -23,8 +23,13 @@
           ,members :: [libp2p_crypto:address()]
          }).
 
+stamp() ->
+    Head = blockchain_worker:head_hash(),
+    %% construct a 2-tuple of the system time and the current head block hash as our stamp data
+    {erlang:system_time(seconds), Head}.
+
 init([Members, Id, N, F, BatchSize, SK, _Worker]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500),
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, []}),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, Members, #state{n=N,
                          id=Id-1,
@@ -132,18 +137,26 @@ handle_message(Index, Msg, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     maybe_deliver_deferred(State#state{hbbft=NewHBBFT}, {send, fixup_msgs(Msgs)});
-                {NewHBBFT, {result, {transactions, Txns}}} ->
+                {NewHBBFT, {result, {transactions, Stamps, Txns}}} ->
                     lager:info("Reached consensus"),
+                    lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
-                    {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns, hbbft:round(NewHBBFT)),
-                    %% call hbbft finalize round
-                    Round = maps:get(round, hbbft:status(NewHBBFT)),
-                    NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
-                    Msgs = [{multicast, {signature, Round, Address, Signature}}],
-                    maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, {send, fixup_msgs(Msgs)})
+                    Round = hbbft:round(NewHBBFT),
+                    case miner:create_block(Stamps, Txns, Round) of
+                        {ok, Address, Artifact, Signature, TxnsToRemove} ->
+                            %% call hbbft finalize round
+                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
+                            Msgs = [{multicast, {signature, Round, Address, Signature}}],
+                            maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, {send, fixup_msgs(Msgs)});
+                        {error, Reason} ->
+                            %% this is almost certainly because we got the new block gossipped before we completed consensus locally
+                            %% which is harmless
+                            lager:warning("failed to create new block ~p", [Reason]),
+                            {State#state{hbbft=NewHBBFT}, ok}
+                    end
             end
     end.
 
@@ -188,19 +201,28 @@ maybe_deliver_deferred(State, Resp, [{Index, Msg}|Tail]) ->
             %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
             undefer(State#state.id, Index, Msg),
             maybe_deliver_deferred(State#state{hbbft=NewHBBFT, deferred=State#state.deferred ++ Tail}, merge_resp(Resp, {send, fixup_msgs(Msgs)}));
-        {NewHBBFT, {result, {transactions, Txns}}} ->
+        {NewHBBFT, {result, {transactions, Stamps, Txns}}} ->
             %% XXX ACK group
             undefer(State#state.id, Index, Msg),
             lager:info("Reached consensus"),
+            lager:info("stamps ~p~n", [Stamps]),
             %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
             %% send agreed upon Txns to the parent blockchain worker
             %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
             %% transactions depending on its buffer
-            {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Txns, hbbft:round(NewHBBFT)),
-            %% call hbbft finalize round
-            NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
-            Msgs = [{multicast, {signature, Address, Signature}}],
-            maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, merge_resp(Resp, {send, fixup_msgs(Msgs)}))
+            Round = hbbft:round(NewHBBFT),
+            case miner:create_block(Stamps, Txns, Round) of
+                {ok, Address, Artifact, Signature, TxnsToRemove} ->
+                    %% call hbbft finalize round
+                    NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
+                    Msgs = [{multicast, {signature, Round, Address, Signature}}],
+                    maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, merge_resp(Resp, {send, fixup_msgs(Msgs)}));
+                {error, Reason} ->
+                    %% this is almost certainly because we got the new block gossipped before we completed consensus locally
+                    %% which is harmless
+                    lager:warning("failed to create new block ~p", [Reason]),
+                    maybe_deliver_deferred(State#state{hbbft=NewHBBFT}, Resp, Tail)
+            end
     end.
 
 undefer(Id, Index, Msg) ->
@@ -232,3 +254,5 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
         false ->
             false
     end.
+
+
