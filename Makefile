@@ -9,10 +9,10 @@ clean:
 	$(REBAR) clean
 
 test: compile
-	$(REBAR) as test do eunit, ct, xref, dialyzer
+	$(REBAR) as test do eunit, ct --verbose
 
 typecheck:
-	$(REBAR) dialyzer
+	$(REBAR) dialyzer, xref
 
 release:
 	$(REBAR) as prod release -n miner
