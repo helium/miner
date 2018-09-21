@@ -1,4 +1,4 @@
-.PHONY: compile test typecheck
+.PHONY: compile test typecheck cover
 
 REBAR=./rebar3
 
@@ -16,6 +16,9 @@ typecheck:
 
 release:
 	$(REBAR) as prod release -n miner
+
+cover:
+	$(REBAR) cover
 
 devrelease:
 	$(REBAR) as dev release -n miner-dev

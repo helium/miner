@@ -32,16 +32,11 @@ init_per_suite(Config) ->
         {error, {already_started, _}} -> ok;
         {error, {{already_started, _},_}} -> ok
     end,
-    Config.
 
-end_per_suite(Config) ->
-    Config.
-
-init_per_testcase(TestCase, Config) ->
     %% assuming each testcase will work with 8 miners for now
     MinerNames = [eric, kenny, kyle, ike, stan, butters, timmy, jimmy],
     Miners = miner_ct_utils:pmap(fun(Miner) ->
-                                        miner_ct_utils:start_node(Miner, Config, TestCase)
+                                        miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
                                 end, MinerNames),
     NumConsensusMembers = 7,
     SeedNodes = [],
@@ -74,10 +69,20 @@ init_per_testcase(TestCase, Config) ->
                                      ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
                                      ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
 
-                                     {ok, StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
-                                     ct_rpc:call(Miner, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, debug]),
-                                     ct:pal("Miner: ~p StartedApps: ~p~n", [Miner, StartedApps])
+                                     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+                                     ct_rpc:call(Miner, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, debug])
                              end, Miners),
+
+    [{config_result, ConfigResult}, {miners, Miners}, {num_consensus_members, NumConsensusMembers} | Config].
+
+end_per_suite(Config) ->
+    Miners = proplists:get_value(miners, Config),
+    miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
+    Config.
+
+init_per_testcase(_TestCase, Config) ->
+    ConfigResult = proplists:get_value(config_result, Config),
+    Miners = proplists:get_value(miners, Config),
 
     %% check that the config loaded correctly on each miner
     true = lists:all(fun(Res) -> Res == ok end, ConfigResult),
@@ -100,11 +105,9 @@ init_per_testcase(TestCase, Config) ->
                             end, [], Miners),
 
     {ok, _} = ct_cover:add_nodes(Miners),
-    [{miners, Miners}, {addresses, Addresses}, {num_consensus_members, NumConsensusMembers} | Config].
+    [{addresses, Addresses} | Config].
 
-end_per_testcase(_TestCase, Config) ->
-    Miners = proplists:get_value(miners, Config),
-    miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
+end_per_testcase(_TestCase, _Config) ->
     ok.
 
 %% test cases
@@ -115,6 +118,7 @@ listen_addr_test(Config) ->
                                       LA = ct_rpc:call(Miner, libp2p_swarm, sessions, [Swarm]),
                                       [LA | Acc]
                               end, [], Miners),
+    ct:pal("ListenAddrs: ~p", [ListenAddrs]),
     ?assertEqual(length(Miners), length(ListenAddrs)),
     ok.
 
@@ -125,6 +129,7 @@ p2p_addr_test(Config) ->
                           P2PAddr = ct_rpc:call(Miner, libp2p_crypto, address_to_p2p, [Address]),
                           [P2PAddr | Acc]
                   end, [], Miners),
+    ct:pal("P2PAddrs: ~p", [P2PAddrs]),
     ?assertEqual(length(Miners), length(P2PAddrs)),
     ok.
 
@@ -136,6 +141,7 @@ initial_dkg_test(Config) ->
     DKGResults = miner_ct_utils:pmap(fun(Miner) ->
                                              ct_rpc:call(Miner, miner, initial_dkg, [Addresses])
                                      end, Miners),
+    ct:pal("DKGResults: ~p", [DKGResults]),
 
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
@@ -143,6 +149,7 @@ initial_dkg_test(Config) ->
                                                Res = ct_rpc:call(Miner, miner, in_consensus, []),
                                                [Res | Acc]
                                        end, [], Miners),
+    ct:pal("ConsensusMemberships: ~p", [ConsensusMemberships]),
 
     NumConsensusMembers = miner_ct_utils:count(true, ConsensusMemberships),
     NonConsensusMember = length(Miners) - NumConsensusMembers,
