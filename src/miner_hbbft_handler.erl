@@ -144,10 +144,10 @@ handle_message(Index, Msg, State=#state{hbbft=HBBFT}) ->
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
-                    case miner:create_block(Stamps, Txns, hbbft:round(NewHBBFT)) of
+                    Round = hbbft:round(NewHBBFT),
+                    case miner:create_block(Stamps, Txns, Round) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
-                            Round = maps:get(round, hbbft:status(NewHBBFT)),
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
                             Msgs = [{multicast, {signature, Round, Address, Signature}}],
                             maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, {send, fixup_msgs(Msgs)});
@@ -210,11 +210,19 @@ maybe_deliver_deferred(State, Resp, [{Index, Msg}|Tail]) ->
             %% send agreed upon Txns to the parent blockchain worker
             %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
             %% transactions depending on its buffer
-            {ok, Address, Artifact, Signature, TxnsToRemove} = miner:create_block(Stamps, Txns, hbbft:round(NewHBBFT)),
-            %% call hbbft finalize round
-            NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
-            Msgs = [{multicast, {signature, Address, Signature}}],
-            maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, merge_resp(Resp, {send, fixup_msgs(Msgs)}))
+            Round = hbbft:round(NewHBBFT),
+            case miner:create_block(Stamps, Txns, Round) of
+                {ok, Address, Artifact, Signature, TxnsToRemove} ->
+                    %% call hbbft finalize round
+                    NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
+                    Msgs = [{multicast, {signature, Round, Address, Signature}}],
+                    maybe_deliver_deferred(State#state{hbbft=NewerHBBFT, artifact=Artifact}, merge_resp(Resp, {send, fixup_msgs(Msgs)}));
+                {error, Reason} ->
+                    %% this is almost certainly because we got the new block gossipped before we completed consensus locally
+                    %% which is harmless
+                    lager:warning("failed to create new block ~p", [Reason]),
+                    maybe_deliver_deferred(State#state{hbbft=NewHBBFT}, Resp, Tail)
+            end
     end.
 
 undefer(Id, Index, Msg) ->

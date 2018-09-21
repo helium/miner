@@ -112,7 +112,7 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), pos_integer()},...], blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
+-spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
 
@@ -214,7 +214,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
             {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
             %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
             LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
-            BlockTime = median(Stamps, LastBlockTimestamp),
+            BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
             lager:info("new block time is ~p", [BlockTime]),
             MetaData = #{hbbft_round => HBBFTRound, block_time => BlockTime},
             NewBlock = blockchain_block:new(CurrentBlockHash,
@@ -457,21 +457,4 @@ maybe_assert_location(Location, Resolution) ->
                             end
                     end
             end
-    end.
-
-median(List, LastBlockTime) ->
-    %% filter out any impossible values
-    median([ X || {_, {X, _}} <- List, X > LastBlockTime]).
-
-median([]) -> 0;
-median(List) ->
-    Length = length(List),
-    Sorted = lists:sort(List),
-    case Length rem 2 == 0 of
-        false ->
-            %% not an even length, there's a clear midpoint
-            lists:nth((Length div 2) + 1, Sorted);
-        true ->
-            %% average the 2 middle values
-            (lists:nth(Length div 2, Sorted) + lists:nth((Length div 2) + 1, Sorted)) div 2
     end.
