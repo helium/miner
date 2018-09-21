@@ -106,7 +106,7 @@ handle_message(Index, Msg, State=#state{hbbft=HBBFT}) ->
             NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
             case enough_signatures(NewState) of
                 {ok, Signatures} ->
-                    miner:sign_block(Signatures);
+                    ok = miner:signed_block(Signatures, State#state.artifact);
                 false ->
                     ok
             end,
