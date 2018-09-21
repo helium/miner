@@ -6,7 +6,7 @@
   1},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"56f8531d75dab49f120ffad23cad5e1069730840"}},
+       {ref,"21160d4866c38304751abd25cfba3f824e0429b6"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
