@@ -52,7 +52,7 @@ handle_input({status, Ref, Worker}, State) ->
 handle_input({next_round, NextRound, TxnsToRemove}, State=#state{hbbft=HBBFT}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
-        1 ->
+        N when N > 0 ->
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             %% filter any stale messages
             libp2p_group_relcast_server:filter(self(), fun(_Index, Key) ->
@@ -76,7 +76,7 @@ handle_input({next_round, NextRound, TxnsToRemove}, State=#state{hbbft=HBBFT}) -
                                                                        true
                                                                end
                                                        end),
-            case hbbft:next_round(HBBFT, TxnsToRemove) of
+            case hbbft:next_round(HBBFT, NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
                     maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, ok);
                 {NextHBBFT, {send, NextMsgs}} ->
