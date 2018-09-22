@@ -112,7 +112,7 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transaction:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transaction:transactions()}.
+-spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
 
@@ -210,8 +210,8 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
         [CurrentBlockHash] ->
-            SortedTransactions = lists:sort(fun blockchain_transaction:sort/2, Transactions),
-            {ValidTransactions, InvalidTransactions} = blockchain_transaction:validate_transactions(SortedTransactions, blockchain_worker:ledger()),
+            SortedTransactions = lists:sort(fun blockchain_transactions:sort/2, Transactions),
+            {ValidTransactions, InvalidTransactions} = blockchain_transactions:validate(SortedTransactions, blockchain_worker:ledger()),
             %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
             LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
             BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
@@ -398,8 +398,8 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
             %% TODO: set initial balance elsewhere
-            InitialPaymentTransactions = [ blockchain_transaction:new_coinbase_txn(Addr, 5000) || Addr <- Addrs],
-            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_transaction:new_genesis_consensus_group(ConsensusAddrs)],
+            InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addrs],
+            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group:new(ConsensusAddrs)],
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
