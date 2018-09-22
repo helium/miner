@@ -51,7 +51,7 @@ handle_input(start_acs, State) ->
     end;
 handle_input({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
-    Worker ! {Ref, maps:put(deferred, [ {Index - 1, binary_to_term(Msg)} || {Index, Msg} <- State#state.deferred], Map)},
+    Worker ! {Ref, maps:merge(#{deferred =>[ {Index - 1, binary_to_term(Msg)} || {Index, Msg} <- State#state.deferred], signatures_required => State#state.signatures_required, signatures => length(State#state.signatures)}, Map)},
     {State, ok};
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_input({next_round, NextRound, TxnsToRemove}, State=#state{hbbft=HBBFT}) ->
@@ -83,9 +83,9 @@ handle_input({next_round, NextRound, TxnsToRemove}, State=#state{hbbft=HBBFT}) -
                                                        end),
             case hbbft:next_round(HBBFT, NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, ok);
+                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}, ok);
                 {NextHBBFT, {send, NextMsgs}} ->
-                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT}, {send, fixup_msgs(NextMsgs)})
+                    maybe_deliver_deferred(State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}, {send, fixup_msgs(NextMsgs)})
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
