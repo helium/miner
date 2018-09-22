@@ -118,7 +118,6 @@ listen_addr_test(Config) ->
                                       LA = ct_rpc:call(Miner, libp2p_swarm, sessions, [Swarm]),
                                       [LA | Acc]
                               end, [], Miners),
-    ct:pal("ListenAddrs: ~p", [ListenAddrs]),
     ?assertEqual(length(Miners), length(ListenAddrs)),
     ok.
 
@@ -129,7 +128,6 @@ p2p_addr_test(Config) ->
                           P2PAddr = ct_rpc:call(Miner, libp2p_crypto, address_to_p2p, [Address]),
                           [P2PAddr | Acc]
                   end, [], Miners),
-    ct:pal("P2PAddrs: ~p", [P2PAddrs]),
     ?assertEqual(length(Miners), length(P2PAddrs)),
     ok.
 
