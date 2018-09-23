@@ -1,14 +1,19 @@
 -module(miner_ct_utils).
 
--export([pmap/2,
-         wait_until/1,
-         wait_until/3,
-         wait_until_disconnected/2,
-         start_node/3,
-         partition_cluster/2,
-         heal_cluster/2,
-         connect/1,
-		 count/2
+-export([pmap/2
+         ,wait_until/1
+         ,wait_until/3
+         ,wait_until_disconnected/2
+         ,start_node/3
+         ,partition_cluster/2
+         ,heal_cluster/2
+         ,connect/1
+         ,count/2
+         ,randname/1
+         ,get_config/2
+         ,random_n/2
+         ,init_per_testcase/2
+         ,end_per_testcase/2
         ]).
 
 pmap(F, L) ->
@@ -120,3 +125,111 @@ attempt_connect(Node) ->
 count(_, []) -> 0;
 count(X, [X|XS]) -> 1 + count(X, XS);
 count(X, [_|XS]) -> count(X, XS).
+
+randname(N) ->
+    randname(N, []).
+
+randname(0, Acc) ->
+    Acc;
+randname(N, Acc) ->
+    randname(N - 1, [rand:uniform(26) + 96 | Acc]).
+
+get_config(Arg, Default) ->
+    case os:getenv(Arg, Default) of
+        false -> Default;
+        T when is_list(T) -> list_to_integer(T);
+        T -> T
+    end.
+
+random_n(N, List) ->
+    lists:sublist(shuffle(List), N).
+
+shuffle(List) ->
+    [x || {_,x} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+init_per_testcase(_TestCase, Config) ->
+    os:cmd(os:find_executable("epmd")++" -daemon"),
+    {ok, Hostname} = inet:gethostname(),
+    case net_kernel:start([list_to_atom("runner@"++Hostname), shortnames]) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok;
+        {error, {{already_started, _},_}} -> ok
+    end,
+
+    %% Miner configuration, can be input from os env
+    TotalMiners = get_config("T", 8),
+    NumConsensusMembers = get_config("N", 7),
+    SeedNodes = [],
+    Port = get_config("PORT", 0),
+    Curve = 'SS512',
+    BlockTime = get_config("BT", 15000),
+    BatchSize = get_config("BS", 500),
+
+    MinerNames = lists:map(fun(_M) -> list_to_atom(miner_ct_utils:randname(5)) end, lists:seq(1, TotalMiners)),
+
+    Miners = miner_ct_utils:pmap(fun(Miner) ->
+                                         miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
+                                 end, MinerNames),
+
+    ct:comment("Miners: ~p\n, NumConsensusMembers: ~p, Port: ~p, BlockTime: ~p, BatchSize: ~p",
+               [Miners, NumConsensusMembers, Port, BlockTime, BatchSize]),
+
+    ConfigResult = miner_ct_utils:pmap(fun(Miner) ->
+                                               ct_rpc:call(Miner, cover, start, []),
+                                               ct_rpc:call(Miner, application, load, [lager]),
+                                               ct_rpc:call(Miner, application, load, [miner]),
+                                               ct_rpc:call(Miner, application, load, [blockchain]),
+                                               ct_rpc:call(Miner, application, load, [libp2p]),
+                                               %% give each miner its own log directory
+                                               ct_rpc:call(Miner, application, set_env, [lager, log_root, "log/"++atom_to_list(Miner)]),
+
+                                               %% set blockchain configuration
+                                               {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
+                                               Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
+                                               BaseDir = "data_" ++ atom_to_list(Miner),
+                                               ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
+                                               ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
+                                               ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+                                               ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+                                               ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+
+                                               %% set miner configuration
+                                               ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+                                               ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
+                                               ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
+
+                                               {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+                                               ct_rpc:call(Miner, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, debug])
+                                       end, Miners),
+
+    %% check that the config loaded correctly on each miner
+    true = lists:all(fun(Res) -> Res == ok end, ConfigResult),
+
+    %% get the first miner's listen addrs
+    [First | Rest] = Miners,
+    FirstSwarm = ct_rpc:call(First, blockchain_swarm, swarm, []),
+    FirstListenAddr = hd(ct_rpc:call(First, libp2p_swarm, listen_addrs, [FirstSwarm])),
+
+    %% tell the rest of the miners to connect to the first miner
+    lists:foreach(fun(Miner) ->
+                          Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+                          ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, FirstListenAddr])
+                  end, Rest),
+
+    %% accumulate the address of each miner
+    Addresses = lists:foldl(fun(Miner, Acc) ->
+                        Address = ct_rpc:call(Miner, blockchain_swarm, address, []),
+                        [Address | Acc]
+                end, [], Miners),
+    {ok, _} = ct_cover:add_nodes(Miners),
+
+    [{config_result, ConfigResult},
+     {miners, Miners},
+     {addresses, Addresses},
+     {miners, Miners},
+     {num_consensus_members, NumConsensusMembers} | Config].
+
+end_per_testcase(_TestCase, Config) ->
+    Miners = proplists:get_value(miners, Config),
+    miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
+    {comment, done}.
