@@ -110,9 +110,13 @@ growth_test(Config) ->
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
                                                                      Height = ct_rpc:call(Miner, blockchain_worker, height, []),
-                                                                     ct:pal("Miner: ~p, Height: ~p", [Miner, Height]),
-                                                                     Height >= 2
+                                                                     Height >= 3
                                                              end, Miners)
-                                   end, 60*2, timer:minutes(3)),
+                                   end, 60, timer:seconds(10)),
 
-    ok.
+    Heights = lists:foldl(fun(Miner, Acc) ->
+                                  H = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                  [{Miner, H} | Acc]
+                          end, [], Miners),
+
+    {comment, Heights}.

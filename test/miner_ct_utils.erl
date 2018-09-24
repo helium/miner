@@ -171,9 +171,6 @@ init_per_testcase(_TestCase, Config) ->
                                          miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
                                  end, MinerNames),
 
-    ct:comment("Miners: ~p\n, NumConsensusMembers: ~p, Port: ~p, BlockTime: ~p, BatchSize: ~p",
-               [Miners, NumConsensusMembers, Port, BlockTime, BatchSize]),
-
     ConfigResult = miner_ct_utils:pmap(fun(Miner) ->
                                                ct_rpc:call(Miner, cover, start, []),
                                                ct_rpc:call(Miner, application, load, [lager]),
@@ -223,10 +220,8 @@ init_per_testcase(_TestCase, Config) ->
                 end, [], Miners),
     {ok, _} = ct_cover:add_nodes(Miners),
 
-    [{config_result, ConfigResult},
-     {miners, Miners},
+    [{miners, Miners},
      {addresses, Addresses},
-     {miners, Miners},
      {num_consensus_members, NumConsensusMembers} | Config].
 
 end_per_testcase(_TestCase, Config) ->
