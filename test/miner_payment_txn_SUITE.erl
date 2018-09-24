@@ -89,12 +89,14 @@ single_payment_test(Config) ->
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
     CurrentHeight = ct_rpc:call(Payer, blockchain_worker, height, []),
+    ct:pal("Payer: ~p, CurrentHeight: ~p", [Payer, CurrentHeight]),
 
     %% XXX: wait till the blockchain grows by 2 blocks
     %% assuming that the transaction makes it within 2 blocks
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
                                                                      Height = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                                                     ct:pal("Miner: ~p, Height: ~p", [Miner, Height]),
                                                                      Height >= CurrentHeight + 2
                                                              end, Miners)
                                    end, 60, timer:seconds(5)),
