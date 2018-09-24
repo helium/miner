@@ -38,7 +38,16 @@ init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, Done
 
 handle_input(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
-    {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}}.
+    {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}};
+handle_input({status, Ref, Worker}, State) ->
+    Map = dkg:status(State#state.dkg),
+    Worker ! {Ref, maps:merge(#{
+                     id => State#state.id,
+                     members => State#state.members,
+                     signatures_required => State#state.signatures_required,
+                     signatures => length(State#state.signatures),
+                     sent_conf => State#state.sent_conf
+                    }, Map)}.
 
 handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
     lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
