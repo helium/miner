@@ -1,0 +1,11 @@
+case os:getenv("TRAVIS") of
+    "true" ->
+        JobId   =   os:getenv("TRAVIS_JOB_ID"),
+        Plugins = proplists:get_value(plugins, CONFIG, []),
+        [{coveralls_coverdata, ["_build/test/cover/ct.coverdata"]},
+         {coveralls_service_name, "travis-ci"},
+         {coveralls_service_job_id, JobId} |
+         lists:keystore(plugins, 1, CONFIG, {plugins, [coveralls|Plugins]})];
+    _ ->
+        CONFIG
+end.
