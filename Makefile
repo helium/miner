@@ -1,4 +1,4 @@
-.PHONY: compile test typecheck
+.PHONY: compile test typecheck cover
 
 REBAR=./rebar3
 
@@ -9,13 +9,16 @@ clean:
 	$(REBAR) clean
 
 test: compile
-	$(REBAR) as test do eunit, ct, xref, dialyzer
+	$(REBAR) as test do eunit, ct --verbose
 
 typecheck:
-	$(REBAR) dialyzer
+	$(REBAR) dialyzer xref
 
 release:
 	$(REBAR) as prod release -n miner
+
+cover:
+	$(REBAR) cover
 
 devrelease:
 	$(REBAR) as dev release -n miner-dev
