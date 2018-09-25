@@ -220,7 +220,7 @@ handle_call(dkg_status, _From, State) ->
                      receive
                          {Ref, Result} ->
                              Result
-                     after timer:seconds(1) ->
+                     after timer:seconds(5) ->
                                {error, timeout}
                      end
              end,
