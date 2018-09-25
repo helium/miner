@@ -40,7 +40,7 @@ handle_input(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}};
 handle_input({status, Ref, Worker}, State) ->
-    Map = dkg:status(State#state.dkg),
+    Map = dkg_hybriddkg:status(State#state.dkg),
     Worker ! {Ref, maps:merge(#{
                      id => State#state.id,
                      members => State#state.members,
