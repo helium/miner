@@ -28,6 +28,7 @@
           ,donemod :: atom()
           ,donefun :: atom()
           ,sent_conf = false :: boolean()
+          ,timer :: undefined | pid()
          }).
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
@@ -48,7 +49,14 @@ handle_input({status, Ref, Worker}, State) ->
                      signatures => length(State#state.signatures),
                      sent_conf => State#state.sent_conf
                     }, Map)},
-    {State, ok}.
+    {State, ok};
+handle_input(timeout, State) ->
+    case dkg_hybriddkg:handle_msg(State#state.dkg, State#state.id, timeout) of
+        {_DKG, ok} ->
+            {State#state{timer=undefined}, ok};
+        {NewDKG, {send, Msgs}} ->
+            {State#state{dkg=NewDKG, timer=undefined}, {send, fixup_msgs(Msgs)}}
+    end.
 
 handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
     lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
@@ -86,7 +94,20 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                 {NewDKG, {send, Msgs}} ->
                     {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}};
                 {NewDKG, start_timer} ->
-                    {State#state{dkg=NewDKG}, ok};
+                    case State#state.timer of
+                        undefined -> ok;
+                        OldTimer ->
+                            OldTimer  ! cancel
+                    end,
+                    Parent = self(),
+                    Pid = spawn(fun() ->
+                                        receive
+                                            cancel -> ok
+                                        after 60000 ->
+                                                  libp2p_group_relcast_server:handle_input(Parent, timeout)
+                                        end
+                                end),
+                    {State#state{dkg=NewDKG, timer=Pid}, ok};
                 {NewDKG, {result, {Shard, VK, VKs}}} ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve), Shard, State#state.id - 1),
@@ -101,7 +122,14 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                                                               Th = State#state.signatures_required,
                                                               {A, S, Th}
                                                       end,
-                    {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, signatures=[{Address, Signature}|State#state.signatures]},
+
+                    case State#state.timer of
+                        undefined -> ok;
+                        OldTimer ->
+                            OldTimer  ! cancel
+                    end,
+
+                    {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undfined, signatures=[{Address, Signature}|State#state.signatures]},
                      {send, [{multicast, term_to_binary({signature, Address, Signature})}]}};
                 {_, Foo} ->
                     erlang:error(Foo)
