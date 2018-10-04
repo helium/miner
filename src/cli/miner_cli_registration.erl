@@ -52,22 +52,22 @@ register_cmd() ->
 
 register_gw_cmd() ->
     [
-     [["register", "gw", '*', '*'], [], [], fun register_gw/3]
+     [["register", "gw", '*', '*', '*'], [], [], fun register_gw/3]
     ].
 
 register_gw_usage() ->
     [["register", "gw"],
-     ["register gw <Txn> <P2PAddr> \n\n",
+     ["register gw <Txn> <Token> <P2PAddr> \n\n",
       "  Register the gw with P2PAddr.\n\n"
      ]
     ].
 
-register_gw(["register", "gw", Txn, Addr], [], []) ->
+register_gw(["register", "gw", Txn, Token, Addr], [], []) ->
     case (catch libp2p_crypto:p2p_to_address(Addr)) of
         {'EXIT', _Reason} ->
             usage;
         NodeAddr when is_binary(NodeAddr) ->
-            miner:register_gw(base58:base58_to_binary(Txn), NodeAddr),
+            miner:register_gw(base58:base58_to_binary(Txn), Token, NodeAddr),
             [clique_status:text("ok")];
         _ ->
             usage

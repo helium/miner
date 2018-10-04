@@ -35,7 +35,7 @@
          ,genesis_block_done/3
          ,create_block/3
          ,signed_block/2
-         ,register_gw/2
+         ,register_gw/3
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -166,8 +166,8 @@ signed_block(Signatures, BinBlock) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-register_gw(Txn, Addr) ->
-    gen_server:cast(?MODULE, {register_gw, Txn, Addr}).
+register_gw(Txn, Token, Addr) ->
+    gen_server:cast(?MODULE, {register_gw, Txn, Token, Addr}).
 
 %% ==================================================================
 %% handle_call functions
@@ -324,8 +324,8 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
-handle_cast({register_gw, Txn, Addr}, State) ->
-    lager:info("register_gw, Txn: ~p, Addr: ~p", [Txn, Addr]),
+handle_cast({register_gw, Txn, Token, Addr}, State) ->
+    lager:info("register_gw, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
 
     P2PAddress = libp2p_crypto:address_to_p2p(Addr),
     Protocol = "gw_registration/1.0.0",
@@ -334,7 +334,7 @@ handle_cast({register_gw, Txn, Addr}, State) ->
                                                        P2PAddress,
                                                        Protocol,
                                                        blockchain_gw_registration_handler,
-                                                       [binary_to_term(Txn)]),
+                                                       [binary_to_term(Txn), Token]),
     unlink(StreamPid),
     {noreply, State};
 handle_cast(_Msg, State) ->
