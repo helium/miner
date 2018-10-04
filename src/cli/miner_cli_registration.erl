@@ -67,7 +67,7 @@ register_gw(["register", "gw", Txn, Addr], [], []) ->
         {'EXIT', _Reason} ->
             usage;
         NodeAddr when is_binary(NodeAddr) ->
-            miner:register_gw(Txn, Addr),
+            miner:register_gw(base58:base58_to_binary(Txn), NodeAddr),
             [clique_status:text("ok")];
         _ ->
             usage

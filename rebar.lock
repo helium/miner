@@ -6,7 +6,7 @@
   1},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"740e1ef2b93e1d73963e9645ea586350d99e15de"}},
+       {ref,"7b0edccd03dea4d2d16ac3f38bf7bb403deb1cb2"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
@@ -28,7 +28,7 @@
  {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
  {<<"erlang_ale">>,
   {git,"https://github.com/helium/erlang_ale",
-       {ref,"a62d152c92469a12e8d9676f4a89f9db7dfc0b94"}},
+       {ref,"7446b2df79411992e8efc34325e35437dcf536c1"}},
   1},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
@@ -85,7 +85,7 @@
  {<<"stacktrace_compat">>,{pkg,<<"stacktrace_compat">>,<<"1.0.0">>},2},
  {<<"ubx">>,
   {git,"https://github.com/helium/erlang-ubx.git",
-       {ref,"9a573b84d60c76bc8530b552bc405dadc90ccd03"}},
+       {ref,"ce78a00b3c9741a3cf4bbc09721bace5c3a3eed1"}},
   0}]}.
 [
 {pkg_hash,[

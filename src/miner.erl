@@ -328,21 +328,14 @@ handle_cast({register_gw, Txn, Addr}, State) ->
     lager:info("register_gw, Txn: ~p, Addr: ~p", [Txn, Addr]),
 
     P2PAddress = libp2p_crypto:address_to_p2p(Addr),
-    Protocol = "registration/1.0.0",
-    case libp2p_swarm:dial(blockchain_swarm:swarm(),
-                           P2PAddress,
-                           Protocol,
-                           'Elixir.BlockchainNode.RegistrationHandler',
-                           [self()]) of
-        {ok, Stream} ->
-            lager:info("dialed peer ~p, via: ~p", [P2PAddress, Protocol]),
-            libp2p_framed_stream:send(Stream, binary_to_term(Txn)),
-            libp2p_framed_stream:close(Stream),
-            ok;
-        Other ->
-            lager:notice("failed to dial ~p service on ~p: ~p", [Protocol, P2PAddress, Other]),
-            ok
-    end,
+    Protocol = "gw_registration/1.0.0",
+
+    {ok, StreamPid} =  libp2p_swarm:dial_framed_stream(blockchain_swarm:swarm(),
+                                                       P2PAddress,
+                                                       Protocol,
+                                                       blockchain_gw_registration_handler,
+                                                       [binary_to_term(Txn)]),
+    unlink(StreamPid),
     {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
