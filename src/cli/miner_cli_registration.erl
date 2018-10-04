@@ -36,7 +36,7 @@ register_all_cmds() ->
 register_usage() ->
     [["register"],
      ["miner register commands\n\n",
-      "  register gw <Txn> <P2PAddr>- Register the gateway.\n"
+      "  register gw <P2PAddr> <Txn> <Token> - Register the gateway.\n"
      ]
     ].
 
@@ -57,20 +57,24 @@ register_gw_cmd() ->
 
 register_gw_usage() ->
     [["register", "gw"],
-     ["register gw <Txn> <Token> <P2PAddr> \n\n",
+     ["register gw <P2PAddr> <Txn> <Token> \n\n",
       "  Register the gw with P2PAddr.\n\n"
      ]
     ].
 
-register_gw(["register", "gw", Txn, Token, Addr], [], []) ->
+register_gw(["register", "gw", Addr, Txn, Token], [], []) ->
     case (catch libp2p_crypto:p2p_to_address(Addr)) of
         {'EXIT', _Reason} ->
+            io:format("EXIT, Reason: ~p~n", [_Reason]),
             usage;
         NodeAddr when is_binary(NodeAddr) ->
+            io:format("NodeAddr: ~p~n", [NodeAddr]),
             miner:register_gw(base58:base58_to_binary(Txn), Token, NodeAddr),
             [clique_status:text("ok")];
-        _ ->
+        Other ->
+            io:format("other: ~p~n", [Other]),
             usage
     end;
-register_gw([_, _, _], [], []) ->
+register_gw(_, [], []) ->
+    io:format("none"),
     usage.
