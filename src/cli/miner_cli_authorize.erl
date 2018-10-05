@@ -1,8 +1,8 @@
 %%%-------------------------------------------------------------------
-%% @doc miner_cli_registration
+%% @doc miner_cli_authorize
 %% @end
 %%%-------------------------------------------------------------------
--module(miner_cli_registration).
+-module(miner_cli_authorize).
 
 -behavior(clique_handler).
 
@@ -17,8 +17,7 @@ register_all_usage() ->
                           apply(clique, register_usage, Args)
                   end,
                   [
-                   register_usage(),
-                   register_gw_usage()
+                   authorize_gw_usage()
                   ]).
 
 register_all_cmds() ->
@@ -26,43 +25,13 @@ register_all_cmds() ->
                           [apply(clique, register_command, Cmd) || Cmd <- Cmds]
                   end,
                   [
-                   register_cmd(),
-                   register_gw_cmd()
+                   authorize_gw_cmd()
                   ]).
-%%
-%% info
-%%
-
-register_usage() ->
-    [["register"],
-     ["miner register commands\n\n",
-      "  register gw <P2PAddr> <Txn> <Token> - Register the gateway.\n"
-     ]
-    ].
-
-register_cmd() ->
-    [
-     [["register"], [], [], fun(_, _, _) -> usage end]
-    ].
-
 
 %%
-%% register gw
+%% authorize gw
 %%
-
-register_gw_cmd() ->
-    [
-     [["register", "gw", '*', '*', '*'], [], [], fun register_gw/3]
-    ].
-
-register_gw_usage() ->
-    [["register", "gw"],
-     ["register gw <P2PAddr> <Txn> <Token> \n\n",
-      "  Register the gw with P2PAddr.\n\n"
-     ]
-    ].
-
-register_gw(["register", "gw", Addr, Txn, Token], [], []) ->
+authorize_gw(["authorize", "gw", Addr, Txn, Token], [], []) ->
     case (catch libp2p_crypto:p2p_to_address(Addr)) of
         {'EXIT', _Reason} ->
             io:format("EXIT, Reason: ~p~n", [_Reason]),
@@ -75,6 +44,18 @@ register_gw(["register", "gw", Addr, Txn, Token], [], []) ->
             io:format("other: ~p~n", [Other]),
             usage
     end;
-register_gw(_, [], []) ->
-    io:format("none"),
+authorize_gw([_, _, _, _, _], [], []) ->
+    io:format("None~n"),
     usage.
+
+authorize_gw_usage() ->
+    [["authorize", "gw"],
+     ["authorize gw <P2PAddress> <AddRequestTxn> <Token>\n\n",
+      "  Send gw authorization request to <P2PAddress>.\n\n"
+     ]
+    ].
+
+authorize_gw_cmd() ->
+    [
+     [["authorize", "gw", '*', '*', '*'], [], [], fun authorize_gw/3]
+    ].

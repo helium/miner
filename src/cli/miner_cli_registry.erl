@@ -10,6 +10,7 @@
                       ,miner_cli_info
                       ,miner_cli_dkg
                       ,miner_cli_registration
+                      ,miner_cli_authorize
                      ]).
 
 -export([register_cli/0]).
