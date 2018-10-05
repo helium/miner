@@ -17,7 +17,8 @@ register_all_usage() ->
                           apply(clique, register_usage, Args)
                   end,
                   [
-                   authorize_gw_usage()
+                   authorize_gw_usage(),
+                   authorize_usage()
                   ]).
 
 register_all_cmds() ->
@@ -25,37 +26,79 @@ register_all_cmds() ->
                           [apply(clique, register_command, Cmd) || Cmd <- Cmds]
                   end,
                   [
-                   authorize_gw_cmd()
+                   authorize_gw_cmd(),
+                   authorize_cmd()
                   ]).
+
+
+%%
+%% authorize
+%%
+
+authorize_usage() ->
+    [["authorize"],
+     ["miner authorize commands\n\n",
+      "   authorize gw    - Send authorization request for adding a gw to a given p2paddress\n"
+     ]
+    ].
+
+
+authorize_cmd() ->
+    [
+     ["authorize", [], [], fun(_, _, _) -> usage end]
+    ].
 
 %%
 %% authorize gw
 %%
-authorize_gw(["authorize", "gw", Addr, Txn, Token], [], []) ->
-    case (catch libp2p_crypto:p2p_to_address(Addr)) of
-        {'EXIT', _Reason} ->
-            io:format("EXIT, Reason: ~p~n", [_Reason]),
-            usage;
-        NodeAddr when is_binary(NodeAddr) ->
-            io:format("NodeAddr: ~p~n", [NodeAddr]),
-            miner:register_gw(base58:base58_to_binary(Txn), Token, NodeAddr),
-            [clique_status:text("ok")];
-        Other ->
-            io:format("other: ~p~n", [Other]),
-            usage
-    end;
-authorize_gw([_, _, _, _, _], [], []) ->
-    io:format("None~n"),
-    usage.
-
-authorize_gw_usage() ->
-    [["authorize", "gw"],
-     ["authorize gw <P2PAddress> <AddRequestTxn> <Token>\n\n",
-      "  Send gw authorization request to <P2PAddress>.\n\n"
+authorize_gw_cmd() ->
+    [
+     [
+      ["authorize", "gw"], '_', [
+                                 {address, [{shortname, "a"}, {longname, "address"}]},
+                                 {request, [{shortname, "r"}, {longname, "request"}]},
+                                 {token, [{shortname, "t"}, {longname, "token"}]}
+                                ], fun authorize_gw/3
      ]
     ].
 
-authorize_gw_cmd() ->
-    [
-     [["authorize", "gw", '*', '*', '*'], [], [], fun authorize_gw/3]
+authorize_gw_usage() ->
+    [["authorize", "gw"],
+     ["miner authorize gw\n\n",
+      "  Send authorization request to the wallet for adding a gw.\n",
+      "  Use key=value args to set options.\n\n",
+      "Required:\n\n"
+      "  -a, --address [P2PAddress]\n",
+      "   The p2paddress of the node to dial\n",
+      "  -r, --request [AddGwRequestTxn]\n",
+      "   The partial add_gateway_request txn. Use ledger add_gateway_request <OwnerAddress> to obtain request.\n",
+      "  -t, --token [Token]\n",
+      "   The token obtained from the QR code from wallet app\n"
+     ]
     ].
+
+authorize_gw(_CmdBase, _, []) ->
+    usage;
+authorize_gw(_CmdBase, _Keys, Flags) ->
+    case (catch authorize_gw_helper(Flags)) of
+        {'EXIT', _Reason} ->
+            usage;
+        ok ->
+            [clique_status:text("ok")];
+        _ -> usage
+    end.
+
+authorize_gw_helper(Flags) ->
+    Address = libp2p_crypto:p2p_to_address(clean(proplists:get_value(address, Flags))),
+    AddGwRequestTxn = base58:base58_to_binary(clean(proplists:get_value(request, Flags))),
+    Token = clean(proplists:get_value(token, Flags)),
+    miner:send_authorization_request(AddGwRequestTxn, Token, Address).
+
+%% NOTE: I noticed that giving a shortname to the flag would end up adding a leading "="
+%% Presumably none of the flags would be _having_ a leading "=" intentionally!
+clean(String) ->
+    case string:split(String, "=", leading) of
+        [[], S] -> S;
+        [S] -> S;
+        _ -> error
+    end.

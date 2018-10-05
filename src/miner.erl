@@ -35,7 +35,7 @@
          ,genesis_block_done/3
          ,create_block/3
          ,signed_block/2
-         ,register_gw/3
+         ,send_authorization_request/3
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -166,8 +166,8 @@ signed_block(Signatures, BinBlock) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-register_gw(Txn, Token, Addr) ->
-    gen_server:cast(?MODULE, {register_gw, Txn, Token, Addr}).
+send_authorization_request(Txn, Token, Addr) ->
+    gen_server:cast(?MODULE, {send_authorization_request, Txn, Token, Addr}).
 
 %% ==================================================================
 %% handle_call functions
@@ -324,9 +324,8 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
-handle_cast({register_gw, Txn, Token, Addr}, State) ->
-    lager:info("register_gw, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
-
+handle_cast({send_authorization_request, Txn, Token, Addr}, State) ->
+    lager:info("send_authorization_request, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
     P2PAddress = libp2p_crypto:address_to_p2p(Addr),
     Protocol = "gw_registration/1.0.0",
 
