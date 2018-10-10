@@ -18,7 +18,7 @@
   1},
  {<<"dkg">>,
   {git,"https://github.com/helium/erlang-dkg.git",
-       {ref,"5907e70ae613639eabb47c7ba42de2b8f5c77613"}},
+       {ref,"cdcf5599816bad264872796ab102094f2c4df94a"}},
   0},
  {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.0.2">>},1},
  {<<"erasure">>,

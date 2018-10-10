@@ -30,6 +30,7 @@
          ,consensus_pos/0
          ,in_consensus/0
          ,hbbft_status/0
+         ,dkg_status/0
          ,sign_genesis_block/2
          ,genesis_block_done/3
          ,create_block/3
@@ -144,6 +145,15 @@ hbbft_status() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+%% TODO: spec
+dkg_status() ->
+    gen_server:call(?MODULE, dkg_status).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
     gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}).
@@ -197,6 +207,20 @@ handle_call(hbbft_status, _From, State) ->
                          {Ref, Result} ->
                              Result
                      after timer:seconds(1) ->
+                               {error, timeout}
+                     end
+             end,
+    {reply, Status, State};
+handle_call(dkg_status, _From, State) ->
+    Status = case State#state.dkg_group of
+                 undefined -> ok;
+                 _ ->
+                     Ref = make_ref(),
+                     ok = libp2p_group_relcast:handle_input(State#state.dkg_group, {status, Ref, self()}),
+                     receive
+                         {Ref, Result} ->
+                             Result
+                     after timer:seconds(5) ->
                                {error, timeout}
                      end
              end,
