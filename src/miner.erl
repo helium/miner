@@ -314,8 +314,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
-                                         {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
+                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
     {reply, ok, State#state{consensus_group=Group, block_timer=Ref}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -368,8 +368,8 @@ handle_info(maybe_restore_consensus, State) ->
                      %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                      {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                      lager:info("~p. Group: ~p~n", [self(), Group]),
-                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
-                                                          {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
+                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
+                                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
                      Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
                      {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
                  false ->
