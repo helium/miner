@@ -14,7 +14,6 @@
     lager,
     ranch,
     libp2p,
-    blockchain,
     erl_base58,
     dkg,
     hbbft,
@@ -24,6 +23,7 @@
     inets, %% nat_upnp has a missing dep
     xmerl  %% nat_upnp has a missing dep
    ]},
+  {included_applications, [blockchain]},
   {env,[]},
   {modules, []},
 
