@@ -5,9 +5,9 @@
 %%%-------------------------------------------------------------------
 -module(miner_dkg_handler).
 
--behavior(libp2p_group_relcast_handler).
+-behavior(relcast).
 
--export([init/1, handle_message/3, handle_input/2, serialize_state/1, deserialize_state/1]).
+-export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2]).
 
 -record(state, {
           n :: non_neg_integer()
@@ -21,7 +21,7 @@
           ,privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized()
           ,members = [] :: [libp2p_crypto:address()]
           ,artifact :: binary()
-          ,signatures = [] :: {libp2p_crypto:address(), binary()}
+          ,signatures = [] :: [{libp2p_crypto:address(), binary()}]
           ,signatures_required :: pos_integer()
           ,sigmod :: atom()
           ,sigfun :: atom()
@@ -33,14 +33,14 @@
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
     {G1, G2} = generate(Curve, Members),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, []),
     lager:info("DKG~p started", [Id]),
-    {ok, Members, #state{n=N, id=Id, f=F, t=T, g1=G1, g2=G2, curve=Curve, dkg=DKG, signatures_required=N, artifact=ThingToSign, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun, members=Members}}.
+    {ok, #state{n=N, id=Id, f=F, t=T, g1=G1, g2=G2, curve=Curve, dkg=DKG, signatures_required=N, artifact=ThingToSign, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun, members=Members}}.
 
-handle_input(start, State) ->
+handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
-    {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}};
-handle_input({status, Ref, Worker}, State) ->
+    {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
+handle_command({status, Ref, Worker}, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
     Worker ! {Ref, maps:merge(#{
                      id => State#state.id,
@@ -49,16 +49,16 @@ handle_input({status, Ref, Worker}, State) ->
                      signatures => length(State#state.signatures),
                      sent_conf => State#state.sent_conf
                     }, Map)},
-    {State, ok};
-handle_input(timeout, State) ->
+    {reply, ok, ignore};
+handle_command(timeout, State) ->
     case dkg_hybriddkg:handle_msg(State#state.dkg, State#state.id, timeout) of
         {_DKG, ok} ->
-            {State#state{timer=undefined}, ok};
+            {reply, ok, [], State#state{timer=undefined}};
         {NewDKG, {send, Msgs}} ->
-            {State#state{dkg=NewDKG, timer=undefined}, {send, fixup_msgs(Msgs)}}
+            {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG, timer=undefined}}
     end.
 
-handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
+handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
     lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
     case binary_to_term(Msg) of
         {conf, Signatures} ->
@@ -67,32 +67,33 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                     case State#state.sent_conf of
                         false ->
                             {State#state{sent_conf=true, signatures=GoodSignatures},
-                             {send, [{multicast, term_to_binary({conf, GoodSignatures})}]}};
+                             [{multicast, term_to_binary({conf, GoodSignatures})}]};
                         true ->
                             %% this needs to be a call so we know the callback succeeded so we can terminate
                             ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures, State#state.privkey),
                             %% stop the handler
-                            {State, {close, 60000}}
+                            {State, [{stop, 60000}]}
                     end;
                 false ->
-                    {State, ok}
+                    {State, []}
             end;
         {signature, Address, Signature} ->
             NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
             case enough_signatures(NewState) of
                 {ok, Signatures} when State#state.sent_conf == false ->
-                    {NewState#state{sent_conf=true},
-                     {send, [{multicast, term_to_binary({conf, Signatures})}]}};
+                    {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
                 _ ->
                     %% already sent a CONF, or not enough signatures
-                    {NewState, ok}
+                    {NewState, []}
             end;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, binary_to_term(Msg)) of
+                {_, ignore} ->
+                    ignore;
                 {NewDKG, ok} ->
-                    {State#state{dkg=NewDKG}, ok};
+                    {State#state{dkg=NewDKG}, []};
                 {NewDKG, {send, Msgs}} ->
-                    {State#state{dkg=NewDKG}, {send, fixup_msgs(Msgs)}};
+                    {State#state{dkg=NewDKG}, fixup_msgs(Msgs)};
                 {NewDKG, start_timer} ->
                     case State#state.timer of
                         undefined -> ok;
@@ -107,7 +108,7 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                                                   libp2p_group_relcast_server:handle_input(Parent, timeout)
                                         end
                                 end),
-                    {State#state{dkg=NewDKG, timer=Pid}, ok};
+                    {State#state{dkg=NewDKG, timer=Pid}, []};
                 {NewDKG, {result, {Shard, VK, VKs}}} ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve), Shard, State#state.id - 1),
@@ -130,14 +131,17 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                     end,
 
                     {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undefined, signatures=[{Address, Signature}|State#state.signatures]},
-                     {send, [{multicast, term_to_binary({signature, Address, Signature})}]}};
+                     [{multicast, term_to_binary({signature, Address, Signature})}]};
                 {_, Foo} ->
                     erlang:error(Foo)
             end
     end.
 
+callback_message(_, _, _) ->
+    none.
+
 %% helper functions
-serialize_state(State) ->
+serialize(State) ->
     SerializedDKG = dkg_hybriddkg:serialize(State#state.dkg),
     G1 = erlang_pbc:element_to_binary(State#state.g1),
     G2 = erlang_pbc:element_to_binary(State#state.g2),
@@ -149,7 +153,7 @@ serialize_state(State) ->
               end,
     term_to_binary(State#state{dkg=SerializedDKG, g1=G1, g2=G2, privkey=PrivKey}).
 
-deserialize_state(BinState) ->
+deserialize(BinState) ->
     State = binary_to_term(BinState),
     Group = erlang_pbc:group_new(State#state.curve),
     G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
@@ -163,6 +167,9 @@ deserialize_state(BinState) ->
     end,
     State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey}.
 
+restore(OldState, _NewState) ->
+    {ok, OldState}.
+
 fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
                       {unicast, J, term_to_binary(NextMsg)};
@@ -170,8 +177,6 @@ fixup_msgs(Msgs) ->
                       {multicast, term_to_binary(NextMsg)}
               end, Msgs).
 
-enough_signatures(#state{artifact=undefined}) ->
-    false;
 enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
     false;
 enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->

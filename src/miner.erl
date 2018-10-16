@@ -116,7 +116,7 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()}.
+-spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
 
@@ -382,7 +382,7 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus_group=ConsensusGroup,
+handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_group=ConsensusGroup,
                                                                 block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
@@ -391,7 +391,7 @@ handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
-                       libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
+                       libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
                        Ref = erlang:send_after(BlockTime, self(), block_timeout),
                        State#state{block_timer=Ref};
                    {error, Reason} ->
