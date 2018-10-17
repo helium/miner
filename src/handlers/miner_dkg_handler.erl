@@ -33,7 +33,7 @@
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
     {G1, G2} = generate(Curve, Members),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, []),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}]),
     lager:info("DKG~p started", [Id]),
     {ok, #state{n=N, id=Id, f=F, t=T, g1=G1, g2=G2, curve=Curve, dkg=DKG, signatures_required=N, artifact=ThingToSign, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun, members=Members}}.
 
@@ -137,8 +137,15 @@ handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
             end
     end.
 
-callback_message(_, _, _) ->
-    none.
+callback_message(Actor, Message, _State) ->
+    case binary_to_term(Message) of
+        {Id, {send, {Session, SerializedCommitment, Shares}}} ->
+            term_to_binary({Id, {send, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
+        {Id, {echo, {Session, SerializedCommitment, Shares}}} ->
+            term_to_binary({Id, {echo, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
+        {Id, {ready, {Session, SerializedCommitment, Shares}}} ->
+            term_to_binary({Id, {ready, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}})
+    end.
 
 %% helper functions
 serialize(State) ->
@@ -174,7 +181,9 @@ fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
                       {unicast, J, term_to_binary(NextMsg)};
                  ({multicast, NextMsg}) ->
-                      {multicast, term_to_binary(NextMsg)}
+                      {multicast, term_to_binary(NextMsg)};
+                 ({callback, NextMsg}) ->
+                      {callback, term_to_binary(NextMsg)}
               end, Msgs).
 
 enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
