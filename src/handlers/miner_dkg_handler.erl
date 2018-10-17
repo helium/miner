@@ -129,7 +129,7 @@ handle_message(Index, Msg, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                             OldTimer  ! cancel
                     end,
 
-                    {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undfined, signatures=[{Address, Signature}|State#state.signatures]},
+                    {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undefined, signatures=[{Address, Signature}|State#state.signatures]},
                      {send, [{multicast, term_to_binary({signature, Address, Signature})}]}};
                 {_, Foo} ->
                     erlang:error(Foo)

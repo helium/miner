@@ -17,11 +17,11 @@ init(_Args) ->
                  ,period => 5},
 
     %% Blockchain Supervisor Options
-	SeedNodes = case application:get_env(blockchain, seed_nodes) of
-					{ok, ""} -> [];
-					{ok, Seeds} -> string:split(Seeds, ",", all);
-					_ -> []
-				end,
+    SeedNodes = case application:get_env(blockchain, seed_nodes) of
+                    {ok, ""} -> [];
+                    {ok, Seeds} -> string:split(Seeds, ",", all);
+                    _ -> []
+                end,
     Port = application:get_env(blockchain, port, 0),
     NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
@@ -38,12 +38,12 @@ init(_Args) ->
                           end,
 
     BlockchainOpts = [
-        {key, {PublicKey, SigFun}}
-        ,{seed_nodes, SeedNodes}
-        ,{port, Port}
-        ,{num_consensus_members, NumConsensusMembers}
-        ,{base_dir, BaseDir}
-    ],
+                      {key, {PublicKey, SigFun}}
+                      ,{seed_nodes, SeedNodes}
+                      ,{port, Port}
+                      ,{num_consensus_members, NumConsensusMembers}
+                      ,{base_dir, BaseDir}
+                     ],
 
     %% Miner Options
     Curve = application:get_env(miner, curve, 'SS512'),
@@ -61,9 +61,9 @@ init(_Args) ->
                 ],
 
     ChildSpecs =  [#{id => blockchain_sup
-                    ,start => {blockchain_sup, start_link, [BlockchainOpts]}
-                    ,restart => permanent
-                    ,type => supervisor
+                     ,start => {blockchain_sup, start_link, [BlockchainOpts]}
+                     ,restart => permanent
+                     ,type => supervisor
                     },
                    #{id => miner
                      ,start => {miner, start_link, [MinerOpts]}

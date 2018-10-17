@@ -6,6 +6,8 @@
 
 -behavior(gen_server).
 
+-include_lib("blockchain/include/blockchain.hrl").
+
 -record(state, {
           %% NOTE: a miner may or may not participate in consensus
           consensus_group :: undefined | pid()
@@ -35,6 +37,7 @@
          ,genesis_block_done/3
          ,create_block/3
          ,signed_block/2
+         ,send_authorization_request/3
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -149,11 +152,11 @@ hbbft_status() ->
 dkg_status() ->
     gen_server:call(?MODULE, dkg_status).
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+-spec signed_block([binary()], binary()) -> ok.
 signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
     gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}).
@@ -161,6 +164,12 @@ signed_block(Signatures, BinBlock) ->
 %% ==================================================================
 %% API casts
 %% ==================================================================
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+send_authorization_request(Txn, Token, Addr) ->
+    gen_server:cast(?MODULE, {send_authorization_request, Txn, Token, Addr}).
 
 %% ==================================================================
 %% handle_call functions
@@ -307,8 +316,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
-                                         {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
     {reply, ok, State#state{consensus_group=Group, block_timer=Ref}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -317,6 +326,18 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
+handle_cast({send_authorization_request, Txn, Token, Addr}, State) ->
+    lager:info("send_authorization_request, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
+    P2PAddress = libp2p_crypto:address_to_p2p(Addr),
+    Protocol = "gw_registration/1.0.0",
+
+    {ok, StreamPid} =  libp2p_swarm:dial_framed_stream(blockchain_swarm:swarm(),
+                                                       P2PAddress,
+                                                       Protocol,
+                                                       blockchain_gw_registration_handler,
+                                                       [binary_to_term(Txn), Token]),
+    unlink(StreamPid),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -349,8 +370,8 @@ handle_info(maybe_restore_consensus, State) ->
                      %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                      {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                      lager:info("~p. Group: ~p~n", [self(), Group]),
-                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "miner_transaction/1.0.0",
-                                                          {libp2p_framed_stream, server, [miner_transaction_handler, self(), Group]}),
+                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
                      Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
                      {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
                  false ->
@@ -361,7 +382,7 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=ConsensusGroup,
+handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus_group=ConsensusGroup,
                                                                 block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
