@@ -6,6 +6,8 @@
 
 -behavior(gen_server).
 
+-include_lib("blockchain/include/blockchain.hrl").
+
 -record(state, {
           %% NOTE: a miner may or may not participate in consensus
           consensus_group :: undefined | pid()
@@ -314,7 +316,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
     {reply, ok, State#state{consensus_group=Group, block_timer=Ref}};
 handle_call(_Msg, _From, State) ->
@@ -368,7 +370,7 @@ handle_info(maybe_restore_consensus, State) ->
                      %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                      {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                      lager:info("~p. Group: ~p~n", [self(), Group]),
-                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), "blockchain_txn/1.0.0",
+                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                                           {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
                      Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
                      {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
@@ -380,7 +382,7 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash}}, State=#state{consensus_group=ConsensusGroup,
+handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus_group=ConsensusGroup,
                                                                 block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
