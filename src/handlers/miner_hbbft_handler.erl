@@ -82,16 +82,27 @@ handle_command(Txn, State) ->
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
     lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+    Round = hbbft:round(HBBFT),
     case binary_to_term(Msg) of
-        {signature, _R, Address, Signature} ->
-            NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
-            case enough_signatures(NewState) of
-                {ok, Signatures} ->
-                    ok = miner:signed_block(Signatures, State#state.artifact);
+        {signature, R, Address, Signature} ->
+            case R == Round andalso lists:member(Address, State#state.members) andalso
+                 %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
+                 (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:address_to_pubkey(Address))) of
+                true ->
+                    NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
+                    case enough_signatures(NewState) of
+                        {ok, Signatures} ->
+                            ok = miner:signed_block(Signatures, State#state.artifact);
+                        false ->
+                            ok
+                    end,
+                    {NewState, []};
+                false when R > Round ->
+                    defer;
                 false ->
-                    ok
-            end,
-            {NewState, []};
+                    %% invalid signature somehow
+                    ignore
+            end;
         _ ->
             case hbbft:handle_msg(HBBFT, Index - 1, binary_to_term(Msg)) of
                 ignore -> ignore;
@@ -110,13 +121,13 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
-                    Round = hbbft:round(NewHBBFT),
-                    case miner:create_block(Stamps, Txns, Round) of
+                    NewRound = hbbft:round(NewHBBFT),
+                    case miner:create_block(Stamps, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
-                            Msgs = [{multicast, {signature, Round, Address, Signature}}],
-                            {State#state{hbbft=NewerHBBFT, artifact=Artifact}, fixup_msgs(Msgs)};
+                            Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
+                            {filter_signatures(State#state{hbbft=NewerHBBFT, artifact=Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
@@ -169,4 +180,12 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
             false
     end.
 
-
+filter_signatures(State=#state{artifact=undefined}) ->
+    %% don't have the item being signed yet, can't filter
+    State;
+filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members=Members}) ->
+    FilteredSignatures = lists:filter(fun({Address, Signature}) ->
+                         lists:member(Address, Members) andalso
+                         libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:address_to_pubkey(Address))
+                 end, Signatures),
+    State#state{signatures=FilteredSignatures}.
