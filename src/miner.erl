@@ -142,7 +142,7 @@ genesis_block_done(GenesisBlock, Signatures, PrivKey) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_status() ->
-    gen_server:call(?MODULE, hbbft_status).
+    gen_server:call(?MODULE, hbbft_status, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -150,7 +150,7 @@ hbbft_status() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 dkg_status() ->
-    gen_server:call(?MODULE, dkg_status).
+    gen_server:call(?MODULE, dkg_status, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
