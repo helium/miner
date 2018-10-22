@@ -6,7 +6,7 @@
 
 -behavior(gen_server).
 
--include_lib("blockchain/include/blockchain.hrl").
+-include_lib("blockchain/src/blockchain.hrl").
 
 -record(state, {
           %% NOTE: a miner may or may not participate in consensus
