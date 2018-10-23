@@ -32,6 +32,7 @@
          ,consensus_pos/0
          ,in_consensus/0
          ,hbbft_status/0
+         ,hbbft_skip/0
          ,dkg_status/0
          ,sign_genesis_block/2
          ,genesis_block_done/3
@@ -149,6 +150,14 @@ hbbft_status() ->
 %% @end
 %%--------------------------------------------------------------------
 %% TODO: spec
+hbbft_skip() ->
+    gen_server:call(?MODULE, hbbft_skip, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+%% TODO: spec
 dkg_status() ->
     gen_server:call(?MODULE, dkg_status, infinity).
 
@@ -218,7 +227,21 @@ handle_call(hbbft_status, _From, State) ->
                      receive
                          {Ref, Result} ->
                              Result
-                     after timer:seconds(1) ->
+                     after timer:seconds(60) ->
+                               {error, timeout}
+                     end
+             end,
+    {reply, Status, State};
+handle_call(hbbft_skip, _From, State) ->
+    Status = case State#state.consensus_group of
+                 undefined -> ok;
+                 _ ->
+                     Ref = make_ref(),
+                     ok = libp2p_group_relcast:handle_input(State#state.consensus_group, {skip, Ref, self()}),
+                     receive
+                         {Ref, Result} ->
+                             Result
+                     after timer:seconds(60) ->
                                {error, timeout}
                      end
              end,
@@ -232,7 +255,7 @@ handle_call(dkg_status, _From, State) ->
                      receive
                          {Ref, Result} ->
                              Result
-                     after timer:seconds(5) ->
+                     after timer:seconds(60) ->
                                {error, timeout}
                      end
              end,

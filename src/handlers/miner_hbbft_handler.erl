@@ -51,6 +51,14 @@ handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     Worker ! {Ref, maps:merge(#{deferred =>[ {Index - 1, binary_to_term(Msg)} || {Index, Msg} <- State#state.deferred], signatures_required => State#state.signatures_required, signatures => length(State#state.signatures)}, Map)},
     {reply, ok, ignore};
+handle_command({skip, Ref, Worker}, State) ->
+    case hbbft:next_round(State#state.hbbft) of
+        {NextHBBFT, ok} ->
+            Worker ! {Ref, ok},
+            {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+        {NextHBBFT, {send, NextMsgs}} ->
+            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+    end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=HBBFT}) ->
     PrevRound = hbbft:round(HBBFT),
