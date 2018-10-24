@@ -142,19 +142,28 @@ receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
-
-    Receipts1 = [Receipt|Receipts0],
-    case erlang:length(Receipts1) =:= erlang:length(Challengees) of
+    Address = blockchain_poc_receipt:address(Receipt),
+    case blockchain_poc_receipt:is_valid(Receipt)
+         andalso lists:member(Address, Challengees)
+    of
         false ->
-            {keep_state, Data#data{receipts=Receipts1}};
+            lager:warning("ignoring receipt ~p", [Receipt]),
+            {keep_state, Data};
         true ->
-            self() ! submit,
-            {next_state, submiting, Data#data{receipts=Receipts1}}
+            Receipts1 = [Receipt|Receipts0],
+            case erlang:length(Receipts1) =:= erlang:length(Challengees) of
+                false ->
+                    {keep_state, Data#data{receipts=Receipts1}};
+                true ->
+                    self() ! submit,
+                    {next_state, submiting, Data#data{receipts=Receipts1}}
+            end
     end;
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-submiting(info,submit, Data) ->
+submiting(info, submit, Data) ->
+
     {keep_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
