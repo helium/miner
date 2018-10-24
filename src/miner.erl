@@ -458,8 +458,6 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
     lager:info("F: ~p", [F]),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-    ok = blockchain_worker:consensus_addrs(ConsensusAddrs),
-    lager:info("WorkerConsensusAddrs: ~p", [blockchain_worker:consensus_addrs()]),
     MyAddress = blockchain_swarm:address(),
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
