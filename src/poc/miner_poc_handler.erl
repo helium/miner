@@ -50,7 +50,8 @@ handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
     {noreply, State};
 handle_data(server, Data, State) ->
-    ok = miner_poc_statem:receipt(Data),
+    Receipt = blockchain_poc_receipt:decode(Data),
+    ok = miner_poc_statem:receipt(Receipt),
     {noreply, State}.
 
 handle_info(_Type, _Msg, State) ->
