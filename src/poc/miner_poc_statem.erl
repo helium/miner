@@ -83,6 +83,10 @@ terminate(_Reason, _State) ->
 %% gen_statem callbacks
 %% ------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastSubmit
                                                                ,address=Address}=Data) ->
     CurrHeight = blockchain_worker:height(),
@@ -99,6 +103,10 @@ requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastS
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, Hash}}, #data{address=Address}=Data) ->
     case blockchain_worker:get_block(Hash) of
         {ok, Block} ->
@@ -121,6 +129,10 @@ mining(info, {blockchain_event, {add_block, Hash}}, #data{address=Address}=Data)
 mining(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 targeting(info, {target, Hash, Block}, Data) ->
     Target = target(Hash, Block),
     self() ! {challenge, Target},
@@ -128,6 +140,10 @@ targeting(info, {target, Hash, Block}, Data) ->
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 challenging(info, {challenge, Target}, Data) ->
     % TODO: Build path, build onion and deliver to first target
     Challengees = [Target],
@@ -135,6 +151,10 @@ challenging(info, {challenge, Target}, Data) ->
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=0}=Data) ->
     self() ! submit,
     {next_state, submiting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
@@ -162,8 +182,11 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 submiting(info, submit, Data) ->
-
     {keep_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -172,40 +195,77 @@ submiting(EventType, EventContent, Data) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 handle_event(_EventType, _EventContent, Data) ->
     lager:debug("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec target(binary(), blockchain_block:block()) -> libp2p_crypto:address().
 target(Hash, _Block) ->
+    ActiveGateways = active_gateways(),
+    Probs = create_probs(ActiveGateways),
+    Entropy = entropy(Hash, Probs),
+    select_target(Probs, maps:keys(ActiveGateways), Entropy, 1).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec create_probs(map()) -> [float()].
+create_probs(Gateways) ->
+    GwScores = [blockchain_ledger:gateway_score(G) || G <- maps:values(Gateways)],
+    LenGwScores = erlang:length(GwScores),
+    SumGwScores = lists:sum(GwScores),
+    [prob(Score, LenGwScores, SumGwScores) || Score <- GwScores].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec prob(float(), pos_integer(), float()) -> float().
+prob(Score, LenScores, SumScores) ->
+    (1.0 - Score) / (LenScores - SumScores).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec entropy(binary(), [float()]) -> float().
+entropy(Entropy, Probs) ->
+    <<A:85/integer-unsigned-little, B:85/integer-unsigned-little
+      ,C:86/integer-unsigned-little, _>> = crypto:hash(sha256, Entropy),
+    S = rand:seed_s(exrop, {A, B, C}),
+    {R, _} = rand:uniform_s(S),
+    R * lists:sum(Probs).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+select_target([W1 | _T], Adresses, Rnd, Index) when (Rnd - W1) < 0 ->
+    lists:nth(Index, Adresses);
+select_target([W1 | T], Adresses, Rnd, Index) ->
+    select_target(T, Adresses, Rnd - W1, Index + 1).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec active_gateways() -> map().
+active_gateways() ->
     ActiveGateways = blockchain_ledger:active_gateways(blockchain_worker:ledger()),
-    Gateways = maps:filter(
+    maps:filter(
         fun(Address, Gateway) ->
             % TODO: Maybe do some find of score check here
             Address =/= blockchain_swarm:address()
             andalso blockchain_ledger:gateway_location(Gateway) =/= undefined
         end
         ,ActiveGateways
-    ),
-    GwScores = [blockchain_ledger:gateway_score(G) || G <- maps:values(Gateways)],
-    LenGwScores = erlang:length(GwScores),
-    SumGwScores = lists:sum(GwScores),
-    Probs = [prob(Score, LenGwScores, SumGwScores) || Score <- GwScores],
-    target(Hash, maps:keys(Gateways), Probs).
-
-target(Entropy, Adresses, Probs) ->
-    %% TODO this is silly but it makes EQC happy....
-    <<A:85/integer-unsigned-little, B:85/integer-unsigned-little
-      ,C:86/integer-unsigned-little, _>> = crypto:hash(sha256, Entropy),
-    S = rand:seed_s(exrop, {A, B, C}),
-    {R, _} = rand:uniform_s(S),
-    Rnd =  R * lists:sum(Probs),
-    select_target(Probs, Adresses, Rnd, 1).
-
-select_target([W1 | _T], Adresses, Rnd, Index) when (Rnd - W1) < 0 ->
-    lists:nth(Index, Adresses);
-select_target([W1 | T], Adresses, Rnd, Index) ->
-    select_target(T, Adresses, Rnd - W1, Index + 1).
-
--spec prob(float(), pos_integer(), float()) -> float().
-prob(Score, LenScores, SumScores) ->
-    (1.0 - Score) / (LenScores - SumScores).
+    ).
