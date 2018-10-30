@@ -49,6 +49,12 @@
     ,receipts = [] :: [binary()]
 }).
 
+-record(path, {
+    target
+    ,target_address
+    ,path
+}).
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -134,8 +140,8 @@ mining(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 targeting(info, {target, Hash, Block}, Data) ->
-    Target = target(Hash, Block),
-    self() ! {challenge, Target},
+    {Target, Gateways} = target(Hash, Block),
+    self() ! {challenge, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -144,12 +150,44 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Target}, Data) ->
-    % TODO: Build path, build onion and deliver to first target
+
+
+challenging(info, {challenge, Target, Gateways}, Data) ->
+    TargetGw = maps:get(Target, Gateways),
+    Path0 = #path{target=TargetGw, target_address=Target, path=[]},
+    _Path1 = path_selection(TargetGw, Gateways, [], 0, Path0),
+
     Challengees = [Target],
     {next_state, receiving, Data#data{challengees=Challengees}};
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
+
+path_selection(TargetGw, Gateways, Path, 3, #path{path=[]}=P) ->
+    path_selection(TargetGw, Gateways, [], 0, P#path{path=Path});
+path_selection(_TargetGw, _Gateways, _Path, 3, #path{target_address=Target, path=FullPath}) ->
+    {A, B} = lists:split(3, FullPath),
+    A ++ [Target] ++ B;
+path_selection(TargetGw, Gateways, Path, Size, #path{path=FullPath}=P) ->
+    S = case Size rem 2 of 0 -> high; _ -> low end,
+    TargetIndex = blockchain_ledger:gateway_location(TargetGw),
+    KRing = h3:k_ring(TargetIndex, 1),
+    % TODO: do something if not enough gateways
+    GwInRing = maps:filter(
+        fun(Address, Gateway) ->
+            Index = blockchain_ledger:gateway_location(Gateway),
+            Score = blockchain_ledger:gateway_score(Gateway),
+            lists:member(Index, KRing)
+                andalso not lists:member(Address, Path)
+                andalso not lists:member(Address, FullPath)
+                andalso case S of high -> Score >= 1.0; low -> Score =< 1.0 end
+        end
+        ,Gateways
+    ),
+    SelectedAddress = lists:first(maps:keys(GwInRing)),
+    SelectedGw = maps:get(SelectedAddress, GwInRing),
+    path_selection(SelectedGw, Gateways, [SelectedAddress|Path], Size+1, P).
+
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -207,12 +245,13 @@ handle_event(_EventType, _EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec target(binary(), blockchain_block:block()) -> libp2p_crypto:address().
+-spec target(binary(), blockchain_block:block()) -> {libp2p_crypto:address(), map()}.
 target(Hash, _Block) ->
     ActiveGateways = active_gateways(),
     Probs = create_probs(ActiveGateways),
     Entropy = entropy(Hash, Probs),
-    select_target(Probs, maps:keys(ActiveGateways), Entropy, 1).
+    Target = select_target(Probs, maps:keys(ActiveGateways), Entropy, 1),
+    {Target, ActiveGateways}.
 
 %%--------------------------------------------------------------------
 %% @doc
