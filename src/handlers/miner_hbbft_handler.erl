@@ -7,7 +7,7 @@
 
 -behavior(relcast).
 
--export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/0]).
+-export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
 
 -record(state, {
           n :: non_neg_integer()
@@ -23,13 +23,13 @@
           ,members :: [libp2p_crypto:address()]
          }).
 
-stamp() ->
-    Head = blockchain_worker:head_hash(),
+stamp(Dir) ->
+    {ok, Head} = blockchain:get_block(head, Dir),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
-    {erlang:system_time(seconds), Head}.
+    {erlang:system_time(seconds), blockchain_block:hash_block(Head)}.
 
-init([Members, Id, N, F, BatchSize, SK, _Worker]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, []}),
+init([Members, Id, N, F, BatchSize, SK, BlockDir]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [BlockDir]}),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
                          id=Id-1,
