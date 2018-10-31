@@ -16,7 +16,7 @@
           ,batch_size = 500 :: pos_integer()
           ,gps_handle = undefined :: undefined | pid()
           ,gps_lock = false :: boolean()
-
+          ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
           ,block_time = 15000 :: pos_integer
@@ -68,7 +68,10 @@ init(Args) ->
 
     self() ! maybe_restore_consensus,
 
+    Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
+
     {ok, #state{curve=Curve,
+                blockchain_dir=Dir,
                 block_time=BlockTime,
                 batch_size=BatchSize,
                 gps_handle=GPSHandle}}.
@@ -264,7 +267,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
-    CurrentBlock = blockchain_worker:head_block(),
+    {ok, CurrentBlock} = blockchain:get_block(head, State#state.blockchain_dir),
     CurrentBlockHash = blockchain_block:hash_block(CurrentBlock),
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
@@ -335,7 +338,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
                                       F,
                                       BatchSize,
                                       PrivKey,
-                                      self()]],
+                                      State#state.blockchain_dir]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
@@ -411,7 +414,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
-    NewState = case blockchain_worker:get_block(Hash) of
+    NewState = case blockchain:get_block(Hash, State#state.blockchain_dir) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
