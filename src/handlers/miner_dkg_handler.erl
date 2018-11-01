@@ -104,7 +104,7 @@ handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                     Pid = spawn(fun() ->
                                         receive
                                             cancel -> ok
-                                        after 60000 ->
+                                        after 300000 ->
                                                   libp2p_group_relcast_server:handle_input(Parent, timeout)
                                         end
                                 end),
