@@ -49,7 +49,10 @@ handle_command(start_acs, State) ->
     end;
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
-    Worker ! {Ref, maps:merge(#{deferred =>[ {Index - 1, binary_to_term(Msg)} || {Index, Msg} <- State#state.deferred], signatures_required => State#state.signatures_required, signatures => length(State#state.signatures)}, Map)},
+    Worker ! {Ref, maps:merge(#{signatures_required => State#state.signatures_required,
+                                signatures => length(State#state.signatures),
+                                public_key_hash => blockchain_util:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
+                               }, Map)},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->
     case hbbft:next_round(State#state.hbbft) of
