@@ -122,7 +122,7 @@ in_consensus() ->
 %%--------------------------------------------------------------------
 -spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
-    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
+    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -171,7 +171,7 @@ dkg_status() ->
 -spec signed_block([binary()], binary()) -> ok.
 signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
-    gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}).
+    gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}, infinity).
 
 %% ==================================================================
 %% API casts
