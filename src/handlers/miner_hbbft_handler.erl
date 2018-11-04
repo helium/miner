@@ -92,7 +92,6 @@ handle_command(Txn, State) ->
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
     Round = hbbft:round(HBBFT),
     case binary_to_term(Msg) of
         {signature, R, Address, Signature} ->
@@ -111,6 +110,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 false when R > Round ->
                     defer;
                 false ->
+                    lager:warning("Invalid signature ~p from ~p for round ~p", [Signature, Address, Round]),
                     %% invalid signature somehow
                     ignore
             end;
@@ -118,17 +118,16 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
             case hbbft:handle_msg(HBBFT, Index - 1, binary_to_term(Msg)) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
-                    %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
+                    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
                     {State#state{hbbft=NewHBBFT}, []};
                 {_, defer} ->
                     defer;
                 {NewHBBFT, {send, Msgs}} ->
-                    %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
+                    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
                     {State#state{hbbft=NewHBBFT}, fixup_msgs(Msgs)};
                 {NewHBBFT, {result, {transactions, Stamps, Txns}}} ->
+                    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
                     lager:info("Reached consensus"),
-                    lager:info("stamps ~p~n", [Stamps]),
-                    %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
