@@ -49,12 +49,6 @@
     ,receipts = [] :: [binary()]
 }).
 
--record(path, {
-    target
-    ,target_address
-    ,path
-}).
-
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -150,44 +144,12 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-
-
 challenging(info, {challenge, Target, Gateways}, Data) ->
-    TargetGw = maps:get(Target, Gateways),
-    Path0 = #path{target=TargetGw, target_address=Target, path=[]},
-    _Path1 = path_selection(TargetGw, Gateways, [], 0, Path0),
-
+    _Graph = miner_poc_path:build_graph(Target, Gateways),
     Challengees = [Target],
     {next_state, receiving, Data#data{challengees=Challengees}};
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
-
-path_selection(TargetGw, Gateways, Path, 3, #path{path=[]}=P) ->
-    path_selection(TargetGw, Gateways, [], 0, P#path{path=Path});
-path_selection(_TargetGw, _Gateways, _Path, 3, #path{target_address=Target, path=FullPath}) ->
-    {A, B} = lists:split(3, FullPath),
-    A ++ [Target] ++ B;
-path_selection(TargetGw, Gateways, Path, Size, #path{path=FullPath}=P) ->
-    S = case Size rem 2 of 0 -> high; _ -> low end,
-    TargetIndex = blockchain_ledger:gateway_location(TargetGw),
-    KRing = h3:k_ring(TargetIndex, 1),
-    % TODO: do something if not enough gateways
-    GwInRing = maps:filter(
-        fun(Address, Gateway) ->
-            Index = blockchain_ledger:gateway_location(Gateway),
-            Score = blockchain_ledger:gateway_score(Gateway),
-            lists:member(Index, KRing)
-                andalso not lists:member(Address, Path)
-                andalso not lists:member(Address, FullPath)
-                andalso case S of high -> Score >= 1.0; low -> Score =< 1.0 end
-        end
-        ,Gateways
-    ),
-    SelectedAddress = lists:first(maps:keys(GwInRing)),
-    SelectedGw = maps:get(SelectedAddress, GwInRing),
-    path_selection(SelectedGw, Gateways, [SelectedAddress|Path], Size+1, P).
-
-
 
 %%--------------------------------------------------------------------
 %% @doc
