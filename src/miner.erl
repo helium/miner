@@ -305,7 +305,9 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * add the block to blockchain
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
-    Ref = erlang:send_after(BlockTime, self(), block_timeout),
+    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
+    NextBlockTime = max(0, erlang:system_time(seconds) - (LastBlockTimestamp + BlockTime)),
+    Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
     ok = blockchain_worker:add_block(Block, blockchain_swarm:address()),
     {reply, ok, State#state{block_timer=Ref}};
 handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
