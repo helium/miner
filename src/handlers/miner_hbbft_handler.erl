@@ -110,7 +110,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 false when R > Round ->
                     defer;
                 false ->
-                    lager:warning("Invalid signature ~p from ~p for round ~p", [Signature, Address, Round]),
+                    lager:warning("Invalid signature ~p from ~p for round ~p in our round ~p", [Signature, Address, R, Round]),
                     %% invalid signature somehow
                     ignore
             end;
