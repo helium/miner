@@ -197,7 +197,7 @@ handle_call({initial_dkg, Addrs}, From, State) ->
     end;
 handle_call(relcast_info, From, State) ->
     case State#state.consensus_group of
-        undefined -> {reply, ok, State};
+        undefined -> {reply, #{}, State};
         Pid ->
             %% put this behind a spawn so we avoid a call loop
             spawn(fun() ->
@@ -208,7 +208,7 @@ handle_call(relcast_info, From, State) ->
     end;
 handle_call(relcast_queue, From, State) ->
     case State#state.consensus_group of
-        undefined -> {reply, ok, State};
+        undefined -> {reply, #{}, State};
         Pid ->
             %% put this behind a spawn so we avoid a call loop
             spawn(fun() ->
