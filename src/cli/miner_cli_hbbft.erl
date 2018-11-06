@@ -124,7 +124,7 @@ hbbft_queue_usage() ->
 hbbft_queue(["hbbft", "queue"], [], Flags) ->
     Queue = miner:relcast_info(),
     case proplists:get_value(inbound, Flags) of
-        undefined ->
+        false ->
             case proplists:get_value(outbound, Flags) of
                 undefined ->
                     %% just print a summary of the queue
