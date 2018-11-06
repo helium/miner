@@ -122,16 +122,25 @@ hbbft_queue_usage() ->
     ].
 
 hbbft_queue(["hbbft", "queue"], [], Flags) ->
-    Queue = miner:relcast_info(),
-    case proplists:get_value(inbound, Flags) of
+    Queue = miner:relcast_queue(),
+    case proplists:get_value(inbound, Flags, false) of
         false ->
             case proplists:get_value(outbound, Flags) of
                 undefined ->
+                    Workers = maps:get(worker_info, miner:relcast_info(), #{}),
+                    io:format("Workers ~p~n", [Workers]),
+                    io:format("Worker info ~p~n", [maps:get(stream_info, maps:get(info, maps:get(1, Workers)))]),
                     %% just print a summary of the queue
                     [clique_status:table([[{destination, "inbound"},
-                                           {count, integer_to_list(length(maps:get(inbound, Queue, [])))}]] ++
+                                           {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
+                                           {connected, "true"},
+                                           {pending_data, "false"}
+                                          ]] ++
                                          [[{destination, integer_to_list(K)},
-                                           {count, integer_to_list(length(V))}] ||
+                                           {count, integer_to_list(length(V))},
+                                           {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
+                                           {blocked, atom_to_list(not (maps:get(msg_key, maps:get(K, Workers)) == undefined))}
+                                          ] ||
                                           {K, V} <- maps:to_list(maps:get(outbound, Queue, #{}))])];
                 PeerID when is_integer(PeerID) ->
                             %% print the outbound messages for this peer
