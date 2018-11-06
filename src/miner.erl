@@ -90,7 +90,7 @@ initial_dkg(Addrs) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_info() ->
-    gen_server:call(?MODULE, relcast_info).
+    gen_server:call(?MODULE, relcast_info, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -98,7 +98,7 @@ relcast_info() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_queue() ->
-    gen_server:call(?MODULE, relcast_queue).
+    gen_server:call(?MODULE, relcast_queue, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
