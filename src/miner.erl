@@ -195,29 +195,37 @@ handle_call({initial_dkg, Addrs}, From, State) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
             {reply, ok, NonDKGState}
     end;
-handle_call(relcast_info, _From, State) ->
+handle_call(relcast_info, From, State) ->
     case State#state.consensus_group of
         undefined -> {reply, ok, State};
         Pid ->
-            Res = (catch libp2p_group_relcast:info(Pid)),
-            {reply, Res, State}
+            %% put this behind a spawn so we avoid a call loop
+            spawn(fun() ->
+                          Res = (catch libp2p_group_relcast:info(Pid)),
+                          gen_server:reply(From, Res)
+                  end),
+            {noreply, State}
     end;
-handle_call(relcast_queue, _From, State) ->
+handle_call(relcast_queue, From, State) ->
     case State#state.consensus_group of
         undefined -> {reply, ok, State};
         Pid ->
-            Reply = try libp2p_group_relcast:queues(Pid) of
-                        {_ModState, Inbound, Outbound} ->
-                            O = maps:map(fun(_, V) ->
-                                             [  erlang:binary_to_term(Value) || Value <- V]
-                                     end, Outbound),
-                            I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
-                            #{inbound => I,
-                              outbound => O}
-                    catch What:Why ->
-                              {error, {What, Why}}
-                    end,
-            {reply, Reply, State}
+            %% put this behind a spawn so we avoid a call loop
+            spawn(fun() ->
+                          Reply = try libp2p_group_relcast:queues(Pid) of
+                                      {_ModState, Inbound, Outbound} ->
+                                          O = maps:map(fun(_, V) ->
+                                                               [  erlang:binary_to_term(Value) || Value <- V]
+                                                       end, Outbound),
+                                          I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
+                                          #{inbound => I,
+                                            outbound => O}
+                                  catch What:Why ->
+                                            {error, {What, Why}}
+                                  end,
+                          gen_server:reply(From, Reply)
+                  end),
+            {noreply, State}
     end;
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
