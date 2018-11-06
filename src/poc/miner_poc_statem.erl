@@ -145,9 +145,19 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Target, Gateways}, Data) ->
-    _Graph = miner_poc_path:build_graph(Target, Gateways),
-    Challengees = [Target],
-    {next_state, receiving, Data#data{challengees=Challengees}};
+    Graph = miner_poc_path:build_graph(Target, Gateways),
+    GraphList = maps:fold(
+        fun(Addr, _, Acc) ->
+            G = maps:get(Addr, Gateways),
+            Score = blockchain_ledger:gateway_score(G),
+            [{Score, G}|Acc]
+        end
+        ,Graph
+    ),
+    [Start, End|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
+    {_, Path} = miner_poc_path:shortest(Graph, Start, End),
+    % Build Onion here
+    {next_state, receiving, Data#data{challengees=Path}};
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
