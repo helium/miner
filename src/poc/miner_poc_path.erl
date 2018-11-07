@@ -6,14 +6,51 @@
 -module(miner_poc_path).
 
 -export([
-    build_graph/2
+    build/2
     ,shortest/3
     ,length/3
+    ,build_graph/2
 ]).
 
 -type graph() :: #{any() => [{number(), any()}]}.
 
 -export_type([graph/0]).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec build(binary(), map()) -> list().
+build(Target, Gateways) ->
+    Graph = ?MODULE:build_graph(Target, Gateways),
+    GraphList = maps:fold(
+        fun(Addr, _, Acc) ->
+            G = maps:get(Addr, Gateways),
+            Score = blockchain_ledger:gateway_score(G),
+            [{Score, G}|Acc]
+        end
+        ,Graph
+    ),
+    [Start, End|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
+    {_, Path} = ?MODULE:shortest(Graph, Start, End),
+    Path.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec shortest(graph(), any(), any()) -> {number(), list()}.
+shortest(Graph, Start, End) ->
+    path(Graph, [{0, [Start]}], End, #{}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec length(graph(), any(), any()) -> integer().
+length(Graph, Start, End) ->
+    {_Cost, Path} = shortest(Graph, Start, End),
+    erlang:length(Path).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -48,23 +85,6 @@ build_graph([Address|Addresses], Gateways, Graph) ->
             Graph1
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec shortest(graph(), any(), any()) -> {number(), list()}.
-shortest(Graph, Start, End) ->
-    path(Graph, [{0, [Start]}], End, #{}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec length(graph(), any(), any()) -> integer().
-length(Graph, Start, End) ->
-    {_Cost, Path} = shortest(Graph, Start, End),
-    erlang:length(Path).
-
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -89,6 +109,7 @@ path(Graph, [{Cost, [Node | _] = Path} | Routes], End, Seen) ->
 %% @end
 %%--------------------------------------------------------------------
 neighbors(Address, Gateways) ->
+    % TODO: It should format with appropriate resolution
     TargetGw = maps:get(Address, Gateways),
     Index = blockchain_ledger:gateway_location(TargetGw),
     KRing = h3:k_ring(Index, 1),
