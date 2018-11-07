@@ -80,7 +80,7 @@
   1},
  {<<"rocksdb">>,
   {git,"https://gitlab.com/fvasquez1/erlang-rocksdb.git",
-        {ref,"c7cc43f076a25cee19b598542f56df97e9d3012d"}},
+        {ref,"86c27229e8e024f25c5cd46150632ef06a6dd37e"}},
   2},
  {<<"serial">>,
   {git,"https://github.com/Vagabond/erlang-serial",
