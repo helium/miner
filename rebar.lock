@@ -24,7 +24,7 @@
  {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.0.2">>},1},
  {<<"erasure">>,
   {git,"https://github.com/helium/erlang-erasure.git",
-       {ref,"2289eda4ee6f0842158f8603a2f8a2995aa0034c"}},
+       {ref,"ace9d23fde068597d6eb3bb65984abfe4814e503"}},
   1},
  {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
  {<<"erlang_ale">>,
