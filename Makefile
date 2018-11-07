@@ -1,6 +1,9 @@
-.PHONY: compile test typecheck cover
+.PHONY: deps compile test typecheck cover
 
 REBAR=./rebar3
+
+deps:
+	$(REBAR) get-deps
 
 compile:
 	$(REBAR) compile
