@@ -144,19 +144,14 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Target, Gateways}, Data) ->
-    Graph = miner_poc_path:build_graph(Target, Gateways),
-    GraphList = maps:fold(
-        fun(Addr, _, Acc) ->
-            G = maps:get(Addr, Gateways),
-            Score = blockchain_ledger:gateway_score(G),
-            [{Score, G}|Acc]
-        end
-        ,Graph
-    ),
-    [Start, End|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
-    {_, Path} = miner_poc_path:shortest(Graph, Start, End),
-    % Build Onion here
+challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
+    Path = miner_poc_path:build(Target, Gateways),
+    % TODO: Maybe make this smaller?
+    Payload = erlang:term_to_binary(#{
+        challenger => Address
+    }),
+    OnionList = [{Payload, libp2p_crypto:address_to_pubkey(A)} || A <- Path],
+    _Onion = miner_onion_server:construct_onion(OnionList),
     {next_state, receiving, Data#data{challengees=Path}};
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
