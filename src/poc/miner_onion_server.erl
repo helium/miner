@@ -1,79 +1,133 @@
 %%%-------------------------------------------------------------------
-%% @doc miner_onion_server
+%% @doc
+%% == Miner Onion Server ==
 %% @end
 %%%-------------------------------------------------------------------
 -module(miner_onion_server).
 
 -behavior(gen_server).
 
--record(state,
-        {socket :: gen_tcp:socket(),
-         compact_key :: ecc_compact:compact_key(),
-         privkey,
-         sender :: undefined | {pid(), term()},
-         controlling_process :: pid()
-        }).
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
+-export([
+    start_link/5
+    ,send/1
+    ,socket/0
+    ,compact_key/0
+    ,construct_onion/1
+    ,decrypt/1
+]).
 
--export([start_link/5]).
--export([send/1, construct_onion/1, socket/0, compact_key/0]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
+-export([
+    init/1
+    ,handle_call/3
+    ,handle_cast/2
+    ,handle_info/2
+]).
 
 -define(WRITE_RADIO_PACKET, 16#0).
 -define(WRITE_RADIO_PACKET_ACK, 16#80).
 -define(READ_RADIO_PACKET, 16#81).
 
-%% ==================================================================
-%% API calls
-%% ==================================================================
+-record(state, {
+    socket :: gen_tcp:socket()
+    ,compact_key :: ecc_compact:compact_key()
+    ,privkey
+    ,sender :: undefined | {pid(), term()}
+    ,controlling_process :: pid()
+}).
+
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 start_link(Host, Port, CompactKey, PrivateKey, ControllingProcess) ->
     lager:debug("Host: ~p, Port: ~p", [Host, Port]),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Host, Port, CompactKey, PrivateKey, ControllingProcess], []).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec send(binary()) -> ok.
+send(Data) ->
+    gen_server:call(?MODULE, {send, Data}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec socket() -> {ok, gen_tcp:socket()}.
+socket() ->
+    gen_server:call(?MODULE, socket).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec compact_key() -> {ok, ecc_compact:compact_key()}.
+compact_key() ->
+    gen_server:call(?MODULE, compact_key).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec construct_onion([{binary(), ecc_compact:compact_key()}]) -> binary().
+construct_onion(DataAndPubkeys) ->
+    {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
+    IV = crypto:strong_rand_bytes(12),
+    <<IV/binary, OnionCompactKey/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec decrypt(binary()) -> ok.
+decrypt(Onion) ->
+    gen_server:cast(?MODULE, {decrypt, Onion}).
+
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 init([Host, Port, CompactKey, PrivateKey, ControllingProcess]) ->
     lager:debug("CompactKey: ~p", [CompactKey]),
     {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {packet, 2}, {active, once}, {nodelay, true}]),
     {ok, #state{socket=Socket, compact_key=CompactKey, privkey=PrivateKey, controlling_process=ControllingProcess}}.
 
--spec send(binary()) -> ok.
-send(Data) ->
-    gen_server:call(?MODULE, {send, Data}).
-
--spec socket() -> {ok, gen_tcp:socket()}.
-socket() ->
-    gen_server:call(?MODULE, socket).
-
--spec compact_key() -> {ok, ecc_compact:compact_key()}.
-compact_key() ->
-    gen_server:call(?MODULE, compact_key).
-
-%% ==================================================================
-%% gen_server handle_calls
-%% ==================================================================
 handle_call({send, Data}, From, State=#state{socket=Socket}) when Socket /= undefined ->
-    ok = gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, Data/binary>>),
-    {noreply, State#state{sender=From}};
+    R = gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, Data/binary>>),
+    {reply, R, State#state{sender=From}};
 handle_call(socket, _From, State=#state{socket=Socket}) when Socket /= undefined ->
     {reply, {ok, Socket}, State};
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->
     {reply, {ok, CK}, State};
-
-%% ==================================================================
-%% gen_server fallback call
-%% ==================================================================
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-%% ==================================================================
-%% gen_server fallback cast
-%% ==================================================================
+handle_cast({decrypt, <<IV:12/binary
+                        ,OnionCompactKey:32/binary
+                        ,Tag:4/binary
+                        ,CipherText/binary>>}
+            ,#state{privkey=PrivKey, socket=Socket}=State) ->
+    AAD = <<IV/binary, OnionCompactKey/binary>>,
+    PubKey = ecc_compact:recover_key(OnionCompactKey),
+    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
+    case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
+        error ->
+            lager:error("Could not decrypt");
+        <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
+            lager:info("Decrypted a layer: ~p~n", [Data]),
+            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
+    end,
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-%% ==================================================================
-%% gen_server info callbacks
-%% ==================================================================
-
-%% handle info received from radio
 handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
                              IV:12/binary,
                              OnionCompactKey:32/binary,
@@ -92,17 +146,14 @@ handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
     end,
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State};
-
 %% handle ack from radio
 handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
     lager:info("received ACK from Radio"),
-
     case State#state.sender of
         undefined -> ok;
         From ->
             gen_server:reply(From, ok)
     end,
-
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{sender=undefined}};
 handle_info({tcp, Socket, Packet}, State) ->
@@ -117,23 +168,18 @@ handle_info({tcp_error, _Socket, Reason}, State) ->
     lager:error("tcp_error, reason: ~p", [Reason]),
     timer:sleep(timer:seconds(5)),
     {stop, normal, State};
-
-%% ==================================================================
-%% gen_server fallback handle_info
-%% ==================================================================
 handle_info(_Msg, State) ->
     lager:warning("unhandled Msg: ~p", [_Msg]),
     {noreply, State}.
 
-%% ==================================================================
-%% internal functions
-%% ==================================================================
--spec construct_onion([{binary(), ecc_compact:compact_key()}]) -> binary().
-construct_onion(DataAndPubkeys) ->
-    {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
-    IV = crypto:strong_rand_bytes(12),
-    <<IV/binary, OnionCompactKey/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 -spec construct_onion([{binary(), ecc_compact:compact_key()}] | [], ecc_compact:private_key(),
                       ecc_compact:compact_key(),
                       binary()) -> binary().
