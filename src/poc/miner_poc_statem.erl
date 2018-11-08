@@ -38,7 +38,6 @@
 ]).
 
 -define(SERVER, ?MODULE).
--define(POC_PROTOCOL, "miner_poc/1.0.0").
 -define(CHALLENGE_TIMEOUT, 3).
 
 -record(data, {
@@ -63,11 +62,8 @@ receipt(Data) ->
 %% ------------------------------------------------------------------
 init(_Args) ->
     ok = blockchain_event:add_handler(self()),
-    ok = libp2p_swarm:add_stream_handler(
-        blockchain_swarm:swarm()
-        ,?POC_PROTOCOL
-        ,{libp2p_framed_stream, server, [miner_poc_handler, ?SERVER]}
-    ),
+    ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
+    ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:address(),
     {ok, requesting, #data{address=Address}}.
 
@@ -151,7 +147,11 @@ challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
         challenger => Address
     }),
     OnionList = [{Payload, libp2p_crypto:address_to_pubkey(A)} || A <- Path],
-    _Onion = miner_onion_server:construct_onion(OnionList),
+    Onion = miner_onion_server:construct_onion(OnionList),
+    [Start|_] = Path,
+    P2P = libp2p_crypto:address_to_p2p(Start),
+    {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
+    _ = miner_onion_handler:send(Stream, Onion),
     {next_state, receiving, Data#data{challengees=Path}};
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).

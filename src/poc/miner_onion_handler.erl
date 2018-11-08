@@ -14,6 +14,7 @@
 -export([
     server/4
     ,client/2
+    ,send/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -36,6 +37,9 @@ client(Connection, Args) ->
 server(Connection, Path, _TID, Args) ->
     libp2p_framed_stream:server(?MODULE, Connection, [Path | Args]).
 
+send(Pid, Data) ->
+    Pid ! {send, Data}.
+
 %% ------------------------------------------------------------------
 %% libp2p_framed_stream Function Definitions
 %% ------------------------------------------------------------------
@@ -49,10 +53,13 @@ init(server, _Conn, _Args) ->
 handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
     {noreply, State};
-handle_data(server, _Data, State) ->
-    % TODO: Transmit onion packet via radio
+handle_data(server, Data, State) ->
+    ok = miner_onion_server:decrypt(Data),
     {noreply, State}.
 
+handle_info(client, {send, Data}, State) ->
+    lager:info("client got data: ~p", [Data]),
+    {noreply, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:info("rcvd unknown type: ~p unknown msg: ~p", [_Type, _Msg]),
     {noreply, State}.
