@@ -128,8 +128,6 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
             case proplists:get_value(outbound, Flags) of
                 undefined ->
                     Workers = maps:get(worker_info, miner:relcast_info(), #{}),
-                    io:format("Workers ~p~n", [Workers]),
-                    io:format("Worker info ~p~n", [maps:get(stream_info, maps:get(info, maps:get(1, Workers)))]),
                     %% just print a summary of the queue
                     [clique_status:table([[{destination, "inbound"},
                                            {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
