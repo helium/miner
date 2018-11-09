@@ -121,6 +121,7 @@ handle_cast({decrypt, <<IV:12/binary
             lager:error("Could not decrypt");
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("Decrypted a layer: ~p~n", [Data]),
+            ok = send_receipt(IV, Data),
             gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
     end,
     ok = inet:setopts(Socket, [{active, once}]),
@@ -142,6 +143,7 @@ handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
             lager:error("Could not decrypt");
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("Decrypted a layer: ~p~n", [Data]),
+            ok = send_receipt(IV, Data),
             gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
     end,
     ok = inet:setopts(Socket, [{active, once}]),
@@ -194,3 +196,21 @@ construct_onion([{Data, PubKey} | Tail], PvtOnionKey, OnionCompactKey, IV) ->
                                              IV, {<<IV/binary, OnionCompactKey/binary>>,
                                                   <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
     <<Tag:4/binary, CipherText/binary>>.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec send_receipt(binary(), binary()) -> ok.
+send_receipt(IV, Data) ->
+    Map = erlang:binary_to_term(Data),
+    Challenger = maps:get(challenger, Map),
+    P2P = libp2p_crypto:address_to_p2p(Challenger),
+    {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
+    Address = blockchain_swarm:address(),
+    Receipt0 = blockchain_poc_receipt:new(Address, os:system_time(), IV),
+    {ok, _, SigFun} = blockchain_swarm:keys(),
+    Receipt1 = blockchain_poc_receipt:sign(Receipt0, SigFun),
+    EncodedReceipt = blockchain_poc_receipt:encode(Receipt1),
+    _ = miner_poc_handler:send(Stream, EncodedReceipt),
+    ok.

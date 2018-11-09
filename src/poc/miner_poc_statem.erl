@@ -168,6 +168,7 @@ receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
     Address = blockchain_poc_receipt:address(Receipt),
+    % TODO: Also check onion IV
     case blockchain_poc_receipt:is_valid(Receipt)
          andalso lists:member(Address, Challengees)
     of
@@ -191,7 +192,11 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submiting(info, submit, Data) ->
+submiting(info, submit, #data{address=Address, receipts=Receipts}=Data) ->
+    Txn0 = blockchain_txn_poc_receipts:new(Receipts, Address),
+    {ok, _, SigFun} = blockchain_swarm:keys(),
+    Txn1 = blockchain_poc_receipt:sign(Txn0, SigFun),
+    ok = blockchain_worker:submit_txn(blockchain_poc_receipt, Txn1),
     {keep_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).

@@ -58,7 +58,7 @@ handle_data(server, Data, State) ->
     {noreply, State}.
 
 handle_info(client, {send, Data}, State) ->
-    lager:info("client got data: ~p", [Data]),
+    lager:info("client sending data: ~p", [Data]),
     {noreply, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:info("rcvd unknown type: ~p unknown msg: ~p", [_Type, _Msg]),

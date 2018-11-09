@@ -23,6 +23,7 @@
     init/3
     ,handle_data/3
     ,handle_info/3
+    ,send/2
 ]).
 
 -record(state, {}).
@@ -35,6 +36,9 @@ client(Connection, Args) ->
 
 server(Connection, Path, _TID, Args) ->
     libp2p_framed_stream:server(?MODULE, Connection, [Path | Args]).
+
+send(Pid, Data) ->
+    Pid ! {send, Data}.
 
 %% ------------------------------------------------------------------
 %% libp2p_framed_stream Function Definitions
@@ -54,6 +58,9 @@ handle_data(server, Data, State) ->
     ok = miner_poc_statem:receipt(Receipt),
     {noreply, State}.
 
+handle_info(client, {send, Data}, State) ->
+    lager:info("client sending data: ~p", [Data]),
+    {noreply, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:info("rcvd unknown type: ~p unknown msg: ~p", [_Type, _Msg]),
     {noreply, State}.
