@@ -12,6 +12,10 @@
     ,build_graph/2
 ]).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -type graph() :: #{any() => [{number(), any()}]}.
 
 -export_type([graph/0]).
@@ -115,8 +119,8 @@ neighbors(Address, Gateways) ->
     KRing = h3:k_ring(Index, 1),
     GwInRing = maps:to_list(maps:filter(
         fun(A, G) ->
-            Index = blockchain_ledger_gateway:location(G),
-            lists:member(Index, KRing)
+            I = blockchain_ledger_gateway:location(G),
+            lists:member(I, KRing)
                 andalso Address =/= A
         end
         ,Gateways
@@ -128,4 +132,54 @@ neighbors(Address, Gateways) ->
 %% @end
 %%--------------------------------------------------------------------
 edge_weight(Gw1, Gw2) ->
-    1 - abs(blockchain_ledger_gateway:location(Gw1) -  blockchain_ledger_gateway:location(Gw2)).
+    1 - abs(blockchain_ledger_gateway:score(Gw1) -  blockchain_ledger_gateway:score(Gw2)).
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+neighbors_test() ->
+    LatLongs = [
+        {{37.782061, -122.446167}, 0.1}, % This should be excluded cause target
+        {{37.782604, -122.447857}, 0.99},
+        {{37.782074, -122.448528}, 0.99},
+        {{37.782002, -122.44826}, 0.99},
+        {{37.78207, -122.44613}, 0.99},
+        {{37.781909, -122.445411}, 0.99},
+        {{37.783371, -122.447879}, 0.99},
+        {{37.780827, -122.44716}, 0.99},
+        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+    ],
+    Gateways = lists:foldl(
+        fun({LatLong, Score}, Acc) ->
+            Owner = <<"test">>,
+            Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
+            Index = h3:from_geo(LatLong, 9),
+            G0 = blockchain_ledger_gateway:new(Owner, Index),
+            G1 = blockchain_ledger_gateway:score(Score, G0),
+            maps:put(Address, G1, Acc)
+
+        end,
+        maps:new(),
+        LatLongs
+    ),
+    [{LL, _}|_] = LatLongs,
+    Target = crypto:hash(sha256, erlang:term_to_binary(LL)),
+    Neighbors = neighbors(Target, Gateways),
+
+    ?assertEqual(erlang:length(maps:keys(Gateways)) - 2, erlang:length(Neighbors)),
+    
+    {LL1, _} =  lists:last(LatLongs),
+    TooFar = crypto:hash(sha256, erlang:term_to_binary(LL1)),
+    lists:foreach(
+        fun({_, Address}) ->
+            ?assert(Address =/= Target),
+            ?assert(Address =/= TooFar)
+        end,
+        Neighbors
+    ),
+    ok.
+
+
+-endif.
