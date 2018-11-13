@@ -327,7 +327,7 @@ target_test() ->
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = target(Hash, undefined),
 
-    [{LL, S}|_] = LatLongs,
+    [{LL, _}|_] = LatLongs,
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
     ?assertEqual(ActiveGateways, Gateways),
 
