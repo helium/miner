@@ -37,6 +37,10 @@
     ,submiting/3
 ]).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(SERVER, ?MODULE).
 -define(CHALLENGE_TIMEOUT, 3).
 
@@ -201,6 +205,18 @@ submiting(info, submit, #data{address=Address, receipts=Receipts}=Data) ->
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec target(binary(), blockchain_block:block()) -> {libp2p_crypto:address(), map()}.
+target(Hash, _Block) ->
+    ActiveGateways = active_gateways(),
+    Probs = create_probs(ActiveGateways),
+    Entropy = entropy(Hash, Probs),
+    Target = select_target(Probs, maps:keys(ActiveGateways), Entropy, 1),
+    {Target, ActiveGateways}.
+
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -217,21 +233,9 @@ handle_event(_EventType, _EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec target(binary(), blockchain_block:block()) -> {libp2p_crypto:address(), map()}.
-target(Hash, _Block) ->
-    ActiveGateways = active_gateways(),
-    Probs = create_probs(ActiveGateways),
-    Entropy = entropy(Hash, Probs),
-    Target = select_target(Probs, maps:keys(ActiveGateways), Entropy, 1),
-    {Target, ActiveGateways}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec create_probs(map()) -> [float()].
 create_probs(Gateways) ->
-    GwScores = [blockchain_ledger:gateway_score(G) || G <- maps:values(Gateways)],
+    GwScores = [blockchain_ledger_gateway:score(G) || G <- maps:values(Gateways)],
     LenGwScores = erlang:length(GwScores),
     SumGwScores = lists:sum(GwScores),
     [prob(Score, LenGwScores, SumGwScores) || Score <- GwScores].
@@ -250,8 +254,8 @@ prob(Score, LenScores, SumScores) ->
 %%--------------------------------------------------------------------
 -spec entropy(binary(), [float()]) -> float().
 entropy(Entropy, Probs) ->
-    <<A:85/integer-unsigned-little, B:85/integer-unsigned-little
-      ,C:86/integer-unsigned-little, _>> = crypto:hash(sha256, Entropy),
+    <<A:85/integer-unsigned-little, B:85/integer-unsigned-little,
+      C:86/integer-unsigned-little, _/binary>> = crypto:hash(sha256, Entropy),
     S = rand:seed_s(exrop, {A, B, C}),
     {R, _} = rand:uniform_s(S),
     R * lists:sum(Probs).
@@ -276,7 +280,62 @@ active_gateways() ->
         fun(Address, Gateway) ->
             % TODO: Maybe do some find of score check here
             Address =/= blockchain_swarm:address()
-            andalso blockchain_ledger:gateway_location(Gateway) =/= undefined
+            andalso blockchain_ledger_gateway:location(Gateway) =/= undefined
         end
         ,ActiveGateways
     ).
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+target_test() ->
+    meck:new(blockchain_ledger, [passthrough]),
+    meck:new(blockchain_worker, [passthrough]),
+    meck:new(blockchain_swarm, [passthrough]),
+    
+    LatLongs = [
+        {{37.782061, -122.446167}, 0.1},
+        {{37.782604, -122.447857}, 0.99},
+        {{37.782074, -122.448528}, 0.99},
+        {{37.782002, -122.44826}, 0.99},
+        {{37.78207, -122.44613}, 0.99},
+        {{37.781909, -122.445411}, 0.99},
+        {{37.783371, -122.447879}, 0.99},
+        {{37.780827, -122.44716}, 0.99}
+    ],
+    ActiveGateways = lists:foldl(
+        fun({LatLong, Score}, Acc) ->
+            Owner = <<"test">>,
+            Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
+            Index = h3:from_geo(LatLong, 9),
+            G0 = blockchain_ledger_gateway:new(Owner, Index),
+            G1 = blockchain_ledger_gateway:score(Score, G0),
+            maps:put(Address, G1, Acc)
+
+        end,
+        maps:new(),
+        LatLongs
+    ),
+
+    meck:expect(blockchain_ledger, active_gateways, fun(_) -> ActiveGateways end),
+    meck:expect(blockchain_worker, ledger, fun() -> ok end),
+    meck:expect(blockchain_swarm, address, fun() -> <<"unknown">> end),
+
+    Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),
+    Hash = blockchain_block:hash_block(Block),
+    {Target, Gateways} = target(Hash, undefined),
+
+    [{LL, S}|_] = LatLongs,
+    ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
+    ?assertEqual(ActiveGateways, Gateways),
+
+    ?assert(meck:validate(blockchain_ledger)),
+    ?assert(meck:validate(blockchain_worker)),
+    ?assert(meck:validate(blockchain_swarm)),
+    meck:unload(blockchain_ledger),
+    meck:unload(blockchain_worker),
+    meck:unload(blockchain_swarm).
+
+-endif.
