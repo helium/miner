@@ -13,7 +13,7 @@
        {ref,"49c51c6d70e702d4d43d97306a4a5cbc3adf1d9d"}},
   1},
  {<<"cuttlefish">>,
-  {git,"https://github.com/helium/cuttlefish",
+  {git,"https://github.com/helium/cuttlefish.git",
        {ref,"8672838e8f4ef61602aee6e4ff97ec9be54031dc"}},
   2},
  {<<"dkg">>,
@@ -103,6 +103,5 @@
  {<<"nat">>, <<"8E6A86D5A4419CBCE4C6E6A48EA77A106CE2598A04CDC5820D2840E9DBDFF04E">>},
  {<<"ranch">>, <<"F04166F456790FEE2AC1AA05A02745CC75783C2BFB26D39FAF6AEFC9A3D3A58A">>},
  {<<"rand_compat">>, <<"011646BC1F0B0C432FE101B816F25B9BBB74A085713CEE1DAFD2D62E9415EAD3">>},
- {<<"rocksdb">>, <<"1E088C3870265D4C037C4CA274C4153DAE739CE48D3C6536230C6B22226FF44E">>},
  {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>}]}
 ].
