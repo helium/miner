@@ -26,7 +26,7 @@ build(Target, Gateways) ->
     GraphList = maps:fold(
         fun(Addr, _, Acc) ->
             G = maps:get(Addr, Gateways),
-            Score = blockchain_ledger:gateway_score(G),
+            Score = blockchain_ledger_gateway:score(G),
             [{Score, G}|Acc]
         end
         ,Graph
@@ -111,11 +111,11 @@ path(Graph, [{Cost, [Node | _] = Path} | Routes], End, Seen) ->
 neighbors(Address, Gateways) ->
     % TODO: It should format with appropriate resolution
     TargetGw = maps:get(Address, Gateways),
-    Index = blockchain_ledger:gateway_location(TargetGw),
+    Index = blockchain_ledger_gateway:location(TargetGw),
     KRing = h3:k_ring(Index, 1),
     GwInRing = maps:to_list(maps:filter(
         fun(A, G) ->
-            Index = blockchain_ledger:gateway_location(G),
+            Index = blockchain_ledger_gateway:location(G),
             lists:member(Index, KRing)
                 andalso Address =/= A
         end
@@ -128,4 +128,4 @@ neighbors(Address, Gateways) ->
 %% @end
 %%--------------------------------------------------------------------
 edge_weight(Gw1, Gw2) ->
-    1 - abs(blockchain_ledger:gateway_location(Gw1) -  blockchain_ledger:gateway_location(Gw2)).
+    1 - abs(blockchain_ledger_gateway:location(Gw1) -  blockchain_ledger_gateway:location(Gw2)).
