@@ -1,10 +1,6 @@
 {"1.1.0",
 [{<<"backoff">>,{pkg,<<"backoff">>,<<"1.1.6">>},2},
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
- {<<"bitcask">>,
-  {git,"https://github.com/helium/bitcask",
-       {ref,"d08cc8eedafefe4659b3be0ff8a256e70b72a6ec"}},
-  2},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
        {ref,"562aa5db8333896036378efbcde71e142109f7a2"}},
@@ -82,14 +78,18 @@
  {<<"recon">>,{pkg,<<"recon">>,<<"2.4.0">>},0},
  {<<"relcast">>,
   {git,"https://github.com/helium/relcast.git",
-       {ref,"5445f490ef06fbf513e4b0445b6579a87eaad4f9"}},
+       {ref,"95dfc6e89aea41cf8b4203293d16ebb008b1c67d"}},
   2},
  {<<"rocksdb">>,{pkg,<<"rocksdb">>,<<"0.26.1">>},0},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
  {<<"splicer">>,
   {git,"https://github.com/helium/erlang-splicer.git",
        {ref,"3a2efb988162fd6ab400ad4183ddc4eac6e6b6e4"}},
-  2}]}.
+  2},
+ {<<"ubx">>,
+  {git,"https://github.com/helium/erlang-ubx.git",
+       {ref,"ce78a00b3c9741a3cf4bbc09721bace5c3a3eed1"}},
+  0}]}.
 [
 {pkg_hash,[
  {<<"backoff">>, <<"83B72ED2108BA1EE8F7D1C22E0B4A00CFE3593A67DBC792799E8CCE9F42F796B">>},
