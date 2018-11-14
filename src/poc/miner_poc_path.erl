@@ -31,11 +31,12 @@ build(Target, Gateways) ->
         fun(Addr, _, Acc) ->
             G = maps:get(Addr, Gateways),
             Score = blockchain_ledger_gateway:score(G),
-            [{Score, G}|Acc]
-        end
-        ,Graph
+            [{Score, Addr}|Acc]
+        end,
+        [],
+        Graph
     ),
-    [Start, End|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
+    [{_, Start}, {_, End}|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
     {_, Path} = ?MODULE:shortest(Graph, Start, End),
     Path.
 
@@ -190,7 +191,7 @@ build_graph_test() ->
     ok.
 
 
-build_graph__in_line_test() ->
+build_graph_in_line_test() ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
         {{37.780586, -122.469471}, 0.1},
@@ -238,6 +239,35 @@ build_graph__in_line_test() ->
         1,
         Addresses
     ),
+    ok.
+
+build_test() ->
+    % All these point are in a line one after the other (except last)
+    LatLongs = [
+        {{37.780586, -122.469471}, 0.99},
+        {{37.780959, -122.467496}, 0.75},
+        {{37.78101, -122.465372}, 0.75},
+        {{37.781179, -122.463226}, 0.75},
+        {{37.781281, -122.461038}, 0.1},
+        {{37.781349, -122.458892}, 0.75},
+        {{37.781468, -122.456617}, 0.75},
+        {{37.781637, -122.4543}, 0.99},
+        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+    ],
+    {Target, Gateways} = build_gateways(LatLongs),
+
+    Path = build(Target, Gateways),
+
+    [{S, _}|_] = LatLongs,
+    Start = crypto:hash(sha256, erlang:term_to_binary(S)),
+    {E, _} = lists:last(lists:droplast(LatLongs)),
+    End = crypto:hash(sha256, erlang:term_to_binary(E)),
+
+    [PS|_] = Path,
+    ?assertEqual(Start, PS),
+    ?assert(lists:member(Target, Path)),
+    ?assertEqual(End, lists:last(Path)),
+
     ok.
 
 build_gateways(LatLongs) ->
