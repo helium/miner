@@ -67,24 +67,24 @@ build_graph(Address, Gateways) ->
 -spec build_graph(binary(), map(), graph()) -> graph().
 build_graph([], _Gateways, Graph) ->
     Graph;
-build_graph([Address|Addresses], Gateways, Graph) ->
-    Neighbors = neighbors(Address, Gateways),
+build_graph([Address0|Addresses], Gateways, Graph0) ->
+    Neighbors0 = neighbors(Address0, Gateways),
     Graph1 = lists:foldl(
-        fun({_W, A}, Map) ->
-            case maps:is_key(A, Map) of
-                true -> Map;
+        fun({_W, Address1}, Acc) ->
+            case maps:is_key(Address1, Acc) of
+                true -> Acc;
                 false ->
-                    Neighbors = neighbors(Address, Gateways),
-                    maps:put(A, Neighbors, Map)
+                    Neighbors1 = neighbors(Address1, Gateways),
+                    Graph1 = maps:put(Address1, Neighbors1, Acc),
+                    build_graph([A || {_, A} <- Neighbors1], Gateways, Graph1)
             end
         end
-        ,Graph
-        ,Neighbors
+        ,maps:put(Address0, Neighbors0, Graph0)
+        ,Neighbors0
     ),
     case maps:size(Graph1) > 100 of
         false ->
-            Graph2 = build_graph(Addresses, Gateways, Graph1),
-            build_graph(Neighbors, Gateways, Graph2);
+            build_graph(Addresses, Gateways, Graph1);
         true ->
             Graph1
     end.
@@ -151,21 +151,7 @@ neighbors_test() ->
         {{37.780827, -122.44716}, 0.99},
         {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
     ],
-    Gateways = lists:foldl(
-        fun({LatLong, Score}, Acc) ->
-            Owner = <<"test">>,
-            Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
-            Index = h3:from_geo(LatLong, 9),
-            G0 = blockchain_ledger_gateway:new(Owner, Index),
-            G1 = blockchain_ledger_gateway:score(Score, G0),
-            maps:put(Address, G1, Acc)
-
-        end,
-        maps:new(),
-        LatLongs
-    ),
-    [{LL, _}|_] = LatLongs,
-    Target = crypto:hash(sha256, erlang:term_to_binary(LL)),
+    {Target, Gateways} = build_gateways(LatLongs),
     Neighbors = neighbors(Target, Gateways),
 
     ?assertEqual(erlang:length(maps:keys(Gateways)) - 2, erlang:length(Neighbors)),
@@ -181,5 +167,95 @@ neighbors_test() ->
     ),
     ok.
 
+build_graph_test() ->
+    LatLongs = [
+        {{37.782061, -122.446167}, 0.1},
+        {{37.782604, -122.447857}, 0.99},
+        {{37.782074, -122.448528}, 0.99},
+        {{37.782002, -122.44826}, 0.99},
+        {{37.78207, -122.44613}, 0.99},
+        {{37.781909, -122.445411}, 0.99},
+        {{37.783371, -122.447879}, 0.99},
+        {{37.780827, -122.44716}, 0.99},
+        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+    ],
+    {Target, Gateways} = build_gateways(LatLongs),
+
+    Graph = build_graph(Target, Gateways),
+    ?assertEqual(8, maps:size(Graph)),
+
+    {LL1, _} = lists:last(LatLongs),
+    TooFar = crypto:hash(sha256, erlang:term_to_binary(LL1)),
+    ?assertNot(lists:member(TooFar, maps:keys(Graph))),
+    ok.
+
+
+build_graph__in_line_test() ->
+    % All these point are in a line one after the other (except last)
+    LatLongs = [
+        {{37.780586, -122.469471}, 0.1},
+        {{37.780959, -122.467496}, 0.99},
+        {{37.78101, -122.465372}, 0.98},
+        {{37.781179, -122.463226}, 0.97},
+        {{37.781281, -122.461038}, 0.96},
+        {{37.781349, -122.458892}, 0.95},
+        {{37.781468, -122.456617}, 0.94},
+        {{37.781637, -122.4543}, 0.93},
+        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+    ],
+    {Target, Gateways} = build_gateways(LatLongs),
+
+    Graph = build_graph(Target, Gateways),
+    ?assertEqual(8, maps:size(Graph)),
+
+    {LL1, _} = lists:last(LatLongs),
+    TooFar = crypto:hash(sha256, erlang:term_to_binary(LL1)),
+    ?assertNot(lists:member(TooFar, maps:keys(Graph))),
+
+    Addresses = lists:droplast([crypto:hash(sha256, erlang:term_to_binary(X)) || {X, _} <- LatLongs]),
+    Size = erlang:length(Addresses),
+
+    lists:foldl(
+        fun(Address, Acc) when Acc =:= 1 ->
+            Next = lists:nth(Acc + 1, Addresses),
+            GraphPart = maps:get(Address, Graph, []),
+            ?assert(lists:member(Next, [A || {_, A} <- GraphPart])),
+            Acc + 1;
+        (Address, Acc) when Size =:= Acc ->
+            Prev = lists:nth(Acc - 1, Addresses),
+            GraphPart = maps:get(Address, Graph, []),
+            ?assert(lists:member(Prev, [A || {_, A} <- GraphPart])),
+            0;
+        (Address, Acc) ->
+            % Each hotspot should at least see the next / prev one
+            Next = lists:nth(Acc + 1, Addresses),
+            Prev = lists:nth(Acc - 1, Addresses),
+            GraphPart = maps:get(Address, Graph, []),
+            ?assert(lists:member(Next, [A || {_, A} <- GraphPart])),
+            ?assert(lists:member(Prev, [A || {_, A} <- GraphPart])),
+            Acc + 1
+        end,
+        1,
+        Addresses
+    ),
+    ok.
+
+build_gateways(LatLongs) ->
+    Gateways = lists:foldl(
+        fun({LatLong, Score}, Acc) ->
+            Owner = <<"test">>,
+            Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
+            Index = h3:from_geo(LatLong, 9),
+            G0 = blockchain_ledger_gateway:new(Owner, Index),
+            G1 = blockchain_ledger_gateway:score(Score, G0),
+            maps:put(Address, G1, Acc)
+
+        end,
+        maps:new(),
+        LatLongs
+    ),
+    [{LL, _}|_] = LatLongs,
+    Target = crypto:hash(sha256, erlang:term_to_binary(LL)),
+    {Target, Gateways}.
 
 -endif.
