@@ -20,10 +20,6 @@
   {git,"https://github.com/helium/erlang-dkg.git",
        {ref,"5d6e55c48f5b7acb351a4e1e687d13149adaeea3"}},
   0},
- {<<"ebus">>,
-  {git,"https://github.com/helium/ebus",
-       {ref,"016be945878bc25b9e4b1bf2c07727685612e85d"}},
-  1},
  {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.0.2">>},2},
  {<<"erasure">>,
   {git,"https://github.com/helium/erlang-erasure.git",
@@ -88,7 +84,7 @@
   2},
  {<<"ubx">>,
   {git,"https://github.com/helium/erlang-ubx.git",
-       {ref,"a488d985641e517f6161fef887864342781022f1"}},
+       {ref,"ce78a00b3c9741a3cf4bbc09721bace5c3a3eed1"}},
   0}]}.
 [
 {pkg_hash,[
