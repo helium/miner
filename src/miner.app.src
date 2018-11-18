@@ -18,7 +18,7 @@
     dkg,
     hbbft,
     h3,
-    ubx,
+    ebus,
     rand_compat, %% nat_upnp has a missing dep
     inets, %% nat_upnp has a missing dep
     xmerl  %% nat_upnp has a missing dep

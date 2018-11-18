@@ -14,8 +14,8 @@
           ,dkg_group :: undefined | pid()
           ,consensus_pos :: undefined | pos_integer()
           ,batch_size = 500 :: pos_integer()
-          ,gps_handle = undefined :: undefined | pid()
-          ,gps_lock = false :: boolean()
+          ,gps_handle ::  pid()
+          ,gps_signal :: ebus:filter_id()
           ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -55,16 +55,11 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
-    %% TODO: put this elsewhere
-    GPSHandle = case proplists:get_value(gps_device, Args) of
-                    {Type, Device, Options} ->
-                        {ok, Pid} = ubx:start_link(Type, Device, Options, self()),
-                        ubx:enable_message(nav_posllh, 5, Pid),
-                        ubx:enable_message(nav_sol, 5, Pid),
-                        Pid;
-                    undefined ->
-                        undefined
-                end,
+    {ok, SystemBus} = ebus:system(),
+    {ok, GPSHandle} = ebus_proxy:start_link(SystemBus, "com.helium.GPS", []),
+    {ok, GPSSignal} = ebus_proxy:add_signal_handler(GPSHandle,
+                                                    "/com/helium/GPS", "com.helium.GPS.Position",
+                                                    self(), gps_location),
 
     self() ! maybe_restore_consensus,
 
@@ -74,6 +69,7 @@ init(Args) ->
                 blockchain_dir=Dir,
                 block_time=BlockTime,
                 batch_size=BatchSize,
+                gps_signal=GPSSignal,
                 gps_handle=GPSHandle}}.
 
 %%--------------------------------------------------------------------
@@ -436,22 +432,24 @@ handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_
                        State
                end,
     {noreply, NewState};
-handle_info({nav_sol, GPSFix}, State) ->
-    case GPSFix == 3 of
-        true ->
-            {noreply, State#state{gps_lock=true}};
-        false ->
-            {noreply, State#state{gps_lock=false}}
-    end;
-handle_info({nav_posllh, {Lat, Lon, Height, HorizontalAcc, _VerticalAcc}}, State=#state{gps_lock=GPSLock}) ->
-    case GPSLock andalso blockchain_worker:blockchain() /= undefined of
-        true ->
-            %% pick the best h3 index we can for the resolution
-            {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-            lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
-            maybe_assert_location(H3Index, Resolution);
-        false ->
-            ok
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{gps_signal=SignalID}) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{"lat" := Lat,
+                "lon" := Lon,
+                "height" := Height,
+                "h_accuracy" := HorizontalAcc
+               }]} ->
+            case blockchain_worker:blockchain() /= undefined of
+                true ->
+                    %% pick the best h3 index we can for the resolution
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
+                    lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
+                    maybe_assert_location(H3Index, Resolution);
+                false ->
+                    ok
+            end;
+        {error, Error} ->
+            lager:error("Faile to decode position message: ~p", [Error])
     end,
     {noreply, State};
 handle_info(_Msg, State) ->
