@@ -19,6 +19,7 @@ register_all_usage() ->
                   [
                    genesis_usage()
                    ,genesis_create_usage()
+                   ,genesis_forge_usage()
                    ,genesis_load_usage()
                   ]).
 
@@ -29,6 +30,7 @@ register_all_cmds() ->
                   [
                    genesis_cmd()
                    ,genesis_create_cmd()
+                   ,genesis_forge_cmd()
                    ,genesis_load_cmd()
                   ]).
 %%
@@ -38,8 +40,9 @@ register_all_cmds() ->
 genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
-      "  genesis create <addrs> - Create genesis block.\n",
-      "  genesis load <genesis_file> - Load genesis block from file.\n"
+      "  genesis create <old_genesis_file> <addrs> - Create genesis block keeping old ledger transactions.\n",
+      "  genesis forge <addrs>                     - Create genesis block from scratch just with the addresses.\n",
+      "  genesis load <genesis_file>               - Load genesis block from file.\n"
      ]
     ].
 
@@ -55,23 +58,55 @@ genesis_cmd() ->
 
 genesis_create_cmd() ->
     [
-     [["genesis", "create", '*'], [], [], fun genesis_create/3]
+     [["genesis", "create", '*', '*'], [], [], fun genesis_create/3]
     ].
 
 genesis_create_usage() ->
     [["genesis", "create"],
-     ["genesis create <addrs> \n\n",
+     ["genesis create <old_genesis_file> <addrs> \n\n",
       "  create a new genesis block.\n\n"
      ]
     ].
 
-genesis_create(["genesis", "create", Addrs], [], []) ->
-    List = lists:foldl(fun(Addr, Acc) ->
-                               [Addr | Acc]
-                       end, [], string:split(Addrs, ",", all)),
-    miner:initial_dkg([libp2p_crypto:p2p_to_address(Addr) || Addr <- List]),
-    [clique_status:text("ok")];
+genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
+    case file:consult(OldGenesisFile) of
+        %% XXX: why is Config coming in as a list of lists ¯\_(ツ)_/¯
+        {ok, [Config]} ->
+            OldGenesisTransactions = [blockchain_txn_coinbase:new(libp2p_crypto:b58_to_address(proplists:get_value(address, X)),
+                                                                  proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
+            %% TODO: gateways and location transactions as well
+            Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
+            InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addresses],
+            miner:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
+            [clique_status:text("ok")];
+        {error, Reason} ->
+            [clique_status:text(io_lib:format("~p", [Reason]))]
+    end;
 genesis_create([_, _, _], [], []) ->
+    usage.
+
+%%
+%% genesis forge
+%%
+
+genesis_forge_cmd() ->
+    [
+     [["genesis", "forge", '*'], [], [], fun genesis_forge/3]
+    ].
+
+genesis_forge_usage() ->
+    [["genesis", "forge"],
+     ["genesis forge <addrs> \n\n",
+      "  forge a new genesis block.\n\n"
+     ]
+    ].
+
+genesis_forge(["genesis", "forge", Addrs], [], []) ->
+    Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
+    InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addresses],
+    miner:initial_dkg(InitialPaymentTransactions, Addresses),
+    [clique_status:text("ok")];
+genesis_forge([_, _, _], [], []) ->
     usage.
 
 %%

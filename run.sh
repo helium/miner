@@ -2,6 +2,9 @@
 
 make clean && make
 
+# pass the old genesis file as an argument
+old_genesis_file=$1
+
 # default to 8 dev releases
 nodes=$(seq 8)
 
@@ -42,10 +45,10 @@ done
 function join_by { local IFS="$1"; shift; echo "$*"; }
 
 create_genesis_block() {
-    echo $(./_build/dev/rel/miner-dev$1/bin/miner-dev$1 genesis create $2)
+    echo $(./_build/dev/rel/miner-dev$1/bin/miner-dev$1 genesis create $2 $3)
 }
 export -f create_genesis_block
-parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $(join_by , ${peer_addrs[@]})
+parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: $(join_by , ${peer_addrs[@]})
 
 # show which node is in the consensus group
 for node in ${nodes[@]}; do
