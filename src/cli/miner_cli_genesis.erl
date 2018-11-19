@@ -72,9 +72,15 @@ genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
     case file:consult(OldGenesisFile) of
         %% XXX: why is Config coming in as a list of lists ¯\_(ツ)_/¯
         {ok, [Config]} ->
-            OldGenesisTransactions = [blockchain_txn_coinbase:new(libp2p_crypto:b58_to_address(proplists:get_value(address, X)),
-                                                                  proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
-            %% TODO: gateways and location transactions as well
+            OldAccounts = [blockchain_txn_coinbase:new(libp2p_crypto:b58_to_address(proplists:get_value(address, X)),
+                                                       proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
+            OldGateways = [blockchain_txn_gen_gateway:new(libp2p_crypto:b58_to_address(proplists:get_value(gateway_address, X)),
+                                                          libp2p_crypto:b58_to_address(proplists:get_value(owner_address, X)),
+                                                          proplists:get_value(location, X),
+                                                          proplists:get_value(last_poc_challenge, X),
+                                                          proplists:get_value(nonce, X),
+                                                          proplists:get_value(score, X)) || X <- proplists:get_value(gateways, Config)],
+            OldGenesisTransactions = OldAccounts ++ OldGateways,
             Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addresses],
             miner:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
