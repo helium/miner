@@ -21,7 +21,7 @@ parallel -k --tagstring miner-dev{} start_dev_release ::: $nodes
 # peer addresses
 addresses=()
 for node in ${nodes[@]}; do
-    addresses+=($(./_build/dev/rel/miner-dev$node/bin/miner-dev$node peer listen --format=csv | sed -n 2p))
+    addresses+=($(./_build/dev/rel/miner-dev$node/bin/miner-dev$node peer listen --format=csv | sed -n 3p))
 done
 
 # connect node1 to every _other_ node

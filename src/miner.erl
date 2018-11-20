@@ -390,7 +390,7 @@ handle_info(maybe_restore_consensus, State) ->
          undefined ->
              {noreply, State};
          Ledger ->
-             ConsensusAddrs = lists:sort(blockchain_ledger:consensus_members(Ledger)),
+             ConsensusAddrs = lists:sort(blockchain_ledger_v1:consensus_members(Ledger)),
              case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
                  true ->
                      lager:info("restoring consensus group"),
@@ -478,8 +478,8 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
             %% TODO: set initial balance elsewhere
-            InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addrs],
-            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group:new(ConsensusAddrs)],
+            InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addrs],
+            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
@@ -505,11 +505,11 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
 maybe_assert_location(Location, Resolution) ->
     Address = blockchain_swarm:address(),
     Ledger = blockchain_worker:ledger(),
-    case blockchain_ledger:find_gateway_info(Address, Ledger) of
+    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         undefined ->
             ok;
         GwInfo ->
-            case blockchain_ledger:gateway_location(GwInfo) of
+            case blockchain_ledger_v1:gateway_location(GwInfo) of
                 undefined ->
                     %% no location, try submitting the transaction
                     blockchain_worker:assert_location_txn(Location);
