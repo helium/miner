@@ -17,7 +17,11 @@ init(_Args) ->
                  ,period => 5},
 
     %% Blockchain Supervisor Options
-    SeedNodes = application:get_env(blockchain, seed_nodes, []),
+    SeedNodes = case application:get_env(blockchain, seed_nodes) of
+                    {ok, ""} -> [];
+                    {ok, Seeds} -> string:split(Seeds, ",", all);
+                    _ -> []
+                end,
     SeedNodeDNS = application:get_env(blockchain, seed_node_dns, []),
     % look up the DNS record and add any resulting addresses to the SeedNodes
     % no need to do any checks here as any bad combination results in an empty list
