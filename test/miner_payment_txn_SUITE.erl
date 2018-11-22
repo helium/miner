@@ -88,7 +88,7 @@ single_payment_test(Config) ->
 
     Ledger = ct_rpc:call(Payer, blockchain_worker, ledger, []),
 
-    Fee = blockchain_ledger:transaction_fee(Ledger),
+    Fee = blockchain_ledger_v1:transaction_fee(Ledger),
 
     %% send some helium tokens from payer to payee
     ok = ct_rpc:call(Payer, blockchain_worker, spend, [PayeeAddr, 1000, Fee]),
