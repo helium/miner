@@ -120,6 +120,6 @@ single_payment_test(Config) ->
 
 get_balance(Miner, Addr) ->
     Ledger = ct_rpc:call(Miner, blockchain_worker, ledger, []),
-    Entries = ct_rpc:call(Miner, blockchain_ledger, entries, [Ledger]),
-    Entry = ct_rpc:call(Miner, blockchain_ledger, find_entry, [Addr, Entries]),
-    ct_rpc:call(Miner, blockchain_ledger, balance, [Entry]).
+    Entries = ct_rpc:call(Miner, blockchain_ledger_v1, entries, [Ledger]),
+    Entry = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Entries]),
+    ct_rpc:call(Miner, blockchain_ledger_v1, balance, [Entry]).
