@@ -10,4 +10,5 @@ cache:
   - $HOME/.cache/rebar3
 
 ## script: ./rebar3 as test do ct --verbose && ./rebar3 dialyzer && ./rebar3 coveralls send
-script: ./rebar3 as test do ct --verbose && ./rebar3 coveralls send
+## script: ./rebar3 as test do ct --verbose && ./rebar3 coveralls send
+script: ./rebar3 as test do ct --verbose
