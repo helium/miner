@@ -18,17 +18,17 @@ start_dev_release() {
 export -f start_dev_release
 parallel -k --tagstring miner-dev{} start_dev_release ::: $nodes
 
-# peer addresses
-addresses=()
-for node in ${nodes[@]}; do
-    addresses+=($(./_build/dev/rel/miner-dev$node/bin/miner-dev$node peer listen --format=csv | sed -n 3p))
-done
+# peer addresses for node 1
+addresses=($(./_build/dev/rel/miner-dev1/bin/miner-dev1 peer listen --format=csv | tail -n +2))
+echo $addresses
 
 # connect node1 to every _other_ node
 for node in ${nodes[@]}; do
     if (( $node != 1 )); then
-        echo "## Node $node trying to connect to seed node 1 which has listen address: ${addresses[0]} ##"
-        ./_build/dev/rel/miner-dev$node/bin/miner-dev$node peer connect ${addresses[0]}
+        for address in ${addresses[@]}; do
+            echo "## Node $node trying to connect to seed node 1 which has listen address: $address"
+            ./_build/dev/rel/miner-dev$node/bin/miner-dev$node peer connect $address
+        done
     fi
 done
 
