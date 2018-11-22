@@ -509,7 +509,7 @@ maybe_assert_location(Location, Resolution) ->
         undefined ->
             ok;
         GwInfo ->
-            case blockchain_ledger_v1:gateway_location(GwInfo) of
+            case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
                     %% no location, try submitting the transaction
                     blockchain_worker:assert_location_txn(Location);
