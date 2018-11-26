@@ -18,7 +18,6 @@
     dkg,
     hbbft,
     h3,
-    ubx,
     relcast, %% dialyzer needs this to build plt
     clique, %% dialyzer needs this to build plt
     rand_compat, %% nat_upnp has a missing dep
