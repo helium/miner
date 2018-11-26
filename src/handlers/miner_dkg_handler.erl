@@ -88,6 +88,8 @@ handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
             end;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, binary_to_term(Msg)) of
+                %% NOTE: We cover all possible return values from handle_msg hence
+                %% eliminating the need for a final catch-all clause
                 {_, ignore} ->
                     ignore;
                 {NewDKG, ok} ->
@@ -131,9 +133,7 @@ handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                     end,
 
                     {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undefined, signatures=[{Address, Signature}|State#state.signatures]},
-                     [{multicast, term_to_binary({signature, Address, Signature})}]};
-                {_, Foo} ->
-                    erlang:error(Foo)
+                     [{multicast, term_to_binary({signature, Address, Signature})}]}
             end
     end.
 
