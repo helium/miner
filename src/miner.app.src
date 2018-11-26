@@ -14,16 +14,17 @@
     lager,
     ranch,
     libp2p,
-    blockchain,
     erl_base58,
     dkg,
     hbbft,
     h3,
-    ubx,
+    relcast, %% dialyzer needs this to build plt
+    clique, %% dialyzer needs this to build plt
     rand_compat, %% nat_upnp has a missing dep
     inets, %% nat_upnp has a missing dep
     xmerl  %% nat_upnp has a missing dep
    ]},
+  {included_applications, [blockchain]},
   {env,[]},
   {modules, []},
 

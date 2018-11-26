@@ -14,12 +14,10 @@
           ,dkg_group :: undefined | pid()
           ,consensus_pos :: undefined | pos_integer()
           ,batch_size = 500 :: pos_integer()
-          ,gps_handle = undefined :: undefined | pid()
-          ,gps_lock = false :: boolean()
-
+          ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
-          ,block_time = 15000 :: pos_integer
+          ,block_time = 15000 :: number()
           %% TODO: this probably doesn't have to be here
           ,curve :: 'SS512'
           ,dkg_await :: undefined | {reference(), term()}
@@ -32,6 +30,7 @@
          ,consensus_pos/0
          ,in_consensus/0
          ,hbbft_status/0
+         ,hbbft_skip/0
          ,dkg_status/0
          ,sign_genesis_block/2
          ,genesis_block_done/3
@@ -54,23 +53,14 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
-    %% TODO: put this elsewhere
-    GPSHandle = case proplists:get_value(gps_device, Args) of
-                    {Type, Device, Options} ->
-                        {ok, Pid} = ubx:start_link(Type, Device, Options, self()),
-                        ubx:enable_message(nav_posllh, 5, Pid),
-                        ubx:enable_message(nav_sol, 5, Pid),
-                        Pid;
-                    undefined ->
-                        undefined
-                end,
-
     self() ! maybe_restore_consensus,
 
+    Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
+
     {ok, #state{curve=Curve,
+                blockchain_dir=Dir,
                 block_time=BlockTime,
-                batch_size=BatchSize,
-                gps_handle=GPSHandle}}.
+                batch_size=BatchSize}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -86,7 +76,7 @@ initial_dkg(Addrs) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_info() ->
-    gen_server:call(?MODULE, relcast_info).
+    gen_server:call(?MODULE, relcast_info, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -94,7 +84,7 @@ relcast_info() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_queue() ->
-    gen_server:call(?MODULE, relcast_queue).
+    gen_server:call(?MODULE, relcast_queue, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -116,9 +106,9 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()}.
+-spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
-    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}).
+    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -142,7 +132,15 @@ genesis_block_done(GenesisBlock, Signatures, PrivKey) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_status() ->
-    gen_server:call(?MODULE, hbbft_status).
+    gen_server:call(?MODULE, hbbft_status, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+%% TODO: spec
+hbbft_skip() ->
+    gen_server:call(?MODULE, hbbft_skip, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -150,7 +148,7 @@ hbbft_status() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 dkg_status() ->
-    gen_server:call(?MODULE, dkg_status).
+    gen_server:call(?MODULE, dkg_status, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -159,7 +157,7 @@ dkg_status() ->
 -spec signed_block([binary()], binary()) -> ok.
 signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
-    gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}).
+    gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}, infinity).
 
 %% ==================================================================
 %% API casts
@@ -183,26 +181,37 @@ handle_call({initial_dkg, Addrs}, From, State) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
             {reply, ok, NonDKGState}
     end;
-handle_call(relcast_info, _From, State) ->
+handle_call(relcast_info, From, State) ->
     case State#state.consensus_group of
-        undefined -> {reply, ok, State};
+        undefined -> {reply, #{}, State};
         Pid ->
-            Res = (catch libp2p_group_relcast:info(Pid)),
-            {reply, Res, State}
+            %% put this behind a spawn so we avoid a call loop
+            spawn(fun() ->
+                          Res = (catch libp2p_group_relcast:info(Pid)),
+                          gen_server:reply(From, Res)
+                  end),
+            {noreply, State}
     end;
-handle_call(relcast_queue, _From, State) ->
+handle_call(relcast_queue, From, State) ->
     case State#state.consensus_group of
-        undefined -> {reply, ok, State};
+        undefined -> {reply, #{}, State};
         Pid ->
-            Reply = try libp2p_group_relcast:queues(Pid) of
-                        Res ->
-                            maps:map(fun(_, V) ->
-                                             [ {Index, lists:map(fun erlang:binary_to_term/1, Values)} || {Index, Values} <- V]
-                                     end, Res)
-                    catch What:Why ->
-                              {error, {What, Why}}
-                    end,
-            {reply, Reply, State}
+            %% put this behind a spawn so we avoid a call loop
+            spawn(fun() ->
+                          Reply = try libp2p_group_relcast:queues(Pid) of
+                                      {_ModState, Inbound, Outbound} ->
+                                          O = maps:map(fun(_, V) ->
+                                                               [  erlang:binary_to_term(Value) || Value <- V]
+                                                       end, Outbound),
+                                          I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
+                                          #{inbound => I,
+                                            outbound => O}
+                                  catch What:Why ->
+                                            {error, {What, Why}}
+                                  end,
+                          gen_server:reply(From, Reply)
+                  end),
+            {noreply, State}
     end;
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
@@ -215,7 +224,21 @@ handle_call(hbbft_status, _From, State) ->
                      receive
                          {Ref, Result} ->
                              Result
-                     after timer:seconds(1) ->
+                     after timer:seconds(60) ->
+                               {error, timeout}
+                     end
+             end,
+    {reply, Status, State};
+handle_call(hbbft_skip, _From, State) ->
+    Status = case State#state.consensus_group of
+                 undefined -> ok;
+                 _ ->
+                     Ref = make_ref(),
+                     ok = libp2p_group_relcast:handle_input(State#state.consensus_group, {skip, Ref, self()}),
+                     receive
+                         {Ref, Result} ->
+                             Result
+                     after timer:seconds(60) ->
                                {error, timeout}
                      end
              end,
@@ -229,7 +252,7 @@ handle_call(dkg_status, _From, State) ->
                      receive
                          {Ref, Result} ->
                              Result
-                     after timer:seconds(5) ->
+                     after timer:seconds(60) ->
                                {error, timeout}
                      end
              end,
@@ -238,7 +261,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
-    CurrentBlock = blockchain_worker:head_block(),
+    {ok, CurrentBlock} = blockchain:get_block(head, State#state.blockchain_dir),
     CurrentBlockHash = blockchain_block:hash_block(CurrentBlock),
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
@@ -276,10 +299,10 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * add the block to blockchain
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
-    NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
-    Ref = erlang:send_after(BlockTime, self(), block_timeout),
+    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
+    NextBlockTime = max(0, erlang:system_time(seconds) - (LastBlockTimestamp + BlockTime)),
+    Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
     ok = blockchain_worker:add_block(Block, blockchain_swarm:address()),
-    libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
     {reply, ok, State#state{block_timer=Ref}};
 handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
     Reply = case Pos of
@@ -311,7 +334,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
                                       F,
                                       BatchSize,
                                       PrivKey,
-                                      self()]],
+                                      State#state.blockchain_dir]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
@@ -353,7 +376,7 @@ handle_info(maybe_restore_consensus, State) ->
          undefined ->
              {noreply, State};
          Ledger ->
-             ConsensusAddrs = lists:sort(blockchain_ledger:consensus_members(Ledger)),
+             ConsensusAddrs = lists:sort(blockchain_ledger_v1:consensus_members(Ledger)),
              case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
                  true ->
                      lager:info("restoring consensus group"),
@@ -382,16 +405,16 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus_group=ConsensusGroup,
+handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_group=ConsensusGroup,
                                                                 block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
-    NewState = case blockchain_worker:get_block(Hash) of
+    NewState = case blockchain:get_block(Hash, State#state.blockchain_dir) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
-                       libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block)}),
+                       libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
                        Ref = erlang:send_after(BlockTime, self(), block_timeout),
                        State#state{block_timer=Ref};
                    {error, Reason} ->
@@ -399,24 +422,6 @@ handle_info({blockchain_event, {add_block, Hash, _Flag}}, State=#state{consensus
                        State
                end,
     {noreply, NewState};
-handle_info({nav_sol, GPSFix}, State) ->
-    case GPSFix == 3 of
-        true ->
-            {noreply, State#state{gps_lock=true}};
-        false ->
-            {noreply, State#state{gps_lock=false}}
-    end;
-handle_info({nav_posllh, {Lat, Lon, Height, HorizontalAcc, _VerticalAcc}}, State=#state{gps_lock=GPSLock}) ->
-    case GPSLock andalso blockchain_worker:blockchain() /= undefined of
-        true ->
-            %% pick the best h3 index we can for the resolution
-            {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-            lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
-            maybe_assert_location(H3Index, Resolution);
-        false ->
-            ok
-    end,
-    {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
@@ -434,8 +439,6 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
     lager:info("F: ~p", [F]),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-    ok = blockchain_worker:consensus_addrs(ConsensusAddrs),
-    lager:info("WorkerConsensusAddrs: ~p", [blockchain_worker:consensus_addrs()]),
     MyAddress = blockchain_swarm:address(),
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
@@ -443,8 +446,8 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
             %% TODO: set initial balance elsewhere
-            InitialPaymentTransactions = [ blockchain_txn_coinbase:new(Addr, 5000) || Addr <- Addrs],
-            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group:new(ConsensusAddrs)],
+            InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addrs],
+            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
             GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
@@ -466,40 +469,41 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
--spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
-maybe_assert_location(Location, Resolution) ->
-    Address = blockchain_swarm:address(),
-    Ledger = blockchain_worker:ledger(),
-    case blockchain_ledger:find_gateway_info(Address, Ledger) of
-        undefined ->
-            ok;
-        GwInfo ->
-            case blockchain_ledger:gateway_location(GwInfo) of
-                undefined ->
-                    %% no location, try submitting the transaction
-                    blockchain_worker:assert_location_txn(Location);
-                OldLocation ->
-                    case {OldLocation, Location} of
-                        {Old, New} when Old == New ->
-                            ok;
-                        {Old, New} ->
-                            try h3:parent(Old, h3:get_resolution(New)) == New of
-                                true ->
-                                    %% new index is a parent of the old one
-                                    ok;
-                                false ->
-                                    %% check whether New Index is a child of the old one, more precise
-                                    case lists:member(New, h3:children(Old, Resolution)) of
-                                        true ->
-                                            blockchain_worker:assert_location_txn(New);
-                                        false ->
-                                            ok
-                                    end
-                            catch
-                                TypeOfError:Exception ->
-                                    lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
-                                    ok
-                            end
-                    end
-            end
-    end.
+%% NOTE: We'll see if this has some use later...
+%% -spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
+%% maybe_assert_location(Location, Resolution) ->
+%%     Address = blockchain_swarm:address(),
+%%     Ledger = blockchain_worker:ledger(),
+%%     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+%%         undefined ->
+%%             ok;
+%%         GwInfo ->
+%%             case blockchain_ledger_gateway_v1:location(GwInfo) of
+%%                 undefined ->
+%%                     %% no location, try submitting the transaction
+%%                     blockchain_worker:assert_location_txn(Location);
+%%                 OldLocation ->
+%%                     case {OldLocation, Location} of
+%%                         {Old, New} when Old == New ->
+%%                             ok;
+%%                         {Old, New} ->
+%%                             try h3:parent(Old, h3:get_resolution(New)) == New of
+%%                                 true ->
+%%                                     %% new index is a parent of the old one
+%%                                     ok;
+%%                                 false ->
+%%                                     %% check whether New Index is a child of the old one, more precise
+%%                                     case lists:member(New, h3:children(Old, Resolution)) of
+%%                                         true ->
+%%                                             blockchain_worker:assert_location_txn(New);
+%%                                         false ->
+%%                                             ok
+%%                                     end
+%%                             catch
+%%                                 TypeOfError:Exception ->
+%%                                     lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
+%%                                     ok
+%%                             end
+%%                     end
+%%             end
+%%     end.

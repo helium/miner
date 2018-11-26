@@ -54,15 +54,18 @@ init_per_testcase(_TestCase, Config0) ->
     ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
                                                 true == ct_rpc:call(Miner, miner, in_consensus, [])
                                         end, Miners)),
-    GenesisBlock = ct_rpc:call(ConsensusMiner, blockchain_worker, genesis_block, []),
+    Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
+    GenesisBlock = blockchain:genesis_block(Chain),
 
     _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
                                                       ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
                                               end, NonConsensusMiners),
 
-    true = lists:all(fun(M) ->
-                             1 == ct_rpc:call(M, blockchain_worker, height, [])
-                     end, Miners),
+    ok = miner_ct_utils:wait_until(fun() ->
+                            lists:all(fun(M) ->
+                                              1 == ct_rpc:call(M, blockchain_worker, height, [])
+                                      end, Miners)
+                    end),
 
     Config.
 
@@ -83,8 +86,12 @@ single_payment_test(Config) ->
     5000 = get_balance(Payer, PayerAddr),
     5000 = get_balance(Payee, PayerAddr),
 
+    Ledger = ct_rpc:call(Payer, blockchain_worker, ledger, []),
+
+    Fee = blockchain_ledger_v1:transaction_fee(Ledger),
+
     %% send some helium tokens from payer to payee
-    ok = ct_rpc:call(Payer, blockchain_worker, spend, [PayeeAddr, 1000]),
+    ok = ct_rpc:call(Payer, blockchain_worker, spend, [PayeeAddr, 1000, Fee]),
 
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
@@ -104,7 +111,7 @@ single_payment_test(Config) ->
     PayerBalance = get_balance(Payer, PayerAddr),
     PayeeBalance = get_balance(Payee, PayeeAddr),
 
-    4000 = PayerBalance,
+    4000 = PayerBalance + Fee,
     6000 = PayeeBalance,
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
@@ -113,6 +120,6 @@ single_payment_test(Config) ->
 
 get_balance(Miner, Addr) ->
     Ledger = ct_rpc:call(Miner, blockchain_worker, ledger, []),
-    Entries = ct_rpc:call(Miner, blockchain_ledger, entries, [Ledger]),
-    Entry = ct_rpc:call(Miner, blockchain_ledger, find_entry, [Addr, Entries]),
-    ct_rpc:call(Miner, blockchain_ledger, balance, [Entry]).
+    Entries = ct_rpc:call(Miner, blockchain_ledger_v1, entries, [Ledger]),
+    Entry = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Entries]),
+    ct_rpc:call(Miner, blockchain_ledger_v1, balance, [Entry]).

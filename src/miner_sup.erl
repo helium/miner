@@ -22,6 +22,10 @@ init(_Args) ->
                     {ok, Seeds} -> string:split(Seeds, ",", all);
                     _ -> []
                 end,
+    SeedNodeDNS = application:get_env(blockchain, seed_node_dns, []),
+    % look up the DNS record and add any resulting addresses to the SeedNodes
+    % no need to do any checks here as any bad combination results in an empty list
+    SeedAddresses = string:tokens(lists:flatten([string:prefix(X, "blockchain-seed-nodes=") || [X] <- inet_res:lookup(SeedNodeDNS, in, txt), string:prefix(X, "blockchain-seed-nodes=") /= nomatch]), ","),
     Port = application:get_env(blockchain, port, 0),
     NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
@@ -39,7 +43,7 @@ init(_Args) ->
 
     BlockchainOpts = [
                       {key, {PublicKey, SigFun}}
-                      ,{seed_nodes, SeedNodes}
+                      ,{seed_nodes, SeedNodes ++ SeedAddresses}
                       ,{port, Port}
                       ,{num_consensus_members, NumConsensusMembers}
                       ,{base_dir, BaseDir}
