@@ -197,9 +197,6 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
             false
     end.
 
-filter_signatures(State=#state{artifact=undefined}) ->
-    %% don't have the item being signed yet, can't filter
-    State;
 filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members=Members}) ->
     FilteredSignatures = lists:filter(fun({Address, Signature}) ->
                          lists:member(Address, Members) andalso
