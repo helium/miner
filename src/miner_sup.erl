@@ -54,14 +54,14 @@ init(_Args) ->
     BlockTime = application:get_env(miner, block_time, 15000),
     BatchSize = application:get_env(miner, batch_size, 500),
     RadioDevice = application:get_env(miner, radio_device, undefined),
-    GPSDevice = application:get_env(miner, gps_device, undefined),
+    UseEBus = application:get_env(miner, use_ebus, true),
 
     MinerOpts = [
                  {curve, Curve}
                  ,{block_time, BlockTime}
                  ,{batch_size, BatchSize}
                  ,{radio_device, RadioDevice}
-                 ,{gps_device, GPSDevice}
+                 ,{use_ebus, UseEBus}
                 ],
 
     ChildSpecs =  [#{id => blockchain_sup

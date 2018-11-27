@@ -14,8 +14,9 @@
           ,dkg_group :: undefined | pid()
           ,consensus_pos :: undefined | pos_integer()
           ,batch_size = 500 :: pos_integer()
-          ,gps_handle ::  pid()
+          ,config_proxy ::  pid() | undefined
           ,gps_signal :: ebus:filter_id()
+          ,add_gateway_signal :: ebus:filter_id()
           ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -38,7 +39,6 @@
          ,genesis_block_done/3
          ,create_block/3
          ,signed_block/2
-         ,send_authorization_request/3
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -55,11 +55,23 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
-    {ok, SystemBus} = ebus:system(),
-    {ok, GPSHandle} = ebus_proxy:start_link(SystemBus, "com.helium.GPS", []),
-    {ok, GPSSignal} = ebus_proxy:add_signal_handler(GPSHandle,
-                                                    "/com/helium/GPS", "com.helium.GPS.Position",
-                                                    self(), gps_location),
+    case proplists:get_value(use_ebus, Args) of
+        true ->
+            {ok, SystemBus} = ebus:system(),
+            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []),
+            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
+                                                            "/com/helium/Config",
+                                                            "com.helium.Config.Position",
+                                                            self(), gps_location),
+            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
+                                                              "/com/helium/Config",
+                                                              "com.helium.Config.AddGatewayRequest",
+                                                              self(), add_gateway_request);
+        false ->
+            GPSSignal = 0,
+            AddGwSignal = 0,
+            ConfigProxy = undefined
+    end,
 
     self() ! maybe_restore_consensus,
 
@@ -70,7 +82,8 @@ init(Args) ->
                 block_time=BlockTime,
                 batch_size=BatchSize,
                 gps_signal=GPSSignal,
-                gps_handle=GPSHandle}}.
+                add_gateway_signal=AddGwSignal,
+                config_proxy=ConfigProxy}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -172,12 +185,6 @@ signed_block(Signatures, BinBlock) ->
 %% ==================================================================
 %% API casts
 %% ==================================================================
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-send_authorization_request(Txn, Token, Addr) ->
-    gen_server:cast(?MODULE, {send_authorization_request, Txn, Token, Addr}).
 
 %% ==================================================================
 %% handle_call functions
@@ -359,18 +366,6 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
-handle_cast({send_authorization_request, Txn, Token, Addr}, State) ->
-    lager:info("send_authorization_request, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
-    P2PAddress = libp2p_crypto:address_to_p2p(Addr),
-    Protocol = "gw_registration/1.0.0",
-
-    {ok, StreamPid} =  libp2p_swarm:dial_framed_stream(blockchain_swarm:swarm(),
-                                                       P2PAddress,
-                                                       Protocol,
-                                                       blockchain_gw_registration_handler,
-                                                       [binary_to_term(Txn), Token]),
-    unlink(StreamPid),
-    {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -448,10 +443,29 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{gps_signal=SignalID}) 
                 false ->
                     ok
             end;
+        {ok, [Args]} ->
+            lager:error("Invalid position_signal args: ~p", [Args]);
         {error, Error} ->
-            lager:error("Faile to decode position message: ~p", [Error])
+            lager:error("Failed to decode position message: ~p", [Error])
     end,
     {noreply, State};
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=SignalID}) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{
+                "addr" := AuthAddress,
+                "token" := AuthToken,
+                "owner" := OwnerStrAddress
+               }]} ->
+            OwnerAddress = libp2p_crypto:b58_to_addres(OwnerStrAddress),
+            Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
+            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]);
+        {ok, [Args]} ->
+            lager:error("Invalid add_gateway_signal args: ~p", [Args]);
+        {error, Error} ->
+            lager:error("Failed to decode add_gateway_signal message: ~p", [Error])
+    end,
+    {noreply, State};
+
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
