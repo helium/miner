@@ -43,6 +43,7 @@
 
 -define(SERVER, ?MODULE).
 -define(CHALLENGE_TIMEOUT, 3).
+-define(BLOCK_DELAY, 30).
 
 -record(data, {
     last_submit = 0 :: non_neg_integer()
@@ -50,13 +51,14 @@
     ,challengees :: [libp2p_crypto:address()]
     ,challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer()
     ,receipts = [] :: [binary()]
+    ,delay = ?BLOCK_DELAY :: non_neg_integer()
 }).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
 start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
+    gen_statem:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
 receipt(Data) ->
     gen_statem:cast(?SERVER, {receipt, Data}).
@@ -64,12 +66,13 @@ receipt(Data) ->
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
-init(_Args) ->
+init(Args) ->
     ok = blockchain_event:add_handler(self()),
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:address(),
-    {ok, requesting, #data{address=Address}}.
+    Delay = maps:get(delay, Args, ?BLOCK_DELAY),
+    {ok, requesting, #data{address=Address, delay=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -87,10 +90,11 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastSubmit
-                                                               ,address=Address}=Data) ->
+requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastSubmit,
+                                                               address=Address,
+                                                               delay=Delay}=Data) ->
     CurrHeight = blockchain_worker:height(),
-    case (CurrHeight - LastSubmit) > 30 of
+    case (CurrHeight - LastSubmit) > Delay of
         false ->
             {keep_state, Data};
         true ->
