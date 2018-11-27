@@ -14,6 +14,8 @@
           ,dkg_group :: undefined | pid()
           ,consensus_pos :: undefined | pos_integer()
           ,batch_size = 500 :: pos_integer()
+          ,gps_handle ::  pid()
+          ,gps_signal :: ebus:filter_id()
           ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -53,6 +55,12 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
+    {ok, SystemBus} = ebus:system(),
+    {ok, GPSHandle} = ebus_proxy:start_link(SystemBus, "com.helium.GPS", []),
+    {ok, GPSSignal} = ebus_proxy:add_signal_handler(GPSHandle,
+                                                    "/com/helium/GPS", "com.helium.GPS.Position",
+                                                    self(), gps_location),
+
     self() ! maybe_restore_consensus,
 
     Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
@@ -60,7 +68,9 @@ init(Args) ->
     {ok, #state{curve=Curve,
                 blockchain_dir=Dir,
                 block_time=BlockTime,
-                batch_size=BatchSize}}.
+                batch_size=BatchSize,
+                gps_signal=GPSSignal,
+                gps_handle=GPSHandle}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -422,6 +432,26 @@ handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_
                        State
                end,
     {noreply, NewState};
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{gps_signal=SignalID}) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{"lat" := Lat,
+                "lon" := Lon,
+                "height" := Height,
+                "h_accuracy" := HorizontalAcc
+               }]} ->
+            case blockchain_worker:blockchain() /= undefined of
+                true ->
+                    %% pick the best h3 index we can for the resolution
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
+                    lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
+                    maybe_assert_location(H3Index, Resolution);
+                false ->
+                    ok
+            end;
+        {error, Error} ->
+            lager:error("Faile to decode position message: ~p", [Error])
+    end,
+    {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
