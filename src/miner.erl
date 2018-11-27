@@ -456,7 +456,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "token" := AuthToken,
                 "owner" := OwnerStrAddress
                }]} ->
-            OwnerAddress = libp2p_crypto:b58_to_addres(OwnerStrAddress),
+            OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
             lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]);
         {ok, [Args]} ->
@@ -513,41 +513,40 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
-%% NOTE: We'll see if this has some use later...
-%% -spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
-%% maybe_assert_location(Location, Resolution) ->
-%%     Address = blockchain_swarm:address(),
-%%     Ledger = blockchain_worker:ledger(),
-%%     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-%%         undefined ->
-%%             ok;
-%%         GwInfo ->
-%%             case blockchain_ledger_gateway_v1:location(GwInfo) of
-%%                 undefined ->
-%%                     %% no location, try submitting the transaction
-%%                     blockchain_worker:assert_location_txn(Location);
-%%                 OldLocation ->
-%%                     case {OldLocation, Location} of
-%%                         {Old, New} when Old == New ->
-%%                             ok;
-%%                         {Old, New} ->
-%%                             try h3:parent(Old, h3:get_resolution(New)) == New of
-%%                                 true ->
-%%                                     %% new index is a parent of the old one
-%%                                     ok;
-%%                                 false ->
-%%                                     %% check whether New Index is a child of the old one, more precise
-%%                                     case lists:member(New, h3:children(Old, Resolution)) of
-%%                                         true ->
-%%                                             blockchain_worker:assert_location_txn(New);
-%%                                         false ->
-%%                                             ok
-%%                                     end
-%%                             catch
-%%                                 TypeOfError:Exception ->
-%%                                     lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
-%%                                     ok
-%%                             end
-%%                     end
-%%             end
-%%     end.
+-spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
+maybe_assert_location(Location, Resolution) ->
+    Address = blockchain_swarm:address(),
+    Ledger = blockchain_worker:ledger(),
+    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+        undefined ->
+            ok;
+        GwInfo ->
+            case blockchain_ledger_gateway_v1:location(GwInfo) of
+                undefined ->
+                    %% no location, try submitting the transaction
+                    blockchain_worker:assert_location_txn(Location);
+                OldLocation ->
+                    case {OldLocation, Location} of
+                        {Old, New} when Old == New ->
+                            ok;
+                        {Old, New} ->
+                            try h3:parent(Old, h3:get_resolution(New)) == New of
+                                true ->
+                                    %% new index is a parent of the old one
+                                    ok;
+                                false ->
+                                    %% check whether New Index is a child of the old one, more precise
+                                    case lists:member(New, h3:children(Old, Resolution)) of
+                                        true ->
+                                            blockchain_worker:assert_location_txn(New);
+                                        false ->
+                                            ok
+                                    end
+                            catch
+                                TypeOfError:Exception ->
+                                    lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
+                                    ok
+                            end
+                    end
+            end
+    end.
