@@ -70,7 +70,6 @@ genesis_create_usage() ->
 
 genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
     case file:consult(OldGenesisFile) of
-        %% XXX: why is Config coming in as a list of lists ¯\_(ツ)_/¯
         {ok, [Config]} ->
             OldAccounts = [blockchain_txn_coinbase:new(libp2p_crypto:b58_to_address(proplists:get_value(address, X)),
                                                        proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
