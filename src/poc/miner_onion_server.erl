@@ -208,9 +208,9 @@ send_receipt(IV, Data) ->
     P2P = libp2p_crypto:address_to_p2p(Challenger),
     {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
     Address = blockchain_swarm:address(),
-    Receipt0 = blockchain_poc_receipt:new(Address, os:system_time(), IV),
+    Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), IV),
     {ok, _, SigFun} = blockchain_swarm:keys(),
-    Receipt1 = blockchain_poc_receipt:sign(Receipt0, SigFun),
-    EncodedReceipt = blockchain_poc_receipt:encode(Receipt1),
+    Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
+    EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
     _ = miner_poc_handler:send(Stream, EncodedReceipt),
     ok.
