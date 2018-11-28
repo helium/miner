@@ -2,6 +2,8 @@
 
 REBAR=./rebar3
 
+all: compile
+
 deps:
 	$(REBAR) get-deps
 

@@ -20,6 +20,7 @@
     h3,
     relcast, %% dialyzer needs this to build plt
     clique, %% dialyzer needs this to build plt
+    ebus,
     rand_compat, %% nat_upnp has a missing dep
     inets, %% nat_upnp has a missing dep
     xmerl  %% nat_upnp has a missing dep

@@ -14,6 +14,9 @@
           ,dkg_group :: undefined | pid()
           ,consensus_pos :: undefined | pos_integer()
           ,batch_size = 500 :: pos_integer()
+          ,config_proxy ::  pid() | undefined
+          ,gps_signal :: ebus:filter_id()
+          ,add_gateway_signal :: ebus:filter_id()
           ,blockchain_dir :: file:name()
           %% but every miner keeps a timer reference?
           ,block_timer = make_ref() :: reference()
@@ -36,7 +39,6 @@
          ,genesis_block_done/3
          ,create_block/3
          ,signed_block/2
-         ,send_authorization_request/3
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -53,6 +55,24 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
+    case proplists:get_value(use_ebus, Args) of
+        true ->
+            {ok, SystemBus} = ebus:system(),
+            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []),
+            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
+                                                            "/com/helium/Config",
+                                                            "com.helium.Config.Position",
+                                                            self(), gps_location),
+            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
+                                                              "/com/helium/Config",
+                                                              "com.helium.Config.AddGateway",
+                                                              self(), add_gateway_request);
+        false ->
+            GPSSignal = 0,
+            AddGwSignal = 0,
+            ConfigProxy = undefined
+    end,
+
     self() ! maybe_restore_consensus,
 
     Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
@@ -60,7 +80,10 @@ init(Args) ->
     {ok, #state{curve=Curve,
                 blockchain_dir=Dir,
                 block_time=BlockTime,
-                batch_size=BatchSize}}.
+                batch_size=BatchSize,
+                gps_signal=GPSSignal,
+                add_gateway_signal=AddGwSignal,
+                config_proxy=ConfigProxy}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -162,12 +185,6 @@ signed_block(Signatures, BinBlock) ->
 %% ==================================================================
 %% API casts
 %% ==================================================================
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-send_authorization_request(Txn, Token, Addr) ->
-    gen_server:cast(?MODULE, {send_authorization_request, Txn, Token, Addr}).
 
 %% ==================================================================
 %% handle_call functions
@@ -349,18 +366,6 @@ handle_call(_Msg, _From, State) ->
 %% ==================================================================
 %% handle_cast functions
 %% ==================================================================
-handle_cast({send_authorization_request, Txn, Token, Addr}, State) ->
-    lager:info("send_authorization_request, Txn: ~p, Token: ~p, Addr: ~p", [Txn, Token, Addr]),
-    P2PAddress = libp2p_crypto:address_to_p2p(Addr),
-    Protocol = "gw_registration/1.0.0",
-
-    {ok, StreamPid} =  libp2p_swarm:dial_framed_stream(blockchain_swarm:swarm(),
-                                                       P2PAddress,
-                                                       Protocol,
-                                                       blockchain_gw_registration_handler,
-                                                       [binary_to_term(Txn), Token]),
-    unlink(StreamPid),
-    {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -422,6 +427,45 @@ handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_
                        State
                end,
     {noreply, NewState};
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{gps_signal=SignalID}) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{"lat" := Lat,
+                "lon" := Lon,
+                "height" := Height,
+                "h_accuracy" := HorizontalAcc
+               }]} ->
+            case blockchain_worker:blockchain() /= undefined of
+                true ->
+                    %% pick the best h3 index we can for the resolution
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
+                    lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
+                    maybe_assert_location(H3Index, Resolution);
+                false ->
+                    ok
+            end;
+        {ok, [Args]} ->
+            lager:error("Invalid position_signal args: ~p", [Args]);
+        {error, Error} ->
+            lager:error("Failed to decode position message: ~p", [Error])
+    end,
+    {noreply, State};
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=SignalID}) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{
+                "addr" := AuthAddress,
+                "token" := AuthToken,
+                "owner" := OwnerStrAddress
+               }]} ->
+            OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
+            Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
+            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]);
+        {ok, [Args]} ->
+            lager:error("Invalid add_gateway_signal args: ~p", [Args]);
+        {error, Error} ->
+            lager:error("Failed to decode add_gateway_signal message: ~p", [Error])
+    end,
+    {noreply, State};
+
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
@@ -467,41 +511,40 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
-%% NOTE: We'll see if this has some use later...
-%% -spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
-%% maybe_assert_location(Location, Resolution) ->
-%%     Address = blockchain_swarm:address(),
-%%     Ledger = blockchain_worker:ledger(),
-%%     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-%%         undefined ->
-%%             ok;
-%%         GwInfo ->
-%%             case blockchain_ledger_gateway_v1:location(GwInfo) of
-%%                 undefined ->
-%%                     %% no location, try submitting the transaction
-%%                     blockchain_worker:assert_location_txn(Location);
-%%                 OldLocation ->
-%%                     case {OldLocation, Location} of
-%%                         {Old, New} when Old == New ->
-%%                             ok;
-%%                         {Old, New} ->
-%%                             try h3:parent(Old, h3:get_resolution(New)) == New of
-%%                                 true ->
-%%                                     %% new index is a parent of the old one
-%%                                     ok;
-%%                                 false ->
-%%                                     %% check whether New Index is a child of the old one, more precise
-%%                                     case lists:member(New, h3:children(Old, Resolution)) of
-%%                                         true ->
-%%                                             blockchain_worker:assert_location_txn(New);
-%%                                         false ->
-%%                                             ok
-%%                                     end
-%%                             catch
-%%                                 TypeOfError:Exception ->
-%%                                     lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
-%%                                     ok
-%%                             end
-%%                     end
-%%             end
-%%     end.
+-spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
+maybe_assert_location(Location, Resolution) ->
+    Address = blockchain_swarm:address(),
+    Ledger = blockchain_worker:ledger(),
+    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+        undefined ->
+            ok;
+        GwInfo ->
+            case blockchain_ledger_gateway_v1:location(GwInfo) of
+                undefined ->
+                    %% no location, try submitting the transaction
+                    blockchain_worker:assert_location_txn(Location);
+                OldLocation ->
+                    case {OldLocation, Location} of
+                        {Old, New} when Old == New ->
+                            ok;
+                        {Old, New} ->
+                            try h3:parent(Old, h3:get_resolution(New)) == New of
+                                true ->
+                                    %% new index is a parent of the old one
+                                    ok;
+                                false ->
+                                    %% check whether New Index is a child of the old one, more precise
+                                    case lists:member(New, h3:children(Old, Resolution)) of
+                                        true ->
+                                            blockchain_worker:assert_location_txn(New);
+                                        false ->
+                                            ok
+                                    end
+                            catch
+                                TypeOfError:Exception ->
+                                    lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
+                                    ok
+                            end
+                    end
+            end
+    end.
