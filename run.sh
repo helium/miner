@@ -2,8 +2,17 @@
 
 make clean && make
 
-# pass the old genesis file as an argument
-old_genesis_file=$1
+if [ -z "$1" ]
+then
+    echo "Will forge a blockchain from scratch"
+    command="forge"
+else
+    echo "Will use provided $1 genesis file and incorporate the transactions"
+    command="create"
+    old_genesis_file=$1
+fi
+
+echo $command
 
 # default to 8 dev releases
 nodes=$(seq 8)
@@ -48,7 +57,21 @@ create_genesis_block() {
     echo $(./_build/dev/rel/miner-dev$1/bin/miner-dev$1 genesis create $2 $3)
 }
 export -f create_genesis_block
-parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: $(join_by , ${peer_addrs[@]})
+
+forge_genesis_block() {
+    echo $(./_build/dev/rel/miner-dev$1/bin/miner-dev$1 genesis forge $2)
+}
+export -f forge_genesis_block
+
+if [ "$command" == "create" ]
+then
+    parallel -k --tagstring miner-dev{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: $(join_by , ${peer_addrs[@]})
+elif [ "$command" == "forge" ]
+then
+    parallel -k --tagstring miner-dev{} forge_genesis_block ::: $nodes ::: $(join_by , ${peer_addrs[@]})
+else
+    exit 1
+fi
 
 # show which node is in the consensus group
 for node in ${nodes[@]}; do
