@@ -54,7 +54,7 @@ init(_Args) ->
     BlockTime = application:get_env(miner, block_time, 15000),
     BatchSize = application:get_env(miner, batch_size, 500),
     RadioDevice = application:get_env(miner, radio_device, undefined),
-    UseEBus = application:get_env(miner, use_ebus, true),
+    UseEBus = application:get_env(miner, use_ebus, false),
 
     MinerOpts = [
                  {curve, Curve}

@@ -65,8 +65,7 @@ start_node(Name, Config, Case) ->
                   {monitor_master, true},
                   {startup_functions, [
                                        {code, set_path, [CodePath]}
-                                      ]},
-                  {erl_flags, "-config ../../../../config/test.config"}],
+                                      ]}],
 
     case ct_slave:start(Name, NodeConfig) of
         {ok, Node} ->
