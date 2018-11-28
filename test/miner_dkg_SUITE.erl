@@ -37,8 +37,9 @@ end_per_testcase(_TestCase, Config) ->
 initial_dkg_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
+    InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     DKGResults = miner_ct_utils:pmap(fun(Miner) ->
-                                             ct_rpc:call(Miner, miner, initial_dkg, [Addresses])
+                                             ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions, Addresses])
                                      end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
     {comment, DKGResults}.
