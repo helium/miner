@@ -65,7 +65,7 @@ init(Args) ->
                                                             self(), gps_location),
             {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
                                                               "/com/helium/Config",
-                                                              "com.helium.Config.AddGatewayRequest",
+                                                              "com.helium.Config.AddGateway",
                                                               self(), add_gateway_request);
         false ->
             GPSSignal = 0,
