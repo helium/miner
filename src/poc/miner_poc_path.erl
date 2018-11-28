@@ -30,7 +30,7 @@ build(Target, Gateways) ->
     GraphList = maps:fold(
         fun(Addr, _, Acc) ->
             G = maps:get(Addr, Gateways),
-            Score = blockchain_ledger_gateway:score(G),
+            Score = blockchain_ledger_gateway_v1:score(G),
             [{Score, Addr}|Acc]
         end,
         [],
@@ -65,7 +65,7 @@ length(Graph, Start, End) ->
 build_graph(Address, Gateways) ->
     build_graph([Address], Gateways, maps:new()).
 
--spec build_graph(binary(), map(), graph()) -> graph().
+-spec build_graph([binary()], map(), graph()) -> graph().
 build_graph([], _Gateways, Graph) ->
     Graph;
 build_graph([Address0|Addresses], Gateways, Graph0) ->
@@ -116,11 +116,11 @@ path(Graph, [{Cost, [Node | _] = Path} | Routes], End, Seen) ->
 neighbors(Address, Gateways) ->
     % TODO: It should format with appropriate resolution
     TargetGw = maps:get(Address, Gateways),
-    Index = blockchain_ledger_gateway:location(TargetGw),
+    Index = blockchain_ledger_gateway_v1:location(TargetGw),
     KRing = h3:k_ring(Index, 1),
     GwInRing = maps:to_list(maps:filter(
         fun(A, G) ->
-            I = blockchain_ledger_gateway:location(G),
+            I = blockchain_ledger_gateway_v1:location(G),
             lists:member(I, KRing)
                 andalso Address =/= A
         end
@@ -133,7 +133,7 @@ neighbors(Address, Gateways) ->
 %% @end
 %%--------------------------------------------------------------------
 edge_weight(Gw1, Gw2) ->
-    1 - abs(blockchain_ledger_gateway:score(Gw1) -  blockchain_ledger_gateway:score(Gw2)).
+    1 - abs(blockchain_ledger_gateway_v1:score(Gw1) -  blockchain_ledger_gateway_v1:score(Gw2)).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -276,8 +276,8 @@ build_gateways(LatLongs) ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
             Index = h3:from_geo(LatLong, 9),
-            G0 = blockchain_ledger_gateway:new(Owner, Index),
-            G1 = blockchain_ledger_gateway:score(Score, G0),
+            G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
+            G1 = blockchain_ledger_gateway_v1:score(Score, G0),
             maps:put(Address, G1, Acc)
 
         end,

@@ -48,9 +48,9 @@
 -record(data, {
     last_submit = 0 :: non_neg_integer()
     ,address :: libp2p_crypto:address()
-    ,challengees :: [libp2p_crypto:address()]
+    ,challengees = [] :: [libp2p_crypto:address()]
     ,challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer()
-    ,receipts = [] :: [binary()]
+    ,receipts = [] :: blockchain_poc_receipt_v1:poc_receipts()
     ,delay = ?BLOCK_DELAY :: non_neg_integer()
 }).
 
@@ -98,10 +98,10 @@ requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastS
         false ->
             {keep_state, Data};
         true ->
-            Tx = blockchain_txn_poc_request:new(Address),
+            Tx = blockchain_txn_poc_request_v1:new(Address),
             {ok, _, SigFun} = blockchain_swarm:keys(),
-            SignedTx = blockchain_txn_poc_request:sign(Tx, SigFun),
-            ok = blockchain_worker:submit_txn(blockchain_txn_poc_request, SignedTx),
+            SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
+            ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             {next_state, mining, Data}
     end;
 requesting(EventType, EventContent, Data) ->
@@ -112,10 +112,12 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, Hash}}, #data{address=Address}=Data) ->
-    case blockchain_worker:get_block(Hash) of
+    Chain = blockchain_worker:blockchain(),
+    Dir = blockchain:dir(Chain),
+    case blockchain_block:load(Hash, Dir) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request:gateway_address(Txn) end,
+            Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     CurrHeight = blockchain_worker:height(),
@@ -175,9 +177,9 @@ receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
-    Address = blockchain_poc_receipt:address(Receipt),
+    Address = blockchain_poc_receipt_v1:address(Receipt),
     % TODO: Also check onion IV
-    case blockchain_poc_receipt:is_valid(Receipt)
+    case blockchain_poc_receipt_v1:is_valid(Receipt)
          andalso lists:member(Address, Challengees)
     of
         false ->
@@ -201,10 +203,10 @@ receiving(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 submiting(info, submit, #data{address=Address, receipts=Receipts}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts:new(Receipts, Address),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address),
     {ok, _, SigFun} = blockchain_swarm:keys(),
-    Txn1 = blockchain_poc_receipt:sign(Txn0, SigFun),
-    ok = blockchain_worker:submit_txn(blockchain_poc_receipt, Txn1),
+    Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
+    ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
     {keep_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -239,7 +241,7 @@ handle_event(_EventType, _EventContent, Data) ->
 %%--------------------------------------------------------------------
 -spec create_probs(map()) -> [float()].
 create_probs(Gateways) ->
-    GwScores = [blockchain_ledger_gateway:score(G) || G <- maps:values(Gateways)],
+    GwScores = [blockchain_ledger_gateway_v1:score(G) || G <- maps:values(Gateways)],
     LenGwScores = erlang:length(GwScores),
     SumGwScores = lists:sum(GwScores),
     [prob(Score, LenGwScores, SumGwScores) || Score <- GwScores].
@@ -279,12 +281,12 @@ select_target([W1 | T], Adresses, Rnd, Index) ->
 %%--------------------------------------------------------------------
 -spec active_gateways() -> map().
 active_gateways() ->
-    ActiveGateways = blockchain_ledger:active_gateways(blockchain_worker:ledger()),
+    ActiveGateways = blockchain_ledger_v1:active_gateways(blockchain_worker:ledger()),
     maps:filter(
         fun(Address, Gateway) ->
             % TODO: Maybe do some find of score check here
             Address =/= blockchain_swarm:address()
-            andalso blockchain_ledger_gateway:location(Gateway) =/= undefined
+            andalso blockchain_ledger_gateway_v1:location(Gateway) =/= undefined
         end
         ,ActiveGateways
     ).
@@ -295,7 +297,7 @@ active_gateways() ->
 -ifdef(TEST).
 
 target_test() ->
-    meck:new(blockchain_ledger, [passthrough]),
+    meck:new(blockchain_ledger_v1, [passthrough]),
     meck:new(blockchain_worker, [passthrough]),
     meck:new(blockchain_swarm, [passthrough]),
     
@@ -314,8 +316,8 @@ target_test() ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
             Index = h3:from_geo(LatLong, 9),
-            G0 = blockchain_ledger_gateway:new(Owner, Index),
-            G1 = blockchain_ledger_gateway:score(Score, G0),
+            G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
+            G1 = blockchain_ledger_gateway_v1:score(Score, G0),
             maps:put(Address, G1, Acc)
 
         end,
@@ -323,7 +325,7 @@ target_test() ->
         LatLongs
     ),
 
-    meck:expect(blockchain_ledger, active_gateways, fun(_) -> ActiveGateways end),
+    meck:expect(blockchain_ledger_v1, active_gateways, fun(_) -> ActiveGateways end),
     meck:expect(blockchain_worker, ledger, fun() -> ok end),
     meck:expect(blockchain_swarm, address, fun() -> <<"unknown">> end),
 
@@ -335,10 +337,10 @@ target_test() ->
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
     ?assertEqual(ActiveGateways, Gateways),
 
-    ?assert(meck:validate(blockchain_ledger)),
+    ?assert(meck:validate(blockchain_ledger_v1)),
     ?assert(meck:validate(blockchain_worker)),
     ?assert(meck:validate(blockchain_swarm)),
-    meck:unload(blockchain_ledger),
+    meck:unload(blockchain_ledger_v1),
     meck:unload(blockchain_worker),
     meck:unload(blockchain_swarm).
 
