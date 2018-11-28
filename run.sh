@@ -12,8 +12,6 @@ else
     old_genesis_file=$1
 fi
 
-echo $command
-
 # default to 8 dev releases
 nodes=$(seq 8)
 
