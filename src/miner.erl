@@ -24,7 +24,7 @@
          }).
 
 -export([start_link/1
-         ,initial_dkg/1
+         ,initial_dkg/2
          ,relcast_info/0
          ,relcast_queue/0
          ,consensus_pos/0
@@ -67,8 +67,8 @@ init(Args) ->
 %% @end
 %%--------------------------------------------------------------------
 %% TODO: spec
-initial_dkg(Addrs) ->
-    gen_server:call(?MODULE, {initial_dkg, Addrs}, infinity).
+initial_dkg(GenesisTransactions, Addrs) ->
+    gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -172,8 +172,8 @@ send_authorization_request(Txn, Token, Addr) ->
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
-handle_call({initial_dkg, Addrs}, From, State) ->
-    case do_initial_dkg(Addrs, State) of
+handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
+    case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
             lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
             {noreply, DKGState#state{dkg_await=From}};
@@ -430,7 +430,7 @@ handle_info(_Msg, State) ->
 %% ==================================================================
 %% Internal functions
 %% ==================================================================
-do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
+do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     SortedAddrs = lists:sort(Addrs),
     lager:info("SortedAddrs: ~p", [SortedAddrs]),
     N = blockchain_worker:num_consensus_members(),
@@ -445,10 +445,8 @@ do_initial_dkg(Addrs, State=#state{curve=Curve}) ->
         true ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
-            %% TODO: set initial balance elsewhere
-            InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addrs],
-            GenesisTransactions = InitialPaymentTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
-            GenesisBlock = blockchain_block:new_genesis_block(GenesisTransactions),
+            GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
+            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
                                             N,
