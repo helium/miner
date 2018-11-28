@@ -65,7 +65,9 @@ start_node(Name, Config, Case) ->
                   {monitor_master, true},
                   {startup_functions, [
                                        {code, set_path, [CodePath]}
-                                      ]}],
+                                      ]},
+                  {erl_flags, "-config ../../../../config/test.config"}],
+
     case ct_slave:start(Name, NodeConfig) of
         {ok, Node} ->
             ok = wait_until(fun() ->
@@ -196,11 +198,14 @@ init_per_testcase(_TestCase, Config) ->
                                                ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
 
                                                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
-                                               ct_rpc:call(Miner, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, debug])
+                                               ok
                                        end, Miners),
 
     %% check that the config loaded correctly on each miner
-    true = lists:all(fun(Res) -> Res == ok end, ConfigResult),
+    true = lists:all(fun(ok) -> true;
+                        (Res) -> ct:pal("config setup failure: ~p", [Res]),
+                                 false
+                     end, ConfigResult),
 
     %% get the first miner's listen addrs
     [First | Rest] = Miners,
