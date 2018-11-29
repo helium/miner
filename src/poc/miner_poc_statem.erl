@@ -213,7 +213,7 @@ submiting(info, submit, #data{address=Address, receipts=Receipts}=Data) ->
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
-    {keep_state, requesting, Data};
+    {next_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
