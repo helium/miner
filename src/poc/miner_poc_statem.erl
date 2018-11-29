@@ -90,7 +90,7 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-requesting(info, {blockchain_event, {add_block, _Hash}}, #data{last_submit=LastSubmit,
+requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit=LastSubmit,
                                                                address=Address,
                                                                delay=Delay}=Data) ->
     CurrHeight = blockchain_worker:height(),
@@ -111,7 +111,7 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, Hash}}, #data{address=Address}=Data) ->
+mining(info, {blockchain_event, {add_block, Hash, true}}, #data{address=Address}=Data) ->
     Chain = blockchain_worker:blockchain(),
     Dir = blockchain:dir(Chain),
     case blockchain_block:load(Hash, Dir) of
@@ -151,18 +151,24 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
-    Path = miner_poc_path:build(Target, Gateways),
-    % TODO: Maybe make this smaller?
-    Payload = erlang:term_to_binary(#{
-        challenger => Address
-    }),
-    OnionList = [{Payload, libp2p_crypto:address_to_pubkey(A)} || A <- Path],
-    Onion = miner_onion_server:construct_onion(OnionList),
-    [Start|_] = Path,
-    P2P = libp2p_crypto:address_to_p2p(Start),
-    {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-    _ = miner_onion_handler:send(Stream, Onion),
-    {next_state, receiving, Data#data{challengees=Path}};
+    case miner_poc_path:build(Target, Gateways) of
+        {error, Reason} ->
+            % TODO: Go back to targeting
+            lager:error("could not build path for ~p: ~p", [Target, Reason]),
+            {keep_state, Data};
+        {ok, Path} ->
+            % TODO: Maybe make this smaller?
+            Payload = erlang:term_to_binary(#{
+                challenger => Address
+            }),
+            OnionList = [{Payload, libp2p_crypto:address_to_pubkey(A)} || A <- Path],
+            Onion = miner_onion_server:construct_onion(OnionList),
+            [Start|_] = Path,
+            P2P = libp2p_crypto:address_to_p2p(Start),
+            {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
+            _ = miner_onion_handler:send(Stream, Onion),
+            {next_state, receiving, Data#data{challengees=Path}}
+    end;
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
@@ -170,10 +176,10 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=0}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, true}}, #data{challenge_timeout=0}=Data) ->
     self() ! submit,
     {next_state, submiting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
-receiving(info, {blockchain_event, {add_block, _Hash}}, #data{challenge_timeout=T}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, true}}, #data{challenge_timeout=T}=Data) ->
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
