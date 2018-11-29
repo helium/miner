@@ -74,7 +74,7 @@ basic(_Config) ->
 
     % All these point are in a line one after the other (except last)
     LatLongs = [
-        {{37.780586, -122.469471}, libp2p_crypto:generate_keys()},
+        {{37.780586, -122.469471}, {PrivKey, PubKey}},
         {{37.780959, -122.467496}, libp2p_crypto:generate_keys()},
         {{37.78101, -122.465372}, libp2p_crypto:generate_keys()},
         {{37.781179, -122.463226}, libp2p_crypto:generate_keys()},
@@ -100,11 +100,29 @@ basic(_Config) ->
 
     % Start poc statem
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
-    _ = erlang:trace(Statem, true, ['receive', send]),
+    _ = erlang:trace(Statem, true, ['receive']),
 
     ?assertMatch({requesting, _}, sys:get_state(Statem)),
 
-    % Add some blocks
+    % Mock submit_txn to actually add the block
+    meck:new(blockchain_worker, [passthrough]),
+    meck:expect(blockchain_worker, submit_txn, fun(_, Txn) ->
+        B = create_block(ConsensusMembers, [Txn]),
+        ok = blockchain_worker:add_block(B, self())
+    end),
+
+    meck:new(miner_onion, [passthrough]),
+    meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
+        {ok, self()}
+    end),
+
+    meck:new(miner_onion_handler, [passthrough]),
+    meck:expect(miner_onion_handler, send, fun(Stream, Onion) ->
+        ?assertEqual(self(), Stream),
+        ct:pal("MARKER0 ~p~n", [sys:get_state(Onion)])
+    end),
+
+    % Add some blocks to pass the delay
     lists:foreach(
         fun(_) ->
             B = create_block(ConsensusMembers, []),
@@ -113,30 +131,36 @@ basic(_Config) ->
         end,
         lists:seq(1, 10)
     ),
-    ?assertEqual(13, blockchain_worker:height()),
+    rcv_block(10),
 
-    % Check State again
-    % ?assertMatch({requesting, _}, sys:get_state(Statem)),
-    loop(),
+    timer:sleep(2000),
 
-    ct:pal("MARKER ~p~n", [sys:get_state(Statem)]),
 
-    % ?assert(false),
+    ?assert(meck:validate(blockchain_worker)),
+    meck:unload(blockchain_worker),  
+    ?assert(meck:validate(miner_onion)),
+    meck:unload(miner_onion),
+    ?assert(meck:validate(miner_onion_handler)),
+    meck:unload(miner_onion_handler),
+
+    ?assert(false),
     ok.
-
-loop() ->
-    receive
-        M ->
-            ct:pal("MARKER ~p~n", [M]),
-            loop()
-    after 10000 ->
-        ok
-        % ct:fail(timeout)
-    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+rcv_block(0) ->
+    ok;
+rcv_block(Acc) ->
+    receive
+        {trace, _, 'receive', {blockchain_event, {add_block, _, true}}} ->
+            rcv_block(Acc - 1);
+        _M ->
+            rcv_block(Acc)
+    after 5000 ->
+        ct:fail(timeout)
+    end.
 
 build_asserts(LatLongs, {PrivKey, PubKey}) ->
     lists:foldl(
