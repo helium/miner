@@ -47,6 +47,7 @@ init(_Args) ->
                       ,{port, Port}
                       ,{num_consensus_members, NumConsensusMembers}
                       ,{base_dir, BaseDir}
+                      ,{update_dir, application:get_env(miner, update_dir, undefined)}
                      ],
 
     %% Miner Options
