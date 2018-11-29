@@ -111,6 +111,11 @@ basic(_Config) ->
         ok = blockchain_worker:add_block(B, self())
     end),
 
+    meck:new(miner_onion_server, [passthrough]),
+    meck:expect(miner_onion_server, construct_onion, fun(_) ->
+        <<"onion">>
+    end),
+
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
         {ok, self()}
@@ -118,8 +123,7 @@ basic(_Config) ->
 
     meck:new(miner_onion_handler, [passthrough]),
     meck:expect(miner_onion_handler, send, fun(Stream, Onion) ->
-        ?assertEqual(self(), Stream),
-        ct:pal("MARKER0 ~p~n", [sys:get_state(Onion)])
+        ?assertEqual(self(), Stream)
     end),
 
     % Add some blocks to pass the delay
@@ -137,13 +141,15 @@ basic(_Config) ->
 
 
     ?assert(meck:validate(blockchain_worker)),
-    meck:unload(blockchain_worker),  
+    meck:unload(blockchain_worker),
+    ?assert(meck:validate(miner_onion_server)),
+    meck:unload(miner_onion_server),
     ?assert(meck:validate(miner_onion)),
     meck:unload(miner_onion),
     ?assert(meck:validate(miner_onion_handler)),
     meck:unload(miner_onion_handler),
 
-    ?assert(false),
+    % ?assert(false),
     ok.
 
 %% ------------------------------------------------------------------
