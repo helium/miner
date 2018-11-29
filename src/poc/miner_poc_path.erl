@@ -24,7 +24,7 @@
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec build(binary(), map()) -> list().
+-spec build(binary(), map()) -> {ok, list()} | {error, any()}.
 build(Target, Gateways) ->
     Graph = ?MODULE:build_graph(Target, Gateways),
     GraphList = maps:fold(
@@ -36,9 +36,14 @@ build(Target, Gateways) ->
         [],
         Graph
     ),
-    [{_, Start}, {_, End}|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
-    {_, Path} = ?MODULE:shortest(Graph, Start, End),
-    Path.
+    case erlang:length(GraphList) > 2 of
+        false ->
+            {error, not_enough_gateways};
+        true ->
+            [{_, Start}, {_, End}|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
+            {_, Path} = ?MODULE:shortest(Graph, Start, End),
+            {ok, Path}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -256,7 +261,7 @@ build_test() ->
     ],
     {Target, Gateways} = build_gateways(LatLongs),
 
-    Path = build(Target, Gateways),
+    {ok, Path} = build(Target, Gateways),
 
     [{S, _}|_] = LatLongs,
     Start = crypto:hash(sha256, erlang:term_to_binary(S)),
@@ -267,7 +272,24 @@ build_test() ->
     ?assertEqual(Start, PS),
     ?assert(lists:member(Target, Path)),
     ?assertEqual(End, lists:last(Path)),
+    ok.
 
+build_with_zero_score_test() ->
+    % All these point are in a line one after the other (except last)
+    LatLongs = [
+        {{37.780586, -122.469471}, 0.0},
+        {{37.780959, -122.467496}, 0.0},
+        {{37.78101, -122.465372}, 0.0},
+        {{37.781179, -122.463226}, 0.0},
+        {{37.781281, -122.461038}, 0.0},
+        {{37.781349, -122.458892}, 0.0},
+        {{37.781468, -122.456617}, 0.0},
+        {{37.781637, -122.4543}, 0.0},
+        {{37.832976, -122.12726}, 0.0} % This should be excluded cause too far
+    ],
+    {Target, Gateways} = build_gateways(LatLongs),
+    {ok, Path} = build(Target, Gateways),
+    ?assert(lists:member(Target, Path)),
     ok.
 
 build_gateways(LatLongs) ->
