@@ -521,8 +521,14 @@ maybe_assert_location(Location, Resolution) ->
         GwInfo ->
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
+                    Gateway = blockchain_ledger_v1:find_gateway_info(Address, Ledger),
+                    Nonce = blockchain_ledger_gateway_v1:nonce(Gateway) + 1,
+                    AssertLocationTxn = blockchain_txn_assert_location_v1:new(Address,
+                                                                              blockchain_ledger_gateway_v1:owner_address(Gateway),
+                                                                              Location,
+                                                                              Nonce),
                     %% no location, try submitting the transaction
-                    blockchain_worker:assert_location_txn(Location);
+                    blockchain_worker:assert_location_txn(AssertLocationTxn);
                 OldLocation ->
                     case {OldLocation, Location} of
                         {Old, New} when Old == New ->
@@ -536,7 +542,14 @@ maybe_assert_location(Location, Resolution) ->
                                     %% check whether New Index is a child of the old one, more precise
                                     case lists:member(New, h3:children(Old, Resolution)) of
                                         true ->
-                                            blockchain_worker:assert_location_txn(New);
+                                            Gateway = blockchain_ledger_v1:find_gateway_info(Address, Ledger),
+                                            Nonce = blockchain_ledger_gateway_v1:nonce(Gateway) + 1,
+                                            AssertLocationTxn = blockchain_txn_assert_location_v1:new(Address,
+                                                                                                      blockchain_ledger_gateway_v1:owner_address(Gateway),
+                                                                                                      Location,
+                                                                                                      Nonce),
+                                            %% no location, try submitting the transaction
+                                            blockchain_worker:assert_location_txn(AssertLocationTxn);
                                         false ->
                                             ok
                                     end
