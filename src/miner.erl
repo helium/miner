@@ -519,10 +519,11 @@ maybe_assert_location(Location, Resolution) ->
         undefined ->
             ok;
         GwInfo ->
+            OwnerAddress = blockchain_ledger_gateway_v1:owner_address(GwInfo),
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
                     %% no location, try submitting the transaction
-                    blockchain_worker:assert_location_txn(Location);
+                    blockchain_worker:assert_location_request(OwnerAddress, Location);
                 OldLocation ->
                     case {OldLocation, Location} of
                         {Old, New} when Old == New ->
@@ -536,7 +537,7 @@ maybe_assert_location(Location, Resolution) ->
                                     %% check whether New Index is a child of the old one, more precise
                                     case lists:member(New, h3:children(Old, Resolution)) of
                                         true ->
-                                            blockchain_worker:assert_location_txn(New);
+                                            blockchain_worker:assert_location_request(OwnerAddress, Location);
                                         false ->
                                             ok
                                     end
