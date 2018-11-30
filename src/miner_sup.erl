@@ -49,7 +49,8 @@ init(_Args) ->
                       {max_inbound_connections, MaxInboundConnections},
                       {port, Port},
                       {num_consensus_members, NumConsensusMembers},
-                      {base_dir, BaseDir}
+                      {base_dir, BaseDir},
+                      {update_dir, application:get_env(miner, update_dir, undefined)}
                      ],
 
     %% Miner Options
