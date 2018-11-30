@@ -29,6 +29,8 @@ init(_Args) ->
     Port = application:get_env(blockchain, port, 0),
     NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
+    %% TODO: Remove when cuttlefish
+    MaxInboundConnections = application:get_env(blockchain, max_inbound_connections, 10),
 
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
@@ -42,11 +44,12 @@ init(_Args) ->
                           end,
 
     BlockchainOpts = [
-                      {key, {PublicKey, SigFun}}
-                      ,{seed_nodes, SeedNodes ++ SeedAddresses}
-                      ,{port, Port}
-                      ,{num_consensus_members, NumConsensusMembers}
-                      ,{base_dir, BaseDir}
+                      {key, {PublicKey, SigFun}},
+                      {seed_nodes, SeedNodes ++ SeedAddresses},
+                      {max_inbound_connections, MaxInboundConnections},
+                      {port, Port},
+                      {num_consensus_members, NumConsensusMembers},
+                      {base_dir, BaseDir}
                      ],
 
     %% Miner Options
