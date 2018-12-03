@@ -72,6 +72,7 @@ init(Args) ->
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:address(),
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
+    lager:notice("init with ~p", [Args]),
     {ok, requesting, #data{address=Address, delay=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -94,6 +95,7 @@ requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit
                                                                address=Address,
                                                                delay=Delay}=Data) ->
     CurrHeight = blockchain_worker:height(),
+    lager:notice("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
         false ->
             {keep_state, Data};
@@ -102,6 +104,7 @@ requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
+            lager:notice("submited poc request"),
             {next_state, mining, Data}
     end;
 requesting(EventType, EventContent, Data) ->
@@ -112,6 +115,7 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, Hash, true}}, #data{address=Address}=Data) ->
+    lager:notice("got block ~p checking content", [Hash]),
     Chain = blockchain_worker:blockchain(),
     Dir = blockchain:dir(Chain),
     case blockchain_block:load(Hash, Dir) of
@@ -122,6 +126,7 @@ mining(info, {blockchain_event, {add_block, Hash, true}}, #data{address=Address}
                 [_POCReq] ->
                     CurrHeight = blockchain_worker:height(),
                     self() ! {target, Hash, Block},
+                    lager:notice("request was mined @ ~p, targeting now", [CurrHeight]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight}};
                 _ ->
                     % TODO: maybe we should restart
@@ -141,6 +146,7 @@ mining(EventType, EventContent, Data) ->
 %%--------------------------------------------------------------------
 targeting(info, {target, Hash, Block}, Data) ->
     {Target, Gateways} = target(Hash, Block),
+    lager:notice("target found ~p, challenging", [Target]),
     self() ! {challenge, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
@@ -157,16 +163,19 @@ challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             {keep_state, Data};
         {ok, Path} ->
+            lager:notice("path created ~p", [Path]),
             % TODO: Maybe make this smaller?
             Payload = erlang:term_to_binary(#{
                 challenger => Address
             }),
             OnionList = [{Payload, A} || A <- Path],
             Onion = miner_onion_server:construct_onion(OnionList),
+            lager:notice("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:address_to_p2p(Start),
             {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
             _ = miner_onion_handler:send(Stream, Onion),
+            lager:notice("onion sent"),
             {next_state, receiving, Data#data{challengees=Path}}
     end;
 challenging(EventType, EventContent, Data) ->
