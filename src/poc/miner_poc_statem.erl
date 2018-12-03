@@ -161,7 +161,7 @@ challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
             Payload = erlang:term_to_binary(#{
                 challenger => Address
             }),
-            OnionList = [{Payload, libp2p_crypto:address_to_pubkey(A)} || A <- Path],
+            OnionList = [{Payload, A} || A <- Path],
             Onion = miner_onion_server:construct_onion(OnionList),
             [Start|_] = Path,
             P2P = libp2p_crypto:address_to_p2p(Start),
