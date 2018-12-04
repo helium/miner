@@ -41,8 +41,9 @@ build(Target, Gateways) ->
             {error, not_enough_gateways};
         true ->
             [{_, Start}, {_, End}|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
-            {_, Path} = ?MODULE:shortest(Graph, Start, End),
-            {ok, Path}
+            {_, Path1} = ?MODULE:shortest(Graph, Start, Target),
+            {_, [Target|Path2]} = ?MODULE:shortest(Graph, Target, End),
+            {ok, Path1 ++ Path2}
     end.
 
 %%--------------------------------------------------------------------
