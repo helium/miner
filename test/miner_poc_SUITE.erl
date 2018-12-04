@@ -94,13 +94,12 @@ basic(_Config) ->
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     Block2 = create_block(ConsensusMembers, AssertLocaltionTxns),
     ok = blockchain_worker:add_block(Block2, self()),
-    timer:sleep(500),
-
-    ?assertEqual(3, blockchain_worker:height()),
+    
+    ok = miner_ct_utils:wait_until(fun() -> 3 =:= blockchain_worker:height() end),
 
     % Start poc statem
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
-    _ = erlang:trace(Statem, true, ['receive']),
+    _ = erlang:trace(Statem, true, ['receive', call]),
 
     ?assertMatch({requesting, _}, sys:get_state(Statem)),
 
@@ -130,35 +129,54 @@ basic(_Config) ->
         end,
         lists:seq(1, 4)
     ),
-    rcv_block(4),
+    
+    % 3 initial blocks + 4 blocks added + 1 mining block
+    ok = miner_ct_utils:wait_until(fun() -> 8 =:= blockchain_worker:height() end),
 
-    timer:sleep(2000),
+    % Capture all trace messages from statem
+    Msgs = loop([]),
 
+    % First few are blocks
+    {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
+    lists:foreach(
+        fun(Msg) ->
+            ?assertMatch({blockchain_event, {add_block, _, true}}, Msg)
+        end,
+        AddBlockMsgs
+    ),
 
+    % Then target
+    [TargetMsg|Msgs2] = Msgs1,
+    ?assertMatch({target, _, _}, TargetMsg),
+ 
+     % Then challenge
+    [ChallengeMsg|_Msgs3] = Msgs2,
+    ?assertMatch({challenge, _, _}, ChallengeMsg),
+    
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
     ?assert(meck:validate(miner_onion)),
     meck:unload(miner_onion),
     ?assert(meck:validate(miner_onion_handler)),
     meck:unload(miner_onion_handler),
-
-    % ?assert(false),
     ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-rcv_block(0) ->
-    ok;
-rcv_block(Acc) ->
+loop(Acc) ->
     receive
-        {trace, _, 'receive', {blockchain_event, {add_block, _, true}}} ->
-            rcv_block(Acc - 1);
+        {trace, _, 'receive', {blockchain_event, _}=Msg} ->
+            loop([Msg|Acc]);
+        {trace, _, 'receive', {target, _, _}=Msg} ->
+            loop([Msg|Acc]);
+        {trace, _, 'receive', {challenge, _, _}=Msg} ->
+            loop([Msg|Acc]);
         _M ->
-            rcv_block(Acc)
-    after 5000 ->
-        ct:fail(timeout)
+            loop(Acc)
+    after 2500 ->
+        lists:reverse(Acc)
     end.
 
 build_asserts(LatLongs, {PrivKey, PubKey}) ->
