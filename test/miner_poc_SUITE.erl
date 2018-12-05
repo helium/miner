@@ -133,6 +133,8 @@ basic(_Config) ->
     % 3 initial blocks + 4 blocks added + 1 mining block
     ok = miner_ct_utils:wait_until(fun() -> 8 =:= blockchain_worker:height() end),
 
+    ok = send_receipts(LatLongs),
+
     % Capture all trace messages from statem
     Msgs = loop([]),
 
@@ -145,14 +147,31 @@ basic(_Config) ->
         AddBlockMsgs
     ),
 
+    % Filter extra useless add block
+    Msgs2 = lists:filter(
+        fun({blockchain_event, _}) -> false;
+           (_) -> true
+        end,
+        Msgs1
+    ),
+
     % Then target
-    [TargetMsg|Msgs2] = Msgs1,
+    [TargetMsg|Msgs3] = Msgs2,
     ?assertMatch({target, _, _}, TargetMsg),
  
-     % Then challenge
-    [ChallengeMsg|_Msgs3] = Msgs2,
+    % Then challenge
+    [ChallengeMsg|Msgs4] = Msgs3,
     ?assertMatch({challenge, _, _}, ChallengeMsg),
-    
+
+    % Receipts and submit
+    lists:foreach(
+        fun({receipt, _}) -> ok;
+           (submit) -> ok;
+           (_) -> error     
+        end,
+        Msgs4
+    ),
+
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
     ?assert(meck:validate(miner_onion)),
@@ -173,11 +192,29 @@ loop(Acc) ->
             loop([Msg|Acc]);
         {trace, _, 'receive', {challenge, _, _}=Msg} ->
             loop([Msg|Acc]);
+        {trace, _, 'receive', {'$gen_cast', {receipt, _}=Msg}} ->
+            loop([Msg|Acc]);
+        {trace, _, 'receive', submit} ->
+            loop([submit|Acc]);
         _M ->
             loop(Acc)
     after 2500 ->
         lists:reverse(Acc)
     end.
+
+send_receipts(LatLongs) ->
+    lists:foreach(
+        fun({_LatLong, {PrivKey, PubKey}}) ->
+            Address = libp2p_crypto:pubkey_to_address(PubKey),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            {Mega, Sec, Micro} = os:timestamp(),
+            Timestamp = Mega * 1000000 * 1000000 + Sec * 1000000 + Micro,
+            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, <<>>),
+            SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
+            miner_poc_statem:receipt(SignedReceipt)
+        end,
+        LatLongs
+    ).
 
 build_asserts(LatLongs, {PrivKey, PubKey}) ->
     lists:foldl(
