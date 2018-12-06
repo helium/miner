@@ -529,18 +529,18 @@ maybe_assert_location(Location, Resolution) ->
                         {Old, New} when Old == New ->
                             ok;
                         {Old, New} ->
-                            try h3:parent(Old, h3:get_resolution(New)) == New of
+                            try (h3:get_resolution(New) < h3:get_resolution(Old) andalso h3:parent(Old, h3:get_resolution(New)) == New) of
                                 true ->
                                     %% new index is a parent of the old one
                                     ok;
                                 false ->
                                     %% check whether New Index is a child of the old one, more precise
-                                    case lists:member(New, h3:children(Old, Resolution)) of
-                                        true ->
-                                            blockchain_worker:assert_location_request(OwnerAddress, Location);
-                                        false ->
-                                            ok
-                                    end
+                                    %case Resolution > h3:get_resolution(Old) andalso lists:member(New, h3:children(Old, Resolution)) of
+                                        %true ->
+                                            blockchain_worker:assert_location_request(OwnerAddress, Location)
+                                        %false ->
+                                            %ok
+                                    %end
                             catch
                                 TypeOfError:Exception ->
                                     lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
