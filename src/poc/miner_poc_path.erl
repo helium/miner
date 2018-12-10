@@ -6,10 +6,10 @@
 -module(miner_poc_path).
 
 -export([
-    build/2
-    ,shortest/3
-    ,length/3
-    ,build_graph/2
+    build/2,
+    shortest/3,
+    length/3,
+    build_graph/2
 ]).
 
 -ifdef(TEST).
@@ -85,9 +85,9 @@ build_graph([Address0|Addresses], Gateways, Graph0) ->
                     Graph1 = maps:put(Address1, Neighbors1, Acc),
                     build_graph([A || {_, A} <- Neighbors1], Gateways, Graph1)
             end
-        end
-        ,maps:put(Address0, Neighbors0, Graph0)
-        ,Neighbors0
+        end,
+        maps:put(Address0, Neighbors0, Graph0),
+        Neighbors0
     ),
     case maps:size(Graph1) > 100 of
         false ->
@@ -129,8 +129,8 @@ neighbors(Address, Gateways) ->
             I = blockchain_ledger_gateway_v1:location(G),
             lists:member(I, KRing)
                 andalso Address =/= A
-        end
-        ,Gateways
+        end,
+        Gateways
     )),
     [{edge_weight(TargetGw, G), A} || {A, G} <- GwInRing].
 

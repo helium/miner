@@ -11,22 +11,22 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/5
-    ,send/1
-    ,socket/0
-    ,compact_key/0
-    ,construct_onion/1
-    ,decrypt/1
+    start_link/5,
+    send/1,
+    socket/0,
+    compact_key/0,
+    construct_onion/1,
+    decrypt/1
 ]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
 -export([
-    init/1
-    ,handle_call/3
-    ,handle_cast/2
-    ,handle_info/2
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2
 ]).
 
 -define(WRITE_RADIO_PACKET, 16#0).
@@ -34,11 +34,11 @@
 -define(READ_RADIO_PACKET, 16#81).
 
 -record(state, {
-    socket :: gen_tcp:socket()
-    ,compact_key :: ecc_compact:compact_key()
-    ,privkey
-    ,sender :: undefined | {pid(), term()}
-    ,controlling_process :: pid()
+    socket :: gen_tcp:socket(),
+    compact_key :: ecc_compact:compact_key(),
+    privkey,
+    sender :: undefined | {pid(), term()},
+    controlling_process :: pid()
 }).
 
 %% ------------------------------------------------------------------
@@ -108,10 +108,10 @@ handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({decrypt, <<IV:12/binary
-                        ,OnionCompactKey:32/binary
-                        ,Tag:4/binary
-                        ,CipherText/binary>>}
+handle_cast({decrypt, <<IV:12/binary,
+                        OnionCompactKey:32/binary,
+                        Tag:4/binary,
+                        CipherText/binary>>}
             ,#state{privkey=PrivKey, socket=Socket}=State) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
     PubKey = ecc_compact:recover_key(OnionCompactKey),

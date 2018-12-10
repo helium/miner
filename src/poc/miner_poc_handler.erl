@@ -12,18 +12,18 @@
 %% ------------------------------------------------------------------
 
 -export([
-    server/4
-    ,client/2
+    server/4,
+    client/2
 ]).
 
 %% ------------------------------------------------------------------
 %% libp2p_framed_stream Function Exports
 %% ------------------------------------------------------------------
 -export([
-    init/3
-    ,handle_data/3
-    ,handle_info/3
-    ,send/2
+    init/3,
+    handle_data/3,
+    handle_info/3,
+    send/2
 ]).
 
 -record(state, {}).
