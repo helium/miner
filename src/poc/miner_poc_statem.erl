@@ -11,30 +11,30 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1
-    ,receipt/1
+    start_link/1,
+    receipt/1
 ]).
 
 %% ------------------------------------------------------------------
 %% gen_statem Function Exports
 %% ------------------------------------------------------------------
 -export([
-    init/1
-    ,code_change/3
-    ,callback_mode/0
-    ,terminate/2
+    init/1,
+    code_change/3,
+    callback_mode/0,
+    terminate/2
 ]).
 
 %% ------------------------------------------------------------------
 %% gen_statem callbacks Exports
 %% ------------------------------------------------------------------
 -export([
-    requesting/3
-    ,mining/3
-    ,targeting/3
-    ,challenging/3
-    ,receiving/3
-    ,submiting/3
+    requesting/3,
+    mining/3,
+    targeting/3,
+    challenging/3,
+    receiving/3,
+    submiting/3
 ]).
 
 -ifdef(TEST).
@@ -46,12 +46,12 @@
 -define(BLOCK_DELAY, 30).
 
 -record(data, {
-    last_submit = 0 :: non_neg_integer()
-    ,address :: libp2p_crypto:address()
-    ,challengees = [] :: [libp2p_crypto:address()]
-    ,challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer()
-    ,receipts = [] :: blockchain_poc_receipt_v1:poc_receipts()
-    ,delay = ?BLOCK_DELAY :: non_neg_integer()
+    last_submit = 0 :: non_neg_integer(),
+    address :: libp2p_crypto:address(),
+    challengees = [] :: [libp2p_crypto:address()],
+    challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
+    receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
+    delay = ?BLOCK_DELAY :: non_neg_integer()
 }).
 
 %% ------------------------------------------------------------------
@@ -92,8 +92,8 @@ terminate(_Reason, _State) ->
 %% @end
 %%--------------------------------------------------------------------
 requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit=LastSubmit,
-                                                               address=Address,
-                                                               delay=Delay}=Data) ->
+                                                                     address=Address,
+                                                                     delay=Delay}=Data) ->
     CurrHeight = blockchain_worker:height(),
     lager:notice("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of

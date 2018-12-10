@@ -6,8 +6,8 @@
 -module(miner_poc).
 
 -export([
-    dial_framed_stream/3
-    ,add_stream_handler/1
+    dial_framed_stream/3,
+    add_stream_handler/1
 ]).
 
 -define(POC_VERSION, "miner_poc/1.0.0").
@@ -20,11 +20,11 @@
 -spec dial_framed_stream(pid(), string(), list()) -> {ok, pid()} | {error, any()} | ignore.
 dial_framed_stream(Swarm, Address, Args) ->
     libp2p_swarm:dial_framed_stream(
-        Swarm
-        ,Address
-        ,?POC_VERSION
-        ,libp2p_poc_handler
-        ,Args
+        Swarm,
+        Address,
+        ?POC_VERSION,
+        libp2p_poc_handler,
+        Args
     ).
 
 %%--------------------------------------------------------------------
@@ -35,7 +35,7 @@ dial_framed_stream(Swarm, Address, Args) ->
 add_stream_handler(Swarm) ->
     TID = libp2p_swarm:tid(Swarm),
     libp2p_swarm:add_stream_handler(
-        TID
-        ,?POC_VERSION
-        ,{libp2p_framed_stream, server, [libp2p_poc_handler, self(), TID]}
+        TID,
+        ?POC_VERSION,
+        {libp2p_framed_stream, server, [libp2p_poc_handler, self(), TID]}
     ).
