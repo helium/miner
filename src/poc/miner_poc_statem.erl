@@ -173,6 +173,7 @@ challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
             lager:notice("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:address_to_p2p(Start),
+            % TODO
             {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
             _ = miner_onion_handler:send(Stream, Onion),
             lager:notice("onion sent"),
