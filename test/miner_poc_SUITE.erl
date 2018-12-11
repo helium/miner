@@ -99,7 +99,7 @@ basic(_Config) ->
 
     % Start poc statem
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
-    _ = erlang:trace(Statem, true, ['receive', call]),
+    _ = erlang:trace(Statem, true, ['receive']),
 
     ?assertMatch({requesting, _}, sys:get_state(Statem)),
 
