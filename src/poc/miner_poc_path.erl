@@ -120,14 +120,25 @@ path(Graph, [{Cost, [Node | _] = Path} | Routes], End, Seen) ->
 %% @end
 %%--------------------------------------------------------------------
 neighbors(Address, Gateways) ->
-    % TODO: It should format with appropriate resolution
     TargetGw = maps:get(Address, Gateways),
     Index = blockchain_ledger_gateway_v1:location(TargetGw),
-    KRing = h3:k_ring(Index, 1),
+    KRing = case h3:get_resolution(Index) of
+        Res when Res < 9 ->
+            [];
+        9 ->
+            h3:k_ring(Index, 1);
+        Res when Res > 9 ->
+            Parent = h3:parent(Index, 9),
+            h3:k_ring(Parent, 1)
+    end,
     GwInRing = maps:to_list(maps:filter(
         fun(A, G) ->
             I = blockchain_ledger_gateway_v1:location(G),
-            lists:member(I, KRing)
+            I1 = case h3:get_resolution(I) of
+                R when R =< 9 -> I;
+                R when R > 9 -> h3:parent(I, 9)
+            end,
+            lists:member(I1, KRing)
                 andalso Address =/= A
         end,
         Gateways
@@ -156,7 +167,7 @@ neighbors_test() ->
         {{37.781909, -122.445411}, 0.99},
         {{37.783371, -122.447879}, 0.99},
         {{37.780827, -122.44716}, 0.99},
-        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+        {{38.897675, -77.036530}, 0.12} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
     Neighbors = neighbors(Target, Gateways),
@@ -184,7 +195,7 @@ build_graph_test() ->
         {{37.781909, -122.445411}, 0.99},
         {{37.783371, -122.447879}, 0.99},
         {{37.780827, -122.44716}, 0.99},
-        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+        {{38.897675, -77.036530}, 0.12} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
 
@@ -208,7 +219,7 @@ build_graph_in_line_test() ->
         {{37.781349, -122.458892}, 0.95},
         {{37.781468, -122.456617}, 0.94},
         {{37.781637, -122.4543}, 0.93},
-        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+        {{38.897675, -77.036530}, 0.12} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
 
@@ -258,7 +269,7 @@ build_test() ->
         {{37.781349, -122.458892}, 0.75},
         {{37.781468, -122.456617}, 0.75},
         {{37.781637, -122.4543}, 0.99},
-        {{37.832976, -122.12726}, 0.12} % This should be excluded cause too far
+        {{38.897675, -77.036530}, 0.12} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
 
@@ -286,7 +297,7 @@ build_with_zero_score_test() ->
         {{37.781349, -122.458892}, 0.0},
         {{37.781468, -122.456617}, 0.0},
         {{37.781637, -122.4543}, 0.0},
-        {{37.832976, -122.12726}, 0.0} % This should be excluded cause too far
+        {{38.897675, -77.036530}, 0.0} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
     {ok, Path} = build(Target, Gateways),
@@ -298,7 +309,8 @@ build_gateways(LatLongs) ->
         fun({LatLong, Score}, Acc) ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
-            Index = h3:from_geo(LatLong, 9),
+            Res = rand:uniform(7) + 8,
+            Index = h3:from_geo(LatLong, Res),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
             G1 = blockchain_ledger_gateway_v1:score(Score, G0),
             maps:put(Address, G1, Acc)
