@@ -48,6 +48,7 @@
 -record(data, {
     last_submit = 0 :: non_neg_integer(),
     address :: libp2p_crypto:address(),
+    secret :: binary() | undefined,
     challengees = [] :: [libp2p_crypto:address()],
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
@@ -100,12 +101,13 @@ requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit
         false ->
             {keep_state, Data};
         true ->
-            Tx = blockchain_txn_poc_request_v1:new(Address),
+            Secret = crypto:strong_rand_bytes(8),
+            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret)),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             lager:notice("submited poc request"),
-            {next_state, mining, Data}
+            {next_state, mining, Data#data{secret=Secret}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -218,8 +220,8 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submiting(info, submit, #data{address=Address, receipts=Receipts}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address),
+submiting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
