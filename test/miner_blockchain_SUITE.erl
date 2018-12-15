@@ -76,7 +76,10 @@ genesis_load_test(Config) ->
     ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
                                                 true == ct_rpc:call(Miner, miner, in_consensus, [])
                                         end, Miners)),
-    GenesisBlock = ct_rpc:call(ConsensusMiner, blockchain_worker, genesis_block, []),
+
+    Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
+
+    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Blockchain]),
 
     GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
@@ -99,8 +102,10 @@ growth_test(Config) ->
     %% get the first consensus miner
     FirstConsensusMiner = hd(ConsensusMiners),
 
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
     %% get the genesis block from first consensus miner
-    GenesisBlock = ct_rpc:call(FirstConsensusMiner, blockchain_worker, genesis_block, []),
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
 
     %% check genesis load results for non consensus miners
     _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
@@ -116,7 +121,7 @@ growth_test(Config) ->
                                    end, 60, timer:seconds(10)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
-                                  H = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                  {ok, H} = ct_rpc:call(Miner, blockchain_worker, height, []),
                                   [{Miner, H} | Acc]
                           end, [], Miners),
 

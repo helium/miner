@@ -24,8 +24,9 @@
          }).
 
 stamp(Chain) ->
+    {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
-    {erlang:system_time(seconds), blockchain:head_hash(Chain)}.
+    {erlang:system_time(seconds), HeadHash}.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),

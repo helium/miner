@@ -385,7 +385,7 @@ handle_info(maybe_restore_consensus, State) ->
             {noreply, State};
         Ledger ->
             case blockchain_ledger_v1:consensus_members(Ledger) of
-                {error, _} -> 
+                {error, _} ->
                     {noreply, State};
                 {ok, Members} ->
                     ConsensusAddrs = lists:sort(Members),

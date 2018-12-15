@@ -72,14 +72,29 @@ else
 fi
 
 # show which node is in the consensus group
+non_consensus_node=0
 for node in ${nodes[@]}; do
     if [[ $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info in_consensus) = *true* ]]; then
         echo "miner-dev$node, in_consensus: true"
     else
         echo "miner-dev$node, in_consensus: false"
-        # load genesis block from file on this node
-        genesis_file=$(ls -d $PWD/$(find ./_build/dev/rel/miner-dev*/data/blockchain -type f -name "genesis" | head -n 1))
-        echo "loading genesis file $genesis_file on miner-dev$node"
-        ./_build/dev/rel/miner-dev$node/bin/miner-dev$node genesis load $genesis_file
+        non_consensus_node=$node
+        # load blockchain from dbfile on this node
+        # blockchain_db_file=$(ls -d $PWD/$(find ./_build/dev/rel/miner-dev*/data -name "blockchain.db" | head -n 1))
+        # echo "loading blockchain file $blockchain_db_file on miner-dev$node"
+        # ./_build/dev/rel/miner-dev$node/bin/miner-dev$node genesis load $blockchain_db_file
     fi
 done
+echo "Node not in consensus: $non_consensus_node"
+
+genesis_block=0
+# get the genesis block from one of the consensus nodes
+for node in ${nodes[@]}; do
+    if [[ $(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info in_consensus) = *true* ]]; then
+        genesis_block=$(./_build/dev/rel/miner-dev$node/bin/miner-dev$node eval 'term_to_binary(element(2, blockchain:genesis_block(blockchain_worker:blockchain())))')
+        break
+    fi
+done
+echo "Genesis block: $genesis_block"
+
+echo "Loading Genesis block on $non_consensus_node: $(./_build/dev/rel/miner-dev$non_consensus_node/bin/miner-dev$non_consensus_node genesis import $genesis_block)"
