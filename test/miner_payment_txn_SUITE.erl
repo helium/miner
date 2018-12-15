@@ -88,11 +88,22 @@ single_payment_test(Config) ->
     5000 = get_balance(Payee, PayerAddr),
 
     Ledger = ct_rpc:call(Payer, blockchain_worker, ledger, []),
+	ct:pal("Ledger: ~p", [Ledger]),
 
     {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+	ct:pal("Fee: ~p", [Fee]),
 
     %% send some helium tokens from payer to payee
-    ok = ct_rpc:call(Payer, blockchain_worker, spend, [PayeeAddr, 1000, Fee]),
+	Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+	ct:pal("Txn: ~p", [Txn]),
+
+	{ok, _Pubkey, SigFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+	ct:pal("SigFun: ~p", [SigFun]),
+
+	SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
+	ct:pal("SignedTxn: ~p", [SignedTxn]),
+
+	ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [payment_txn, SignedTxn]),
 
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
@@ -106,7 +117,6 @@ single_payment_test(Config) ->
             true =:= lists:all(
                 fun(Miner) ->
                     {ok, Height} = ct_rpc:call(Miner, blockchain_worker, height, []),
-                    ct:pal("Miner: ~p, Height: ~p", [Miner, Height]),
                     Height >= CurrentHeight + 2
                 end,
                 Miners

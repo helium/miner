@@ -5,25 +5,25 @@
 -include_lib("kernel/include/inet.hrl").
 
 -export([
-         init_per_suite/1
-         ,end_per_suite/1
-         ,init_per_testcase/2
-         ,end_per_testcase/2
-         ,all/0
+         init_per_suite/1,
+         end_per_suite/1,
+         init_per_testcase/2,
+         end_per_testcase/2,
+         all/0
         ]).
 
 -export([
-         consensus_test/1
-         ,genesis_load_test/1
-         ,growth_test/1
+         consensus_test/1,
+         genesis_load_test/1,
+         growth_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          consensus_test
-          ,genesis_load_test
-          ,growth_test
+          consensus_test,
+          genesis_load_test,
+          growth_test
          ].
 
 init_per_suite(Config) ->
@@ -115,7 +115,7 @@ growth_test(Config) ->
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Height = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain_worker, height, []),
                                                                      Height >= 3
                                                              end, Miners)
                                    end, 60, timer:seconds(10)),

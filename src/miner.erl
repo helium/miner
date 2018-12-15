@@ -75,10 +75,7 @@ init(Args) ->
 
     self() ! maybe_restore_consensus,
 
-    Chain = blockchain_worker:blockchain(),
-
     {ok, #state{curve=Curve,
-                blockchain=Chain,
                 block_time=BlockTime,
                 batch_size=BatchSize,
                 gps_signal=GPSSignal,
@@ -274,7 +271,9 @@ handle_call(dkg_status, _From, State) ->
                      end
              end,
     {reply, Status, State};
-handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State=#state{blockchain=Chain}) ->
+handle_call({create_block, Stamps, Transactions, HBBFTRound},
+            _From,
+            State=#state{blockchain=Chain}) when Chain /= undefined ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
@@ -333,7 +332,6 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Address = libp2p_crypto:pubkey_to_address(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
-                                                                                                 blockchain=Chain,
                                                                                                  block_time=BlockTime}) ->
     GenesisBlock = binary_to_term(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:sign_block(term_to_binary(Signatures), GenesisBlock),
@@ -348,6 +346,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
     {ok, ConsensusAddrs} = blockchain_worker:consensus_addrs(),
+    Chain = blockchain_worker:blockchain(),
     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                       State#state.consensus_pos,
                                       N,
@@ -361,7 +360,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     lager:info("~p. Group: ~p~n", [self(), Group]),
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-    {reply, ok, State#state{consensus_group=Group, block_timer=Ref}};
+    %% NOTE: I *think* this is the only place to store the chain reference in the miner state
+    {reply, ok, State#state{consensus_group=Group, block_timer=Ref, blockchain=Chain}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
@@ -418,9 +418,11 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_group=ConsensusGroup,
-                                                                      blockchain=Chain,
-                                                                      block_time=BlockTime}) when ConsensusGroup /= undefined ->
+handle_info({blockchain_event, {add_block, Hash, Sync}},
+            State=#state{consensus_group=ConsensusGroup,
+                         blockchain=Chain,
+                         block_time=BlockTime}) when ConsensusGroup /= undefined andalso
+                                                     Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
