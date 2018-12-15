@@ -10,20 +10,20 @@
 
 -record(state, {
           %% NOTE: a miner may or may not participate in consensus
-          consensus_group :: undefined | pid()
-          ,dkg_group :: undefined | pid()
-          ,consensus_pos :: undefined | pos_integer()
-          ,batch_size = 500 :: pos_integer()
-          ,config_proxy ::  pid() | undefined
-          ,gps_signal :: ebus:filter_id()
-          ,add_gateway_signal :: ebus:filter_id()
-          ,blockchain_dir :: file:name()
+          consensus_group :: undefined | pid(),
+          dkg_group :: undefined | pid(),
+          consensus_pos :: undefined | pos_integer(),
+          batch_size = 500 :: pos_integer(),
+          config_proxy ::  pid() | undefined,
+          gps_signal :: ebus:filter_id(),
+          add_gateway_signal :: ebus:filter_id(),
+          blockchain :: blockchain:blockchain(),
           %% but every miner keeps a timer reference?
-          ,block_timer = make_ref() :: reference()
-          ,block_time = 15000 :: number()
+          block_timer = make_ref() :: reference(),
+          block_time = 15000 :: number(),
           %% TODO: this probably doesn't have to be here
-          ,curve :: 'SS512'
-          ,dkg_await :: undefined | {reference(), term()}
+          curve :: 'SS512',
+          dkg_await :: undefined | {reference(), term()}
          }).
 
 -export([start_link/1
@@ -75,10 +75,10 @@ init(Args) ->
 
     self() ! maybe_restore_consensus,
 
-    Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
+    Chain = blockchain_worker:blockchain(),
 
     {ok, #state{curve=Curve,
-                blockchain_dir=Dir,
+                blockchain=Chain,
                 block_time=BlockTime,
                 batch_size=BatchSize,
                 gps_signal=GPSSignal,
@@ -274,12 +274,12 @@ handle_call(dkg_status, _From, State) ->
                      end
              end,
     {reply, Status, State};
-handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
+handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State=#state{blockchain=Chain}) ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
-    {ok, CurrentBlock} = blockchain:get_block(head, State#state.blockchain_dir),
-    CurrentBlockHash = blockchain_block:hash_block(CurrentBlock),
+    {ok, CurrentBlock} = blockchain:head_block(Chain),
+    {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
         [CurrentBlockHash] ->
@@ -332,7 +332,9 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Signature = SignFun(GenesisBlock),
     Address = libp2p_crypto:pubkey_to_address(MyPubKey),
     {reply, {ok, Address, Signature}, State};
-handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize, block_time=BlockTime}) ->
+handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
+                                                                                                 blockchain=Chain,
+                                                                                                 block_time=BlockTime}) ->
     GenesisBlock = binary_to_term(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:sign_block(term_to_binary(Signatures), GenesisBlock),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -345,13 +347,14 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
-    GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
+    {ok, ConsensusAddrs} = blockchain_worker:consensus_addrs(),
+    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                       State#state.consensus_pos,
                                       N,
                                       F,
                                       BatchSize,
                                       PrivKey,
-                                      State#state.blockchain_dir]],
+                                      Chain]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
@@ -411,11 +414,12 @@ handle_info(block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
 handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_group=ConsensusGroup,
-                                                                block_time=BlockTime}) when ConsensusGroup /= undefined ->
+                                                                      blockchain=Chain,
+                                                                      block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
-    NewState = case blockchain:get_block(Hash, State#state.blockchain_dir) of
+    NewState = case blockchain:get_block(Hash, Chain) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,

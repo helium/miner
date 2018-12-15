@@ -3,7 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"e3393db0ce316541aa6691a75fbc5da443fd3617"}},
+       {ref,"18f1bc62a3979a5169f56372c217b7205d9b95dd"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
@@ -70,6 +70,7 @@
   3},
  {<<"ranch">>,{pkg,<<"ranch">>,<<"1.5.0">>},2},
  {<<"rand_compat">>,{pkg,<<"rand_compat">>,<<"0.0.3">>},3},
+ {<<"recon">>,{pkg,<<"recon">>,<<"2.3.6">>},0},
  {<<"relcast">>,
   {git,"https://github.com/helium/relcast.git",
        {ref,"5445f490ef06fbf513e4b0445b6579a87eaad4f9"}},
@@ -100,5 +101,6 @@
  {<<"nat">>, <<"8E6A86D5A4419CBCE4C6E6A48EA77A106CE2598A04CDC5820D2840E9DBDFF04E">>},
  {<<"ranch">>, <<"F04166F456790FEE2AC1AA05A02745CC75783C2BFB26D39FAF6AEFC9A3D3A58A">>},
  {<<"rand_compat">>, <<"011646BC1F0B0C432FE101B816F25B9BBB74A085713CEE1DAFD2D62E9415EAD3">>},
+ {<<"recon">>, <<"2BCAD0CF621FB277CABBB6413159CD3AA30265C2DEE42C968697988B30108604">>},
  {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>}]}
 ].
