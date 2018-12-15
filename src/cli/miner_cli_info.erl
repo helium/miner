@@ -66,7 +66,8 @@ info_height_usage() ->
     ].
 
 info_height(["info", "height"], [], []) ->
-    [clique_status:text(integer_to_list(blockchain_worker:height()))];
+    {ok, Height} = blockchain_worker:height(),
+    [clique_status:text(integer_to_list(Height))];
 info_height([_, _, _], [], []) ->
     usage.
 

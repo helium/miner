@@ -379,36 +379,41 @@ handle_cast(_Msg, State) ->
 %% TODO: how to restore state when consensus group changes
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 handle_info(maybe_restore_consensus, State) ->
-     Ledger = blockchain_worker:ledger(),
-     case Ledger of
-         undefined ->
-             {noreply, State};
-         Ledger ->
-             ConsensusAddrs = lists:sort(blockchain_ledger_v1:consensus_members(Ledger)),
-             case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
-                 true ->
-                     lager:info("restoring consensus group"),
-                     Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
-                     N = length(ConsensusAddrs),
-                     F = (N div 3),
-                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-                                                       Pos,
-                                                       N,
-                                                       F,
-                                                       State#state.batch_size,
-                                                       undefined,
-                                                       self()]],
-                     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
-                     lager:info("~p. Group: ~p~n", [self(), Group]),
-                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-                     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
-                     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
-                 false ->
-                     {noreply, State}
-             end
-     end;
+    Ledger = blockchain_worker:ledger(),
+    case Ledger of
+        undefined ->
+            {noreply, State};
+        Ledger ->
+            case blockchain_ledger_v1:consensus_members(Ledger) of
+                {error, _} -> 
+                    {noreply, State};
+                {ok, Members} ->
+                    ConsensusAddrs = lists:sort(Members),
+                    case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
+                        true ->
+                            lager:info("restoring consensus group"),
+                            Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
+                            N = length(ConsensusAddrs),
+                            F = (N div 3),
+                            GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                              Pos,
+                                                              N,
+                                                              F,
+                                                              State#state.batch_size,
+                                                              undefined,
+                                                              self()]],
+                            %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
+                            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
+                            lager:info("~p. Group: ~p~n", [self(), Group]),
+                            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                            {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+                            Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+                            {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
+                        false ->
+                            {noreply, State}
+                    end
+            end
+    end;
 handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
@@ -516,13 +521,13 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     end.
 
 -spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
-maybe_assert_location(Location, Resolution) ->
+maybe_assert_location(Location, _Resolution) ->
     Address = blockchain_swarm:address(),
     Ledger = blockchain_worker:ledger(),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        undefined ->
+        {error, _} ->
             ok;
-        GwInfo ->
+        {ok, GwInfo} ->
             OwnerAddress = blockchain_ledger_gateway_v1:owner_address(GwInfo),
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
