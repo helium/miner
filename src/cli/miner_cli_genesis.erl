@@ -203,9 +203,13 @@ genesis_import_usage() ->
      ]
     ].
 
-genesis_import(["genesis", "import", GenesisBlock], [], []) ->
-    io_lib:format("GenesisBlock: ~p~n", [GenesisBlock]),
-    ok = blockchain_worker:integrate_genesis_block(binary_to_term(GenesisBlock)),
-    [clique_status:text("ok")];
+genesis_import(["genesis", "import", GenesisFile], [], []) ->
+    case file:consult(GenesisFile) of
+        {ok, [Bin]} ->
+            ok = blockchain_worker:integrate_genesis_block(binary_to_term(Bin)),
+            [clique_status:text("ok")];
+        {error, Reason} ->
+            [clique_status:text(io_lib:format("~p", [Reason]))]
+    end;
 genesis_import([_, _, _], [], []) ->
     usage.
