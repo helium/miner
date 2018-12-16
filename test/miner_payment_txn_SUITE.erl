@@ -64,7 +64,8 @@ init_per_testcase(_TestCase, Config0) ->
 
     ok = miner_ct_utils:wait_until(fun() ->
                             lists:all(fun(M) ->
-                                              {ok, 1} == ct_rpc:call(M, blockchain_worker, height, [])
+                                              C = ct_rpc:call(M, blockchain_worker, blockchain, []),
+                                              {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
                                       end, Miners)
                     end),
 
@@ -87,7 +88,8 @@ single_payment_test(Config) ->
     5000 = get_balance(Payer, PayerAddr),
     5000 = get_balance(Payee, PayerAddr),
 
-    Ledger = ct_rpc:call(Payer, blockchain_worker, ledger, []),
+    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
 	ct:pal("Ledger: ~p", [Ledger]),
 
     {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
@@ -107,7 +109,8 @@ single_payment_test(Config) ->
 
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
-    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain_worker, height, []),
+    Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
     ct:pal("Payer: ~p, CurrentHeight: ~p", [Payer, CurrentHeight]),
 
     %% XXX: wait till the blockchain grows by 2 blocks
@@ -116,7 +119,8 @@ single_payment_test(Config) ->
         fun() ->
             true =:= lists:all(
                 fun(Miner) ->
-                    {ok, Height} = ct_rpc:call(Miner, blockchain_worker, height, []),
+                    C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
                     Height >= CurrentHeight + 2
                 end,
                 Miners
@@ -139,6 +143,7 @@ single_payment_test(Config) ->
 
 
 get_balance(Miner, Addr) ->
-    Ledger = ct_rpc:call(Miner, blockchain_worker, ledger, []),
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
     ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).

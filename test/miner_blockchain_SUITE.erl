@@ -115,13 +115,15 @@ growth_test(Config) ->
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                                                     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
                                                                      Height >= 3
                                                              end, Miners)
                                    end, 60, timer:seconds(10)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
-                                  {ok, H} = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                  C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
                                   [{Miner, H} | Acc]
                           end, [], Miners),
 
