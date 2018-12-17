@@ -63,11 +63,11 @@ init_per_testcase(_TestCase, Config0) ->
                                               end, NonConsensusMiners),
 
     ok = miner_ct_utils:wait_until(fun() ->
-                            lists:all(fun(M) ->
-                                              C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-                                              {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-                                      end, Miners)
-                    end),
+                                           lists:all(fun(M) ->
+                                                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
+                                                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
+                                                     end, Miners)
+                                   end),
 
     Config.
 
@@ -77,11 +77,8 @@ end_per_testcase(_TestCase, Config) ->
 single_payment_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     [Payer, Payee | _Tail] = Miners,
-    ct:pal("Payer: ~p, Payee :~p", [Payer, Payee]),
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, address, []),
-    ct:pal("PayerAddr: ~p", [PayerAddr]),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, address, []),
-    ct:pal("PayeeAddr: ~p", [PayeeAddr]),
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere
@@ -90,50 +87,42 @@ single_payment_test(Config) ->
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-	ct:pal("Ledger: ~p", [Ledger]),
 
     {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-	ct:pal("Fee: ~p", [Fee]),
 
     %% send some helium tokens from payer to payee
-	Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
-	ct:pal("Txn: ~p", [Txn]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
 
-	{ok, _Pubkey, SigFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
-	ct:pal("SigFun: ~p", [SigFun]),
+    {ok, _Pubkey, SigFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
-	SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
-	ct:pal("SignedTxn: ~p", [SignedTxn]),
+    SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
 
-	ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [payment_txn, SignedTxn]),
+    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [payment_txn, SignedTxn]),
 
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
     Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
-    ct:pal("Payer: ~p, CurrentHeight: ~p", [Payer, CurrentHeight]),
 
     %% XXX: wait till the blockchain grows by 2 blocks
     %% assuming that the transaction makes it within 2 blocks
     ok = miner_ct_utils:wait_until(
-        fun() ->
-            true =:= lists:all(
-                fun(Miner) ->
-                    C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                    Height >= CurrentHeight + 2
-                end,
-                Miners
-            )
-        end,
-        60,
-        timer:seconds(1)
-    ),
+           fun() ->
+                   true =:= lists:all(
+                              fun(Miner) ->
+                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                      Height >= CurrentHeight + 2
+                              end,
+                              Miners
+                             )
+           end,
+           60,
+           timer:seconds(1)
+          ),
 
     PayerBalance = get_balance(Payer, PayerAddr),
     PayeeBalance = get_balance(Payee, PayeeAddr),
-
-    ct:pal("MARKER ~p", [{Fee, PayeeBalance, PayerBalance}]),
 
     4000 = PayerBalance + Fee,
     6000 = PayeeBalance,
