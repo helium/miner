@@ -10,20 +10,20 @@
 
 -record(state, {
           %% NOTE: a miner may or may not participate in consensus
-          consensus_group :: undefined | pid()
-          ,dkg_group :: undefined | pid()
-          ,consensus_pos :: undefined | pos_integer()
-          ,batch_size = 500 :: pos_integer()
-          ,config_proxy ::  pid() | undefined
-          ,gps_signal :: ebus:filter_id()
-          ,add_gateway_signal :: ebus:filter_id()
-          ,blockchain_dir :: file:name()
+          consensus_group :: undefined | pid(),
+          dkg_group :: undefined | pid(),
+          consensus_pos :: undefined | pos_integer(),
+          batch_size = 500 :: pos_integer(),
+          config_proxy ::  pid() | undefined,
+          gps_signal :: ebus:filter_id(),
+          add_gateway_signal :: ebus:filter_id(),
+          blockchain :: undefined | blockchain:blockchain(),
           %% but every miner keeps a timer reference?
-          ,block_timer = make_ref() :: reference()
-          ,block_time = 15000 :: number()
+          block_timer = make_ref() :: reference(),
+          block_time = 15000 :: number(),
           %% TODO: this probably doesn't have to be here
-          ,curve :: 'SS512'
-          ,dkg_await :: undefined | {reference(), term()}
+          curve :: 'SS512',
+          dkg_await :: undefined | {reference(), term()}
          }).
 
 -export([start_link/1
@@ -75,10 +75,7 @@ init(Args) ->
 
     self() ! maybe_restore_consensus,
 
-    Dir = blockchain:base_dir(application:get_env(blockchain, base_dir, "data")),
-
     {ok, #state{curve=Curve,
-                blockchain_dir=Dir,
                 block_time=BlockTime,
                 batch_size=BatchSize,
                 gps_signal=GPSSignal,
@@ -274,17 +271,19 @@ handle_call(dkg_status, _From, State) ->
                      end
              end,
     {reply, Status, State};
-handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
+handle_call({create_block, Stamps, Transactions, HBBFTRound},
+            _From,
+            State=#state{blockchain=Chain}) when Chain /= undefined ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
-    {ok, CurrentBlock} = blockchain:get_block(head, State#state.blockchain_dir),
-    CurrentBlockHash = blockchain_block:hash_block(CurrentBlock),
+    {ok, CurrentBlock} = blockchain:head_block(Chain),
+    {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
         [CurrentBlockHash] ->
             SortedTransactions = lists:sort(fun blockchain_transactions:sort/2, Transactions),
-            {ValidTransactions, InvalidTransactions} = blockchain_transactions:validate(SortedTransactions, blockchain_worker:ledger()),
+            {ValidTransactions, InvalidTransactions} = blockchain_transactions:validate(SortedTransactions, blockchain:ledger(Chain)),
             %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
             LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
             BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
@@ -308,7 +307,8 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound}, _From, State) ->
             {reply, {error, multiple_hashes}, State}
     end;
 handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus_group=ConsensusGroup,
-                                                   block_time=BlockTime}) when ConsensusGroup /= undefined ->
+                                                                       blockchain=Chain,
+                                                                       block_time=BlockTime}) when ConsensusGroup /= undefined ->
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
     %% * cancel the block timer
     %% * sign the block
@@ -316,10 +316,52 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * add the block to blockchain
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
+    Hash = blockchain_block:hash_block(Block),
     LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
     NextBlockTime = max(0, erlang:system_time(seconds) - (LastBlockTimestamp + BlockTime)),
     Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
-    ok = blockchain_worker:add_block(Block, blockchain_swarm:address()),
+    case blockchain:head_hash(Chain) of
+        {error, _Reason} ->
+            lager:error("could not get head hash ~p", [_Reason]);
+        {ok, Head} ->
+            case blockchain_block:prev_hash(Block) =:= Head of
+                true ->
+                    lager:info("prev hash matches the gossiped block"),
+                    Ledger = blockchain:ledger(Chain),
+                    case blockchain_ledger_v1:consensus_members(Ledger) of
+                        {error, _Reason} ->
+                            lager:error("could not get consensus_members ~p", [_Reason]);
+                        {ok, ConsensusAddrs} ->
+                            N = length(ConsensusAddrs),
+                            F = ((N-1) div 3),
+                            case blockchain_block:verify_signature(Block,
+                                                                   ConsensusAddrs,
+                                                                   blockchain_block:signature(Block),
+                                                                   N-F)
+                            of
+                                {true, _} ->
+                                    case blockchain:add_block(Block, Chain) of
+                                        {error, _Reason} ->
+                                            lager:error("failed to add block ~p", [_Reason]);
+                                        ok ->
+                                            lager:info("sending the gossipped block to other workers"),
+                                            Swarm = blockchain_swarm:swarm(),
+                                            Address = libp2p_swarm:address(Swarm),
+                                            libp2p_group_gossip:send(
+                                              libp2p_swarm:gossip_group(Swarm),
+                                              ?GOSSIP_PROTOCOL,
+                                              term_to_binary({block, Address, Block})
+                                             ),
+                                            ok = blockchain_worker:notify({add_block, Hash, true})
+                                    end;
+                                false ->
+                                    lager:warning("signature on block ~p is invalid", [Block])
+                            end
+                    end;
+                false when Hash == Head ->
+                    lager:info("already have this block")
+            end
+    end,
     {reply, ok, State#state{block_timer=Ref}};
 handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
     Reply = case Pos of
@@ -332,7 +374,8 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Signature = SignFun(GenesisBlock),
     Address = libp2p_crypto:pubkey_to_address(MyPubKey),
     {reply, {ok, Address, Signature}, State};
-handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize, block_time=BlockTime}) ->
+handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
+                                                                                                 block_time=BlockTime}) ->
     GenesisBlock = binary_to_term(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:sign_block(term_to_binary(Signatures), GenesisBlock),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -345,20 +388,23 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
     ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
     N = blockchain_worker:num_consensus_members(),
     F = ((N-1) div 3),
-    GroupArg = [miner_hbbft_handler, [blockchain_worker:consensus_addrs(),
+    {ok, ConsensusAddrs} = blockchain_worker:consensus_addrs(),
+    Chain = blockchain_worker:blockchain(),
+    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                       State#state.consensus_pos,
                                       N,
                                       F,
                                       BatchSize,
                                       PrivKey,
-                                      State#state.blockchain_dir]],
+                                      Chain]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
     lager:info("~p. Group: ~p~n", [self(), Group]),
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-    {reply, ok, State#state{consensus_group=Group, block_timer=Ref}};
+    %% NOTE: I *think* this is the only place to store the chain reference in the miner state
+    {reply, ok, State#state{consensus_group=Group, block_timer=Ref, blockchain=Chain}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
@@ -376,46 +422,55 @@ handle_cast(_Msg, State) ->
 %% TODO: how to restore state when consensus group changes
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 handle_info(maybe_restore_consensus, State) ->
-     Ledger = blockchain_worker:ledger(),
-     case Ledger of
-         undefined ->
-             {noreply, State};
-         Ledger ->
-             ConsensusAddrs = lists:sort(blockchain_ledger_v1:consensus_members(Ledger)),
-             case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
-                 true ->
-                     lager:info("restoring consensus group"),
-                     Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
-                     N = length(ConsensusAddrs),
-                     F = (N div 3),
-                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-                                                       Pos,
-                                                       N,
-                                                       F,
-                                                       State#state.batch_size,
-                                                       undefined,
-                                                       self()]],
-                     %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
-                     lager:info("~p. Group: ~p~n", [self(), Group]),
-                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-                     Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
-                     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos}};
-                 false ->
-                     {noreply, State}
-             end
-     end;
+    Chain = blockchain_worker:blockchain(),
+    case Chain of
+        undefined ->
+            {noreply, State};
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            case blockchain_ledger_v1:consensus_members(Ledger) of
+                {error, _} ->
+                    {noreply, State#state{blockchain=Chain}};
+                {ok, Members} ->
+                    ConsensusAddrs = lists:sort(Members),
+                    case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
+                        true ->
+                            lager:info("restoring consensus group"),
+                            Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
+                            N = length(ConsensusAddrs),
+                            F = (N div 3),
+                            GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                              Pos,
+                                                              N,
+                                                              F,
+                                                              State#state.batch_size,
+                                                              undefined,
+                                                              self()]],
+                            %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
+                            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
+                            lager:info("~p. Group: ~p~n", [self(), Group]),
+                            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                            {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+                            Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+                            {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
+                        false ->
+                            {noreply, State#state{blockchain=Chain}}
+                    end
+            end
+    end;
 handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_group=ConsensusGroup,
-                                                                block_time=BlockTime}) when ConsensusGroup /= undefined ->
+handle_info({blockchain_event, {add_block, Hash, Sync}},
+            State=#state{consensus_group=ConsensusGroup,
+                         blockchain=Chain,
+                         block_time=BlockTime}) when ConsensusGroup /= undefined andalso
+                                                     Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
-    NewState = case blockchain:get_block(Hash, State#state.blockchain_dir) of
+    NewState = case blockchain:get_block(Hash, Chain) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
@@ -427,19 +482,19 @@ handle_info({blockchain_event, {add_block, Hash, Sync}}, State=#state{consensus_
                        State
                end,
     {noreply, NewState};
-handle_info({ebus_signal, _, SignalID, Msg}, State=#state{gps_signal=SignalID}) ->
+handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_signal=SignalID}) ->
     case ebus_message:args(Msg) of
         {ok, [#{"lat" := Lat,
                 "lon" := Lon,
                 "height" := Height,
                 "h_accuracy" := HorizontalAcc
                }]} ->
-            case blockchain_worker:blockchain() /= undefined of
+            case Chain /= undefined of
                 true ->
                     %% pick the best h3 index we can for the resolution
                     {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
                     lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
-                    maybe_assert_location(H3Index, Resolution);
+                    maybe_assert_location(H3Index, Resolution, Chain);
                 false ->
                     ok
             end;
@@ -490,7 +545,8 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
             GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
-            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions),
+            MetaData = #{hbbft_round => 0, block_time => 0},
+            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions, MetaData),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
                                             N,
@@ -511,14 +567,14 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
--spec maybe_assert_location(h3:index(), h3:resolution()) -> ok.
-maybe_assert_location(Location, Resolution) ->
+-spec maybe_assert_location(h3:index(), h3:resolution(), blockchain:blockchain()) -> ok.
+maybe_assert_location(Location, _Resolution, Chain) ->
     Address = blockchain_swarm:address(),
-    Ledger = blockchain_worker:ledger(),
+    Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        undefined ->
+        {error, _} ->
             ok;
-        GwInfo ->
+        {ok, GwInfo} ->
             OwnerAddress = blockchain_ledger_gateway_v1:owner_address(GwInfo),
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->

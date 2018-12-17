@@ -148,10 +148,10 @@ random_n(N, List) ->
 shuffle(List) ->
     [x || {_,x} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
-init_per_testcase(_TestCase, Config) ->
+init_per_testcase(TestCase, Config) ->
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
-    case net_kernel:start([list_to_atom("runner@"++Hostname), shortnames]) of
+    case net_kernel:start([list_to_atom("runner-miner@"++Hostname), shortnames]) of
         {ok, _} -> ok;
         {error, {already_started, _}} -> ok;
         {error, {{already_started, _},_}} -> ok
@@ -179,12 +179,12 @@ init_per_testcase(_TestCase, Config) ->
                                                ct_rpc:call(Miner, application, load, [blockchain]),
                                                ct_rpc:call(Miner, application, load, [libp2p]),
                                                %% give each miner its own log directory
-                                               ct_rpc:call(Miner, application, set_env, [lager, log_root, "log/"++atom_to_list(Miner)]),
-
+                                               LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
+                                               ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
                                                %% set blockchain configuration
                                                {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
                                                Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
-                                               BaseDir = "data_" ++ atom_to_list(Miner),
+                                               BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),

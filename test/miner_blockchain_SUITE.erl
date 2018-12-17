@@ -5,25 +5,25 @@
 -include_lib("kernel/include/inet.hrl").
 
 -export([
-         init_per_suite/1
-         ,end_per_suite/1
-         ,init_per_testcase/2
-         ,end_per_testcase/2
-         ,all/0
+         init_per_suite/1,
+         end_per_suite/1,
+         init_per_testcase/2,
+         end_per_testcase/2,
+         all/0
         ]).
 
 -export([
-         consensus_test/1
-         ,genesis_load_test/1
-         ,growth_test/1
+         consensus_test/1,
+         genesis_load_test/1,
+         growth_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          consensus_test
-          ,genesis_load_test
-          ,growth_test
+          consensus_test,
+          genesis_load_test,
+          growth_test
          ].
 
 init_per_suite(Config) ->
@@ -76,7 +76,10 @@ genesis_load_test(Config) ->
     ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
                                                 true == ct_rpc:call(Miner, miner, in_consensus, [])
                                         end, Miners)),
-    GenesisBlock = ct_rpc:call(ConsensusMiner, blockchain_worker, genesis_block, []),
+
+    Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
+
+    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Blockchain]),
 
     GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
@@ -99,8 +102,10 @@ growth_test(Config) ->
     %% get the first consensus miner
     FirstConsensusMiner = hd(ConsensusMiners),
 
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
     %% get the genesis block from first consensus miner
-    GenesisBlock = ct_rpc:call(FirstConsensusMiner, blockchain_worker, genesis_block, []),
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
 
     %% check genesis load results for non consensus miners
     _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
@@ -110,13 +115,15 @@ growth_test(Config) ->
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Height = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                                                     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
                                                                      Height >= 3
                                                              end, Miners)
                                    end, 60, timer:seconds(10)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
-                                  H = ct_rpc:call(Miner, blockchain_worker, height, []),
+                                  C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
                                   [{Miner, H} | Acc]
                           end, [], Miners),
 
