@@ -545,7 +545,8 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
             GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
-            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions),
+            MetaData = #{hbbft_round => 0, block_time => 0},
+            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions, MetaData),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
                                             N,
