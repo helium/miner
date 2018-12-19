@@ -316,51 +316,22 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * add the block to blockchain
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
-    Hash = blockchain_block:hash_block(Block),
     LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
     NextBlockTime = max(0, erlang:system_time(seconds) - (LastBlockTimestamp + BlockTime)),
     Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
-    case blockchain:head_hash(Chain) of
-        {error, _Reason} ->
-            lager:error("could not get head hash ~p", [_Reason]);
-        {ok, Head} ->
-            case blockchain_block:prev_hash(Block) =:= Head of
-                true ->
-                    lager:info("prev hash matches the gossiped block"),
-                    Ledger = blockchain:ledger(Chain),
-                    case blockchain_ledger_v1:consensus_members(Ledger) of
-                        {error, _Reason} ->
-                            lager:error("could not get consensus_members ~p", [_Reason]);
-                        {ok, ConsensusAddrs} ->
-                            N = length(ConsensusAddrs),
-                            F = ((N-1) div 3),
-                            case blockchain_block:verify_signature(Block,
-                                                                   ConsensusAddrs,
-                                                                   blockchain_block:signature(Block),
-                                                                   N-F)
-                            of
-                                {true, _} ->
-                                    case blockchain:add_block(Block, Chain) of
-                                        {error, _Reason} ->
-                                            lager:error("failed to add block ~p", [_Reason]);
-                                        ok ->
-                                            lager:info("sending the gossipped block to other workers"),
-                                            Swarm = blockchain_swarm:swarm(),
-                                            Address = libp2p_swarm:address(Swarm),
-                                            libp2p_group_gossip:send(
-                                              libp2p_swarm:gossip_group(Swarm),
-                                              ?GOSSIP_PROTOCOL,
-                                              term_to_binary({block, Address, Block})
-                                             ),
-                                            ok = blockchain_worker:notify({add_block, Hash, true})
-                                    end;
-                                false ->
-                                    lager:warning("signature on block ~p is invalid", [Block])
-                            end
-                    end;
-                false when Hash == Head ->
-                    lager:info("already have this block")
-            end
+    case blockchain:add_block(Block, Chain) of
+        ok ->
+            lager:info("sending the gossipped block to other workers"),
+            Swarm = blockchain_swarm:swarm(),
+            Address = libp2p_swarm:address(Swarm),
+            libp2p_group_gossip:send(
+              libp2p_swarm:gossip_group(Swarm),
+              ?GOSSIP_PROTOCOL,
+              term_to_binary({block, Address, Block})
+             ),
+            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true});
+        Error ->
+            lager:error("signed_block, error: ~p", [Error])
     end,
     {reply, ok, State#state{block_timer=Ref}};
 handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->

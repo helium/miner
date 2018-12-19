@@ -117,7 +117,7 @@ growth_test(Config) ->
                                            true == lists:all(fun(Miner) ->
                                                                      C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-                                                                     Height >= 3
+                                                                     Height >= 5
                                                              end, Miners)
                                    end, 60, timer:seconds(10)),
 
