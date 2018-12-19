@@ -10,17 +10,17 @@
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
 
 -record(state, {
-          n :: non_neg_integer()
-          ,f :: non_neg_integer()
-          ,id :: non_neg_integer()
-          ,hbbft :: hbbft:hbbft_data()
-          ,sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized()
-          ,seq = 0
-          ,deferred = []
-          ,signatures = []
-          ,signatures_required = 0
-          ,artifact :: undefined | binary()
-          ,members :: [libp2p_crypto:address()]
+          n :: non_neg_integer(),
+          f :: non_neg_integer(),
+          id :: non_neg_integer(),
+          hbbft :: hbbft:hbbft_data(),
+          sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+          seq = 0,
+          deferred = [],
+          signatures = [],
+          signatures_required = 0,
+          artifact :: undefined | binary(),
+          members :: [libp2p_crypto:address()]
          }).
 
 stamp(Chain) ->
@@ -31,13 +31,13 @@ stamp(Chain) ->
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
     lager:info("HBBFT~p started~n", [Id]),
-    {ok, #state{n=N,
-                         id=Id-1,
-                         sk=SK,
-                         f=F,
-                         members=Members,
-                         signatures_required=N-F,
-                         hbbft=HBBFT}}.
+    {ok, #state{n = N,
+                id = Id - 1,
+                sk = SK,
+                f = F,
+                members = Members,
+                signatures_required = N - F,
+                hbbft = HBBFT}}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
