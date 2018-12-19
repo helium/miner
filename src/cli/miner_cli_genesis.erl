@@ -173,8 +173,7 @@ genesis_export(["genesis", "export", Filename], [], []) ->
                 {error, Reason} ->
                     [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])];
                 {ok, GenesisBlock} ->
-                    case (catch file:write_file(Filename,
-                                                io_lib:fwrite("~p.\n", [term_to_binary(GenesisBlock)]))) of
+                    case (catch file:write_file(Filename, term_to_binary(GenesisBlock))) of
                         {'EXIT', _} ->
                             usage;
                         ok ->
