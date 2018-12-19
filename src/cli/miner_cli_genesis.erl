@@ -140,7 +140,7 @@ genesis_load(["genesis", "load", GenesisFile], [], []) ->
     case file:read_file(GenesisFile) of
         {ok, GenesisBlock} ->
             io:format("Integrating genesis block from file..."),
-            blockchain_worker:integrate_genesis_block(binary_to_term(GenesisBlock));
+            blockchain_worker:integrate_genesis_block(blockchain_block:deserialize(GenesisBlock));
         {error, Reason} ->
             io:format("Error, Reason: ~p", [Reason])
     end,
@@ -173,7 +173,7 @@ genesis_export(["genesis", "export", Filename], [], []) ->
                 {error, Reason} ->
                     [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])];
                 {ok, GenesisBlock} ->
-                    case (catch file:write_file(Filename, term_to_binary(GenesisBlock))) of
+                    case (catch file:write_file(Filename, blockchain_block:serialize(GenesisBlock))) of
                         {'EXIT', _} ->
                             usage;
                         ok ->
