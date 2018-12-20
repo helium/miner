@@ -544,6 +544,9 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     end.
 
 -spec maybe_assert_location(h3:index(), h3:resolution(), blockchain:blockchain()) -> ok.
+maybe_assert_location(_, Resolution, _) when Resolution < 10 ->
+    %% wait for a better resolution
+    ok;
 maybe_assert_location(Location, _Resolution, Chain) ->
     Address = blockchain_swarm:address(),
     Ledger = blockchain:ledger(Chain),
@@ -566,13 +569,13 @@ maybe_assert_location(Location, _Resolution, Chain) ->
                                     %% new index is a parent of the old one
                                     ok;
                                 false ->
-                                    %% check whether New Index is a child of the old one, more precise
-                                    %case Resolution > h3:get_resolution(Old) andalso lists:member(New, h3:children(Old, Resolution)) of
-                                        %true ->
-                                            blockchain_worker:assert_location_request(OwnerAddress, Location)
-                                        %false ->
-                                            %ok
-                                    %end
+                                    %% check if the parent at resolution 10 actually differs
+                                    case h3:parent(New, 10) /= h3:parent(Old, 10) of
+                                        true ->
+                                            blockchain_worker:assert_location_request(OwnerAddress, Location);
+                                        false ->
+                                            ok
+                                    end
                             catch
                                 TypeOfError:Exception ->
                                     lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
