@@ -453,11 +453,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        State
                end,
     {noreply, NewState};
-handle_info({blockchain_event, {add_block, Hash, Sync}},
+handle_info({blockchain_event, {add_block, _Hash, _Sync}},
             State=#state{consensus_group=ConsensusGroup,
                          blockchain=Chain}) when ConsensusGroup == undefined andalso
                                                  Chain /= undefined ->
-    lager:info("I am not in consensus_group, nothing to do for this block hash :~p", [Hash]),
     {noreply, State};
 handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_signal=SignalID}) ->
     case ebus_message:args(Msg) of
@@ -470,7 +469,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_
                 true ->
                     %% pick the best h3 index we can for the resolution
                     {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-                    lager:info("I want to claim h3 index ~p at height ~p meters", [H3Index, Height/1000]),
+                    lager:info("I want to claim h3 index ~p with resolution: ~p at height ~p meters", [H3Index, Resolution, Height/1000]),
                     maybe_assert_location(H3Index, Resolution, Chain);
                 false ->
                     ok
