@@ -15,5 +15,7 @@ addons:
 cache:
   directories:
   - $HOME/.cache/rebar3
+  - _build/default/lib/rocksdb/priv/
+  - _build/default/lib/rocksdb/c_src/*.o
 
-script: ./rebar3 as test do ct --verbose && ./rebar3 do dialyzer, xref, lint
+script: ./rebar3 do ct, dialyzer, xref, lint
