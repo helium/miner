@@ -16,6 +16,18 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-define(RESOLUTION, 9).
+-define(RING_SIZE, 2).
+% KRing of 1
+%     Scale 3.57
+%     Max distance 1.028 miles @ resolution 8
+%     Max distance 0.38 miles @ resolution 9
+
+% KRing of 2
+%     Scale 5.42
+%     Max distance 1.564 miles @ resolution 8
+%     Max distance 0.59 miles @ resolution 9  <----
+
 -type graph() :: #{any() => [{number(), any()}]}.
 
 -export_type([graph/0]).
@@ -123,20 +135,20 @@ neighbors(Address, Gateways) ->
     TargetGw = maps:get(Address, Gateways),
     Index = blockchain_ledger_gateway_v1:location(TargetGw),
     KRing = case h3:get_resolution(Index) of
-        Res when Res < 9 ->
+        Res when Res < ?RESOLUTION ->
             [];
-        9 ->
-            h3:k_ring(Index, 1);
-        Res when Res > 9 ->
-            Parent = h3:parent(Index, 9),
-            h3:k_ring(Parent, 1)
+        ?RESOLUTION ->
+            h3:k_ring(Index, ?RING_SIZE);
+        Res when Res > ?RESOLUTION ->
+            Parent = h3:parent(Index, ?RESOLUTION),
+            h3:k_ring(Parent, ?RING_SIZE)
     end,
     GwInRing = maps:to_list(maps:filter(
         fun(A, G) ->
             I = blockchain_ledger_gateway_v1:location(G),
             I1 = case h3:get_resolution(I) of
-                R when R =< 9 -> I;
-                R when R > 9 -> h3:parent(I, 9)
+                R when R =< ?RESOLUTION -> I;
+                R when R > ?RESOLUTION -> h3:parent(I, ?RESOLUTION)
             end,
             lists:member(I1, KRing)
                 andalso Address =/= A

@@ -65,12 +65,13 @@ basic(_Config) ->
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
 
     Chain = blockchain_worker:blockchain(),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
 
-    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain_block:hash_block(blockchain:head_block(Chain))),
-    ?assertEqual(GenesisBlock, blockchain:head_block(Chain)),
-    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain:genesis_hash(Chain)),
-    ?assertEqual(GenesisBlock, blockchain:genesis_block(Chain)),
-    ?assertEqual(1, blockchain_worker:height()),
+    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain_block:hash_block(HeadBlock)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:head_block(Chain)),
+    ?assertEqual({ok, blockchain_block:hash_block(GenesisBlock)}, blockchain:genesis_hash(Chain)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:genesis_block(Chain)),
+    ?assertEqual({ok, 1}, blockchain:height(Chain)),
 
     % All these point are in a line one after the other (except last)
     LatLongs = [
@@ -88,14 +89,16 @@ basic(_Config) ->
     % Add a Gateway
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     Block = create_block(ConsensusMembers, AddGatewayTxs),
-    ok = blockchain_worker:add_block(Block, self()),
+    ok = blockchain:add_block(Block, Chain),
+    ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     Block2 = create_block(ConsensusMembers, AssertLocaltionTxns),
-    ok = blockchain_worker:add_block(Block2, self()),
+    ok = blockchain:add_block(Block2, Chain),
+    ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block2), true}),
     
-    ok = miner_ct_utils:wait_until(fun() -> 3 =:= blockchain_worker:height() end),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
     % Start poc statem
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
@@ -107,7 +110,8 @@ basic(_Config) ->
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(_, Txn) ->
         B = create_block(ConsensusMembers, [Txn]),
-        ok = blockchain_worker:add_block(B, self())
+        ok = blockchain:add_block(B, Chain),
+        ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true})
     end),
 
     meck:new(miner_onion, [passthrough]),
@@ -124,19 +128,23 @@ basic(_Config) ->
     lists:foreach(
         fun(_) ->
             B = create_block(ConsensusMembers, []),
-            ok = blockchain_worker:add_block(B, self()),
+            ok = blockchain:add_block(B, Chain),
+            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
             timer:sleep(100)
         end,
         lists:seq(1, 4)
     ),
     
     % 3 initial blocks + 4 blocks added + 1 mining block
-    ok = miner_ct_utils:wait_until(fun() -> 8 =:= blockchain_worker:height() end),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 8} =:= blockchain:height(Chain) end),
 
     ok = send_receipts(LatLongs),
 
     % Capture all trace messages from statem
     Msgs = loop([]),
+
+    % ct:pal("MARKER ~p~n", [Msgs]),
+    % ?assert(false),
 
     % First few are blocks
     {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
@@ -157,7 +165,7 @@ basic(_Config) ->
 
     % Then target
     [TargetMsg|Msgs3] = Msgs2,
-    ?assertMatch({target, _, _}, TargetMsg),
+    ?assertMatch({target, _}, TargetMsg),
  
     % Then challenge
     [ChallengeMsg|Msgs4] = Msgs3,
@@ -188,7 +196,7 @@ loop(Acc) ->
     receive
         {trace, _, 'receive', {blockchain_event, _}=Msg} ->
             loop([Msg|Acc]);
-        {trace, _, 'receive', {target, _, _}=Msg} ->
+        {trace, _, 'receive', {target, _}=Msg} ->
             loop([Msg|Acc]);
         {trace, _, 'receive', {challenge, _, _}=Msg} ->
             loop([Msg|Acc]);
@@ -266,8 +274,9 @@ generate_keys(N) ->
 
 create_block(ConsensusMembers, Txs) ->
     Blockchain = blockchain_worker:blockchain(),
-    PrevHash = blockchain:head_hash(Blockchain),
-    Height = blockchain_block:height(blockchain:head_block(Blockchain)) + 1,
+    {ok, PrevHash} = blockchain:head_hash(Blockchain),
+    {ok, HeadBlock} = blockchain:head_block(Blockchain),
+    Height = blockchain_block:height(HeadBlock) + 1,
     Block0 = blockchain_block:new(PrevHash, Height, Txs, <<>>, #{}),
     BinBlock = erlang:term_to_binary(blockchain_block:remove_signature(Block0)),
     Signatures = signatures(ConsensusMembers, BinBlock),
