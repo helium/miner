@@ -21,8 +21,7 @@ register_all_usage() ->
                    genesis_create_usage(),
                    genesis_forge_usage(),
                    genesis_load_usage(),
-                   genesis_export_usage(),
-                   genesis_import_usage()
+                   genesis_export_usage()
                   ]).
 
 register_all_cmds() ->
@@ -34,8 +33,7 @@ register_all_cmds() ->
                    genesis_create_cmd(),
                    genesis_forge_cmd(),
                    genesis_load_cmd(),
-                   genesis_export_cmd(),
-                   genesis_import_cmd()
+                   genesis_export_cmd()
                   ]).
 %%
 %% genesis
@@ -48,7 +46,6 @@ genesis_usage() ->
       "  genesis forge <addrs>                     - Create genesis block from scratch just with the addresses.\n",
       "  genesis load <genesis_file>               - Load genesis block from file.\n"
       "  genesis export <path>                     - Write genesis block to a file.\n"
-      "  genesis import <genesis_block>            - Import genesis block on miner.\n"
      ]
     ].
 
@@ -184,31 +181,4 @@ genesis_export(["genesis", "export", Filename], [], []) ->
             end
     end;
 genesis_export([_, _, _], [], []) ->
-    usage.
-
-%%
-%% genesis import
-%%
-
-genesis_import_cmd() ->
-    [
-     [["genesis", "import", '*'], [], [], fun genesis_import/3]
-    ].
-
-genesis_import_usage() ->
-    [["genesis", "import"],
-     ["genesis import <genesis_block> \n\n",
-      "  import a genesis block.\n\n"
-     ]
-    ].
-
-genesis_import(["genesis", "import", GenesisFile], [], []) ->
-    case file:consult(GenesisFile) of
-        {ok, [Bin]} ->
-            ok = blockchain_worker:integrate_genesis_block(binary_to_term(Bin)),
-            [clique_status:text("ok")];
-        {error, Reason} ->
-            [clique_status:text(io_lib:format("~p", [Reason]))]
-    end;
-genesis_import([_, _, _], [], []) ->
     usage.
