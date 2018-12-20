@@ -20,7 +20,7 @@
           blockchain :: undefined | blockchain:blockchain(),
           %% but every miner keeps a timer reference?
           block_timer = make_ref() :: reference(),
-          block_time = 15000 :: number(),
+          block_time = application:get_env(blockchain, block_time, 15000) :: integer(),
           %% TODO: this probably doesn't have to be here
           curve :: 'SS512',
           dkg_await :: undefined | {reference(), term()}

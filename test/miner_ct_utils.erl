@@ -46,17 +46,17 @@ wait_until(Fun, Retry, Delay) when Retry > 0 ->
 wait_until_offline(Node) ->
     wait_until(fun() ->
                        pang == net_adm:ping(Node)
-               end, 60*2, 500).
+               end, 600, 100).
 
 wait_until_disconnected(Node1, Node2) ->
     wait_until(fun() ->
                        pang == rpc:call(Node1, net_adm, ping, [Node2])
-               end, 60*2, 500).
+               end, 600, 100).
 
 wait_until_connected(Node1, Node2) ->
     wait_until(fun() ->
                        pong == rpc:call(Node1, net_adm, ping, [Node2])
-               end, 60*2, 500).
+               end, 600, 100).
 
 start_node(Name, Config, Case) ->
     CodePath = lists:filter(fun filelib:is_dir/1, code:get_path()),
@@ -71,7 +71,7 @@ start_node(Name, Config, Case) ->
         {ok, Node} ->
             ok = wait_until(fun() ->
                                     net_adm:ping(Node) == pong
-                            end, 60, 500),
+                            end, 60*5, 100),
             Node;
         {error, already_started, Node} ->
             ct_slave:stop(Name),
