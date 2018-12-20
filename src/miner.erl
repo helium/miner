@@ -453,6 +453,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        State
                end,
     {noreply, NewState};
+handle_info({blockchain_event, {add_block, Hash, Sync}},
+            State=#state{consensus_group=ConsensusGroup,
+                         blockchain=Chain}) when ConsensusGroup == undefined andalso
+                                                 Chain /= undefined ->
+    lager:info("I am not in consensus_group, nothing to do for this block hash :~p", [Hash]),
+    {noreply, State};
 handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_signal=SignalID}) ->
     case ebus_message:args(Msg) of
         {ok, [#{"lat" := Lat,
