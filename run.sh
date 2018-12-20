@@ -94,4 +94,4 @@ done
 echo "Exported Genesis file: $exported_genesis_file"
 
 echo "Loading Genesis block on $non_consensus_node"
-./_build/dev/rel/miner-dev$non_consensus_node/bin/miner-dev$non_consensus_node genesis import $exported_genesis_file
+./_build/dev/rel/miner-dev$non_consensus_node/bin/miner-dev$non_consensus_node genesis load $exported_genesis_file
