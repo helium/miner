@@ -46,6 +46,7 @@
 -define(BLOCK_DELAY, 30).
 
 -record(data, {
+    blockchain :: blockchain:blockchain(),
     last_submit = 0 :: non_neg_integer(),
     address :: libp2p_crypto:address(),
     secret :: binary() | undefined,
@@ -73,8 +74,9 @@ init(Args) ->
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:address(),
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
+    Blockchain = blockchain_worker:blockchain(),
     lager:notice("init with ~p", [Args]),
-    {ok, requesting, #data{address=Address, delay=Delay}}.
+    {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -92,10 +94,11 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-requesting(info, {blockchain_event, {add_block, _Hash, true}}, #data{last_submit=LastSubmit,
+requesting(info, {blockchain_event, {add_block, _Hash, _}}, #data{blockchain=Blockchain,
+                                                                     last_submit=LastSubmit,
                                                                      address=Address,
                                                                      delay=Delay}=Data) ->
-    CurrHeight = blockchain_worker:height(),
+   {ok, CurrHeight} = blockchain:height(Blockchain),
     lager:notice("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
         false ->
@@ -116,18 +119,16 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, Hash, true}}, #data{address=Address}=Data) ->
+mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain, address=Address}=Data) ->
     lager:notice("got block ~p checking content", [Hash]),
-    Chain = blockchain_worker:blockchain(),
-    Dir = blockchain:dir(Chain),
-    case blockchain_block:load(Hash, Dir) of
+    case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
             Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
-                    CurrHeight = blockchain_worker:height(),
-                    self() ! {target, Hash, Block},
+                    {ok, CurrHeight} = blockchain:height(Blockchain),
+                    self() ! {target, Hash},
                     lager:notice("request was mined @ ~p, targeting now", [CurrHeight]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight}};
                 _ ->
@@ -146,8 +147,8 @@ mining(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-targeting(info, {target, Hash, Block}, Data) ->
-    {Target, Gateways} = target(Hash, Block),
+targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
+    {Target, Gateways} = target(Hash, Blockchain),
     lager:notice("target found ~p, challenging", [Target]),
     self() ! {challenge, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
@@ -188,10 +189,10 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, true}}, #data{challenge_timeout=0}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
     self() ! submit,
     {next_state, submiting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
-receiving(info, {blockchain_event, {add_block, _Hash, true}}, #data{challenge_timeout=T}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
@@ -233,9 +234,9 @@ submiting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec target(binary(), blockchain_block:block()) -> {libp2p_crypto:address(), map()}.
-target(Hash, _Block) ->
-    ActiveGateways = active_gateways(),
+-spec target(binary(), blockchain:blockchain()) -> {libp2p_crypto:address(), map()}.
+target(Hash, Blockchain) ->
+    ActiveGateways = active_gateways(Blockchain),
     Probs = create_probs(ActiveGateways),
     Entropy = entropy(Hash, Probs),
     Target = select_target(Probs, maps:keys(ActiveGateways), Entropy, 1),
@@ -297,9 +298,10 @@ select_target([W1 | T], Adresses, Rnd, Index) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec active_gateways() -> map().
-active_gateways() ->
-    ActiveGateways = blockchain_ledger_v1:active_gateways(blockchain_worker:ledger()),
+-spec active_gateways(blockchain:blockchain()) -> map().
+active_gateways(Blockchain) ->
+    Ledger = blockchain:ledger(Blockchain),
+    ActiveGateways = blockchain_ledger_v1:active_gateways(Ledger),
     maps:filter(
         fun(Address, Gateway) ->
             % TODO: Maybe do some find of score check here
@@ -318,6 +320,7 @@ target_test() ->
     meck:new(blockchain_ledger_v1, [passthrough]),
     meck:new(blockchain_worker, [passthrough]),
     meck:new(blockchain_swarm, [passthrough]),
+    meck:new(blockchain, [passthrough]),
     
     LatLongs = [
         {{37.782061, -122.446167}, 0.1},
@@ -344,8 +347,9 @@ target_test() ->
     ),
 
     meck:expect(blockchain_ledger_v1, active_gateways, fun(_) -> ActiveGateways end),
-    meck:expect(blockchain_worker, ledger, fun() -> ok end),
+    meck:expect(blockchain_worker, blockchain, fun() -> blockchain end),
     meck:expect(blockchain_swarm, address, fun() -> <<"unknown">> end),
+    meck:expect(blockchain, ledger, fun(_) -> ledger end),
 
     Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),
     Hash = blockchain_block:hash_block(Block),
@@ -358,8 +362,10 @@ target_test() ->
     ?assert(meck:validate(blockchain_ledger_v1)),
     ?assert(meck:validate(blockchain_worker)),
     ?assert(meck:validate(blockchain_swarm)),
+    ?assert(meck:validate(blockchain)),
     meck:unload(blockchain_ledger_v1),
     meck:unload(blockchain_worker),
-    meck:unload(blockchain_swarm).
+    meck:unload(blockchain_swarm),
+    meck:unload(blockchain).
 
 -endif.
