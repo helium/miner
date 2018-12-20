@@ -40,7 +40,7 @@
  {<<"gpb">>,{pkg,<<"gpb">>,<<"4.2.1">>},2},
  {<<"h3">>,
   {git,"https://github.com/helium/erlang-h3.git",
-       {ref,"a8d1e104035228f141cdf5d3f9743f2e55bf6d28"}},
+       {ref,"584d6b20f5b64c8c0a3570d23bebcea2537d68bc"}},
   0},
  {<<"hbbft">>,
   {git,"https://github.com/helium/erlang-hbbft.git",
