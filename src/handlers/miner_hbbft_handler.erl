@@ -23,7 +23,8 @@
           ,members :: [libp2p_crypto:address()]
          }).
 
-stamp(Chain) ->
+stamp(_Chain) ->
+    Chain = blockchain_worker:blockchain(),
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     {erlang:system_time(seconds), HeadHash}.
