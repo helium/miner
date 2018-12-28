@@ -132,12 +132,14 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                     [clique_status:table([[{destination, "inbound"},
                                            {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
                                            {connected, "true"},
-                                           {pending_data, "false"}
+                                           {blocked, "false"},
+                                           {in_flight, "0"}
                                           ]] ++
                                          [[{destination, integer_to_list(K)},
                                            {count, integer_to_list(length(V))},
                                            {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
-                                           {blocked, atom_to_list(not (maps:get(msg_key, maps:get(K, Workers)) == undefined))}
+                                           {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
+                                           {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))}
                                           ] ||
                                           {K, V} <- maps:to_list(maps:get(outbound, Queue, #{}))])];
                 PeerID when is_integer(PeerID) ->
