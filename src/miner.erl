@@ -318,6 +318,7 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
     LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime) - erlang:system_time(seconds)),
+    lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
     case blockchain:add_block(Block, Chain) of
         ok ->
@@ -425,6 +426,7 @@ handle_info(maybe_restore_consensus, State) ->
                             {ok, HeadBlock} = blockchain:head_block(Chain),
                             LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
                             NextBlockTime = max(0, (LastBlockTimestamp + State#state.block_time) - erlang:system_time(seconds)),
+                            lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
                             Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
                             {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
                         false ->
@@ -451,6 +453,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
                        LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
                        NextBlockTime = max(0, (LastBlockTimestamp + BlockTime) - erlang:system_time(seconds)),
+                       lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
                        Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
                        State#state{block_timer=Ref};
                    {error, Reason} ->
