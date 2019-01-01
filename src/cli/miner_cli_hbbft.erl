@@ -148,7 +148,7 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                             [clique_status:table([[{message, lists:flatten(io_lib:format("~p", [Msg]))}] || Msg <- Msgs])];
                 _ -> usage
             end;
-        true ->
+        _ ->
             Msgs = maps:get(inbound, Queue, []),
             [clique_status:table([[{message, lists:flatten(io_lib:format("~p", [Msg]))}] || Msg <- Msgs])]
     end;
