@@ -43,6 +43,18 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+%% DBus helper macros
+-define(MINER_OBJECT_PATH, "/"),
+-define(MINER_INTERFACE, "com.helium.Miner").
+-define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
+-define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
+
+-define(CONFIG_OBJECT_PATH, "/").
+-define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
+-define(CONFIG_OBJECT(M), ?CONFIG_OBJECT_INTERFACE ++ "." ++ M).
+-define(CONFIG_MEMBER_POSITION, "Position").
+-define(CONFIG_MEMBER_ADD_GW, "AddGateway").
+
 %% ==================================================================
 %% API calls
 %% ==================================================================
@@ -59,13 +71,11 @@ init(Args) ->
         true ->
             {ok, SystemBus} = ebus:system(),
             {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []),
-            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
-                                                            "/com/helium/Config",
-                                                            "com.helium.Config.Position",
+            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
+                                                            ?CONFIG_OBJECT(?CONFIG_MEMBER_POSITION),
                                                             self(), gps_location),
-            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
-                                                              "/com/helium/Config",
-                                                              "com.helium.Config.AddGateway",
+            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
+                                                              ?CONFIG_OBJECT(?CONFIG_MEMBER_ADD_GW),
                                                               self(), add_gateway_request);
         false ->
             GPSSignal = 0,
@@ -487,9 +497,15 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "token" := AuthToken,
                 "owner" := OwnerStrAddress
                }]} ->
+            signal_add_gateway_status("sending", State),
             OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
-            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]);
+            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
+            Status = case Result of
+                         ok -> "sent";
+                         _ -> "send_failed"
+                     end,
+            signal_add_gateway_status(Status, State);
         {ok, [Args]} ->
             lager:error("Invalid add_gateway_signal args: ~p", [Args]);
         {error, Error} ->
@@ -500,6 +516,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
+
 
 
 %% ==================================================================
@@ -584,3 +601,11 @@ maybe_assert_location(Location, _Resolution, Chain) ->
                     end
             end
     end.
+
+-spec signal_add_gateway_status(string(), #state{}) -> ok.
+signal_add_gateway_status(Status, State=#state{}) ->
+    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
+                                        ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
+    ok = ebus_message:append_args(Msg, [string], [Status]),
+    ok = ebus:send(ebus_proxy:bus(State#state.config_proxy), Msg),
+    ok.
