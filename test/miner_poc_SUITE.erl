@@ -97,7 +97,6 @@ basic(_Config) ->
     Block2 = create_block(ConsensusMembers, AssertLocaltionTxns),
     ok = blockchain:add_block(Block2, Chain),
     ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block2), true}),
-    
     ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
     % Start poc statem
@@ -134,7 +133,6 @@ basic(_Config) ->
         end,
         lists:seq(1, 4)
     ),
-    
     % 3 initial blocks + 4 blocks added + 1 mining block
     ok = miner_ct_utils:wait_until(fun() -> {ok, 8} =:= blockchain:height(Chain) end),
 
@@ -166,7 +164,7 @@ basic(_Config) ->
     % Then target
     [TargetMsg|Msgs3] = Msgs2,
     ?assertMatch({target, _}, TargetMsg),
- 
+
     % Then challenge
     [ChallengeMsg|Msgs4] = Msgs3,
     ?assertMatch({challenge, _, _}, ChallengeMsg),
@@ -175,7 +173,7 @@ basic(_Config) ->
     lists:foreach(
         fun({receipt, _}) -> ok;
            (submit) -> ok;
-           (_) -> error     
+           (_) -> error
         end,
         Msgs4
     ),
@@ -231,7 +229,7 @@ build_asserts(LatLongs, {PrivKey, PubKey}) ->
             GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_address(PubKey),
-            Index = h3:from_geo(LatLong, 9),    
+            Index = h3:from_geo(LatLong, 9),
 
             AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),

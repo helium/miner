@@ -52,9 +52,13 @@ build(Target, Gateways) ->
         false ->
             {error, not_enough_gateways};
         true ->
-            [{_, Start}, {_, End}|_] = lists:sort(fun({A, _}, {B, _}) -> A >= B end, GraphList),
+            [{_, Start}, {_, End}|_] = lists:sort(fun({ScoreA, AddrA}, {ScoreB, AddrB}) ->
+                                                          ScoreA * ?MODULE:length(Graph, Target, AddrA) >
+                                                          ScoreB * ?MODULE:length(Graph, Target, AddrB)
+                                                  end, GraphList),
             {_, Path1} = ?MODULE:shortest(Graph, Start, Target),
             {_, [Target|Path2]} = ?MODULE:shortest(Graph, Target, End),
+            %% NOTE: It is possible the path contains dupes, these are also considered valid
             {ok, Path1 ++ Path2}
     end.
 
@@ -185,7 +189,6 @@ neighbors_test() ->
     Neighbors = neighbors(Target, Gateways),
 
     ?assertEqual(erlang:length(maps:keys(Gateways)) - 2, erlang:length(Neighbors)),
-    
     {LL1, _} =  lists:last(LatLongs),
     TooFar = crypto:hash(sha256, erlang:term_to_binary(LL1)),
     lists:foreach(
@@ -273,29 +276,23 @@ build_graph_in_line_test() ->
 build_test() ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
-        {{37.780586, -122.469471}, 0.99},
-        {{37.780959, -122.467496}, 0.75},
+        {{37.780959, -122.467496}, 0.65},
         {{37.78101, -122.465372}, 0.75},
+        {{37.780586, -122.469471}, 0.99},
         {{37.781179, -122.463226}, 0.75},
         {{37.781281, -122.461038}, 0.1},
         {{37.781349, -122.458892}, 0.75},
         {{37.781468, -122.456617}, 0.75},
-        {{37.781637, -122.4543}, 0.99},
+        {{37.781637, -122.4543}, 0.95},
         {{38.897675, -77.036530}, 0.12} % This should be excluded cause too far
     ],
     {Target, Gateways} = build_gateways(LatLongs),
 
     {ok, Path} = build(Target, Gateways),
 
-    [{S, _}|_] = LatLongs,
-    Start = crypto:hash(sha256, erlang:term_to_binary(S)),
-    {E, _} = lists:last(lists:droplast(LatLongs)),
-    End = crypto:hash(sha256, erlang:term_to_binary(E)),
-
-    [PS|_] = Path,
-    ?assertEqual(Start, PS),
+    ?assertNotEqual(Target, hd(Path)),
     ?assert(lists:member(Target, Path)),
-    ?assertEqual(End, lists:last(Path)),
+    ?assertNotEqual(Target, lists:last(Path)),
     ok.
 
 build_with_zero_score_test() ->
