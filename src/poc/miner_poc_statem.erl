@@ -76,6 +76,15 @@ init(Args) ->
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
     Blockchain = blockchain_worker:blockchain(),
     lager:notice("init with ~p", [Args]),
+
+    case maps:get(onion_server, Args, undefined) of
+        {ok, {RadioHost, RadioPort}} ->
+            PrivKey = maps:get(priv_key, Args),
+            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey, self());
+        undefined ->
+            ok
+    end,
+
     {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
