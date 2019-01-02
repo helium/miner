@@ -321,7 +321,6 @@ target_test() ->
     meck:new(blockchain_worker, [passthrough]),
     meck:new(blockchain_swarm, [passthrough]),
     meck:new(blockchain, [passthrough]),
-    
     LatLongs = [
         {{37.782061, -122.446167}, 0.1},
         {{37.782604, -122.447857}, 0.99},
