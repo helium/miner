@@ -44,7 +44,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 %% DBus helper macros
--define(MINER_OBJECT_PATH, "/"),
+-define(MINER_OBJECT_PATH, "/").
 -define(MINER_INTERFACE, "com.helium.Miner").
 -define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
 -define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
