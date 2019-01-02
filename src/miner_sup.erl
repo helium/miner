@@ -37,14 +37,14 @@ init(_Args) ->
 
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
-    {PublicKey, SigFun} =
+    {PublicKey, PrivKey, SigFun} =
         case libp2p_crypto:load_keys(SwarmKey) of
-            {ok, PrivKey, PubKey} ->
-                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)};
+            {ok, PrivKey0, PubKey} ->
+                {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)};
             {error, enoent} ->
-                {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
-                ok = libp2p_crypto:save_keys({PrivKey, PubKey}, SwarmKey),
-                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)}
+                {PrivKey0, PubKey} = libp2p_crypto:generate_keys(),
+                ok = libp2p_crypto:save_keys({PrivKey0, PubKey}, SwarmKey),
+                {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)}
         end,
 
     BlockchainOpts = [
@@ -72,6 +72,11 @@ init(_Args) ->
         {use_ebus, UseEBus}
     ],
 
+    POCOpts = #{
+        onion_server => application:get_env(miner, radio_device),
+        priv_key => PrivKey
+    },
+
     ChildSpecs =  [
         #{
             id => blockchain_sup,
@@ -88,7 +93,7 @@ init(_Args) ->
         },
         #{
             id => miner_poc_statem,
-            start => {miner_poc_statem, start_link, [#{}]},
+            start => {miner_poc_statem, start_link, [POCOpts]},
             restart => permanent,
             type => worker,
             modules => [miner_poc_statem]

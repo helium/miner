@@ -31,7 +31,6 @@
   {git,"https://github.com/helium/erlang_ale",
        {ref,"7446b2df79411992e8efc34325e35437dcf536c1"}},
   1},
- {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
        {ref,"7d515e63b55b0ccd35fca05e882c4f7f52ab491e"}},
