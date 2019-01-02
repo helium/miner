@@ -603,9 +603,11 @@ maybe_assert_location(Location, _Resolution, Chain) ->
     end.
 
 -spec signal_add_gateway_status(string(), #state{}) -> ok.
-signal_add_gateway_status(Status, State=#state{}) ->
+signal_add_gateway_status(_, #state{config_proxy=undefined}) ->
+    ok;
+signal_add_gateway_status(Status, State=#state{config_proxy=Proxy}) ->
     {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
                                         ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
     ok = ebus_message:append_args(Msg, [string], [Status]),
-    ok = ebus:send(ebus_proxy:bus(State#state.config_proxy), Msg),
+    ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
     ok.
