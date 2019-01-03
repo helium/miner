@@ -43,6 +43,7 @@
 
 -define(SERVER, ?MODULE).
 -define(CHALLENGE_TIMEOUT, 3).
+-define(CHALLENGE_RETRY, 3).
 -define(BLOCK_DELAY, 30).
 
 -record(data, {
@@ -53,7 +54,8 @@
     challengees = [] :: [libp2p_crypto:address()],
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
-    delay = ?BLOCK_DELAY :: non_neg_integer()
+    delay = ?BLOCK_DELAY :: non_neg_integer(),
+    retry = ?CHALLENGE_RETRY :: non_neg_integer()
 }).
 
 %% ------------------------------------------------------------------
@@ -138,7 +140,7 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
                     {ok, CurrHeight} = blockchain:height(Blockchain),
                     self() ! {target, Hash},
                     lager:info("request was mined @ ~p, targeting now", [CurrHeight]),
-                    {next_state, targeting, Data#data{last_submit=CurrHeight}};
+                    {next_state, targeting, Data#data{last_submit=CurrHeight, retry=?CHALLENGE_RETRY}};
                 _ ->
                     lager:debug("request not found in block ~p", [Hash]),
                     {keep_state, Data}
@@ -154,6 +156,9 @@ mining(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+targeting(info, _, #data{retry=0}=Data) ->
+    lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
+    {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
     {Target, Gateways} = target(Hash, Blockchain),
     lager:info("target found ~p, challenging", [Target]),
@@ -166,13 +171,13 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address}=Data) ->
+challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, retry=Retry}=Data) ->
     case miner_poc_path:build(Target, Gateways) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
             self() ! {target, Hash},
-            {next_state, targeting, Data};
+            {next_state, targeting, Data#data{retry=Retry-1}};
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             Payload = erlang:term_to_binary(#{
@@ -192,7 +197,7 @@ challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address}=Da
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
                     self() ! {target, Hash},
-                    {next_state, targeting, Data}
+                    {next_state, targeting, Data#data{retry=Retry-1}}
             end
     end;
 challenging(EventType, EventContent, Data) ->
