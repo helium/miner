@@ -133,13 +133,17 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                                            {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
                                            {connected, "true"},
                                            {blocked, "false"},
-                                           {in_flight, "0"}
+                                           {in_flight, "0"},
+                                           {connections, "0"},
+                                           {last_take, "none"}
                                           ]] ++
                                          [[{destination, integer_to_list(K)},
                                            {count, integer_to_list(length(V))},
                                            {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
                                            {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
-                                           {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))}
+                                           {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))},
+                                           {connects, integer_to_list(maps:get(connects, maps:get(K, Workers)))},
+                                           {last_take, atom_to_list(maps:get(last_take, maps:get(K, Workers)))} 
                                           ] ||
                                           {K, V} <- maps:to_list(maps:get(outbound, Queue, #{}))])];
                 PeerID when is_integer(PeerID) ->
