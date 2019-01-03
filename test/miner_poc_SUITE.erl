@@ -167,7 +167,7 @@ basic(_Config) ->
 
     % Then challenge
     [ChallengeMsg|Msgs4] = Msgs3,
-    ?assertMatch({challenge, _, _}, ChallengeMsg),
+    ?assertMatch({challenge, _, _, _}, ChallengeMsg),
 
     % Receipts and submit
     lists:foreach(
@@ -196,7 +196,7 @@ loop(Acc) ->
             loop([Msg|Acc]);
         {trace, _, 'receive', {target, _}=Msg} ->
             loop([Msg|Acc]);
-        {trace, _, 'receive', {challenge, _, _}=Msg} ->
+        {trace, _, 'receive', {challenge, _, _, _}=Msg} ->
             loop([Msg|Acc]);
         {trace, _, 'receive', {'$gen_cast', {receipt, _}=Msg}} ->
             loop([Msg|Acc]);

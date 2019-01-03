@@ -75,16 +75,15 @@ init(Args) ->
     Address = blockchain_swarm:address(),
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
     Blockchain = blockchain_worker:blockchain(),
-    lager:notice("init with ~p", [Args]),
-
     case maps:get(onion_server, Args, undefined) of
         {ok, {RadioHost, RadioPort}} ->
             PrivKey = maps:get(priv_key, Args),
-            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey, self());
+            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey, self()),
+            lager:info("started miner_onion_server");
         undefined ->
-            ok
+            lager:info("onion_server not started")
     end,
-
+    lager:info("init with ~p", [Args]),
     {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -104,11 +103,11 @@ terminate(_Reason, _State) ->
 %% @end
 %%--------------------------------------------------------------------
 requesting(info, {blockchain_event, {add_block, _Hash, _}}, #data{blockchain=Blockchain,
-                                                                     last_submit=LastSubmit,
-                                                                     address=Address,
-                                                                     delay=Delay}=Data) ->
-   {ok, CurrHeight} = blockchain:height(Blockchain),
-    lager:notice("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
+                                                                  last_submit=LastSubmit,
+                                                                  address=Address,
+                                                                  delay=Delay}=Data) ->
+    {ok, CurrHeight} = blockchain:height(Blockchain),
+    lager:debug("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
         false ->
             {keep_state, Data};
@@ -118,7 +117,7 @@ requesting(info, {blockchain_event, {add_block, _Hash, _}}, #data{blockchain=Blo
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
-            lager:notice("submited poc request"),
+            lager:info("submited poc request ~p", [Tx]),
             {next_state, mining, Data#data{secret=Secret}}
     end;
 requesting(EventType, EventContent, Data) ->
@@ -129,7 +128,7 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain, address=Address}=Data) ->
-    lager:notice("got block ~p checking content", [Hash]),
+    lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
@@ -138,14 +137,13 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
                     self() ! {target, Hash},
-                    lager:notice("request was mined @ ~p, targeting now", [CurrHeight]),
+                    lager:info("request was mined @ ~p, targeting now", [CurrHeight]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight}};
                 _ ->
-                    % TODO: maybe we should restart
+                    lager:debug("request not found in block ~p", [Hash]),
                     {keep_state, Data}
             end;
         {error, _Reason} ->
-            % TODO: maybe we should restart
             lager:error("failed to get block ~p : ~p", [Hash, _Reason]),
             {keep_state, Data}
     end;
@@ -158,8 +156,8 @@ mining(EventType, EventContent, Data) ->
 %%--------------------------------------------------------------------
 targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
     {Target, Gateways} = target(Hash, Blockchain),
-    lager:notice("target found ~p, challenging", [Target]),
-    self() ! {challenge, Target, Gateways},
+    lager:info("target found ~p, challenging", [Target]),
+    self() ! {challenge, Hash, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -168,28 +166,34 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Target, Gateways}, #data{address=Address}=Data) ->
+challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address}=Data) ->
     case miner_poc_path:build(Target, Gateways) of
         {error, Reason} ->
-            % TODO: Go back to targeting
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
-            {keep_state, Data};
+            lager:info("selecting new target"),
+            self() ! {target, Hash},
+            {next_state, targeting, Data};
         {ok, Path} ->
-            lager:notice("path created ~p", [Path]),
-            % TODO: Maybe make this smaller?
+            lager:info("path created ~p", [Path]),
             Payload = erlang:term_to_binary(#{
                 challenger => Address
             }),
             OnionList = [{Payload, A} || A <- Path],
             Onion = miner_onion_server:construct_onion(OnionList),
-            lager:notice("onion created ~p", [Onion]),
+            lager:info("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:address_to_p2p(Start),
-            % TODO
-            {ok, Stream} = miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-            _ = miner_onion_handler:send(Stream, Onion),
-            lager:notice("onion sent"),
-            {next_state, receiving, Data#data{challengees=Path}}
+            case miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                {ok, Stream} ->
+                    _ = miner_onion_handler:send(Stream, Onion),
+                    lager:info("onion sent"),
+                    {next_state, receiving, Data#data{challengees=Path}};
+                {error, Reason} ->
+                    lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
+                    lager:info("selecting new target"),
+                    self() ! {target, Hash},
+                    {next_state, targeting, Data}
+            end
     end;
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -199,12 +203,15 @@ challenging(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
+    lager:warning("timing out, submiting receipts @ ~p", [_Hash]),
     self() ! submit,
     {next_state, submiting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
+    lager:debug("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
+    lager:info("got receipt ~p", [Receipt]),
     Address = blockchain_poc_receipt_v1:address(Receipt),
     % TODO: Also check onion IV
     case blockchain_poc_receipt_v1:is_valid(Receipt)
@@ -217,8 +224,10 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
             Receipts1 = [Receipt|Receipts0],
             case erlang:length(Receipts1) =:= erlang:length(Challengees) of
                 false ->
+                    lager:debug("waiting for more"),
                     {keep_state, Data#data{receipts=Receipts1}};
                 true ->
+                    lager:info("got all ~p receipts, submitting", [erlang:length(Receipts1)]),
                     self() ! submit,
                     {next_state, submiting, Data#data{receipts=Receipts1}}
             end
@@ -235,6 +244,7 @@ submiting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
+    lager:info("submited blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
     {next_state, requesting, Data};
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -260,7 +270,7 @@ target(Hash, Blockchain) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_event(_EventType, _EventContent, Data) ->
-    lager:debug("ignoring event [~p] ~p", [_EventType, _EventContent]),
+    lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
 %%--------------------------------------------------------------------
