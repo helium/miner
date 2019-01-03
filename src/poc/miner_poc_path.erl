@@ -128,7 +128,7 @@ path(_Graph, [{Cost, [End | _] = Path} | _], End, _Seen) ->
     % base case
     {Cost, lists:reverse(Path)};
 path(Graph, [{Cost, [Node | _] = Path} | Routes], End, Seen) ->
-    NewRoutes = [{Cost + NewCost, [NewNode | Path]} || {NewCost, NewNode} <- maps:get(Node, Graph), not maps:get(NewNode, Seen, false)],
+    NewRoutes = [{Cost + NewCost, [NewNode | Path]} || {NewCost, NewNode} <- maps:get(Node, Graph, [{0, []}]), not maps:get(NewNode, Seen, false)],
     path(Graph, lists:sort(NewRoutes ++ Routes), End, Seen#{Node => true}).
 
 %%--------------------------------------------------------------------
