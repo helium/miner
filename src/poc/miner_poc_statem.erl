@@ -104,17 +104,17 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-requesting(info, {blockchain_event, {add_block, _Hash, _}}, #data{blockchain=Blockchain,
+requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
                                                                   last_submit=LastSubmit,
                                                                   address=Address,
                                                                   delay=Delay}=Data) ->
     {ok, CurrHeight} = blockchain:height(Blockchain),
-    lager:debug("got block ~p @ height ~p (~p)", [_Hash, CurrHeight, LastSubmit]),
+    lager:debug("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
         false ->
             {keep_state, Data};
         true ->
-            Secret = crypto:strong_rand_bytes(8),
+            Secret = <<(crypto:strong_rand_bytes(8))/binary, Hash/binary>>,
             Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret)),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
