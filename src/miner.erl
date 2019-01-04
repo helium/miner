@@ -497,7 +497,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "token" := AuthToken,
                 "owner" := OwnerStrAddress
                }]} ->
-            signal_add_gateway_status("sending", State),
+            catch(signal_add_gateway_status("sending", State)),
             OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
             lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
@@ -505,7 +505,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                          ok -> "sent";
                          _ -> "send_failed"
                      end,
-            signal_add_gateway_status(Status, State);
+            catch(signal_add_gateway_status(Status, State));
         {ok, [Args]} ->
             lager:error("Invalid add_gateway_signal args: ~p", [Args]);
         {error, Error} ->
@@ -605,7 +605,7 @@ maybe_assert_location(Location, _Resolution, Chain) ->
 -spec signal_add_gateway_status(string(), #state{}) -> ok.
 signal_add_gateway_status(_, #state{config_proxy=undefined}) ->
     ok;
-signal_add_gateway_status(Status, State=#state{config_proxy=Proxy}) ->
+signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
     {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
                                         ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
     ok = ebus_message:append_args(Msg, [string], [Status]),
