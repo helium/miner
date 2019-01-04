@@ -77,7 +77,7 @@
  {<<"recon">>,{pkg,<<"recon">>,<<"2.4.0">>},0},
  {<<"relcast">>,
   {git,"https://github.com/helium/relcast.git",
-       {ref,"95dfc6e89aea41cf8b4203293d16ebb008b1c67d"}},
+       {ref,"5445f490ef06fbf513e4b0445b6579a87eaad4f9"}},
   2},
  {<<"rocksdb">>,{pkg,<<"rocksdb">>,<<"0.26.1">>},0},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
