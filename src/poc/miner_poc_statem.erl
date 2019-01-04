@@ -34,7 +34,7 @@
     targeting/3,
     challenging/3,
     receiving/3,
-    submiting/3
+    submitting/3
 ]).
 
 -ifdef(TEST).
@@ -119,7 +119,7 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
-            lager:info("submited poc request ~p", [Tx]),
+            lager:info("submitted poc request ~p", [Tx]),
             {next_state, mining, Data#data{secret=Secret}}
     end;
 requesting(EventType, EventContent, Data) ->
@@ -209,9 +209,9 @@ challenging(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
-    lager:warning("timing out, submiting receipts @ ~p", [_Hash]),
+    lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
     self() ! submit,
-    {next_state, submiting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
+    {next_state, submitting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:debug("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
@@ -235,7 +235,7 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                 true ->
                     lager:info("got all ~p receipts, submitting", [erlang:length(Receipts1)]),
                     self() ! submit,
-                    {next_state, submiting, Data#data{receipts=Receipts1}}
+                    {next_state, submitting, Data#data{receipts=Receipts1}}
             end
     end;
 receiving(EventType, EventContent, Data) ->
@@ -245,14 +245,14 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submiting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
+submitting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
     Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
-    lager:info("submited blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
+    lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
     {next_state, requesting, Data};
-submiting(EventType, EventContent, Data) ->
+submitting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 %% ------------------------------------------------------------------
