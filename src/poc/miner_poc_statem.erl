@@ -160,7 +160,8 @@ targeting(info, _, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
-    {Target, Gateways} = target(Hash, Blockchain),
+    Ledger = blockchain:ledger(Blockchain),
+    {Target, Gateways} = blockchain_poc_path:target(Hash, Ledger),
     lager:info("target found ~p, challenging", [Target]),
     self() ! {challenge, Hash, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
@@ -172,7 +173,7 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, retry=Retry}=Data) ->
-    case miner_poc_path:build(Target, Gateways) of
+    case blockchain_poc_path:build(Target, Gateways) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
@@ -254,18 +255,6 @@ submiting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}
 submiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec target(binary(), blockchain:blockchain()) -> {libp2p_crypto:address(), map()}.
-target(Hash, Blockchain) ->
-    ActiveGateways = active_gateways(Blockchain),
-    Probs = create_probs(ActiveGateways),
-    Entropy = entropy(Hash, Probs),
-    Target = select_target(Probs, maps:keys(ActiveGateways), Entropy, 1),
-    {Target, ActiveGateways}.
-
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -277,63 +266,6 @@ target(Hash, Blockchain) ->
 handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec create_probs(map()) -> [float()].
-create_probs(Gateways) ->
-    GwScores = [blockchain_ledger_gateway_v1:score(G) || G <- maps:values(Gateways)],
-    LenGwScores = erlang:length(GwScores),
-    SumGwScores = lists:sum(GwScores),
-    [prob(Score, LenGwScores, SumGwScores) || Score <- GwScores].
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec prob(float(), pos_integer(), float()) -> float().
-prob(Score, LenScores, SumScores) ->
-    (1.0 - Score) / (LenScores - SumScores).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec entropy(binary(), [float()]) -> float().
-entropy(Entropy, Probs) ->
-    <<A:85/integer-unsigned-little, B:85/integer-unsigned-little,
-      C:86/integer-unsigned-little, _/binary>> = crypto:hash(sha256, Entropy),
-    S = rand:seed_s(exrop, {A, B, C}),
-    {R, _} = rand:uniform_s(S),
-    R * lists:sum(Probs).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
-select_target([W1 | _T], Adresses, Rnd, Index) when (Rnd - W1) < 0 ->
-    lists:nth(Index, Adresses);
-select_target([W1 | T], Adresses, Rnd, Index) ->
-    select_target(T, Adresses, Rnd - W1, Index + 1).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec active_gateways(blockchain:blockchain()) -> map().
-active_gateways(Blockchain) ->
-    Ledger = blockchain:ledger(Blockchain),
-    ActiveGateways = blockchain_ledger_v1:active_gateways(Ledger),
-    maps:filter(
-        fun(Address, Gateway) ->
-            % TODO: Maybe do some find of score check here
-            Address =/= blockchain_swarm:address()
-            andalso blockchain_ledger_gateway_v1:location(Gateway) =/= undefined
-        end
-        ,ActiveGateways
-    ).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -376,7 +308,7 @@ target_test() ->
 
     Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),
     Hash = blockchain_block:hash_block(Block),
-    {Target, Gateways} = target(Hash, undefined),
+    {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
 
     [{LL, _}|_] = LatLongs,
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
