@@ -105,9 +105,9 @@ terminate(_Reason, _State) ->
 %% @end
 %%--------------------------------------------------------------------
 requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
-                                                                  last_submit=LastSubmit,
-                                                                  address=Address,
-                                                                  delay=Delay}=Data) ->
+                                                                 last_submit=LastSubmit,
+                                                                 address=Address,
+                                                                 delay=Delay}=Data) ->
     {ok, CurrHeight} = blockchain:height(Blockchain),
     lager:debug("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
@@ -134,12 +134,12 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) end,
+            Filter = fun(Txn) -> Address == blockchain_txn_poc_request_v1:gateway_address(Txn) end,
             case lists:filter(Filter, Txns) of
-                [_POCReq] ->
+                [POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
-                    self() ! {target, Hash},
-                    lager:info("request was mined @ ~p, targeting now", [CurrHeight]),
+                    self() ! {target, blockchain_txn_poc_request_v1:hash(POCReq)},
+                    lager:info("request was mined @ ~p, hash: ~p, targeting now", [CurrHeight, Hash]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight, retry=?CHALLENGE_RETRY}};
                 _ ->
                     lager:debug("request not found in block ~p", [Hash]),
@@ -162,7 +162,7 @@ targeting(info, _, #data{retry=0}=Data) ->
 targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
     {Target, Gateways} = blockchain_poc_path:target(Hash, Ledger),
-    lager:info("target found ~p, challenging", [Target]),
+    lager:info("target found ~p, challenging, hash: ~p", [Target, Hash]),
     self() ! {challenge, Hash, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
@@ -228,7 +228,7 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
             {keep_state, Data};
         true ->
             Receipts1 = [Receipt|Receipts0],
-            case erlang:length(Receipts1) =:= erlang:length(Challengees) of
+            case erlang:length(Receipts1) == erlang:length(Challengees) of
                 false ->
                     lager:debug("waiting for more"),
                     {keep_state, Data#data{receipts=Receipts1}};
