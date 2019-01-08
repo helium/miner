@@ -129,17 +129,17 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain, address=Address}=Data) ->
+mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain, address=Address, secret=Secret}=Data) ->
     lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
             Filter = fun(Txn) -> Address == blockchain_txn_poc_request_v1:gateway_address(Txn) end,
             case lists:filter(Filter, Txns) of
-                [POCReq] ->
+                [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
-                    self() ! {target, blockchain_txn_poc_request_v1:hash(POCReq)},
-                    lager:info("request was mined @ ~p, hash: ~p, targeting now", [CurrHeight, Hash]),
+                    self() ! {target, Secret},
+                    lager:info("request was mined @ ~p, hash: ~p, targeting now, secret: ~p", [CurrHeight, Hash, Secret]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight, retry=?CHALLENGE_RETRY}};
                 _ ->
                     lager:debug("request not found in block ~p", [Hash]),
