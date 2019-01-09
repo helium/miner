@@ -13,8 +13,8 @@ start_link() ->
 
 init(_Args) ->
     SupFlags = #{strategy => rest_for_one
-                 ,intensity => 1
-                 ,period => 5},
+                 ,intensity => 10
+                 ,period => 10},
 
     %% Blockchain Supervisor Options
     SeedNodes = case application:get_env(blockchain, seed_nodes) of
