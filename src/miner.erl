@@ -55,6 +55,9 @@
 -define(CONFIG_MEMBER_POSITION, "Position").
 -define(CONFIG_MEMBER_ADD_GW, "AddGateway").
 
+%% H3/assert_location
+-define(H3_MINIMUM_RESOLUTION, 9).
+
 %% ==================================================================
 %% API calls
 %% ==================================================================
@@ -472,14 +475,12 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_
     case ebus_message:args(Msg) of
         {ok, [#{"lat" := Lat,
                 "lon" := Lon,
-                "height" := Height,
                 "h_accuracy" := HorizontalAcc
                }]} ->
             case Chain /= undefined of
                 true ->
                     %% pick the best h3 index we can for the resolution
-                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-                    lager:info("I want to claim h3 index ~p with resolution: ~p at height ~p meters", [H3Index, Resolution, Height/1000]),
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),                    
                     maybe_assert_location(H3Index, Resolution, Chain);
                 false ->
                     ok
@@ -561,7 +562,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     end.
 
 -spec maybe_assert_location(h3:index(), h3:resolution(), blockchain:blockchain()) -> ok.
-maybe_assert_location(_, Resolution, _) when Resolution < 10 ->
+maybe_assert_location(_, Resolution, _) when Resolution < ?H3_MINIMUM_RESOLUTION ->
     %% wait for a better resolution
     ok;
 maybe_assert_location(Location, _Resolution, Chain) ->
@@ -575,6 +576,7 @@ maybe_assert_location(Location, _Resolution, Chain) ->
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
                     %% no location, try submitting the transaction
+                    lager:info("submitting assert location with h3 index ~p", [Location]),
                     blockchain_worker:assert_location_request(OwnerAddress, Location);
                 OldLocation ->
                     case {OldLocation, Location} of
@@ -586,9 +588,10 @@ maybe_assert_location(Location, _Resolution, Chain) ->
                                     %% new index is a parent of the old one
                                     ok;
                                 false ->
-                                    %% check if the parent at resolution 10 actually differs
-                                    case h3:parent(New, 10) /= h3:parent(Old, 10) of
+                                    %% check if the parent at resolution H3_MINIMUM_RESOLUTION actually differs
+                                    case h3:parent(New, ?H3_MINIMUM_RESOLUTION) /= h3:parent(Old, ?H3_MINIMUM_RESOLUTION) of
                                         true ->
+                                            lager:info("submitting assert location with h3 index ~p", [Location]),
                                             blockchain_worker:assert_location_request(OwnerAddress, Location);
                                         false ->
                                             ok
