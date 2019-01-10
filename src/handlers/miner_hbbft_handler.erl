@@ -7,7 +7,7 @@
 
 -behavior(relcast).
 
--export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
+-export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1, txn_filter/2]).
 
 -record(state, {
           n :: non_neg_integer()
@@ -28,8 +28,25 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     {erlang:system_time(seconds), HeadHash}.
 
+txn_filter(Txn, Chain) ->
+    %% XXX we have to use absorb here because we don't have a full validate yet
+    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
+    Type = blockchain_transactions:type(Txn),
+    case Type:absorb(Txn, Ledger) of
+        ok ->
+            true;
+        {error, {bad_nonce, {_NonceType, Nonce, LedgerNonce}}} when Nonce > LedgerNonce + 1 ->
+            %% we don't have enough context to decide if this transaction is valid yet
+            %% XXX we should probably have an upper bound on the nonce gap, though
+            true;
+        _ ->
+            %% any other error means we drop it
+            false
+    end.
+
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
+    HBBFT0 = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
+    HBBFT = hbbft:set_filter_fun(?MODULE, txn_filter, [Chain], HBBFT0),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
                          id=Id-1,
@@ -166,9 +183,12 @@ deserialize(BinState) ->
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK}.
 
-restore(OldState, _NewState) ->
-    %% don't need to merge states
-    {ok, OldState}.
+restore(OldState, NewState) ->
+    %% provide the new filter/stamp funs to the old state
+    {FilterM, FilterF, FilterA} = hbbft:get_filter_fun(NewState#state.hbbft),
+    {StampM, StampF, StampA} = hbbft:get_stamp_fun(NewState#state.hbbft),
+    {ok, OldState#state{hbbft=hbbft:set_stamp_fun(StampM, StampF, StampA,
+                                                  hbbft:set_filter_fun(FilterM, FilterF, FilterA, OldState#state.hbbft))}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->

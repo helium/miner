@@ -429,7 +429,7 @@ handle_info(maybe_restore_consensus, State) ->
                                                               F,
                                                               State#state.batch_size,
                                                               undefined,
-                                                              self()]],
+                                                              Chain]],
                             %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                             lager:info("~p. Group: ~p~n", [self(), Group]),
