@@ -43,6 +43,21 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+%% DBus helper macros
+-define(MINER_OBJECT_PATH, "/").
+-define(MINER_INTERFACE, "com.helium.Miner").
+-define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
+-define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
+
+-define(CONFIG_OBJECT_PATH, "/").
+-define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
+-define(CONFIG_OBJECT(M), ?CONFIG_OBJECT_INTERFACE ++ "." ++ M).
+-define(CONFIG_MEMBER_POSITION, "Position").
+-define(CONFIG_MEMBER_ADD_GW, "AddGateway").
+
+%% H3/assert_location
+-define(H3_MINIMUM_RESOLUTION, 9).
+
 %% ==================================================================
 %% API calls
 %% ==================================================================
@@ -59,13 +74,11 @@ init(Args) ->
         true ->
             {ok, SystemBus} = ebus:system(),
             {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []),
-            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
-                                                            "/com/helium/Config",
-                                                            "com.helium.Config.Position",
+            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
+                                                            ?CONFIG_OBJECT(?CONFIG_MEMBER_POSITION),
                                                             self(), gps_location),
-            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy,
-                                                              "/com/helium/Config",
-                                                              "com.helium.Config.AddGateway",
+            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
+                                                              ?CONFIG_OBJECT(?CONFIG_MEMBER_ADD_GW),
                                                               self(), add_gateway_request);
         false ->
             GPSSignal = 0,
@@ -462,14 +475,12 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_
     case ebus_message:args(Msg) of
         {ok, [#{"lat" := Lat,
                 "lon" := Lon,
-                "height" := Height,
                 "h_accuracy" := HorizontalAcc
                }]} ->
             case Chain /= undefined of
                 true ->
                     %% pick the best h3 index we can for the resolution
-                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-                    lager:info("I want to claim h3 index ~p with resolution: ~p at height ~p meters", [H3Index, Resolution, Height/1000]),
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),                    
                     maybe_assert_location(H3Index, Resolution, Chain);
                 false ->
                     ok
@@ -487,9 +498,15 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "token" := AuthToken,
                 "owner" := OwnerStrAddress
                }]} ->
+            catch(signal_add_gateway_status("sending", State)),
             OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
-            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]);
+            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
+            Status = case Result of
+                         ok -> "sent";
+                         _ -> "send_failed"
+                     end,
+            catch(signal_add_gateway_status(Status, State));
         {ok, [Args]} ->
             lager:error("Invalid add_gateway_signal args: ~p", [Args]);
         {error, Error} ->
@@ -500,6 +517,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
+
 
 
 %% ==================================================================
@@ -544,7 +562,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     end.
 
 -spec maybe_assert_location(h3:index(), h3:resolution(), blockchain:blockchain()) -> ok.
-maybe_assert_location(_, Resolution, _) when Resolution < 10 ->
+maybe_assert_location(_, Resolution, _) when Resolution < ?H3_MINIMUM_RESOLUTION ->
     %% wait for a better resolution
     ok;
 maybe_assert_location(Location, _Resolution, Chain) ->
@@ -558,6 +576,7 @@ maybe_assert_location(Location, _Resolution, Chain) ->
             case blockchain_ledger_gateway_v1:location(GwInfo) of
                 undefined ->
                     %% no location, try submitting the transaction
+                    lager:info("submitting assert location with h3 index ~p", [Location]),
                     blockchain_worker:assert_location_request(OwnerAddress, Location);
                 OldLocation ->
                     case {OldLocation, Location} of
@@ -569,9 +588,10 @@ maybe_assert_location(Location, _Resolution, Chain) ->
                                     %% new index is a parent of the old one
                                     ok;
                                 false ->
-                                    %% check if the parent at resolution 10 actually differs
-                                    case h3:parent(New, 10) /= h3:parent(Old, 10) of
+                                    %% check if the parent at resolution H3_MINIMUM_RESOLUTION actually differs
+                                    case h3:parent(New, ?H3_MINIMUM_RESOLUTION) /= h3:parent(Old, ?H3_MINIMUM_RESOLUTION) of
                                         true ->
+                                            lager:info("submitting assert location with h3 index ~p", [Location]),
                                             blockchain_worker:assert_location_request(OwnerAddress, Location);
                                         false ->
                                             ok
@@ -584,3 +604,13 @@ maybe_assert_location(Location, _Resolution, Chain) ->
                     end
             end
     end.
+
+-spec signal_add_gateway_status(string(), #state{}) -> ok.
+signal_add_gateway_status(_, #state{config_proxy=undefined}) ->
+    ok;
+signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
+    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
+                                        ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
+    ok = ebus_message:append_args(Msg, [string], [Status]),
+    ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
+    ok.
