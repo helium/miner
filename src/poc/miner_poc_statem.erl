@@ -80,7 +80,7 @@ init(Args) ->
     case maps:get(onion_server, Args, undefined) of
         {ok, {RadioHost, RadioPort}} ->
             PrivKey = maps:get(priv_key, Args),
-            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey, self()),
+            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey),
             lager:info("started miner_onion_server");
         undefined ->
             lager:info("onion_server not started")
