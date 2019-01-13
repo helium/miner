@@ -68,16 +68,16 @@ handle_command({skip, Ref, Worker}, State) ->
             {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=HBBFT}) ->
+handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(HBBFT, NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [new_epoch || Sync], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [new_epoch || Sync] ++ fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -108,11 +108,11 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact);
+                            ok = miner:signed_block(Signatures, State#state.artifact),
+                            {NewState, [new_epoch]};
                         false ->
-                            ok
-                    end,
-                    {NewState, []};
+                            {NewState, []}
+                    end;
                 false when R > Round ->
                     defer;
                 false ->
@@ -166,9 +166,11 @@ deserialize(BinState) ->
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK}.
 
-restore(OldState, _NewState) ->
-    %% don't need to merge states
-    {ok, OldState}.
+restore(OldState, NewState) ->
+    %% replace the stamp fun from the old state with the new one
+    %% because we have non-serializable data in it (rocksdb refs)
+    {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
+    {ok, OldState#state{hbbft=hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft)}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
