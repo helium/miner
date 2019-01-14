@@ -63,9 +63,9 @@ handle_command({skip, Ref, Worker}, State) ->
     case hbbft:next_round(State#state.hbbft) of
         {NextHBBFT, ok} ->
             Worker ! {Ref, ok},
-            {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+            {reply, ok, [], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
         {NextHBBFT, {send, NextMsgs}} ->
-            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+            {reply, ok, fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
@@ -109,7 +109,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
                             ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState, [new_epoch]};
+                            {NewState, []}; %[new_epoch]}; %% comment this out to see if it fixes the BBA wedge
                         false ->
                             {NewState, []}
                     end;
