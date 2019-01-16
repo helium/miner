@@ -97,7 +97,7 @@ handle_command(Txn, State) ->
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+    %lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
     Round = hbbft:round(HBBFT),
     case binary_to_term(Msg) of
         {signature, R, Address, Signature} ->
