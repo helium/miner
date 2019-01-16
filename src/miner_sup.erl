@@ -97,6 +97,13 @@ init(_Args) ->
             restart => permanent,
             type => worker,
             modules => [miner_poc_statem]
+        },
+        #{
+            id => miner_metrics,
+            start => {miner_metrics, start_link, [[]]},
+            restart => permanent,
+            type => worker,
+            modules => [miner_metrics]
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

@@ -120,6 +120,7 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             lager:info("submitted poc request ~p", [Tx]),
+            ok = miner_metrics:poc_req_rate(1),
             {next_state, mining, Data#data{secret=Secret}}
     end;
 requesting(EventType, EventContent, Data) ->

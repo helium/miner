@@ -23,7 +23,10 @@
     ebus,
     rand_compat, %% nat_upnp has a missing dep
     inets, %% nat_upnp has a missing dep
-    xmerl  %% nat_upnp has a missing dep
+    xmerl,  %% nat_upnp has a missing dep
+    folsom,
+    exometer_core,
+    recon
    ]},
   {included_applications, [blockchain]},
   {env,[]},
