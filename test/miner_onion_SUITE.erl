@@ -42,7 +42,7 @@ basic(_Config) ->
     {ok, Port} = inet:port(LSock),
 
     {ok, PrivateKey, CompactKey} = ecc_compact:generate_key(),
-    {ok, _Server} = miner_onion_server:start_link("127.0.0.1", Port, CompactKey, PrivateKey, self()),
+    {ok, _Server} = miner_onion_server:start_link("127.0.0.1", Port, CompactKey, PrivateKey),
     {ok, Sock} = gen_tcp:accept(LSock),
 
     Data = <<1, 2, 3>>,
