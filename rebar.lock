@@ -44,7 +44,7 @@
   0},
  {<<"hbbft">>,
   {git,"https://github.com/helium/erlang-hbbft.git",
-       {ref,"1a5a8b5417fcfdc36ae6785f3bbddccace0a00ef"}},
+       {ref,"e537d6726f60e4eaad3503aa26bdfdd6fdbf5a02"}},
   0},
  {<<"inert">>,
   {git,"https://github.com/msantos/inert",
