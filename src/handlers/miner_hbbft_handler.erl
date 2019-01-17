@@ -109,7 +109,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
                             ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState, []}; %[new_epoch]}; %% comment this out to see if it fixes the BBA wedge
+                            {NewState, [new_epoch]};
                         false ->
                             {NewState, []}
                     end;
