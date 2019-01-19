@@ -97,7 +97,7 @@ handle_command(Txn, State) ->
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+    %lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
     Round = hbbft:round(HBBFT),
     case binary_to_term(Msg) of
         {signature, R, Address, Signature} ->
@@ -127,7 +127,6 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT}, []};
                 {_, defer} ->
-                    lager:info("Deferred ~p", [binary_to_term(Msg)]),
                     defer;
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
