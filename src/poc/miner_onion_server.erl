@@ -122,18 +122,7 @@ handle_cast({decrypt, <<IV:12/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
             ,#state{privkey=PrivKey, socket=Socket}=State) ->
-    AAD = <<IV/binary, OnionCompactKey/binary>>,
-    PubKey = ecc_compact:recover_key(OnionCompactKey),
-    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
-    case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
-        error ->
-            lager:error("could not decrypt");
-        <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
-            lager:info("decrypted a layer: ~p~n", [Data]),
-            _ = erlang:spawn(?MODULE, send_receipt, [IV, Data]),
-            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
-    end,
-    ok = inet:setopts(Socket, [{active, once}]),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -154,18 +143,7 @@ handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
                              Tag:4/binary,
                              CipherText/binary>>},
             #state{privkey=PrivKey, socket=Socket}=State) ->
-    AAD = <<IV/binary, OnionCompactKey/binary>>,
-    PubKey = ecc_compact:recover_key(OnionCompactKey),
-    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
-    case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
-        error ->
-            lager:error("Could not decrypt");
-        <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
-            lager:info("Decrypted a layer: ~p~n", [Data]),
-            _ = erlang:spawn(?MODULE, send_receipt, [IV, Data]),
-            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
-    end,
-    ok = inet:setopts(Socket, [{active, once}]),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
     {noreply, State};
 %% handle ack from radio
 handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
@@ -196,6 +174,24 @@ handle_info(_Msg, State) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket) ->
+    AAD = <<IV/binary, OnionCompactKey/binary>>,
+    PubKey = ecc_compact:recover_key(OnionCompactKey),
+    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
+    case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
+        error ->
+            lager:error("could not decrypt");
+        <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
+            lager:info("decrypted a layer: ~p~n", [Data]),
+            _ = erlang:spawn(?MODULE, send_receipt, [IV, Data]),
+            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
+    end,
+    ok = inet:setopts(Socket, [{active, once}]).
 
 %%--------------------------------------------------------------------
 %% @doc
