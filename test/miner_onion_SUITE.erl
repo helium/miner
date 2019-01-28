@@ -34,15 +34,21 @@ all() ->
 %% @end
 %%--------------------------------------------------------------------
 basic(_Config) ->
-
     application:ensure_all_started(lager),
 
     {ok, LSock} = gen_tcp:listen(0, [{active, false}, binary, {packet, 2}]),
-
     {ok, Port} = inet:port(LSock),
 
     {ok, PrivateKey, CompactKey} = ecc_compact:generate_key(),
-    {ok, _Server} = miner_onion_server:start_link("127.0.0.1", Port, CompactKey, PrivateKey),
+
+    meck:new(blockchain_swarm, [passthrough]),
+    meck:expect(blockchain_swarm, address, fun() -> CompactKey end),
+
+    {ok, _Server} = miner_onion_server:start_link(#{
+        radio_host => "127.0.0.1",
+        radio_port => Port,
+        priv_key => PrivateKey
+    }),
     {ok, Sock} = gen_tcp:accept(LSock),
 
     Data = <<1, 2, 3>>,
@@ -59,4 +65,6 @@ basic(_Config) ->
 
     ?assert(meck:validate(miner_onion_server)),
     meck:unload(miner_onion_server),
+    ?assert(meck:validate(blockchain_swarm)),
+    meck:unload(blockchain_swarm),
     ok.

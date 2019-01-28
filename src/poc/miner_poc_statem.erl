@@ -77,14 +77,6 @@ init(Args) ->
     Address = blockchain_swarm:address(),
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
     Blockchain = blockchain_worker:blockchain(),
-    case maps:get(onion_server, Args, undefined) of
-        {ok, {RadioHost, RadioPort}} ->
-            PrivKey = maps:get(priv_key, Args),
-            miner_onion_server:start_link(RadioHost, RadioPort, Address, PrivKey),
-            lager:info("started miner_onion_server");
-        undefined ->
-            lager:info("onion_server not started")
-    end,
     lager:info("init with ~p", [Args]),
     {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
 

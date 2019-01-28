@@ -11,7 +11,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/4,
+    start_link/1,
     send/1,
     socket/0,
     compact_key/0,
@@ -47,8 +47,8 @@
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
-start_link(Host, Port, CompactKey, PrivateKey) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Host, Port, CompactKey, PrivateKey], []).
+start_link(Args) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -113,15 +113,15 @@ send_receipt(IV, Data) ->
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
-init([Host, Port, CompactKey, PrivateKey]=_Args) ->
+init(Args) ->
     State = #state{
-        host=Host,
-        port=Port,
-        compact_key=CompactKey,
-        privkey=PrivateKey
+        host=maps:get(radio_host, Args),
+        port=maps:get(radio_port, Args),
+        compact_key=blockchain_swarm:address(),
+        privkey=maps:get(priv_key, Args)
     },
     self() ! connect,
-    lager:info("init with ~p", [_Args]),
+    lager:info("init with ~p", [Args]),
     {ok, State}.
 
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->

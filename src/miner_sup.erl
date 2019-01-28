@@ -72,8 +72,12 @@ init(_Args) ->
         {use_ebus, UseEBus}
     ],
 
-    POCOpts = #{
-        onion_server => application:get_env(miner, radio_device),
+    POCOpts = #{},
+
+    {RadioHost, RadioPort} = application:get_env(miner, radio_device, {"127.0.0.1", 45000}),
+    OnionOpts = #{
+        radio_host => RadioHost,
+        radio_port => RadioPort,
         priv_key => PrivKey
     },
 
@@ -97,6 +101,13 @@ init(_Args) ->
             restart => permanent,
             type => worker,
             modules => [miner_poc_statem]
+        },
+        #{
+            id => miner_onion_server,
+            start => {miner_onion_server, start_link, [OnionOpts]},
+            restart => permanent,
+            type => worker,
+            modules => [miner_onion_server]
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.
