@@ -209,7 +209,7 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Address = blockchain_poc_receipt_v1:address(Receipt),
-    % TODO: Also check onion IV
+    % TODO: Also check onion layer secret
     case blockchain_poc_receipt_v1:is_valid(Receipt)
          andalso lists:member(Address, Challengees)
     of
