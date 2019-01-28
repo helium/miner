@@ -13,8 +13,6 @@
 -export([
     start_link/1,
     send/1,
-    socket/0,
-    compact_key/0,
     construct_onion/1,
     decrypt/1,
     send_receipt/2
@@ -37,11 +35,10 @@
 -record(state, {
     host :: string(),
     port :: integer(),
-    socket :: gen_tcp:socket(),
+    socket :: gen_tcp:socket() | undefined,
     compact_key :: ecc_compact:compact_key(),
     privkey,
-    sender :: undefined | {pid(), term()},
-    controlling_process :: pid()
+    sender :: undefined | {pid(), term()}
 }).
 
 %% ------------------------------------------------------------------
@@ -57,22 +54,6 @@ start_link(Args) ->
 -spec send(binary()) -> ok.
 send(Data) ->
     gen_server:call(?MODULE, {send, Data}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec socket() -> {ok, gen_tcp:socket()}.
-socket() ->
-    gen_server:call(?MODULE, socket).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec compact_key() -> {ok, ecc_compact:compact_key()}.
-compact_key() ->
-    gen_server:call(?MODULE, compact_key).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -115,10 +96,10 @@ send_receipt(IV, Data) ->
 %% ------------------------------------------------------------------
 init(Args) ->
     State = #state{
-        host=maps:get(radio_host, Args),
-        port=maps:get(radio_port, Args),
-        compact_key=blockchain_swarm:address(),
-        privkey=maps:get(priv_key, Args)
+        host = maps:get(radio_host, Args),
+        port = maps:get(radio_port, Args),
+        compact_key = blockchain_swarm:address(),
+        privkey = maps:get(priv_key, Args)
     },
     self() ! connect,
     lager:info("init with ~p", [Args]),
