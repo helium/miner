@@ -181,10 +181,8 @@ challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, re
             lager:info("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:address_to_p2p(Start),
-            case miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
-                {ok, Stream} ->
-                    _ = miner_onion_handler:send(Stream, Onion),
-                    lager:info("onion sent"),
+            case send_onion(P2P, Onion, 3) of
+                ok ->
                     {next_state, receiving, Data#data{challengees=Path}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
@@ -258,6 +256,24 @@ submitting(EventType, EventContent, Data) ->
 handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+send_onion(_P2P, _Onion, 0) ->
+    {error, retries_exceeded};
+send_onion(P2P, Onion, Retry) ->
+    case miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+        {ok, Stream} ->
+            _ = miner_onion_handler:send(Stream, Onion),
+            lager:info("onion sent"),
+            ok;
+        {error, Reason} ->
+            lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
+            timer:sleep(timer:seconds(5)),
+            send_onion(P2P, Onion, Retry-1)
+    end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
