@@ -58,22 +58,27 @@ init(_Args) ->
     % no need to do any checks here as any bad combination results in an empty list
     SeedAddresses = string:tokens(lists:flatten([string:prefix(X, "blockchain-seed-nodes=") || [X] <- inet_res:lookup(SeedNodeDNS, in, txt), string:prefix(X, "blockchain-seed-nodes=") /= nomatch]), ","),
     Port = application:get_env(blockchain, port, 0),
-    NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 7),
+    NumConsensusMembers = application:get_env(blockchain, num_consensus_members, 4),
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     %% TODO: Remove when cuttlefish
     MaxInboundConnections = application:get_env(blockchain, max_inbound_connections, 10),
 
-    SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
-    ok = filelib:ensure_dir(SwarmKey),
-    {PublicKey, ECDHFun, SigFun} =
-        case libp2p_crypto:load_keys(SwarmKey) of
-            {ok, #{secret := PrivKey0, public := PubKey}} ->
-                {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)};
-            {error, enoent} ->
-                KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-                ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
-                {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)}
-        end,
+    case application:get_env(blockchain, key, undefined) of
+        undefined ->
+            SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
+            ok = filelib:ensure_dir(SwarmKey),
+            {PublicKey, ECDHFun, SigFun} =
+                case libp2p_crypto:load_keys(SwarmKey) of
+                    {ok, #{secret := PrivKey0, public := PubKey}} ->
+                        {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)};
+                    {error, enoent} ->
+                        KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+                        ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
+                        {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)}
+                end;
+        {PublicKey, ECDHFun, SigFun} ->
+            ok
+    end,
 
     BlockchainOpts = [
         {key, {PublicKey, SigFun}},
@@ -91,12 +96,14 @@ init(_Args) ->
     BatchSize = application:get_env(miner, batch_size, 500),
     RadioDevice = application:get_env(miner, radio_device, undefined),
 
-    MinerOpts = [
-        {curve, Curve},
-        {block_time, BlockTime},
-        {batch_size, BatchSize},
-        {radio_device, RadioDevice}
-    ],
+    MinerOpts =
+        [
+         {curve, Curve},
+         {block_time, BlockTime},
+         {batch_size, BatchSize},
+         {radio_device, RadioDevice},
+         {election_interval, application:get_env(miner, election_interval, 30)}
+        ],
 
     POCOpts = #{},
 

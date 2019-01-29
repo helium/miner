@@ -9,33 +9,46 @@
 
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2]).
 
--record(state, {
-          n :: non_neg_integer(),
-          f :: non_neg_integer(),
-          t :: non_neg_integer(),
-          id :: non_neg_integer(),
-          dkg :: dkg_hybriddkg:dkg() | dkg_hybriddkg:serialized_dkg(),
-          curve :: atom(),
-          g1 :: erlang_pbc:element() | binary(),
-          g2 :: erlang_pbc:element() | binary(),
-          privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
-          members = [] :: [libp2p_crypto:pubkey_bin()],
-          artifact :: binary(),
-          signatures = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
-          signatures_required :: pos_integer(),
-          sigmod :: atom(),
-          sigfun :: atom(),
-          donemod :: atom(),
-          donefun :: atom(),
-          sent_conf = false :: boolean(),
-          timer :: undefined | pid()
-         }).
+-record(state,
+        {
+         n :: non_neg_integer(),
+         f :: non_neg_integer(),
+         t :: non_neg_integer(),
+         id :: non_neg_integer(),
+         dkg :: dkg_hybriddkg:dkg() | dkg_hybriddkg:serialized_dkg(),
+         curve :: atom(),
+         g1 :: erlang_pbc:element() | binary(),
+         g2 :: erlang_pbc:element() | binary(),
+         privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+         members = [] :: [libp2p_crypto:address()],
+         artifact :: binary(),
+         signatures = [] :: [{libp2p_crypto:address(), binary()}],
+         signatures_required :: pos_integer(),
+         sigmod :: atom(),
+         sigfun :: atom(),
+         donemod :: atom(),
+         donefun :: atom(),
+         done_called = false :: boolean(),
+         sent_conf = false :: boolean(),
+         timer :: undefined | pid()
+        }).
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
     {G1, G2} = generate(Curve, Members),
     DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}]),
     lager:info("DKG~p started", [Id]),
-    {ok, #state{n=N, id=Id, f=F, t=T, g1=G1, g2=G2, curve=Curve, dkg=DKG, signatures_required=N, artifact=ThingToSign, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun, members=Members}}.
+    {ok, #state{n=N,
+                id=Id,
+                f=F,
+                t=T,
+                g1=G1, g2=G2,
+                curve=Curve,
+                dkg=DKG,
+                signatures_required=N,
+                artifact=ThingToSign,
+                sigmod=SigMod, sigfun=SigFun,
+                donemod=DoneMod, donefun=DoneFun,
+                members=Members}}.
 
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
@@ -58,21 +71,33 @@ handle_command(timeout, State) ->
             {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG, timer=undefined}}
     end.
 
-handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
-    %% lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
-    case binary_to_term(Msg) of
+handle_message(BinMsg, Index, State=#state{n = N, t = T,
+                                        curve = Curve,
+                                        g1 = G1, g2 = G2,
+                                        members = Members,
+                                        sigmod = SigMod, sigfun = SigFun,
+                                        donemod = DoneMod, donefun = DoneFun}) ->
+    Msg = binary_to_term(BinMsg),
+    %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
+    case Msg of
         {conf, Signatures} ->
             case enough_signatures(State#state{signatures=Signatures}) of
                 {ok, GoodSignatures} ->
                     case State#state.sent_conf of
                         false ->
+                            %% relies on implicit self-send to hit the
+                            %% other clause here in some cases
                             {State#state{sent_conf=true, signatures=GoodSignatures},
                              [{multicast, term_to_binary({conf, GoodSignatures})}]};
-                        true ->
-                            %% this needs to be a call so we know the callback succeeded so we can terminate
-                            ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures, State#state.privkey),
+                        true when State#state.done_called == false ->
+                            %% this needs to be a call so we know the callback succeeded so we
+                            %% can terminate
+                            ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
+                                                 Members, State#state.privkey),
                             %% stop the handler
-                            {State, [{stop, 60000}]}
+                            {State#state{done_called = true}, [{stop, 60000}]};
+                        _ ->
+                            {State, []}
                     end;
                 false ->
                     {State, []}
@@ -87,7 +112,7 @@ handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sig
                     {NewState, []}
             end;
         _ ->
-            case dkg_hybriddkg:handle_msg(State#state.dkg, Index, binary_to_term(Msg)) of
+            case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
                 %% NOTE: We cover all possible return values from handle_msg hence
                 %% eliminating the need for a final catch-all clause
                 {_, ignore} ->
@@ -190,7 +215,7 @@ enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when lengt
     false;
 enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
+    case blockchain_block_v1:verify_signatures(Artifact, %blockchain_block:deserialize(Artifact),
                                             Members,
                                             Signatures,
                                             Threshold) of

@@ -163,16 +163,28 @@ init_per_testcase(TestCase, Config) ->
     SeedNodes = [],
     Port = get_config("PORT", 0),
     Curve = 'SS512',
-    BlockTime = get_config("BT", 15000),
+    BlockTime = get_config("BT", 100),
     BatchSize = get_config("BS", 500),
+    Interval = get_config("INT", 5),
 
-    MinerNames = lists:map(fun(_M) -> list_to_atom(miner_ct_utils:randname(5)) end, lists:seq(1, TotalMiners)),
+    MinerNames = lists:map(fun(M) ->
+                                   list_to_atom(integer_to_list(M) ++ miner_ct_utils:randname(5))
+                           end, lists:seq(1, TotalMiners)),
 
-    Miners = miner_ct_utils:pmap(fun(Miner) ->
-                                         miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
-                                 end, MinerNames),
+    Keys = miner_ct_utils:pmap(
+             fun(Miner) ->
+                     Pid = miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
+                     #{secret := GPriv, public := GPub} =
+                         libp2p_crypto:generate_keys(ecc_compact),
+                     GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
+                     GAddr = libp2p_crypto:pubkey_to_bin(GPub),
+                     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
+                     {Miner, Pid, GECDH, GPub, GAddr, GSigFun}
+             end, MinerNames),
 
-    ConfigResult = miner_ct_utils:pmap(fun(Miner) ->
+    Miners = [element(2, K) || K <- Keys],
+
+    ConfigResult = miner_ct_utils:pmap(fun({_Name, Miner, ECDH, PubKey, _Addr, SigFun}) ->
                                                ct_rpc:call(Miner, cover, start, []),
                                                ct_rpc:call(Miner, application, load, [lager]),
                                                ct_rpc:call(Miner, application, load, [miner]),
@@ -182,8 +194,7 @@ init_per_testcase(TestCase, Config) ->
                                                LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
                                                %% set blockchain configuration
-                                               #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-                                               Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
+                                               Key = {PubKey, ECDH, SigFun},
                                                BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
@@ -195,10 +206,11 @@ init_per_testcase(TestCase, Config) ->
                                                ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
                                                ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
                                                ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
+                                               ct_rpc:call(Miner, application, set_env, [miner, election_interval, Interval]),
 
                                                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
                                                ok
-                                       end, Miners),
+                                       end, Keys),
 
     %% check that the config loaded correctly on each miner
     true = lists:all(fun(ok) -> true;
@@ -225,6 +237,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, _} = ct_cover:add_nodes(Miners),
 
     [{miners, Miners},
+     {keys, Keys},
      {addresses, Addresses},
      {num_consensus_members, NumConsensusMembers} | Config].
 
