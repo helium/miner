@@ -131,7 +131,10 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) end,
+            Filter = fun(Txn) ->
+                Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) andalso
+                crypto:hash(sha256, Secret) =:= blockchain_txn_poc_request_v1:hash(Txn)
+            end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
