@@ -9,42 +9,45 @@
 
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
 
--record(state, {
-          n :: non_neg_integer(),
-          f :: non_neg_integer(),
-          id :: non_neg_integer(),
-          hbbft :: hbbft:hbbft_data(),
-          sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
-          seq = 0,
-          deferred = [],
-          signatures = [],
-          signatures_required = 0,
-          artifact :: undefined | binary(),
-          members :: [libp2p_crypto:pubkey_bin()],
-          chain :: undefined | blockchain:blockchain()
-         }).
+-record(state,
+        {
+         n :: non_neg_integer(),
+         f :: non_neg_integer(),
+         id :: non_neg_integer(),
+         hbbft :: hbbft:hbbft_data(),
+         sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+         seq = 0,
+         deferred = [],
+         signatures = [],
+         signatures_required = 0,
+         artifact :: undefined | binary(),
+         members :: [libp2p_crypto:pubkey_bin()],
+         chain :: undefined | blockchain_ledger_v1:ledger(),
+         signed = 0 :: non_neg_integer()
+        }).
 
 stamp(Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
-    %% Create a new ledger context to be used for speculative absorbs
-    %% and attach it to the chain in our state
-    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
-    Chain1 = blockchain:ledger(Ledger, Chain0),
+init([Members, Id, N, F, BatchSize, SK, Chain]) ->
+    init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
+                       {?MODULE, stamp, [Chain]}, Round, Buf),
+    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
+    Chain1 = blockchain:ledger(Ledger, Chain),
+
     lager:info("HBBFT~p started~n", [Id]),
-    {ok, #state{n=N,
-                id=Id-1,
-                sk=SK,
-                f=F,
-                members=Members,
-                signatures_required=N-F,
-                hbbft=HBBFT,
-                chain=Chain1
-               }}.
+    {ok, #state{n = N,
+                id = Id - 1,
+                sk = SK,
+                f = F,
+                members = Members,
+                signatures_required = N - F,
+                hbbft = HBBFT,
+                chain=Chain1}}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -54,6 +57,16 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
+handle_command(get_buf, State) ->
+    {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
+handle_command({set_buf, Buf}, State) ->
+    {reply, ok, [], State#state{hbbft = hbbft:buf(Buf, State#state.hbbft)}};
+handle_command(stop, State) ->
+    %% TODO add ignore support for this four tuple to use ignore
+    {reply, ok, [{stop, timer:minutes(1)}], State};
+handle_command({stop, Timeout}, State) ->
+    %% TODO add ignore support for this four tuple to use ignore
+    {reply, ok, [{stop, Timeout}], State};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
@@ -122,32 +135,41 @@ handle_command(Txn, State=#state{chain=Chain}) ->
             {reply, Error, ignore}
     end.
 
-handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    %% lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
+    Msg = binary_to_term(BinMsg),
+    %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
-    case binary_to_term(Msg) of
+    case Msg of
         {signature, R, Address, Signature} ->
             case R == Round andalso lists:member(Address, State#state.members) andalso
                  %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
                  (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
                 true ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
-                    case enough_signatures(NewState) of
-                        {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState, []};
-                        false ->
-                            {NewState, []}
-                    end;
+                    NewState1 =
+                        case enough_signatures(NewState) of
+                            {ok, Signatures} when Round > NewState#state.signed ->
+                                %% no point in doing this more than once
+                                ok = miner:signed_block(Signatures, State#state.artifact),
+                                NewState#state{signed = Round};
+                            _ ->
+                                NewState
+                        end,
+                    {NewState1, []};
                 false when R > Round ->
                     defer;
+                false when R < Round ->
+                    %% don't log on late sigs
+                    ignore;
                 false ->
                     lager:warning("Invalid signature ~p from ~p for round ~p in our round ~p", [Signature, Address, R, Round]),
+                    lager:warning("member? ~p", [lists:member(Address, State#state.members)]),
+                    lager:warning("valid? ~p", [libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))]),
                     %% invalid signature somehow
                     ignore
             end;
         _ ->
-            case hbbft:handle_msg(HBBFT, Index - 1, binary_to_term(Msg)) of
+            case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
@@ -160,7 +182,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {result, {transactions, Stamps0, BinTxns}}} ->
                     Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
                     Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
-                    lager:info("Reached consensus"),
+                    lager:info("Reached consensus ~p ~p", [Index, Round]),
                     %% lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     %% send agreed upon Txns to the parent blockchain worker

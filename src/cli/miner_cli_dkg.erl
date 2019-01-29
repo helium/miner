@@ -65,7 +65,13 @@ dkg_status_usage() ->
     ].
 
 dkg_status(["dkg", "status"], [], []) ->
-    Text = clique_status:text(io_lib:format("~p", [miner:dkg_status()])),
+    Status =
+        try miner_consensus_mgr:dkg_status() of
+            Stat -> Stat
+        catch _:_ ->
+                not_running
+        end,
+    Text = clique_status:text(io_lib:format("~p", [Status])),
     [Text];
 dkg_status([], [], []) ->
     usage.

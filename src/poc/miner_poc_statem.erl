@@ -545,7 +545,10 @@ target_test() ->
                                       transactions => [],
                                       signatures => [],
                                       hbbft_round => 0,
-                                      time => 0}),
+                                      time => 0,
+                                      election_epoch => 1,
+                                      epoch_start => 0
+                                     }),
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = blockchain_poc_path:target(Hash, undefined, blockchain_swarm:pubkey_bin()),
 
