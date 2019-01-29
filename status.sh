@@ -3,7 +3,7 @@
 check_height() {
     nodes=$(seq 8)
     for node in ${nodes[@]}; do
-        echo "miner-dev$node, height: "$(./_build/dev/rel/miner-dev$node/bin/miner-dev$node info height)
+        echo "miner$node, height: "$(./_build/dev\+miner$node/rel/miner$node/bin/miner$node info height)
     done
     echo ""
 }
