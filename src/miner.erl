@@ -317,8 +317,9 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
     LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
-    NextBlockTime = max(0, erlang:system_time(seconds) - (LastBlockTimestamp + BlockTime)),
-    Ref = erlang:send_after(NextBlockTime, self(), block_timeout),
+    NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
+    lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
+    Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
     case blockchain:add_block(Block, Chain) of
         ok ->
             lager:info("sending the gossipped block to other workers"),
@@ -416,13 +417,17 @@ handle_info(maybe_restore_consensus, State) ->
                                                               F,
                                                               State#state.batch_size,
                                                               undefined,
-                                                              self()]],
+                                                              Chain]],
                             %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                             lager:info("~p. Group: ~p~n", [self(), Group]),
                             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                             {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-                            Ref = erlang:send_after(application:get_env(blockchain, block_time, 15000), self(), block_timeout),
+                            {ok, HeadBlock} = blockchain:head_block(Chain),
+                            LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
+                            NextBlockTime = max(0, (LastBlockTimestamp + (State#state.block_time div 1000)) - erlang:system_time(seconds)),
+                            lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
+                            Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
                             {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
                         false ->
                             {noreply, State#state{blockchain=Chain}}
@@ -446,7 +451,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
                        libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
-                       Ref = erlang:send_after(BlockTime, self(), block_timeout),
+                       LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
+                       NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
+                       lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
+                       Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
                        State#state{block_timer=Ref};
                    {error, Reason} ->
                        lager:error("Error, Reason: ~p", [Reason]),
