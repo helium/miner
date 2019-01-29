@@ -110,10 +110,10 @@ genesis_forge_usage() ->
 
 genesis_forge(["genesis", "forge", Addrs], [], []) ->
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses ],
-    %% IntitialGatewayTransactions = [ blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0) || Addr <- Addresses ],
-    %% miner:initial_dkg((InitialPaymentTransactions ++ IntitialGatewayTransactions), Addresses),
-    miner:initial_dkg(InitialPaymentTransactions, Addresses),
+    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
+    IntitialGatewayTransactions = [ blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0) || Addr <- Addresses ],
+    miner:initial_dkg(InitialPaymentTransactions ++ IntitialGatewayTransactions, Addresses),
     [clique_status:text("ok")];
 genesis_forge([_, _, _], [], []) ->
     usage.

@@ -163,19 +163,31 @@ init_per_testcase(TestCase, Config) ->
     SeedNodes = [],
     Port = get_config("PORT", 0),
     Curve = 'SS512',
-    BlockTime = get_config("BT", 15000),
+    BlockTime = get_config("BT", 100),
     BatchSize = get_config("BS", 500),
+    Interval = get_config("INT", 5),
 
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
-            MinerName = list_to_atom(miner_ct_utils:randname(5)),
+            MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
             {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 46000+I}}
         end,
         lists:seq(1, TotalMiners)
     ),
 
+    Keys = miner_ct_utils:pmap(
+             fun({Miner, Ports}) ->
+                     Pid = miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
+                     #{secret := GPriv, public := GPub} =
+                     libp2p_crypto:generate_keys(ecc_compact),
+                     GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
+                     GAddr = libp2p_crypto:pubkey_to_bin(GPub),
+                     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
+                     {Miner, Ports, Pid, GECDH, GPub, GAddr, GSigFun}
+             end, MinersAndPorts),
+
     ConfigResult = miner_ct_utils:pmap(
-        fun({Miner, {TCPPort, UDPPort}}) ->
+        fun({_MinerName, {TCPPort, UDPPort}, Miner, ECDH, PubKey, _Addr, SigFun}) ->
             ct_rpc:call(Miner, cover, start, []),
             ct_rpc:call(Miner, application, load, [lager]),
             ct_rpc:call(Miner, application, load, [miner]),
@@ -199,15 +211,15 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
             ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
             ct_rpc:call(Miner, application, set_env, [miner, radio_device, {"127.0.0.1", TCPPort, UDPPort}]),
+            ct_rpc:call(Miner, application, set_env, [miner, election_interval, Interval]),
 
             {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
         end,
-        MinersAndPorts
+        Keys
     ),
 
     Miners = [M || {M, _} <- MinersAndPorts],
-
     %% check that the config loaded correctly on each miner
     true = lists:all(
         fun(ok) -> true;
@@ -244,6 +256,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, _} = ct_cover:add_nodes(Miners),
     [
         {miners, Miners},
+        {keys, Keys},
         {ports, MinersAndPorts},
         {addresses, Addresses},
         {num_consensus_members, NumConsensusMembers}

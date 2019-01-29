@@ -31,16 +31,19 @@ stamp(Chain) ->
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
+    init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
+                       {?MODULE, stamp, [Chain]}, Round, Buf),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
 
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
-                id=Id-1,
+                id=Id - 1,
                 sk=SK,
                 f=F,
                 members=Members,
-                signatures_required=N-F,
+                signatures_required=N - F,
                 hbbft=HBBFT,
                 ledger=Ledger,
                 chain=Chain
@@ -54,6 +57,11 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
+handle_command(get_buf, State) ->
+    {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
+handle_command(stop, State) ->
+    %% TODO add ignore support for this four tuple to use ignore
+    {reply, ok, [{stop, timer:minutes(5)}], State};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
@@ -111,10 +119,11 @@ handle_command(Txn, State=#state{ledger=Ledger, chain=Chain, hbbft=HBBFT}) ->
             {reply, Error, ignore}
     end.
 
-handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    %% lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
+    Msg = binary_to_term(BinMsg),
+    %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
-    case binary_to_term(Msg) of
+    case Msg of
         {signature, R, Address, Signature} ->
             case R == Round andalso lists:member(Address, State#state.members) andalso
                  %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
@@ -123,11 +132,11 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState, []};
+                            ok = miner:signed_block(Signatures, State#state.artifact);
                         false ->
-                            {NewState, []}
-                    end;
+                            false
+                    end,
+                    {NewState, []};
                 false when R > Round ->
                     defer;
                 false ->
@@ -136,7 +145,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     ignore
             end;
         _ ->
-            case hbbft:handle_msg(HBBFT, Index - 1, binary_to_term(Msg)) of
+            case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
