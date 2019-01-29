@@ -109,7 +109,11 @@ initial_dkg(GenesisTransactions, Addrs) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_info() ->
-    gen_server:call(?MODULE, relcast_info, infinity).
+    case gen_server:call(?MODULE, consensus_group, 60000) of
+        undefined -> #{};
+        Pid ->
+            libp2p_group_relcast:info(Pid)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -117,7 +121,21 @@ relcast_info() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_queue() ->
-    gen_server:call(?MODULE, relcast_queue, infinity).
+    case gen_server:call(?MODULE, consensus_group, 60000) of
+        undefined -> #{};
+        Pid ->
+            try libp2p_group_relcast:queues(Pid) of
+                {_ModState, Inbound, Outbound} ->
+                    O = maps:map(fun(_, V) ->
+                                         [  erlang:binary_to_term(Value) || Value <- V]
+                                 end, Outbound),
+                    I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
+                    #{inbound => I,
+                      outbound => O}
+            catch What:Why ->
+                      {error, {What, Why}}
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -170,7 +188,18 @@ genesis_block_done(GenesisBlock, Signatures, PrivKey) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_status() ->
-    gen_server:call(?MODULE, hbbft_status, infinity).
+    case gen_server:call(?MODULE, consensus_group, 60000) of
+        undefined -> ok;
+        Pid ->
+            Ref = make_ref(),
+            ok = libp2p_group_relcast:handle_input(Pid, {status, Ref, self()}),
+            receive
+                {Ref, Result} ->
+                    Result
+            after timer:seconds(60) ->
+                      {error, timeout}
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -178,7 +207,18 @@ hbbft_status() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_skip() ->
-    gen_server:call(?MODULE, hbbft_skip, infinity).
+    case gen_server:call(?MODULE, consensus_group, 60000) of
+        undefined -> ok;
+        Pid ->
+            Ref = make_ref(),
+            ok = libp2p_group_relcast:handle_input(Pid, {skip, Ref, self()}),
+            receive
+                {Ref, Result} ->
+                    Result
+            after timer:seconds(60) ->
+                      {error, timeout}
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -186,7 +226,19 @@ hbbft_skip() ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 dkg_status() ->
-    gen_server:call(?MODULE, dkg_status, infinity).
+    case gen_server:call(?MODULE, dkg_group, 60000) of
+        undefined -> ok;
+        Pid ->
+            Ref = make_ref(),
+            ok = libp2p_group_relcast:handle_input(Pid, {status, Ref, self()}),
+            receive
+                {Ref, Result} ->
+                    Result
+            after timer:seconds(60) ->
+                      {error, timeout}
+            end
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -213,82 +265,12 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
-handle_call(relcast_info, From, State) ->
-    case State#state.consensus_group of
-        undefined -> {reply, #{}, State};
-        Pid ->
-            %% put this behind a spawn so we avoid a call loop
-            spawn(fun() ->
-                          Res = (catch libp2p_group_relcast:info(Pid)),
-                          gen_server:reply(From, Res)
-                  end),
-            {noreply, State}
-    end;
-handle_call(relcast_queue, From, State) ->
-    case State#state.consensus_group of
-        undefined -> {reply, #{}, State};
-        Pid ->
-            %% put this behind a spawn so we avoid a call loop
-            spawn(fun() ->
-                          Reply = try libp2p_group_relcast:queues(Pid) of
-                                      {_ModState, Inbound, Outbound} ->
-                                          O = maps:map(fun(_, V) ->
-                                                               [  erlang:binary_to_term(Value) || Value <- V]
-                                                       end, Outbound),
-                                          I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
-                                          #{inbound => I,
-                                            outbound => O}
-                                  catch What:Why ->
-                                            {error, {What, Why}}
-                                  end,
-                          gen_server:reply(From, Reply)
-                  end),
-            {noreply, State}
-    end;
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
-handle_call(hbbft_status, _From, State) ->
-    Status = case State#state.consensus_group of
-                 undefined -> ok;
-                 _ ->
-                     Ref = make_ref(),
-                     ok = libp2p_group_relcast:handle_input(State#state.consensus_group, {status, Ref, self()}),
-                     receive
-                         {Ref, Result} ->
-                             Result
-                     after timer:seconds(60) ->
-                               {error, timeout}
-                     end
-             end,
-    {reply, Status, State};
-handle_call(hbbft_skip, _From, State) ->
-    Status = case State#state.consensus_group of
-                 undefined -> ok;
-                 _ ->
-                     Ref = make_ref(),
-                     ok = libp2p_group_relcast:handle_input(State#state.consensus_group, {skip, Ref, self()}),
-                     receive
-                         {Ref, Result} ->
-                             Result
-                     after timer:seconds(60) ->
-                               {error, timeout}
-                     end
-             end,
-    {reply, Status, State};
-handle_call(dkg_status, _From, State) ->
-    Status = case State#state.dkg_group of
-                 undefined -> ok;
-                 _ ->
-                     Ref = make_ref(),
-                     ok = libp2p_group_relcast:handle_input(State#state.dkg_group, {status, Ref, self()}),
-                     receive
-                         {Ref, Result} ->
-                             Result
-                     after timer:seconds(60) ->
-                               {error, timeout}
-                     end
-             end,
-    {reply, Status, State};
+handle_call(consensus_group, _From, State) ->
+        {reply, State#state.consensus_group, State};
+handle_call(dkg_group, _From, State) ->
+        {reply, State#state.dkg_group, State};
 handle_call({create_block, Stamps, Transactions, HBBFTRound},
             _From,
             State=#state{blockchain=Chain}) when Chain /= undefined ->
