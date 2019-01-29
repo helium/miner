@@ -513,7 +513,6 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
             lager:error("Failed to decode add_gateway_signal message: ~p", [Error])
     end,
     {noreply, State};
-
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
