@@ -166,9 +166,11 @@ deserialize(BinState) ->
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK}.
 
-restore(OldState, _NewState) ->
-    %% don't need to merge states
-    {ok, OldState}.
+restore(OldState, NewState) ->
+    %% replace the stamp fun from the old state with the new one
+    %% because we have non-serializable data in it (rocksdb refs)
+    {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
+    {ok, OldState#state{hbbft=hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft)}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
