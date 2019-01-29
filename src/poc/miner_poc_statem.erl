@@ -34,7 +34,8 @@
     targeting/3,
     challenging/3,
     receiving/3,
-    submitting/3
+    submitting/3,
+    waiting/3
 ]).
 
 -ifdef(TEST).
@@ -42,9 +43,12 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(CHALLENGE_TIMEOUT, 3).
--define(CHALLENGE_RETRY, 3).
 -define(BLOCK_DELAY, 30).
+-define(CHALLENGE_RETRY, 3).
+-define(CHALLENGE_TIMEOUT, 3).
+-define(WAITING, 10).
+
+
 
 -record(data, {
     blockchain :: blockchain:blockchain(),
@@ -55,7 +59,8 @@
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
-    retry = ?CHALLENGE_RETRY :: non_neg_integer()
+    retry = ?CHALLENGE_RETRY :: non_neg_integer(),
+    waiting = ?WAITING :: non_neg_integer()
 }).
 
 %% ------------------------------------------------------------------
@@ -126,7 +131,7 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) -> Address == blockchain_txn_poc_request_v1:gateway_address(Txn) end,
+            Filter = fun(Txn) -> Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
@@ -241,8 +246,42 @@ submitting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret
     Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
     lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
-    {next_state, requesting, Data};
+    {next_state, waiting, Data#data{waiting=?WAITING}};
 submitting(EventType, EventContent, Data) ->
+    handle_event(EventType, EventContent, Data).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+waiting(info, {blockchain_event, {add_block, _Hash, _}}, #data{waiting=0}=Data) ->
+    lager:warning("I have been waiting for ~p blocks abandoning last request", [?WAITING]),
+    {next_state, requesting,  Data#data{waiting=?WAITING}};
+waiting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
+                                                              address=Address,
+                                                              secret=Secret,
+                                                              waiting=Waiting}=Data) ->
+    lager:debug("got block ~p checking content", [Hash]),
+    case blockchain:get_block(Hash, Blockchain) of
+        {ok, Block} ->
+            Txns = lists:filter(fun blockchain_txn_poc_receipts_v1:is/1, blockchain_block:transactions(Block)),
+            Filter = fun(Txn) ->
+                Address =:= blockchain_txn_poc_receipts_v1:challenger(Txn) andalso
+                Secret =:= blockchain_txn_poc_receipts_v1:secret(Txn)
+            end,
+            case lists:filter(Filter, Txns) of
+                [_POCReceipt] ->
+                    lager:info("found my receipt got mined in ~p, moving one", [Hash]),
+                    {next_state, requesting,  Data#data{waiting=?WAITING}};
+                _ ->
+                    lager:info("did not find my receipt in ~p"),
+                    {keep_state,  Data#data{waiting=Waiting-1}}
+            end;
+        {error, _Reason} ->
+            lager:error("failed to get block ~p : ~p", [Hash, _Reason]),
+            {keep_state,  Data#data{waiting=Waiting-1}}
+    end;
+waiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 %% ------------------------------------------------------------------
