@@ -50,7 +50,7 @@ basic(_Config) ->
 
     % Generate fake blockchains (just the keys)
     RandomKeys = generate_keys(6),
-    Address = blockchain_swarm:address(),
+    Address = blockchain_swarm:pubkey_bin(),
     ConsensusMembers = [
         {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
     ] ++ RandomKeys,

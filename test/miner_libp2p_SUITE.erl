@@ -50,7 +50,7 @@ listen_addr_test(Config) ->
 p2p_addr_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     P2PAddrs = lists:foldl(fun(Miner, Acc) ->
-                                   Address = ct_rpc:call(Miner, blockchain_swarm, address, []),
+                                   Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                                    P2PAddr = ct_rpc:call(Miner, libp2p_crypto, pubkey_bin_to_p2p, [Address]),
                                    [{Miner, P2PAddr} | Acc]
                            end, [], Miners),

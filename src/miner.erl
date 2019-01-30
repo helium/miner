@@ -207,10 +207,10 @@ signed_block(Signatures, BinBlock) ->
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
-            lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
+            lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {noreply, DKGState#state{dkg_await=From}};
         {false, NonDKGState} ->
-            lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
+            lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
 handle_call(relcast_info, From, State) ->
@@ -422,10 +422,10 @@ handle_info(maybe_restore_consensus, State) ->
                     {noreply, State#state{blockchain=Chain}};
                 {ok, Members} ->
                     ConsensusAddrs = lists:sort(Members),
-                    case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
+                    case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                         true ->
                             lager:info("restoring consensus group"),
-                            Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
+                            Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                             N = length(ConsensusAddrs),
                             F = (N div 3),
                             GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
@@ -536,7 +536,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     lager:info("F: ~p", [F]),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-    MyAddress = blockchain_swarm:address(),
+    MyAddress = blockchain_swarm:pubkey_bin(),
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
@@ -570,7 +570,7 @@ maybe_assert_location(_, Resolution, _) when Resolution < ?H3_MINIMUM_RESOLUTION
     %% wait for a better resolution
     ok;
 maybe_assert_location(Location, _Resolution, Chain) ->
-    Address = blockchain_swarm:address(),
+    Address = blockchain_swarm:pubkey_bin(),
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, _} ->

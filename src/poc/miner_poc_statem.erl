@@ -79,7 +79,7 @@ init(Args) ->
     ok = blockchain_event:add_handler(self()),
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
-    Address = blockchain_swarm:address(),
+    Address = blockchain_swarm:pubkey_bin(),
     Delay = maps:get(delay, Args, ?BLOCK_DELAY),
     Blockchain = blockchain_worker:blockchain(),
     lager:info("init with ~p", [Args]),
@@ -350,7 +350,7 @@ target_test() ->
 
     meck:expect(blockchain_ledger_v1, active_gateways, fun(_) -> ActiveGateways end),
     meck:expect(blockchain_worker, blockchain, fun() -> blockchain end),
-    meck:expect(blockchain_swarm, address, fun() -> <<"unknown">> end),
+    meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
 
     Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),

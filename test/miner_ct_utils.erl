@@ -219,7 +219,7 @@ init_per_testcase(TestCase, Config) ->
 
     %% accumulate the address of each miner
     Addresses = lists:foldl(fun(Miner, Acc) ->
-                        Address = ct_rpc:call(Miner, blockchain_swarm, address, []),
+                        Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                         [Address | Acc]
                 end, [], Miners),
     {ok, _} = ct_cover:add_nodes(Miners),

@@ -77,8 +77,8 @@ end_per_testcase(_TestCase, Config) ->
 single_payment_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, address, []),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, address, []),
+    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere

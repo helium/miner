@@ -83,7 +83,7 @@ send_receipt(IV, Data) ->
     Challenger = maps:get(challenger, Map),
     P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
     {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-    Address = blockchain_swarm:address(),
+    Address = blockchain_swarm:pubkey_bin(),
     Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), IV),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
@@ -98,7 +98,7 @@ init(Args) ->
     State = #state{
         host = maps:get(radio_host, Args),
         port = maps:get(radio_port, Args),
-        compact_key = blockchain_swarm:address(),
+        compact_key = blockchain_swarm:pubkey_bin(),
         privkey = maps:get(priv_key, Args)
     },
     self() ! connect,

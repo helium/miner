@@ -42,7 +42,7 @@ basic(_Config) ->
     {ok, PrivateKey, CompactKey} = ecc_compact:generate_key(),
 
     meck:new(blockchain_swarm, [passthrough]),
-    meck:expect(blockchain_swarm, address, fun() -> CompactKey end),
+    meck:expect(blockchain_swarm, pubkey_bin, fun() -> CompactKey end),
 
     {ok, _Server} = miner_onion_server:start_link(#{
         radio_host => "127.0.0.1",
