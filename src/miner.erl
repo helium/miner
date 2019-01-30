@@ -312,7 +312,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
                                             ValidTransactions,
                                             << >>,
                                             MetaData),
-            {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
+            {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
             Signature = SignFun(term_to_binary(NewBlock)),
             %% XXX: can we lose state here if we crash and recover later?
             lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
@@ -341,7 +341,7 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
         ok ->
             lager:info("sending the gossipped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
-            Address = libp2p_swarm:address(Swarm),
+            Address = blockchain_swarm:pubkey_bin(),
             libp2p_group_gossip:send(
               libp2p_swarm:gossip_group(Swarm),
               ?GOSSIP_PROTOCOL,
@@ -359,7 +359,7 @@ handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
             end,
     {reply, Reply, State};
 handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
-    {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
+    {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
     Signature = SignFun(GenesisBlock),
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
