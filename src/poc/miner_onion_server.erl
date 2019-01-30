@@ -213,7 +213,9 @@ construct_onion([], _, _, _) ->
     %% make up some random data so nobody can tell if they're the last link in the chain
     crypto:strong_rand_bytes(20);
 construct_onion([{Data, PubKey} | Tail], PvtOnionKey, OnionCompactKey, IV) ->
-    SecretKey = public_key:compute_key(element(1, ecc_compact:recover_key(PubKey)), PvtOnionKey),
+    %% NOTE: PubKey is prefixed with KEYTYPE
+    {ecc_compact, {Point, _}} = libp2p_crypto:bin_to_pubkey(PubKey),
+    SecretKey = public_key:compute_key(Point, PvtOnionKey),
     InnerLayer = construct_onion(Tail, PvtOnionKey, OnionCompactKey, IV),
     {CipherText, Tag} = crypto:block_encrypt(aes_gcm,
                                              SecretKey,
