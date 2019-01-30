@@ -314,14 +314,11 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * sign the block
     %% * tell hbbft to go to next round
     %% * add the block to blockchain
-    erlang:cancel_timer(State#state.block_timer),
     Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
-    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
-    NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
-    lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
     case blockchain:add_block(Block, Chain) of
         ok ->
+            erlang:cancel_timer(State#state.block_timer),
+            Ref = set_next_block_timer(Chain, BlockTime),
             lager:info("sending the gossipped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
             Address = blockchain_swarm:pubkey_bin(),
@@ -330,11 +327,12 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
               ?GOSSIP_PROTOCOL,
               term_to_binary({block, Address, Block})
              ),
-            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true});
+            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
+            {reply, ok, State#state{block_timer=Ref}};
         Error ->
-            lager:error("signed_block, error: ~p", [Error])
-    end,
-    {reply, ok, State#state{block_timer=Ref}};
+            lager:error("signed_block, error: ~p", [Error]),
+            {reply, ok, State}
+    end;
 handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
     Reply = case Pos of
                 undefined -> false;
@@ -418,16 +416,12 @@ handle_info(maybe_restore_consensus, State) ->
                                                               State#state.batch_size,
                                                               undefined,
                                                               Chain]],
+                            Ref = set_next_block_timer(Chain, State#state.block_time),
                             %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
                             lager:info("~p. Group: ~p~n", [self(), Group]),
                             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                             {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-                            {ok, HeadBlock} = blockchain:head_block(Chain),
-                            LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
-                            NextBlockTime = max(0, (LastBlockTimestamp + (State#state.block_time div 1000)) - erlang:system_time(seconds)),
-                            lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-                            Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
                             {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
                         false ->
                             {noreply, State#state{blockchain=Chain}}
@@ -451,10 +445,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
                        NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
                        libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
-                       LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(Block), erlang:system_time(seconds)),
-                       NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
-                       lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-                       Ref = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
+                       Ref = set_next_block_timer(Chain, BlockTime),
                        State#state{block_timer=Ref};
                    {error, Reason} ->
                        lager:error("Error, Reason: ~p", [Reason]),
@@ -608,3 +599,11 @@ signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
     ok = ebus_message:append_args(Msg, [string], [Status]),
     ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
     ok.
+
+set_next_block_timer(Chain, BlockTime) ->
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
+    NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
+    lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
+    erlang:send_after(NextBlockTime * 1000, self(), block_timeout).
+

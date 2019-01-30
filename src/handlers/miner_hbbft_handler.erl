@@ -108,11 +108,11 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact);
+                            ok = miner:signed_block(Signatures, State#state.artifact),
+                            {NewState, []};
                         false ->
-                            ok
-                    end,
-                    {NewState, []};
+                            {NewState, []}
+                    end;
                 false when R > Round ->
                     defer;
                 false ->
