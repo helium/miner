@@ -36,7 +36,7 @@ all() ->
 basic(_Config) ->
     % Create chain
     BaseDir = "data/miner_poc_SUITE/basic",
-    {PrivKey, PubKey} = new_random_key(ed25519),
+    {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Opts = [
         {key, {PubKey, SigFun}}
@@ -76,14 +76,14 @@ basic(_Config) ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
         {{37.780586, -122.469471}, {PrivKey, PubKey}},
-        {{37.780959, -122.467496}, new_random_key(ed25519)},
-        {{37.78101, -122.465372}, new_random_key(ed25519)},
-        {{37.781179, -122.463226}, new_random_key(ed25519)},
-        {{37.781281, -122.461038}, new_random_key(ed25519)},
-        {{37.781349, -122.458892}, new_random_key(ed25519)},
-        {{37.781468, -122.456617}, new_random_key(ed25519)},
-        {{37.781637, -122.4543}, new_random_key(ed25519)},
-        {{37.832976, -122.12726}, new_random_key(ed25519)} % This should be excluded cause too far
+        {{37.780959, -122.467496}, new_random_key(ecc_compact)},
+        {{37.78101, -122.465372}, new_random_key(ecc_compact)},
+        {{37.781179, -122.463226}, new_random_key(ecc_compact)},
+        {{37.781281, -122.461038}, new_random_key(ecc_compact)},
+        {{37.781349, -122.458892}, new_random_key(ecc_compact)},
+        {{37.781468, -122.456617}, new_random_key(ecc_compact)},
+        {{37.781637, -122.4543}, new_random_key(ecc_compact)},
+        {{37.832976, -122.12726}, new_random_key(ecc_compact)} % This should be excluded cause too far
     ],
 
     % Add a Gateway
@@ -262,7 +262,7 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
 generate_keys(N) ->
     lists:foldl(
         fun(_, Acc) ->
-            {PrivKey, PubKey} = new_random_key(ed25519),
+            {PrivKey, PubKey} = new_random_key(ecc_compact),
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
         end
