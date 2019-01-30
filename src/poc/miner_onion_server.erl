@@ -179,9 +179,11 @@ handle_info(_Msg, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey0, Socket) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
     PubKey = ecc_compact:recover_key(OnionCompactKey),
+    %% XXX: should ideally be using ecdh_fun, don't have one yet
+    {ecc_compact, PrivKey} = PrivKey0,
     SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
