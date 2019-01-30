@@ -110,8 +110,8 @@ genesis_forge_usage() ->
     ].
 
 genesis_forge(["genesis", "forge", Addrs], [], []) ->
-    Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     miner:initial_dkg(InitialPaymentTransactions, Addresses),
     [clique_status:text("ok")];
 genesis_forge([_, _, _], [], []) ->
