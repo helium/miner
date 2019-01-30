@@ -10,25 +10,25 @@
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2]).
 
 -record(state, {
-          n :: non_neg_integer()
-          ,f :: non_neg_integer()
-          ,t :: non_neg_integer()
-          ,id :: non_neg_integer()
-          ,dkg :: dkg_hybriddkg:dkg() | dkg_hybriddkg:serialized_dkg()
-          ,curve :: atom()
-          ,g1 :: erlang_pbc:element() | binary()
-          ,g2 :: erlang_pbc:element() | binary()
-          ,privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized()
-          ,members = [] :: [libp2p_crypto:address()]
-          ,artifact :: binary()
-          ,signatures = [] :: [{libp2p_crypto:address(), binary()}]
-          ,signatures_required :: pos_integer()
-          ,sigmod :: atom()
-          ,sigfun :: atom()
-          ,donemod :: atom()
-          ,donefun :: atom()
-          ,sent_conf = false :: boolean()
-          ,timer :: undefined | pid()
+          n :: non_neg_integer(),
+          f :: non_neg_integer(),
+          t :: non_neg_integer(),
+          id :: non_neg_integer(),
+          dkg :: dkg_hybriddkg:dkg() | dkg_hybriddkg:serialized_dkg(),
+          curve :: atom(),
+          g1 :: erlang_pbc:element() | binary(),
+          g2 :: erlang_pbc:element() | binary(),
+          privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+          members = [] :: [libp2p_crypto:pubkey_bin()],
+          artifact :: binary(),
+          signatures = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
+          signatures_required :: pos_integer(),
+          sigmod :: atom(),
+          sigfun :: atom(),
+          donemod :: atom(),
+          donefun :: atom(),
+          sent_conf = false :: boolean(),
+          timer :: undefined | pid()
          }).
 
 init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->

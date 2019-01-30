@@ -36,7 +36,7 @@ all() ->
 basic(_Config) ->
     % Create chain
     BaseDir = "data/miner_poc_SUITE/basic",
-    {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
+    {PrivKey, PubKey} = new_random_key(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Opts = [
         {key, {PubKey, SigFun}}
@@ -76,14 +76,14 @@ basic(_Config) ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
         {{37.780586, -122.469471}, {PrivKey, PubKey}},
-        {{37.780959, -122.467496}, libp2p_crypto:generate_keys()},
-        {{37.78101, -122.465372}, libp2p_crypto:generate_keys()},
-        {{37.781179, -122.463226}, libp2p_crypto:generate_keys()},
-        {{37.781281, -122.461038}, libp2p_crypto:generate_keys()},
-        {{37.781349, -122.458892}, libp2p_crypto:generate_keys()},
-        {{37.781468, -122.456617}, libp2p_crypto:generate_keys()},
-        {{37.781637, -122.4543}, libp2p_crypto:generate_keys()},
-        {{37.832976, -122.12726}, libp2p_crypto:generate_keys()} % This should be excluded cause too far
+        {{37.780959, -122.467496}, new_random_key(ed25519)},
+        {{37.78101, -122.465372}, new_random_key(ed25519)},
+        {{37.781179, -122.463226}, new_random_key(ed25519)},
+        {{37.781281, -122.461038}, new_random_key(ed25519)},
+        {{37.781349, -122.458892}, new_random_key(ed25519)},
+        {{37.781468, -122.456617}, new_random_key(ed25519)},
+        {{37.781637, -122.4543}, new_random_key(ed25519)},
+        {{37.832976, -122.12726}, new_random_key(ed25519)} % This should be excluded cause too far
     ],
 
     % Add a Gateway
@@ -211,7 +211,7 @@ loop(Acc) ->
 send_receipts(LatLongs) ->
     lists:foreach(
         fun({_LatLong, {PrivKey, PubKey}}) ->
-            Address = libp2p_crypto:pubkey_to_address(PubKey),
+            Address = libp2p_crypto:pubkey_to_bin(PubKey),
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             {Mega, Sec, Micro} = os:timestamp(),
             Timestamp = Mega * 1000000 * 1000000 + Sec * 1000000 + Micro,
@@ -225,10 +225,10 @@ send_receipts(LatLongs) ->
 build_asserts(LatLongs, {PrivKey, PubKey}) ->
     lists:foldl(
         fun({LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
-            Gateway = libp2p_crypto:pubkey_to_address(GatewayPubKey),
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
             GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_address(PubKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
             Index = h3:from_geo(LatLong, 9),
 
             AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
@@ -244,10 +244,10 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
     lists:foldl(
         fun({_LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
             % Create a Gateway
-            Gateway = libp2p_crypto:pubkey_to_address(GatewayPubKey),
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
             GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_address(PubKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
 
             AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
             SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
@@ -262,9 +262,9 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
 generate_keys(N) ->
     lists:foldl(
         fun(_, Acc) ->
-            {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
+            {PrivKey, PubKey} = new_random_key(ed25519),
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            [{libp2p_crypto:pubkey_to_address(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
+            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
         end
         ,[]
         ,lists:seq(1, N)
@@ -290,3 +290,7 @@ signatures(ConsensusMembers, BinBlock) ->
         ,[]
         ,ConsensusMembers
     ).
+
+new_random_key(Curve) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
+    {PrivKey, PubKey}.

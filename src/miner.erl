@@ -139,7 +139,9 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
+-spec create_block(Stamps :: [{non_neg_integer(), {pos_integer(), binary()}},...],
+                   Txns :: blockchain_transactions:transactions(),
+                   HBBFTRound :: non_neg_integer()) -> {ok, libp2p_crypto:pubkey_bin(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
 
@@ -147,7 +149,8 @@ create_block(Stamps, Txns, HBBFTRound) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec sign_genesis_block(binary(), tpke_privkey:privkey()) -> {ok, libp2p_crypto:address(), binary()}.
+-spec sign_genesis_block(GenesisBlock :: binary(),
+                         PrivKey :: tpke_privkey:privkey()) -> {ok, libp2p_crypto:pubkey_bin(), binary()}.
 sign_genesis_block(GenesisBlock, PrivKey) ->
     gen_server:call(?MODULE, {sign_genesis_block, GenesisBlock, PrivKey}).
 
@@ -155,7 +158,9 @@ sign_genesis_block(GenesisBlock, PrivKey) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec genesis_block_done(binary(), [{libp2p_crypto:address(), binary()}], tpke_privkey:privkey()) -> ok.
+-spec genesis_block_done(GenesisBlock :: binary(),
+                         Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
+                         PrivKey :: tpke_privkey:privkey()) -> ok.
 genesis_block_done(GenesisBlock, Signatures, PrivKey) ->
     gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures, PrivKey}).
 
@@ -312,7 +317,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
             %% XXX: can we lose state here if we crash and recover later?
             lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
             %% return both valid and invalid transactions to be deleted from the buffer
-            {reply, {ok, libp2p_crypto:pubkey_to_address(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
+            {reply, {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
         [_OtherBlockHash] ->
             {reply, {error, stale_hash}, State};
         List ->
@@ -356,7 +361,7 @@ handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
 handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
     Signature = SignFun(GenesisBlock),
-    Address = libp2p_crypto:pubkey_to_address(MyPubKey),
+    Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
                                                                                                  block_time=BlockTime}) ->
@@ -499,7 +504,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "owner" := OwnerStrAddress
                }]} ->
             catch(signal_add_gateway_status("sending", State)),
-            OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
+            OwnerAddress = libp2p_crypto:b58_to_bin(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
             lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
             Status = case Result of

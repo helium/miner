@@ -53,9 +53,9 @@
 -record(data, {
     blockchain :: blockchain:blockchain(),
     last_submit = 0 :: non_neg_integer(),
-    address :: libp2p_crypto:address(),
+    address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
-    challengees = [] :: [libp2p_crypto:address()],
+    challengees = [] :: [libp2p_crypto:pubkey_bin()],
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
@@ -185,7 +185,7 @@ challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, re
             Onion = miner_onion_server:construct_onion(OnionList),
             lager:info("onion created ~p", [Onion]),
             [Start|_] = Path,
-            P2P = libp2p_crypto:address_to_p2p(Start),
+            P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
                     {next_state, receiving, Data#data{challengees=Path}};

@@ -81,7 +81,7 @@ decrypt(Onion) ->
 send_receipt(IV, Data) ->
     Map = erlang:binary_to_term(Data),
     Challenger = maps:get(challenger, Map),
-    P2P = libp2p_crypto:address_to_p2p(Challenger),
+    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
     {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
     Address = blockchain_swarm:address(),
     Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), IV),

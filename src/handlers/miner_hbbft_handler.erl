@@ -10,17 +10,17 @@
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
 
 -record(state, {
-          n :: non_neg_integer()
-          ,f :: non_neg_integer()
-          ,id :: non_neg_integer()
-          ,hbbft :: hbbft:hbbft_data()
-          ,sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized()
-          ,seq = 0
-          ,deferred = []
-          ,signatures = []
-          ,signatures_required = 0
-          ,artifact :: undefined | binary()
-          ,members :: [libp2p_crypto:address()]
+          n :: non_neg_integer(),
+          f :: non_neg_integer(),
+          id :: non_neg_integer(),
+          hbbft :: hbbft:hbbft_data(),
+          sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+          seq = 0,
+          deferred = [],
+          signatures = [],
+          signatures_required = 0,
+          artifact :: undefined | binary(),
+          members :: [libp2p_crypto:pubkey_bin()]
          }).
 
 stamp(Chain) ->
@@ -103,7 +103,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
         {signature, R, Address, Signature} ->
             case R == Round andalso lists:member(Address, State#state.members) andalso
                  %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
-                 (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:address_to_pubkey(Address))) of
+                 (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
                 true ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
@@ -200,6 +200,6 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
 filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members=Members}) ->
     FilteredSignatures = lists:filter(fun({Address, Signature}) ->
                          lists:member(Address, Members) andalso
-                         libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:address_to_pubkey(Address))
+                         libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))
                  end, Signatures),
     State#state{signatures=FilteredSignatures}.
