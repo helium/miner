@@ -55,6 +55,7 @@
     last_submit = 0 :: non_neg_integer(),
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
+    onion_keys :: {ecc_compact:private_key(), ecc_compact:compact_key()} | undefined,
     challengees = [] :: [libp2p_crypto:pubkey_bin()],
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
@@ -111,13 +112,14 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
         false ->
             {keep_state, Data};
         true ->
-            Secret = <<(crypto:strong_rand_bytes(8))/binary, Hash/binary>>,
-            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret)),
+            {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
+            Secret = crypto:strong_rand_bytes(8),
+            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), OnionCompactKey),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             lager:info("submitted poc request ~p", [Tx]),
-            {next_state, mining, Data#data{secret=Secret}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -138,7 +140,7 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
-                    self() ! {target, Secret},
+                    self() ! {target, <<Secret/binary, Hash/binary>>},
                     lager:info("request was mined @ ~p, hash: ~p, targeting now, secret: ~p", [CurrHeight, Hash, Secret]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight, retry=?CHALLENGE_RETRY}};
                 _ ->
@@ -159,11 +161,11 @@ mining(EventType, EventContent, Data) ->
 targeting(info, _, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
-targeting(info, {target, Hash}, #data{blockchain=Blockchain}=Data) ->
+targeting(info, {target, Entropy}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
-    {Target, Gateways} = blockchain_poc_path:target(Hash, Ledger),
-    lager:info("target found ~p, challenging, hash: ~p", [Target, Hash]),
-    self() ! {challenge, Hash, Target, Gateways},
+    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger),
+    lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
+    self() ! {challenge, Entropy, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -172,20 +174,20 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, retry=Retry}=Data) ->
+challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
+                                                                onion_keys={PvtOnionKey, OnionCompactKey}
+                                                               }=Data) ->
     case blockchain_poc_path:build(Target, Gateways) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
-            self() ! {target, Hash},
+            self() ! {target, Entropy},
             {next_state, targeting, Data#data{retry=Retry-1}};
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
-            Payload = erlang:term_to_binary(#{
-                challenger => Address
-            }),
-            OnionList = [{Payload, A} || A <- Path],
-            Onion = miner_onion_server:construct_onion(OnionList),
+            N = erlang:length(Path),
+            OnionList = lists:zip(blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N), Path),
+            Onion = miner_onion_server:construct_onion({PvtOnionKey, OnionCompactKey}, OnionList),
             lager:info("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
@@ -195,7 +197,7 @@ challenging(info, {challenge, Hash, Target, Gateways}, #data{address=Address, re
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
-                    self() ! {target, Hash},
+                    self() ! {target, Entropy},
                     {next_state, targeting, Data#data{retry=Retry-1}}
             end
     end;
@@ -209,7 +211,7 @@ challenging(EventType, EventContent, Data) ->
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
     lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
     self() ! submit,
-    {next_state, submitting, Data#data{challenge_timeout= ?CHALLENGE_TIMEOUT}};
+    {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}};
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:debug("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
