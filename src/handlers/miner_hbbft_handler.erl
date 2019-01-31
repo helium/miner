@@ -108,11 +108,11 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
                         {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact);
+                            ok = miner:signed_block(Signatures, State#state.artifact),
+                            {NewState, []};
                         false ->
-                            ok
-                    end,
-                    {NewState, []};
+                            {NewState, []}
+                    end;
                 false when R > Round ->
                     defer;
                 false ->
@@ -166,9 +166,11 @@ deserialize(BinState) ->
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK}.
 
-restore(OldState, _NewState) ->
-    %% don't need to merge states
-    {ok, OldState}.
+restore(OldState, NewState) ->
+    %% replace the stamp fun from the old state with the new one
+    %% because we have non-serializable data in it (rocksdb refs)
+    {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
+    {ok, OldState#state{hbbft=hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft)}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
