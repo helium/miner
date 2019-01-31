@@ -39,10 +39,10 @@ basic(_Config) ->
     {ok, LSock} = gen_tcp:listen(0, [{active, false}, binary, {packet, 2}]),
     {ok, Port} = inet:port(LSock),
 
-    {ok, PrivateKey, CompactKey} = ecc_compact:generate_key(),
+    #{secret := PrivateKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
 
     meck:new(blockchain_swarm, [passthrough]),
-    meck:expect(blockchain_swarm, address, fun() -> CompactKey end),
+    meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),
 
     {ok, _Server} = miner_onion_server:start_link(#{
         radio_host => "127.0.0.1",
@@ -52,7 +52,7 @@ basic(_Config) ->
     {ok, Sock} = gen_tcp:accept(LSock),
 
     Data = <<1, 2, 3>>,
-    Onion = miner_onion_server:construct_onion([{Data, CompactKey}]),
+    Onion = miner_onion_server:construct_onion([{Data, libp2p_crypto:pubkey_to_bin(PubKey)}]),
 
     meck:new(miner_onion_server, [passthrough]),
     meck:expect(miner_onion_server, send_receipt, fun(_IV, Data0) ->

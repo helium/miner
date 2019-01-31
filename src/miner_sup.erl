@@ -39,11 +39,11 @@ init(_Args) ->
     ok = filelib:ensure_dir(SwarmKey),
     {PublicKey, PrivKey, SigFun} =
         case libp2p_crypto:load_keys(SwarmKey) of
-            {ok, PrivKey0, PubKey} ->
+            {ok, #{secret := PrivKey0, public := PubKey}} ->
                 {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)};
             {error, enoent} ->
-                {PrivKey0, PubKey} = libp2p_crypto:generate_keys(),
-                ok = libp2p_crypto:save_keys({PrivKey0, PubKey}, SwarmKey),
+                KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+                ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
                 {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)}
         end,
 

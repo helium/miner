@@ -74,16 +74,16 @@ genesis_create_usage() ->
 genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
     case file:consult(OldGenesisFile) of
         {ok, [Config]} ->
-            OldAccounts = [blockchain_txn_coinbase_v1:new(libp2p_crypto:b58_to_address(proplists:get_value(address, X)),
+            OldAccounts = [blockchain_txn_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
                                                        proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
-            OldGateways = [blockchain_txn_gen_gateway_v1:new(libp2p_crypto:b58_to_address(proplists:get_value(gateway_address, X)),
-                                                          libp2p_crypto:b58_to_address(proplists:get_value(owner_address, X)),
+            OldGateways = [blockchain_txn_gen_gateway_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(gateway_address, X)),
+                                                          libp2p_crypto:b58_to_bin(proplists:get_value(owner_address, X)),
                                                           proplists:get_value(location, X),
                                                           proplists:get_value(last_poc_challenge, X),
                                                           proplists:get_value(nonce, X),
                                                           proplists:get_value(score, X)) || X <- proplists:get_value(gateways, Config)],
             OldGenesisTransactions = OldAccounts ++ OldGateways,
-            Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
+            Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
             miner:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
             [clique_status:text("ok")];
@@ -110,7 +110,7 @@ genesis_forge_usage() ->
     ].
 
 genesis_forge(["genesis", "forge", Addrs], [], []) ->
-    Addresses = [libp2p_crypto:p2p_to_address(Addr) || Addr <- string:split(Addrs, ",", all)],
+    Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     miner:initial_dkg(InitialPaymentTransactions, Addresses),
     [clique_status:text("ok")];

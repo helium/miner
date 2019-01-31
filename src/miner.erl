@@ -139,7 +139,9 @@ in_consensus() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block([{non_neg_integer(), {pos_integer(), binary()}},...], blockchain_transactions:transactions(), non_neg_integer()) -> {ok, libp2p_crypto:address(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
+-spec create_block(Stamps :: [{non_neg_integer(), {pos_integer(), binary()}},...],
+                   Txns :: blockchain_transactions:transactions(),
+                   HBBFTRound :: non_neg_integer()) -> {ok, libp2p_crypto:pubkey_bin(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
 
@@ -147,7 +149,8 @@ create_block(Stamps, Txns, HBBFTRound) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec sign_genesis_block(binary(), tpke_privkey:privkey()) -> {ok, libp2p_crypto:address(), binary()}.
+-spec sign_genesis_block(GenesisBlock :: binary(),
+                         PrivKey :: tpke_privkey:privkey()) -> {ok, libp2p_crypto:pubkey_bin(), binary()}.
 sign_genesis_block(GenesisBlock, PrivKey) ->
     gen_server:call(?MODULE, {sign_genesis_block, GenesisBlock, PrivKey}).
 
@@ -155,7 +158,9 @@ sign_genesis_block(GenesisBlock, PrivKey) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec genesis_block_done(binary(), [{libp2p_crypto:address(), binary()}], tpke_privkey:privkey()) -> ok.
+-spec genesis_block_done(GenesisBlock :: binary(),
+                         Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
+                         PrivKey :: tpke_privkey:privkey()) -> ok.
 genesis_block_done(GenesisBlock, Signatures, PrivKey) ->
     gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures, PrivKey}).
 
@@ -202,10 +207,10 @@ signed_block(Signatures, BinBlock) ->
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
-            lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
+            lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {noreply, DKGState#state{dkg_await=From}};
         {false, NonDKGState} ->
-            lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:address()]),
+            lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
 handle_call(relcast_info, From, State) ->
@@ -307,12 +312,12 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
                                             ValidTransactions,
                                             << >>,
                                             MetaData),
-            {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
+            {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
             Signature = SignFun(term_to_binary(NewBlock)),
             %% XXX: can we lose state here if we crash and recover later?
             lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
             %% return both valid and invalid transactions to be deleted from the buffer
-            {reply, {ok, libp2p_crypto:pubkey_to_address(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
+            {reply, {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
         [_OtherBlockHash] ->
             {reply, {error, stale_hash}, State};
         List ->
@@ -336,7 +341,7 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
         ok ->
             lager:info("sending the gossipped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
-            Address = libp2p_swarm:address(Swarm),
+            Address = blockchain_swarm:pubkey_bin(),
             libp2p_group_gossip:send(
               libp2p_swarm:gossip_group(Swarm),
               ?GOSSIP_PROTOCOL,
@@ -354,9 +359,9 @@ handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
             end,
     {reply, Reply, State};
 handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
-    {ok, MyPubKey, SignFun} = libp2p_swarm:keys(blockchain_swarm:swarm()),
+    {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
     Signature = SignFun(GenesisBlock),
-    Address = libp2p_crypto:pubkey_to_address(MyPubKey),
+    Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
                                                                                                  block_time=BlockTime}) ->
@@ -417,10 +422,10 @@ handle_info(maybe_restore_consensus, State) ->
                     {noreply, State#state{blockchain=Chain}};
                 {ok, Members} ->
                     ConsensusAddrs = lists:sort(Members),
-                    case lists:member(blockchain_swarm:address(), ConsensusAddrs) of
+                    case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                         true ->
                             lager:info("restoring consensus group"),
-                            Pos = miner_util:index_of(blockchain_swarm:address(), ConsensusAddrs),
+                            Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                             N = length(ConsensusAddrs),
                             F = (N div 3),
                             GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
@@ -499,7 +504,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=Sig
                 "owner" := OwnerStrAddress
                }]} ->
             catch(signal_add_gateway_status("sending", State)),
-            OwnerAddress = libp2p_crypto:b58_to_address(OwnerStrAddress),
+            OwnerAddress = libp2p_crypto:b58_to_bin(OwnerStrAddress),
             Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
             lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
             Status = case Result of
@@ -531,7 +536,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
     lager:info("F: ~p", [F]),
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-    MyAddress = blockchain_swarm:address(),
+    MyAddress = blockchain_swarm:pubkey_bin(),
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
@@ -565,7 +570,7 @@ maybe_assert_location(_, Resolution, _) when Resolution < ?H3_MINIMUM_RESOLUTION
     %% wait for a better resolution
     ok;
 maybe_assert_location(Location, _Resolution, Chain) ->
-    Address = blockchain_swarm:address(),
+    Address = blockchain_swarm:pubkey_bin(),
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, _} ->

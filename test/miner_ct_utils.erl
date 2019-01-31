@@ -182,7 +182,7 @@ init_per_testcase(TestCase, Config) ->
                                                LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
                                                %% set blockchain configuration
-                                               {PrivKey, PubKey} = libp2p_crypto:generate_keys(),
+                                               #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
                                                Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
                                                BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
@@ -219,7 +219,7 @@ init_per_testcase(TestCase, Config) ->
 
     %% accumulate the address of each miner
     Addresses = lists:foldl(fun(Miner, Acc) ->
-                        Address = ct_rpc:call(Miner, blockchain_swarm, address, []),
+                        Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                         [Address | Acc]
                 end, [], Miners),
     {ok, _} = ct_cover:add_nodes(Miners),
