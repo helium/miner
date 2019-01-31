@@ -32,7 +32,10 @@ stamp(Chain) ->
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
 init([Members, Id, N, F, BatchSize, SK, Chain, Interval]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
+    init([Members, Id, N, F, BatchSize, SK, Chain, Interval, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, Interval, Round, Buf]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
+                       {?MODULE, stamp, [Chain]}, Round, Buf),>
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
 
     lager:info("HBBFT~p started~n", [Id]),
@@ -54,6 +57,9 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
+handle_command({get_buf, Asker, Ref}, State) ->
+    Asker ! {Ref, hbbft:buf(State#state.hbbft)},
+    {reply, ok, ignore};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
@@ -132,7 +138,6 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT,
                     case Finished andalso Round rem Interval == 0 of
                         true ->
                             %% we're done, linger so that laggy members can progress
-                            lager:info("hbbft stopping on round ~p", [Round]),
                             {NewState, [{stop, timer:minutes(5)}]};
                         false ->
                             {NewState, []}

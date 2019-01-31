@@ -398,17 +398,49 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                             group_num = 2,
                             dkg_await = undefined, % not sure we use this again, but
                             blockchain = Chain}};
-handle_call({election_done, _BinaryArtifact, _Signatures, Members, PrivKey}, _From,
-            State = #state{batch_size = BatchSize,
+handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
+            State = #state{consensus_group = OldGroup,
+                           batch_size = BatchSize,
                            block_time = BlockTime,
                            group_num = GroupNum,
-                           current_height = Height,
+                           blockchain = Chain,
+                           current_height = CurrHeight,
                            election_interval = Interval}) ->
-    %% TODO: should likely be doing something with the signed artifact here but what?
-    lager:info("election done at ~p", [Height]),
+    lager:info("election done at ~p", [CurrHeight]),
+
+    Block0 = binary_to_term(BinaryBlock),
+    Block = blockchain_block:sign_block(term_to_binary(Signatures), Block0),
+
+
+    ok = blockchain:add_block(Block, Chain),
+    Height = blockchain_block:height(Block),
+    Swarm = blockchain_swarm:swarm(),
+    Address = blockchain_swarm:pubkey_bin(),
+    libp2p_group_gossip:send(
+      libp2p_swarm:gossip_group(Swarm),
+      ?GOSSIP_PROTOCOL,
+      term_to_binary({block, Address, Block})
+     ),
+    ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
+
+    %% grab the existing transactions on this node, if any
+    Buf =
+        case OldGroup of
+            P when is_pid(P) ->
+                R = make_ref(),
+                libp2p_group_relcast:handle_input(P, {get_buf, self(), R}),
+                receive
+                    {R, B} ->
+                        B
+                after 250 ->
+                        []
+                end;
+            _ ->
+                []
+        end,
 
     Chain = blockchain_worker:blockchain(),
     GroupArg = [miner_hbbft_handler, [Members,
@@ -418,20 +450,23 @@ handle_call({election_done, _BinaryArtifact, _Signatures, Members, PrivKey}, _Fr
                                       BatchSize,
                                       PrivKey,
                                       Chain,
-                                      Interval]],
-    Ref = erlang:send_after(BlockTime, self(), block_timeout),
+                                      Interval,
+                                      Height,
+                                      Buf]],
+    Ref = set_next_block_timer(Chain, BlockTime),
     Name = "consensus_" ++ integer_to_list(max(0, Height)),
     lager:info("post-election start group ~p in pos ~p", [Name, State#state.consensus_pos]),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
-    lager:info("~p. new group: ~p ~p~n", [self(), GroupNum, Group]),
+    lager:info("~p. new group: ~p ~p~n", [self(), Height, Group]),
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server,
                                           [blockchain_txn_handler, self(), Group]}),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     {reply, ok, State#state{consensus_group = Group,
                             block_timer = Ref,
+                            current_height = Height + 1,
                             group_num = GroupNum + 1,
                             blockchain = Chain}};
 handle_call(_Msg, _From, State) when element(1, _Msg) == genesis_block_done ->
@@ -501,7 +536,7 @@ handle_info(block_timeout, State) ->
 handle_info({blockchain_event, {add_block, Hash, Sync}},
             State=#state{consensus_group = ConsensusGroup,
                          election_interval = Interval,
-                         current_height = _CurrHeight,
+                         current_height = CurrHeight,
                          blockchain = Chain,
                          block_time = BlockTime}) when ConsensusGroup /= undefined andalso
                                                        Chain /= undefined ->
@@ -514,7 +549,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
         case blockchain:get_block(Hash, Chain) of
             {ok, Block} ->
                 case blockchain_block:height(Block) of
-                    Height when true -> %Height > CurrHeight -> %uncomment post relcast rebase
+                    Height when true -> % Height > CurrHeight -> %uncomment post relcast rebase
                         lager:info("processing block for ~p", [Height]),
                         Round = blockchain_block:hbbft_round(Block) + 1,
                         NextRound = Round + 1,
@@ -532,13 +567,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             %% seed for the random operations that come next.  Then, we use
                             %% that to select a new consensus group deterministically (ish).
                             true ->
-                                Ledger = blockchain:ledger(Chain),
-                                OrderedGateways = blockchain_election:new_group(Ledger, Hash),
-                                lager:info("height ~p ordered: ~p", [Height, OrderedGateways]),
-                                %% TODO: probably replace the hash here with the snapshot?
-                                {_, State1} = do_dkg(OrderedGateways, Hash, sign_genesis_block,
-                                                     election_done, State#state{current_height = Height}),
-                                State1
+                                initiate_election(Chain, Hash, Height, State)
                         end;
                     _Height ->
                         lager:info("skipped re-processing block for ~p", [_Height]),
@@ -552,13 +581,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
 handle_info({blockchain_event, {add_block, Hash, _Sync}},
             State=#state{consensus_group = ConsensusGroup,
                          election_interval = Interval,
+                         current_height = CurrHeight,
                          blockchain = Chain}) when ConsensusGroup == undefined andalso
                                                    Chain /= undefined ->
     lager:info("non-consensus block"),
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
-                Height when true -> % Round > CurrRound -> uncomment post relcast rebase
+                Height when true -> % Height > CurrHeight -> %uncomment post relcast rebase
                     lager:info("nc processing block for ~p", [Height]),
                     case Height rem Interval == 0 andalso Height /= 0 of
                         false ->
@@ -568,12 +598,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync}},
                         %% seed for the random operations that come next.  Then, we use
                         %% that to select a new consensus group deterministically (ish).
                         true ->
-                            Ledger = blockchain:ledger(Chain),
-                            OrderedGateways = blockchain_election:new_group(Ledger, Hash),
-                            %% TODO: probably replace the hash here with the snapshot?
-                            {_, State1} = do_dkg(OrderedGateways, Hash, sign_genesis_block,
-                                                 election_done, State#state{current_height = Height}),
-                            {noreply, State1}
+                            initiate_election(Chain, Hash, Height, State)
                     end;
                 _ ->
                     {noreply, State}
@@ -594,6 +619,26 @@ handle_info(_Msg, State) ->
 %% ==================================================================
 %% Internal functions
 %% =================================================================
+
+initiate_election(Chain, Hash, Height, State) ->
+    Ledger = blockchain:ledger(Chain),
+    OrderedGateways = blockchain_election:new_group(Ledger, Hash),
+    lager:info("height ~p ordered: ~p", [Height, OrderedGateways]),
+    %% TODO: probably replace the hash here with the snapshot?
+    NewGroupTxn = [blockchain_txn_gen_consensus_group_v1:new(OrderedGateways)],
+    %% no idea what to do here
+    MetaData = #{hbbft_round => Height},
+
+    {ok, CurrentBlock} = blockchain:head_block(Chain),
+    {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
+    Block = blockchain_block:new(CurrentBlockHash,
+                                 blockchain_block:height(CurrentBlock) + 1,
+                                 NewGroupTxn,
+                                 << >>,
+                                 MetaData),
+    {_, State1} = do_dkg(OrderedGateways, Block, sign_genesis_block,
+                         election_done, State#state{current_height = Height}),
+    State1.
 
 do_initial_dkg(GenesisTransactions, Addrs, State) ->
     lager:info("do initial"),
