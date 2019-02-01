@@ -110,13 +110,13 @@ handle_command(Txn, State=#state{ledger=Ledger}) ->
                 {NewHBBFT, ok} ->
                     {reply, ok, [], State#state{hbbft=NewHBBFT}};
                 {_HBBFT, full} ->
-                    {reply, full, ignore};
+                    {reply, {error, full}, ignore};
                 {NewHBBFT, {send, Msgs}} ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end;
-        Reason ->
-            lager:error("hbbft_handler speculative absorb failed, reason: ~p", [Reason]),
-            {reply, ok, ignore}
+        Error ->
+            lager:error("hbbft_handler speculative absorb failed, error: ~p", [Error]),
+            {reply, Error, ignore}
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
