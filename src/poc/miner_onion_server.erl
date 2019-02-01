@@ -37,7 +37,7 @@
     port :: integer(),
     socket :: gen_tcp:socket() | undefined,
     compact_key :: ecc_compact:compact_key(),
-    privkey,
+    ecdh_fun,
     sender :: undefined | {pid(), term()}
 }).
 
@@ -113,7 +113,7 @@ init(Args) ->
         host = maps:get(radio_host, Args),
         port = maps:get(radio_port, Args),
         compact_key = blockchain_swarm:pubkey_bin(),
-        privkey = maps:get(priv_key, Args)
+        ecdh_fun = maps:get(ecdh_fun, Args)
     },
     self() ! connect,
     lager:info("init with ~p", [Args]),
@@ -135,8 +135,8 @@ handle_cast({decrypt, <<IV:12/binary,
                         OnionCompactKey:32/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
-            ,#state{privkey=PrivKey, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
+            ,#state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -156,8 +156,8 @@ handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
                              OnionCompactKey:32/binary,
                              Tag:4/binary,
                              CipherText/binary>>},
-            #state{privkey=PrivKey, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
+            #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
     {noreply, State};
 %% handle ack from radio
 handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
@@ -193,12 +193,10 @@ handle_info(_Msg, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey0, Socket) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
     PubKey = ecc_compact:recover_key(OnionCompactKey),
-    %% XXX: should ideally be using ecdh_fun, don't have one yet
-    {ecc_compact, PrivKey} = PrivKey0,
-    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
+    SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
             lager:error("could not decrypt");

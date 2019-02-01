@@ -37,14 +37,14 @@ init(_Args) ->
 
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
-    {PublicKey, PrivKey, SigFun} =
+    {PublicKey, ECDHFun, SigFun} =
         case libp2p_crypto:load_keys(SwarmKey) of
             {ok, #{secret := PrivKey0, public := PubKey}} ->
-                {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)};
+                {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)};
             {error, enoent} ->
                 KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
                 ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
-                {PubKey, PrivKey0, libp2p_crypto:mk_sig_fun(PrivKey0)}
+                {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)}
         end,
 
     BlockchainOpts = [
@@ -78,7 +78,7 @@ init(_Args) ->
     OnionOpts = #{
         radio_host => RadioHost,
         radio_port => RadioPort,
-        priv_key => PrivKey
+        ecdh_fun => ECDHFun
     },
 
     ChildSpecs =  [
