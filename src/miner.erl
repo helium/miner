@@ -466,7 +466,7 @@ handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_
             case Chain /= undefined of
                 true ->
                     %% pick the best h3 index we can for the resolution
-                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),                    
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
                     maybe_assert_location(H3Index, Resolution, Chain);
                 false ->
                     ok
