@@ -238,6 +238,3 @@ construct_onion([{Data, PubKey} | Tail], PvtOnionKey, OnionCompactKey, IV) ->
                                              IV, {<<IV/binary, OnionCompactKey/binary>>,
                                                   <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
     <<Tag:4/binary, CipherText/binary>>.
-
-
-% take secret / hash to sha256 and take 5 bytes and sha sha sha again...
