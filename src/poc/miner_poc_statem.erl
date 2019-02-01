@@ -114,7 +114,7 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
         true ->
             {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
             Secret = crypto:strong_rand_bytes(8),
-            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), OnionCompactKey),
+            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, OnionCompactKey)),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
