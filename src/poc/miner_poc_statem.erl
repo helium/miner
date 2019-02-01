@@ -112,14 +112,15 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
         false ->
             {keep_state, Data};
         true ->
-            {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
+            %{ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
+            #{secret := PvtOnionKey, public := CompactOnionKey} = libp2p_crypto:generate_keys(ecc_compact),
             Secret = crypto:strong_rand_bytes(8),
-            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, OnionCompactKey)),
+            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(CompactOnionKey))),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             lager:info("submitted poc request ~p", [Tx]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, CompactOnionKey}}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -187,7 +188,7 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
             OnionList = lists:zip(blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N), Path),
-            Onion = miner_onion_server:construct_onion({PvtOnionKey, OnionCompactKey}, OnionList),
+            Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, OnionList),
             lager:info("onion created ~p", [Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),

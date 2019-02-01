@@ -62,7 +62,7 @@ send(Data) ->
 -spec construct_onion({ecc_compact:private_key(), ecc_compact:compact_key()}, [{binary(), ecc_compact:compact_key()}]) -> binary().
 construct_onion({PvtOnionKey, OnionCompactKey}, DataAndPubkeys) ->
     IV = crypto:strong_rand_bytes(12),
-    <<IV/binary, OnionCompactKey/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
+    <<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -133,7 +133,7 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({decrypt, <<IV:12/binary,
-                        OnionCompactKey:32/binary,
+                        OnionCompactKey:33/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
             ,#state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
@@ -154,7 +154,7 @@ handle_info(connect, #state{host=Host, port=Port}=State) ->
     end;
 handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
                              IV:12/binary,
-                             OnionCompactKey:32/binary,
+                             OnionCompactKey:33/binary,
                              Tag:4/binary,
                              CipherText/binary>>},
             #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
@@ -196,7 +196,7 @@ handle_info(_Msg, State) ->
 %%--------------------------------------------------------------------
 decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
-    PubKey = ecc_compact:recover_key(OnionCompactKey),
+    PubKey = libp2p_crypto:bin_to_pubkey(OnionCompactKey),
     SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
@@ -227,13 +227,11 @@ reconnect() ->
 construct_onion([], _, _, _) ->
     %% TODO: make up some random data so nobody can tell if they're the last link in the chain
     crypto:strong_rand_bytes(20);
-construct_onion([{Data, PubKey} | Tail], PvtOnionKey, OnionCompactKey, IV) ->
-    %% NOTE: PubKey is prefixed with KEYTYPE
-    {ecc_compact, {Point, _}} = libp2p_crypto:bin_to_pubkey(PubKey),
-    SecretKey = public_key:compute_key(Point, PvtOnionKey),
-    InnerLayer = construct_onion(Tail, PvtOnionKey, OnionCompactKey, IV),
+construct_onion([{Data, PubKey} | Tail], OnionECDH, OnionCompactKey, IV) ->
+    SecretKey = OnionECDH(libp2p_crypto:bin_to_pubkey(PubKey)),
+    InnerLayer = construct_onion(Tail, OnionECDH, OnionCompactKey, IV),
     {CipherText, Tag} = crypto:block_encrypt(aes_gcm,
                                              SecretKey,
-                                             IV, {<<IV/binary, OnionCompactKey/binary>>,
+                                             IV, {<<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary>>,
                                                   <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
     <<Tag:4/binary, CipherText/binary>>.

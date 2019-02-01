@@ -52,8 +52,8 @@ basic(_Config) ->
     {ok, Sock} = gen_tcp:accept(LSock),
 
     Data = <<1, 2, 3>>,
-    {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
-    Onion = miner_onion_server:construct_onion({PvtOnionKey, OnionCompactKey}, [{Data, libp2p_crypto:pubkey_to_bin(PubKey)}]),
+    #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
+    Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, [{Data, libp2p_crypto:pubkey_to_bin(PubKey)}]),
 
     meck:new(miner_onion_server, [passthrough]),
     meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0) ->
