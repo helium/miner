@@ -5,6 +5,13 @@ language: erlang
 otp_release:
   - 21.1
 
+env:
+  LD_LIBRARY_PATH="/usr/local/lib"
+
+before_install:
+  - git clone -b stable https://github.com/jedisct1/libsodium.git
+  - cd libsodium && ./configure && make check && sudo make install && cd ..
+
 addons:
   apt:
     packages:
