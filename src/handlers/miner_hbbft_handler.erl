@@ -20,7 +20,8 @@
           signatures = [],
           signatures_required = 0,
           artifact :: undefined | binary(),
-          members :: [libp2p_crypto:pubkey_bin()]
+          members :: [libp2p_crypto:pubkey_bin()],
+          ledger :: blockchain_ledger_v1:ledger()
          }).
 
 stamp(Chain) ->
@@ -30,14 +31,18 @@ stamp(Chain) ->
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
+    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
+
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
-                         id=Id-1,
-                         sk=SK,
-                         f=F,
-                         members=Members,
-                         signatures_required=N-F,
-                         hbbft=HBBFT}}.
+                id=Id-1,
+                sk=SK,
+                f=F,
+                members=Members,
+                signatures_required=N-F,
+                hbbft=HBBFT,
+                ledger=Ledger
+               }}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -68,16 +73,24 @@ handle_command({skip, Ref, Worker}, State) ->
             {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=HBBFT}) ->
+handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=HBBFT, ledger=Ledger0}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
+            Buf = hbbft:buf(HBBFT),
+            Ledger = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
+
+            NewBuf = lists:filter(fun(Txn) ->
+                                          Type = blockchain_transactions:type(Txn),
+                                          ok == Type:absorb(Txn, Ledger)
+                                  end, Buf),
+
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(HBBFT, NextRound, TxnsToRemove) of
+            case hbbft:next_round(hbbft:buf(NewBuf, HBBFT), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [new_epoch || Sync], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [new_epoch || Sync], State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [new_epoch || Sync] ++ fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [new_epoch || Sync] ++ fixup_msgs(NextMsgs), State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -86,14 +99,21 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
-handle_command(Txn, State) ->
-    case hbbft:input(State#state.hbbft, Txn) of
-        {NewHBBFT, ok} ->
-            {reply, ok, [], State#state{hbbft=NewHBBFT}};
-        {_HBBFT, full} ->
-            {reply, full, ignore};
-        {NewHBBFT, {send, Msgs}} ->
-            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+handle_command(Txn, State=#state{ledger=Ledger}) ->
+    Type = blockchain_transactions:type(Txn),
+    case Type:absorb(Txn, Ledger) of
+        ok ->
+            case hbbft:input(State#state.hbbft, Txn) of
+                {NewHBBFT, ok} ->
+                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                {_HBBFT, full} ->
+                    {reply, {error, full}, ignore};
+                {NewHBBFT, {send, Msgs}} ->
+                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+            end;
+        Error ->
+            lager:error("hbbft_handler speculative absorb failed, error: ~p", [Error]),
+            {reply, Error, ignore}
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
