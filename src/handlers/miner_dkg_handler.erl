@@ -71,18 +71,18 @@ handle_command(timeout, State) ->
             {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG, timer=undefined}}
     end.
 
-handle_message(Msg, Index, State=#state{n = N, t = T,
+handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                         curve = Curve,
                                         g1 = G1, g2 = G2,
                                         members = Members,
                                         sigmod = SigMod, sigfun = SigFun,
                                         donemod = DoneMod, donefun = DoneFun}) ->
-    lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
-    case binary_to_term(Msg) of
+    Msg = binary_to_term(BinMsg),
+    lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
+    case Msg of
         {conf, Signatures} ->
             case enough_signatures(State#state{signatures=Signatures}) of
                 {ok, GoodSignatures} ->
-                    lager:info("XXXX conf recv, ~p", [State#state.sent_conf]),
                     case State#state.sent_conf of
                         false ->
                             %% relies on implicit self-send to hit the
@@ -111,8 +111,8 @@ handle_message(Msg, Index, State=#state{n = N, t = T,
                     %% already sent a CONF, or not enough signatures
                     {NewState, []}
             end;
-        DKGMsg ->
-            case dkg_hybriddkg:handle_msg(State#state.dkg, Index, DKGMsg) of
+        _ ->
+            case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
                 %% NOTE: We cover all possible return values from handle_msg hence
                 %% eliminating the need for a final catch-all clause
                 {_, ignore} ->

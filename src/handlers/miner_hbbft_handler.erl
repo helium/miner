@@ -124,11 +124,12 @@ handle_command(Txn, State=#state{ledger=Ledger}) ->
             {reply, Error, ignore}
     end.
 
-handle_message(Msg, Index, State=#state{hbbft = HBBFT,
+handle_message(BinMsg, Index, State=#state{hbbft = HBBFT,
                                         election_interval = Interval}) ->
-    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+    Msg = binary_to_term(BinMsg),
+    lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
-    case binary_to_term(Msg) of
+    case Msg of
         {signature, R, Address, Signature} ->
             case R == Round andalso lists:member(Address, State#state.members) andalso
                  %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
@@ -156,8 +157,8 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT,
                     %% invalid signature somehow
                     ignore
             end;
-        HBBFTMsg ->
-            case hbbft:handle_msg(HBBFT, Index - 1, HBBFTMsg) of
+        _ ->
+            case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
