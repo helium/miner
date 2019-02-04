@@ -85,8 +85,6 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
                                           ok == Type:absorb(Txn, Ledger)
                                   end, Buf),
 
-            lager:info("hbbft_handler oldbuf: ~p, newbuf: ~p", [Buf, NewBuf]),
-
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(hbbft:buf(NewBuf, HBBFT), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
