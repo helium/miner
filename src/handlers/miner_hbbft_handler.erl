@@ -103,7 +103,6 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
     end;
 handle_command(Txn, State=#state{ledger=Ledger}) ->
     Type = blockchain_transactions:type(Txn),
-    lager:info("Type: ~p, Txn: ~p", [Type, Txn]),
     case Type:absorb(Txn, Ledger) of
         ok ->
             case hbbft:input(State#state.hbbft, Txn) of
