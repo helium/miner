@@ -80,7 +80,7 @@ decrypt(Onion) ->
 send_receipt(Data, OnionCompactKey) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    OnionCompactKeyBin = crypto:hash(sha256, OnionCompactKey),
+    OnionCompactKeyBin = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Gateways = maps:filter(
         fun(_Address, Info) ->
             case blockchain_ledger_gateway_v1:last_poc_info(Info) of

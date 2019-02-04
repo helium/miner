@@ -112,15 +112,14 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
         false ->
             {keep_state, Data};
         true ->
-            %{ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
-            #{secret := PvtOnionKey, public := CompactOnionKey} = libp2p_crypto:generate_keys(ecc_compact),
+            #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
             Secret = crypto:strong_rand_bytes(8),
-            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(CompactOnionKey))),
+            Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
             ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
             lager:info("submitted poc request ~p", [Tx]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, CompactOnionKey}}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -129,14 +128,18 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain, address=Address, secret=Secret}=Data) ->
+mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
+                                                             address=Address,
+                                                             secret=Secret,
+                                                             onion_keys={_, OnionCompactKey}}=Data) ->
     lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:poc_request_transactions(Block),
             Filter = fun(Txn) ->
                 Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) andalso
-                crypto:hash(sha256, Secret) =:= blockchain_txn_poc_request_v1:hash(Txn)
+                crypto:hash(sha256, Secret) =:= blockchain_txn_poc_request_v1:hash(Txn) andalso
+                crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
             end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
