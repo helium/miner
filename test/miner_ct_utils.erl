@@ -176,14 +176,15 @@ init_per_testcase(TestCase, Config) ->
                      Pid = miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
                      #{secret := GPriv, public := GPub} =
                          libp2p_crypto:generate_keys(ecc_compact),
+                     GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
                      GAddr = libp2p_crypto:pubkey_to_bin(GPub),
                      GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
-                     {Miner, Pid, GPriv, GPub, GAddr, GSigFun}
+                     {Miner, Pid, GECDH, GPub, GAddr, GSigFun}
              end, MinerNames),
 
     Miners = [element(2, K) || K <- Keys],
 
-    ConfigResult = miner_ct_utils:pmap(fun({_Name, Miner, PrivKey, PubKey, _Addr, SigFun}) ->
+    ConfigResult = miner_ct_utils:pmap(fun({_Name, Miner, ECDH, PubKey, _Addr, SigFun}) ->
                                                ct_rpc:call(Miner, cover, start, []),
                                                ct_rpc:call(Miner, application, load, [lager]),
                                                ct_rpc:call(Miner, application, load, [miner]),
@@ -193,7 +194,7 @@ init_per_testcase(TestCase, Config) ->
                                                LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
                                                %% set blockchain configuration
-                                               Key = {PubKey, PrivKey, SigFun},
+                                               Key = {PubKey, ECDH, SigFun},
                                                BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
                                                ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
