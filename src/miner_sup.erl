@@ -6,11 +6,39 @@
 
 -behaviour(supervisor).
 
--export([init/1, start_link/0]).
+%% API
+-export([start_link/0]).
 
+%% Supervisor callbacks
+-export([init/1]).
+
+-define(SUP(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => supervisor,
+    modules => [I]
+}).
+
+-define(WORKER(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [I]
+}).
+
+%% ------------------------------------------------------------------
+%% API functions
+%% ------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% ------------------------------------------------------------------
+%% Supervisor callbacks
+%% ------------------------------------------------------------------
 init(_Args) ->
     SupFlags = #{
         strategy => rest_for_one,
@@ -74,40 +102,22 @@ init(_Args) ->
 
     POCOpts = #{},
 
-    {RadioHost, RadioPort} = application:get_env(miner, radio_device, {"127.0.0.1", 45000}),
-    OnionOpts = #{
-        radio_host => RadioHost,
-        radio_port => RadioPort,
-        ecdh_fun => ECDHFun
-    },
+    OnionServer =
+        case application:get_env(miner, radio_device) of
+            {RadioHost, RadioPort} ->
+                OnionOpts = #{
+                    radio_host => RadioHost,
+                    radio_port => RadioPort,
+                    ecdh_fun => ECDHFun
+                },
+                [?WORKER(miner_onion_server, [OnionOpts])];
+            _ ->
+                []
+        end,
 
     ChildSpecs =  [
-        #{
-            id => blockchain_sup,
-            start => {blockchain_sup, start_link, [BlockchainOpts]},
-            restart => permanent,
-            type => supervisor
-        },
-        #{
-            id => miner,
-            start => {miner, start_link, [MinerOpts]},
-            restart => permanent,
-            type => worker,
-            modules => [miner]
-        },
-        #{
-            id => miner_poc_statem,
-            start => {miner_poc_statem, start_link, [POCOpts]},
-            restart => permanent,
-            type => worker,
-            modules => [miner_poc_statem]
-        },
-        #{
-            id => miner_onion_server,
-            start => {miner_onion_server, start_link, [OnionOpts]},
-            restart => permanent,
-            type => worker,
-            modules => [miner_onion_server]
-        }
-    ],
+        ?SUP(blockchain_sup, [BlockchainOpts]),
+        ?WORKER(miner, [MinerOpts]),
+        ?WORKER(miner_poc_statem, [POCOpts])
+    ] ++ OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
