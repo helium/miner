@@ -529,15 +529,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                                        Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
-    erlang:cancel_timer(State#state.block_timer),
     lager:info("add block ~p", [Hash]),
 
     NewState =
         case blockchain:get_block(Hash, Chain) of
             {ok, Block} ->
                 case blockchain_block:height(Block) of
-                    %% TODO URGENTLY: figure out why this doesn't work
-                    Height when Height > CurrHeight -> %uncomment post relcast rebase
+                    Height when Height > CurrHeight ->
+                        erlang:cancel_timer(State#state.block_timer),
                         lager:info("processing block for ~p", [Height]),
                         Round = maps:get(hbbft_round, blockchain_block:meta(Block), 0),
                         NextRound = Round + 1,
@@ -579,8 +578,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync}},
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
-                %% TODO URGENTLY: figure out why this doesn't work
-                Height when Height > CurrHeight -> %uncomment post relcast rebase
+                Height when Height > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
                     case Height rem Interval == 0 andalso Height /= 0 of
                         false ->
