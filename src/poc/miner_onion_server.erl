@@ -13,7 +13,7 @@
 -export([
     start_link/1,
     send/1,
-    construct_onion/1,
+    construct_onion/2,
     decrypt/1,
     send_receipt/2
 ]).
@@ -37,7 +37,7 @@
     port :: integer(),
     socket :: gen_tcp:socket() | undefined,
     compact_key :: ecc_compact:compact_key(),
-    privkey,
+    ecdh_fun,
     sender :: undefined | {pid(), term()}
 }).
 
@@ -59,11 +59,10 @@ send(Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec construct_onion([{binary(), ecc_compact:compact_key()}]) -> binary().
-construct_onion(DataAndPubkeys) ->
-    {ok, PvtOnionKey, OnionCompactKey} = ecc_compact:generate_key(),
+-spec construct_onion({ecc_compact:private_key(), ecc_compact:compact_key()}, [{binary(), ecc_compact:compact_key()}]) -> binary().
+construct_onion({PvtOnionKey, OnionCompactKey}, DataAndPubkeys) ->
     IV = crypto:strong_rand_bytes(12),
-    <<IV/binary, OnionCompactKey/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
+    <<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -77,18 +76,34 @@ decrypt(Onion) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), binary()) -> ok.
-send_receipt(IV, Data) ->
-    Map = erlang:binary_to_term(Data),
-    Challenger = maps:get(challenger, Map),
-    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-    {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-    Address = blockchain_swarm:pubkey_bin(),
-    Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), IV),
-    {ok, _, SigFun} = blockchain_swarm:keys(),
-    Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
-    EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
-    _ = miner_poc_handler:send(Stream, EncodedReceipt),
+-spec send_receipt(binary(), libp2p_crypto:pubkey()) -> ok.
+send_receipt(Data, OnionCompactKey) ->
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    OnionCompactKeyBin = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Gateways = maps:filter(
+        fun(_Address, Info) ->
+            case blockchain_ledger_gateway_v1:last_poc_info(Info) of
+                {_, OnionCompactKeyBin} -> true;
+                _ -> false
+            end
+        end,
+        blockchain_ledger_v1:active_gateways(Ledger)
+    ),
+    case maps:keys(Gateways) of
+        [Challenger] ->
+            Address = blockchain_swarm:pubkey_bin(),
+            Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), Data),
+            {ok, _, SigFun} = blockchain_swarm:keys(),
+            Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
+            EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
+
+            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+            {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
+            _ = miner_poc_handler:send(Stream, EncodedReceipt);
+        _Other ->
+            lager:warning("not gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
+    end,
     ok.
 
 %% ------------------------------------------------------------------
@@ -99,7 +114,7 @@ init(Args) ->
         host = maps:get(radio_host, Args),
         port = maps:get(radio_port, Args),
         compact_key = blockchain_swarm:pubkey_bin(),
-        privkey = maps:get(priv_key, Args)
+        ecdh_fun = maps:get(ecdh_fun, Args)
     },
     self() ! connect,
     lager:info("init with ~p", [Args]),
@@ -118,11 +133,11 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({decrypt, <<IV:12/binary,
-                        OnionCompactKey:32/binary,
+                        OnionCompactKey:33/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
-            ,#state{privkey=PrivKey, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
+            ,#state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -139,11 +154,11 @@ handle_info(connect, #state{host=Host, port=Port}=State) ->
     end;
 handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
                              IV:12/binary,
-                             OnionCompactKey:32/binary,
+                             OnionCompactKey:33/binary,
                              Tag:4/binary,
                              CipherText/binary>>},
-            #state{privkey=PrivKey, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey, Socket),
+            #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
     {noreply, State};
 %% handle ack from radio
 handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
@@ -179,18 +194,16 @@ handle_info(_Msg, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, PrivKey0, Socket) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
-    PubKey = ecc_compact:recover_key(OnionCompactKey),
-    %% XXX: should ideally be using ecdh_fun, don't have one yet
-    {ecc_compact, PrivKey} = PrivKey0,
-    SharedKey = public_key:compute_key(element(1, PubKey), PrivKey),
+    PubKey = libp2p_crypto:bin_to_pubkey(OnionCompactKey),
+    SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
             lager:error("could not decrypt");
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("decrypted a layer: ~p~n", [Data]),
-            _ = erlang:spawn(?MODULE, send_receipt, [IV, Data]),
+            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey]),
             gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
     end,
     ok = inet:setopts(Socket, [{active, once}]).
@@ -212,15 +225,13 @@ reconnect() ->
                       ecc_compact:compact_key(),
                       binary()) -> binary().
 construct_onion([], _, _, _) ->
-    %% make up some random data so nobody can tell if they're the last link in the chain
+    %% TODO: make up some random data so nobody can tell if they're the last link in the chain
     crypto:strong_rand_bytes(20);
-construct_onion([{Data, PubKey} | Tail], PvtOnionKey, OnionCompactKey, IV) ->
-    %% NOTE: PubKey is prefixed with KEYTYPE
-    {ecc_compact, {Point, _}} = libp2p_crypto:bin_to_pubkey(PubKey),
-    SecretKey = public_key:compute_key(Point, PvtOnionKey),
-    InnerLayer = construct_onion(Tail, PvtOnionKey, OnionCompactKey, IV),
+construct_onion([{Data, PubKey} | Tail], OnionECDH, OnionCompactKey, IV) ->
+    SecretKey = OnionECDH(libp2p_crypto:bin_to_pubkey(PubKey)),
+    InnerLayer = construct_onion(Tail, OnionECDH, OnionCompactKey, IV),
     {CipherText, Tag} = crypto:block_encrypt(aes_gcm,
                                              SecretKey,
-                                             IV, {<<IV/binary, OnionCompactKey/binary>>,
+                                             IV, {<<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary>>,
                                                   <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
     <<Tag:4/binary, CipherText/binary>>.
