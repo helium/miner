@@ -76,7 +76,7 @@ decrypt(Onion) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), binary()) -> ok.
+-spec send_receipt(binary(), libp2p_crypto:pubkey()) -> ok.
 send_receipt(Data, OnionCompactKey) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
