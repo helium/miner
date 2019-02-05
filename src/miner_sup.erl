@@ -67,7 +67,7 @@ init(_Args) ->
         undefined ->
             SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
             ok = filelib:ensure_dir(SwarmKey),
-            {PublicKey, PrivKey, SigFun} =
+            {PublicKey, ECDHFun, SigFun} =
                 case libp2p_crypto:load_keys(SwarmKey) of
                     {ok, #{secret := PrivKey0, public := PubKey}} ->
                         {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)};
@@ -76,7 +76,7 @@ init(_Args) ->
                         ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
                         {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)}
                 end;
-        {PublicKey, PrivKey, SigFun} ->
+        {PublicKey, ECDHFun, SigFun} ->
             ok
     end,
 

@@ -34,7 +34,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
 init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
-                       {?MODULE, stamp, [Chain]}, Round, Buf),>
+                       {?MODULE, stamp, [Chain]}, Round, Buf),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
 
     lager:info("HBBFT~p started~n", [Id]),

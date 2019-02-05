@@ -93,6 +93,8 @@ init(Args) ->
             ConfigProxy = undefined
     end,
 
+    %% TODO this seems to work somehow??!?! but if node fails while in
+    %% the dkg, things will stick forever.
     self() ! maybe_restore_consensus,
 
     {ok, #state{curve = Curve,
