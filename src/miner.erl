@@ -24,7 +24,6 @@
           curve :: 'SS512',
           dkg_await :: undefined | {reference(), term()},
           election_interval :: pos_integer(),
-          group_num = 1 :: pos_integer(),
           current_dkg = undefined :: undefined | pos_integer(),
           current_height = -1 :: integer()
          }).
@@ -356,8 +355,7 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey}, _From,
             #state{batch_size = BatchSize,
-                   block_time = BlockTime,
-                   election_interval = Interval} = State) ->
+                   block_time = BlockTime} = State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -378,7 +376,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       BatchSize,
                                       PrivKey,
                                       Chain,
-                                      Interval]],
+                                      1,
+                                      []]],
     %% TODO generate a unique value (probably based on the public key from the DKG) to identify
     %% this consensus group
     Ref = erlang:send_after(BlockTime, self(), block_timeout),
@@ -391,17 +390,15 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     {reply, ok, State#state{consensus_group = Group,
                             block_timer = Ref,
-                            group_num = 2,
                             dkg_await = undefined, % not sure we use this again, but
+                            current_height = 0,
                             blockchain = Chain}};
 handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
             State = #state{consensus_group = OldGroup,
                            batch_size = BatchSize,
                            block_time = BlockTime,
-                           group_num = GroupNum,
                            blockchain = Chain,
-                           current_height = CurrHeight,
-                           election_interval = Interval}) ->
+                           current_height = CurrHeight}) ->
     lager:info("election done at ~p", [CurrHeight]),
 
     Block0 = binary_to_term(BinaryBlock),
@@ -426,14 +423,8 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
     Buf =
         case OldGroup of
             P when is_pid(P) ->
-                R = make_ref(),
-                libp2p_group_relcast:handle_input(P, {get_buf, self(), R}),
-                receive
-                    {R, B} ->
-                        B
-                after 250 ->
-                        []
-                end;
+                {ok, B} = libp2p_group_relcast:handle_command(P, get_buf),
+                B;
             _ ->
                 []
         end,
@@ -446,7 +437,6 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
                                       BatchSize,
                                       PrivKey,
                                       Chain,
-                                      Interval,
                                       Height,
                                       Buf]],
     Ref = set_next_block_timer(Chain, BlockTime),
@@ -462,7 +452,6 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
     {reply, ok, State#state{consensus_group = Group,
                             block_timer = Ref,
                             current_height = Height,
-                            group_num = GroupNum + 1,
                             blockchain = Chain}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -504,8 +493,7 @@ handle_info(maybe_restore_consensus, State) ->
                                                               F,
                                                               State#state.batch_size,
                                                               undefined,
-                                                              Chain,
-                                                              State#state.election_interval]],
+                                                              Chain]],
                             Ref = set_next_block_timer(Chain, State#state.block_time),
                             %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
                             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
@@ -538,7 +526,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
         case blockchain:get_block(Hash, Chain) of
             {ok, Block} ->
                 case blockchain_block:height(Block) of
-                    Height when true -> % Height > CurrHeight -> %uncomment post relcast rebase
+                    %% TODO URGENTLY: figure out why this doesn't work
+                    Height when Height > CurrHeight -> %uncomment post relcast rebase
                         lager:info("processing block for ~p", [Height]),
                         Round = blockchain_block:hbbft_round(Block) + 1,
                         NextRound = Round + 1,
@@ -556,6 +545,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             %% seed for the random operations that come next.  Then, we use
                             %% that to select a new consensus group deterministically (ish).
                             true ->
+                                %% signal the existing group to stop.
+                                ok = libp2p_group_relcast:handle_input(ConsensusGroup, stop),
+
                                 initiate_election(Chain, Hash, Height, State)
                         end;
                     _Height ->
@@ -577,7 +569,8 @@ handle_info({blockchain_event, {add_block, Hash, _Sync}},
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
-                Height when true -> % Height > CurrHeight -> %uncomment post relcast rebase
+                %% TODO URGENTLY: figure out why this doesn't work
+                Height when Height > CurrHeight -> %uncomment post relcast rebase
                     lager:info("nc processing block for ~p", [Height]),
                     case Height rem Interval == 0 andalso Height /= 0 of
                         false ->

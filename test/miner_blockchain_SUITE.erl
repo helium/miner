@@ -142,7 +142,7 @@ growth_test(Config) ->
                                                                      ct:pal("miner ~p height ~p", [Miner, Height]),
                                                                      Height >= 5
                                                              end, Miners)
-                                   end, 30, timer:seconds(1)),
+                                   end, 120, timer:seconds(1)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
                                   C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),

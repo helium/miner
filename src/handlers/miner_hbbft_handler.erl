@@ -22,8 +22,7 @@
          signatures_required = 0,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
-         ledger :: undefined | blockchain_ledger_v1:ledger(),
-         election_interval :: pos_integer()
+         ledger :: undefined | blockchain_ledger_v1:ledger()
         }).
 
 stamp(Chain) ->
@@ -31,9 +30,9 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain, Interval]) ->
-    init([Members, Id, N, F, BatchSize, SK, Chain, Interval, 0, []]);
-init([Members, Id, N, F, BatchSize, SK, Chain, Interval, Round, Buf]) ->
+init([Members, Id, N, F, BatchSize, SK, Chain]) ->
+    init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
                        {?MODULE, stamp, [Chain]}, Round, Buf),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
@@ -46,8 +45,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Interval, Round, Buf]) ->
                 members = Members,
                 signatures_required = N - F,
                 hbbft = HBBFT,
-                ledger=Ledger,
-                election_interval = Interval}}.
+                ledger=Ledger}}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -57,9 +55,11 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
-handle_command({get_buf, Asker, Ref}, State) ->
-    Asker ! {Ref, hbbft:buf(State#state.hbbft)},
-    {reply, ok, ignore};
+handle_command(get_buf, State) ->
+    {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
+handle_command(stop, State) ->
+    %% TODO add ignore support for this four tuple to use ignore
+    {reply, ok, [{stop, timer:minutes(5)}], State};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
@@ -117,8 +117,7 @@ handle_command(Txn, State=#state{ledger=Ledger}) ->
             {reply, Error, ignore}
     end.
 
-handle_message(BinMsg, Index, State=#state{hbbft = HBBFT,
-                                        election_interval = Interval}) ->
+handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
     Msg = binary_to_term(BinMsg),
     %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
@@ -129,20 +128,13 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT,
                  (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
                 true ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
-                    Finished =
-                        case enough_signatures(NewState) of
-                            {ok, Signatures} ->
-                                ok == miner:signed_block(Signatures, State#state.artifact);
-                            false ->
-                                false
-                        end,
-                    case Finished andalso Round rem Interval == 0 of
-                        true ->
-                            %% we're done, linger so that laggy members can progress
-                            {NewState, [{stop, timer:minutes(5)}]};
+                    case enough_signatures(NewState) of
+                        {ok, Signatures} ->
+                            ok = miner:signed_block(Signatures, State#state.artifact);
                         false ->
-                            {NewState, []}
-                    end;
+                            false
+                    end,
+                    {NewState, []};
                 false when R > Round ->
                     defer;
                 false ->
