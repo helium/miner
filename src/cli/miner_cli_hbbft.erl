@@ -43,7 +43,6 @@ hbbft_usage() ->
       "  hbbft status           - Display hbbft status.\n"
       "  hbbft queue            - Display hbbft message queue.\n"
       "  hbbft skip             - Skip current hbbft round.\n"
-      "  hbbft queue            - Show hbbft queued messages.\n"
      ]
     ].
 
@@ -122,12 +121,12 @@ hbbft_queue_usage() ->
     ].
 
 hbbft_queue(["hbbft", "queue"], [], Flags) ->
-    Queue = miner:relcast_queue(),
+    Queue = miner:relcast_queue(consensus_group),
     case proplists:get_value(inbound, Flags, false) of
         false ->
             case proplists:get_value(outbound, Flags) of
                 undefined ->
-                    Workers = maps:get(worker_info, miner:relcast_info(), #{}),
+                    Workers = maps:get(worker_info, miner:relcast_info(consensus_group), #{}),
                     %% just print a summary of the queue
                     [clique_status:table([[{destination, "inbound"},
                                            {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
