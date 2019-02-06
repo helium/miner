@@ -60,6 +60,7 @@
 -define(MINER_INTERFACE, "com.helium.Miner").
 -define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
 -define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
+-define(MINER_MEMBER_SYNCING_STATUS, "SyncingStatus").
 
 -define(CONFIG_OBJECT_PATH, "/").
 -define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
@@ -297,7 +298,7 @@ handle_call(dkg_group, _From, State) ->
         {reply, State#state.dkg_group, State};
 handle_call({create_block, Stamps, Transactions, HBBFTRound},
             _From,
-            State=#state{blockchain=Chain}) when Chain /= undefined ->
+            #state{blockchain=Chain}=State) when Chain /= undefined ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
@@ -331,9 +332,9 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
             lager:warning("got unexpected block hashes in stamp information ~p", [List]),
             {reply, {error, multiple_hashes}, State}
     end;
-handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus_group=ConsensusGroup,
-                                                                       blockchain=Chain,
-                                                                       block_time=BlockTime}) when ConsensusGroup /= undefined ->
+handle_call({signed_block, Signatures, Tempblock}, _From, #state{consensus_group=ConsensusGroup,
+                                                                 blockchain=Chain,
+                                                                 block_time=BlockTime}=State) when ConsensusGroup /= undefined ->
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
     %% * cancel the block timer
     %% * sign the block
@@ -357,7 +358,7 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
             lager:error("signed_block, error: ~p", [Error]),
             {reply, ok, State}
     end;
-handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
+handle_call(in_consensus, _From, #state{consensus_pos=Pos}=State) ->
     Reply = case Pos of
                 undefined -> false;
                 _ -> true
@@ -452,10 +453,11 @@ handle_info(block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
 handle_info({blockchain_event, {add_block, Hash, Sync}},
-            State=#state{consensus_group=ConsensusGroup,
-                         blockchain=Chain,
-                         block_time=BlockTime}) when ConsensusGroup /= undefined andalso
+            #state{consensus_group=ConsensusGroup,
+                   blockchain=Chain,
+                   block_time=BlockTime}=State) when ConsensusGroup /= undefined andalso
                                                      Chain /= undefined ->
+    ok = signal_syncing_status(Sync, State),
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
@@ -471,10 +473,53 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        State
                end,
     {noreply, NewState};
-handle_info({blockchain_event, {add_block, _Hash, _Sync}},
-            State=#state{consensus_group=ConsensusGroup,
-                         blockchain=Chain}) when ConsensusGroup == undefined andalso
+handle_info({blockchain_event, {add_block, _Hash, Sync}},
+            #state{consensus_group=ConsensusGroup,
+                   blockchain=Chain}=State) when ConsensusGroup == undefined andalso
                                                  Chain /= undefined ->
+    ok = signal_syncing_status(Sync, State),
+    {noreply, State};
+handle_info({ebus_signal, _, SignalID, Msg}, #state{blockchain=Chain, gps_signal=SignalID}=State) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{"lat" := Lat,
+                "lon" := Lon,
+                "h_accuracy" := HorizontalAcc
+               }]} ->
+            case Chain /= undefined of
+                true ->
+                    %% pick the best h3 index we can for the resolution
+                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
+                    maybe_assert_location(H3Index, Resolution, Chain);
+                false ->
+                    ok
+            end;
+        {ok, [Args]} ->
+            lager:error("Invalid position_signal args: ~p", [Args]);
+        {error, Error} ->
+            lager:error("Failed to decode position message: ~p", [Error])
+    end,
+    {noreply, State};
+handle_info({ebus_signal, _, SignalID, Msg}, #state{add_gateway_signal=SignalID}=State) ->
+    case ebus_message:args(Msg) of
+        {ok, [#{
+                "addr" := AuthAddress,
+                "token" := AuthToken,
+                "owner" := OwnerStrAddress
+               }]} ->
+            catch(signal_add_gateway_status("sending", State)),
+            OwnerAddress = libp2p_crypto:b58_to_bin(OwnerStrAddress),
+            Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
+            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
+            Status = case Result of
+                         ok -> "sent";
+                         _ -> "send_failed"
+                     end,
+            catch(signal_add_gateway_status(Status, State));
+        {ok, [Args]} ->
+            lager:error("Invalid add_gateway_signal args: ~p", [Args]);
+        {error, Error} ->
+            lager:error("Failed to decode add_gateway_signal message: ~p", [Error])
+    end,
     {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
@@ -488,7 +533,7 @@ handle_info(_Msg, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
+do_initial_dkg(GenesisTransactions, Addrs, #state{curve=Curve}=State) ->
     SortedAddrs = lists:sort(Addrs),
     lager:info("SortedAddrs: ~p", [SortedAddrs]),
     N = blockchain_worker:num_consensus_members(),
@@ -580,9 +625,27 @@ maybe_assert_location(Location, _Resolution, Chain) ->
 -spec signal_add_gateway_status(string(), #state{}) -> ok.
 signal_add_gateway_status(_, #state{config_proxy=undefined}) ->
     ok;
-signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
+signal_add_gateway_status(Status, #state{config_proxy=Proxy}) ->
     {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
                                         ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
+    ok = ebus_message:append_args(Msg, [string], [Status]),
+    ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec signal_syncing_status(boolean(), #state{}) -> ok.
+signal_syncing_status(_, #state{config_proxy=undefined}) ->
+    ok;
+signal_syncing_status(Syncing, #state{config_proxy=Proxy}) ->
+    Status = case Syncing of
+        false -> "StartSyncing";
+        true -> "StopSyncing"
+    end,
+    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
+                                        ?MINER_OBJECT(?MINER_MEMBER_SYNCING_STATUS)),
     ok = ebus_message:append_args(Msg, [string], [Status]),
     ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
     ok.
