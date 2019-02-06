@@ -128,7 +128,6 @@ basic(_Config) ->
         fun(_) ->
             B = create_block(ConsensusMembers, []),
             ok = blockchain:add_block(B, Chain),
-            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
             timer:sleep(100)
         end,
         lists:seq(1, 4)
@@ -148,7 +147,7 @@ basic(_Config) ->
     {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
     lists:foreach(
         fun(Msg) ->
-            ?assertMatch({blockchain_event, {add_block, _, true}}, Msg)
+            ?assertMatch({blockchain_event, {add_block, _, false}}, Msg)
         end,
         AddBlockMsgs
     ),

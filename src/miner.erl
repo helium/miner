@@ -641,8 +641,8 @@ signal_syncing_status(_, #state{config_proxy=undefined}) ->
     ok;
 signal_syncing_status(Syncing, #state{config_proxy=Proxy}) ->
     Status = case Syncing of
-        false -> "StartSyncing";
-        true -> "StopSyncing"
+        true -> "StartSyncing";
+        false -> "StopSyncing"
     end,
     {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
                                         ?MINER_OBJECT(?MINER_MEMBER_SYNCING_STATUS)),
