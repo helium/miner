@@ -26,19 +26,19 @@
           dkg_await :: undefined | {reference(), term()}
          }).
 
--export([start_link/1
-         ,initial_dkg/2
-         ,relcast_info/0
-         ,relcast_queue/0
-         ,consensus_pos/0
-         ,in_consensus/0
-         ,hbbft_status/0
-         ,hbbft_skip/0
-         ,dkg_status/0
-         ,sign_genesis_block/2
-         ,genesis_block_done/3
-         ,create_block/3
-         ,signed_block/2
+-export([start_link/1,
+         initial_dkg/2,
+         relcast_info/1,
+         relcast_queue/1,
+         consensus_pos/0,
+         in_consensus/0,
+         hbbft_status/0,
+         hbbft_skip/0,
+         dkg_status/0,
+         sign_genesis_block/2,
+         genesis_block_done/3,
+         create_block/3,
+         signed_block/2
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -108,8 +108,8 @@ initial_dkg(GenesisTransactions, Addrs) ->
 %% @end
 %%--------------------------------------------------------------------
 %% TODO: spec
-relcast_info() ->
-    case gen_server:call(?MODULE, consensus_group, 60000) of
+relcast_info(Group) ->
+    case gen_server:call(?MODULE, Group, 60000) of
         undefined -> #{};
         Pid ->
             libp2p_group_relcast:info(Pid)
@@ -120,8 +120,8 @@ relcast_info() ->
 %% @end
 %%--------------------------------------------------------------------
 %% TODO: spec
-relcast_queue() ->
-    case gen_server:call(?MODULE, consensus_group, 60000) of
+relcast_queue(Group) ->
+    case gen_server:call(?MODULE, Group, 60000) of
         undefined -> #{};
         Pid ->
             try libp2p_group_relcast:queues(Pid) of
