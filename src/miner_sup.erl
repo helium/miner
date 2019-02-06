@@ -103,7 +103,7 @@ init(_Args) ->
     POCOpts = #{},
 
     OnionServer =
-        case application:get_env(miner, radio_device) of
+        case application:get_env(miner, radio_device, undefined) of
             {RadioHost, RadioPort} ->
                 OnionOpts = #{
                     radio_host => RadioHost,
