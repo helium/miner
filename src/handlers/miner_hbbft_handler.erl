@@ -21,7 +21,7 @@
           signatures_required = 0,
           artifact :: undefined | binary(),
           members :: [libp2p_crypto:pubkey_bin()],
-          ledger :: blockchain_ledger_v1:ledger()
+          ledger :: undefined | blockchain_ledger_v1:ledger()
          }).
 
 stamp(Chain) ->
@@ -77,16 +77,10 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
-            Buf = hbbft:buf(HBBFT),
             Ledger = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
 
-            NewBuf = lists:filter(fun(Txn) ->
-                                          Type = blockchain_transactions:type(Txn),
-                                          ok == Type:absorb(Txn, Ledger)
-                                  end, Buf),
-
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(hbbft:buf(NewBuf, HBBFT), NextRound, TxnsToRemove) of
+            case hbbft:next_round(filter_txn_buf(HBBFT, Ledger), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
                     {reply, ok, [new_epoch || Sync], State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
@@ -178,7 +172,7 @@ callback_message(_, _, _) -> none.
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
-    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK}).
+    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, ledger=undefined}).
 
 deserialize(BinState) ->
     State = binary_to_term(BinState),
@@ -190,7 +184,8 @@ restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
     %% because we have non-serializable data in it (rocksdb refs)
     {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
-    {ok, OldState#state{hbbft=hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft)}}.
+    Ledger = NewState#state.ledger,
+    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft), Ledger), ledger=Ledger}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
@@ -225,3 +220,12 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
                          libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))
                  end, Signatures),
     State#state{signatures=FilteredSignatures}.
+
+filter_txn_buf(HBBFT, Ledger) ->
+    Buf = hbbft:buf(HBBFT),
+    NewBuf = lists:filter(fun(Txn) ->
+                                  Type = blockchain_transactions:type(Txn),
+                                  ok == Type:absorb(Txn, Ledger)
+                          end, Buf),
+    hbbft:buf(NewBuf, HBBFT).
+
