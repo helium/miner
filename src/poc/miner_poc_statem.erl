@@ -362,7 +362,12 @@ target_test() ->
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
 
-    Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),
+    Block = blockchain_block:new(#{prev_hash => <<>>,
+                                   height => 2,
+                                   transactions => [],
+                                   signatures => [],
+                                   hbbft_rount => 0,
+                                   time => 0}),
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
 

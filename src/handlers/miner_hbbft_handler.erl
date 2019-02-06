@@ -94,8 +94,7 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             {reply, error, ignore}
     end;
 handle_command(Txn, State=#state{ledger=Ledger}) ->
-    Type = blockchain_transactions:type(Txn),
-    case Type:absorb(Txn, Ledger) of
+    case blockchain_txn:absorb(Txn, Ledger) of
         ok ->
             case hbbft:input(State#state.hbbft, Txn) of
                 {NewHBBFT, ok} ->
@@ -203,7 +202,7 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     case blockchain_block:verify_signature(Artifact,
                                            Members,
-                                           term_to_binary(Signatures),
+                                           Signatures,
                                            Threshold) of
         {true, ValidSignatures} ->
             %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets

@@ -275,10 +275,15 @@ create_block(ConsensusMembers, Txs) ->
     {ok, PrevHash} = blockchain:head_hash(Blockchain),
     {ok, HeadBlock} = blockchain:head_block(Blockchain),
     Height = blockchain_block:height(HeadBlock) + 1,
-    Block0 = blockchain_block:new(PrevHash, Height, Txs, <<>>, #{}),
-    BinBlock = erlang:term_to_binary(blockchain_block:remove_signature(Block0)),
+    Block0 = blockchain_block:new(#{prev_hash => PrevHash,
+                                    height => Height,
+                                    transactions => Txs,
+                                    signatures => [],
+                                    time => 0,
+                                    hbbft_round => 0}),
+    BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
     Signatures = signatures(ConsensusMembers, BinBlock),
-    Block1 = blockchain_block:sign_block(erlang:term_to_binary(Signatures), Block0),
+    Block1 = blockchain_block:set_signatures(Block0, Signatures),
     Block1.
 
 signatures(ConsensusMembers, BinBlock) ->
