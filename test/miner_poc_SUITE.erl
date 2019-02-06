@@ -61,7 +61,7 @@ basic(_Config) ->
                      || {Addr, _} <- ConsensusMembers],
     GenConsensusGroupTx = blockchain_txn_gen_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
     Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
-    GenesisBlock = blockchain_block:new_genesis_block(Txs),
+    GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
 
     Chain = blockchain_worker:blockchain(),
@@ -275,7 +275,7 @@ create_block(ConsensusMembers, Txs) ->
     {ok, PrevHash} = blockchain:head_hash(Blockchain),
     {ok, HeadBlock} = blockchain:head_block(Blockchain),
     Height = blockchain_block:height(HeadBlock) + 1,
-    Block0 = blockchain_block:new(#{prev_hash => PrevHash,
+    Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
                                     height => Height,
                                     transactions => Txs,
                                     signatures => [],
