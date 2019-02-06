@@ -111,12 +111,17 @@ relcast_queue(Group) ->
         Pid ->
             try libp2p_group_relcast:queues(Pid) of
                 {_ModState, Inbound, Outbound} ->
-                    O = maps:map(fun(_, V) ->
-                                         [  erlang:binary_to_term(Value) || Value <- V]
-                                 end, Outbound),
+                    O = maps:map(
+                        fun(_, V) ->
+                            [erlang:binary_to_term(Value) || Value <- V]
+                        end,
+                        Outbound
+                    ),
                     I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
-                    #{inbound => I,
-                      outbound => O}
+                    #{
+                        inbound => I,
+                        outbound => O
+                    }
             catch What:Why ->
                       {error, {What, Why}}
             end
