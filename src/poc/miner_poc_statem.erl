@@ -135,12 +135,14 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
     lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
-            Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) ->
-                Address =:= blockchain_txn_poc_request_v1:gateway(Txn) andalso
-                crypto:hash(sha256, Secret) =:= blockchain_txn:hash(Txn) andalso
-                crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
-            end,
+            Txns = blockchain_block:transactions(Block),
+            Filter =
+                fun(Txn) ->
+                        blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1 andalso
+                            Address =:= blockchain_txn_poc_request_v1:gateway(Txn) andalso
+                            crypto:hash(sha256, Secret) =:= blockchain_txn:hash(Txn) andalso
+                            crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
+                end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
