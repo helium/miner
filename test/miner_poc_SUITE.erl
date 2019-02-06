@@ -107,7 +107,7 @@ basic(_Config) ->
 
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
-    meck:expect(blockchain_worker, submit_txn, fun(_, Txn) ->
+    meck:expect(blockchain_worker, submit_txn, fun(Txn) ->
         B = create_block(ConsensusMembers, [Txn]),
         ok = blockchain:add_block(B, Chain),
         ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true})
