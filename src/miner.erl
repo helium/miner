@@ -291,7 +291,7 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
             SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Transactions),
             {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, blockchain:ledger(Chain)),
             %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
-            LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
+            LastBlockTimestamp = blockchain_block:time(CurrentBlock),
             BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
             lager:info("new block time is ~p", [BlockTime]),
             NewBlock = blockchain_block_v1:new(#{prev_hash => CurrentBlockHash,
@@ -449,7 +449,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
     NewState = case blockchain:get_block(Hash, Chain) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
-                       NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
+                       NextRound = blockchain_block:hbbft_round(Block) + 1,
                        libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
                        Ref = set_next_block_timer(Chain, BlockTime),
                        State#state{block_timer=Ref};
@@ -529,7 +529,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
         true ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
-            GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
+            GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
             GenesisBlock = blockchain_block_v1:new_genesis_block(GenesisBlockTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
@@ -607,7 +607,7 @@ signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
 
 set_next_block_timer(Chain, BlockTime) ->
     {ok, HeadBlock} = blockchain:head_block(Chain),
-    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
+    LastBlockTimestamp = blockchain_block:time(HeadBlock),
     NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     erlang:send_after(NextBlockTime * 1000, self(), block_timeout).

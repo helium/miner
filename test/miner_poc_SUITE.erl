@@ -59,7 +59,7 @@ basic(_Config) ->
     Balance = 5000,
     GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
                      || {Addr, _} <- ConsensusMembers],
-    GenConsensusGroupTx = blockchain_txn_gen_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
+    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
     Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),

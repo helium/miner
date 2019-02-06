@@ -363,11 +363,11 @@ target_test() ->
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
 
     Block = blockchain_block_v1:new(#{prev_hash => <<>>,
-                                   height => 2,
-                                   transactions => [],
-                                   signatures => [],
-                                   hbbft_round => 0,
-                                   time => 0}),
+                                      height => 2,
+                                      transactions => [],
+                                      signatures => [],
+                                      hbbft_round => 0,
+                                      time => 0}),
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
 
