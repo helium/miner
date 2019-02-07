@@ -96,7 +96,7 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
 handle_command(Txn, State=#state{ledger=Ledger}) ->
     case blockchain_txn:absorb(Txn, Ledger) of
         ok ->
-            case hbbft:input(State#state.hbbft, Txn) of
+            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
                 {NewHBBFT, ok} ->
                     {reply, ok, [], State#state{hbbft=NewHBBFT}};
                 {_HBBFT, full} ->
