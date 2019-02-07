@@ -59,7 +59,7 @@ handle_command(timeout, State) ->
     end.
 
 handle_message(Msg, Index, State=#state{n=N, t=T, curve=Curve, g1=G1, g2=G2, sigmod=SigMod, sigfun=SigFun, donemod=DoneMod, donefun=DoneFun}) ->
-    lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
+    %% lager:info("DKG input ~p from ~p", [binary_to_term(Msg), Index]),
     case binary_to_term(Msg) of
         {conf, Signatures} ->
             case enough_signatures(State#state{signatures=Signatures}) of

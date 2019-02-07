@@ -110,7 +110,7 @@ handle_command(Txn, State=#state{ledger=Ledger}) ->
     end.
 
 handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
-    lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
+    %% lager:info("HBBFT input ~p from ~p", [binary_to_term(Msg), Index]),
     Round = hbbft:round(HBBFT),
     case binary_to_term(Msg) of
         {signature, R, Address, Signature} ->
@@ -148,7 +148,7 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
                     Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus"),
-                    lager:info("stamps ~p~n", [Stamps]),
+                    %% lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
