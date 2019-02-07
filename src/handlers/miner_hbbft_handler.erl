@@ -27,7 +27,7 @@
 stamp(Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
-    {erlang:system_time(seconds), HeadHash}.
+    term_to_binary({erlang:system_time(seconds), HeadHash}).
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
@@ -144,7 +144,8 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT}, fixup_msgs(Msgs)};
-                {NewHBBFT, {result, {transactions, Stamps, Txns}}} ->
+                {NewHBBFT, {result, {transactions, Stamps0, Txns}}} ->
+                    Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
                     lager:info("Reached consensus"),
                     lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
