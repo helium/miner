@@ -42,8 +42,6 @@
     consensus_pos :: undefined | pos_integer(),
     batch_size = 500 :: pos_integer(),
     config_proxy ::  pid() | undefined,
-    gps_signal :: ebus:filter_id(),
-    add_gateway_signal :: ebus:filter_id(),
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
@@ -59,13 +57,7 @@
 -define(MINER_OBJECT_PATH, "/").
 -define(MINER_INTERFACE, "com.helium.Miner").
 -define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
--define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
 -define(MINER_MEMBER_SYNCING_STATUS, "SyncingStatus").
-
--define(CONFIG_OBJECT_PATH, "/").
--define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
--define(CONFIG_OBJECT(M), ?CONFIG_OBJECT_INTERFACE ++ "." ++ M).
-
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
