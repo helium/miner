@@ -93,8 +93,6 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
-handle_command(Txn, State=#state{}) when is_binary(Txn) ->
-    handle_command(blockchain_txn:deserialize(Txn), State);
 handle_command(Txn, State=#state{ledger=Ledger}) ->
     case blockchain_txn:absorb(Txn, Ledger) of
         ok ->
@@ -146,8 +144,9 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT}, fixup_msgs(Msgs)};
-                {NewHBBFT, {result, {transactions, Stamps0, Txns}}} ->
+                {NewHBBFT, {result, {transactions, Stamps0, BinTxns}}} ->
                     Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
+                    Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus"),
                     lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
@@ -158,7 +157,8 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     case miner:create_block(Stamps, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
-                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
+                            BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
+                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
                             {filter_signatures(State#state{hbbft=NewerHBBFT, artifact=Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
