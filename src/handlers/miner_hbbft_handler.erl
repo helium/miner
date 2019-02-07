@@ -93,6 +93,8 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
+handle_command(Txn, State=#state{}) when is_binary(Txn) ->
+    handle_command(blockchain_txn:deserialize(Txn), State);
 handle_command(Txn, State=#state{ledger=Ledger}) ->
     case blockchain_txn:absorb(Txn, Ledger) of
         ok ->
@@ -223,7 +225,8 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
 
 filter_txn_buf(HBBFT, Ledger) ->
     Buf = hbbft:buf(HBBFT),
-    NewBuf = lists:filter(fun(Txn) ->
+    NewBuf = lists:filter(fun(BinTxn) ->
+                                  Txn = blockchain_txn:deserialize(BinTxn),
                                   ok == blockchain_txn:absorb(Txn, Ledger)
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
