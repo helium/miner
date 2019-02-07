@@ -190,10 +190,10 @@ enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when lengt
     false;
 enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    case blockchain_block:verify_signature(Artifact,
-                                           Members,
-                                           term_to_binary(Signatures),
-                                           Threshold) of
+    case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
+                                            Members,
+                                            Signatures,
+                                            Threshold) of
         {true, ValidSignatures} ->
             %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets
             %% depending on message order. Given that the underlying artifact they're signing is the same though,

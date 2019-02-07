@@ -97,7 +97,7 @@ single_payment_test(Config) ->
 
     SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
 
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [payment_txn, SignedTxn]),
+    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
     %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here

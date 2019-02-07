@@ -27,7 +27,7 @@
 stamp(Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
-    {erlang:system_time(seconds), HeadHash}.
+    term_to_binary({erlang:system_time(seconds), HeadHash}).
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
@@ -94,10 +94,9 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             {reply, error, ignore}
     end;
 handle_command(Txn, State=#state{ledger=Ledger}) ->
-    Type = blockchain_transactions:type(Txn),
-    case Type:absorb(Txn, Ledger) of
+    case blockchain_txn:absorb(Txn, Ledger) of
         ok ->
-            case hbbft:input(State#state.hbbft, Txn) of
+            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
                 {NewHBBFT, ok} ->
                     {reply, ok, [], State#state{hbbft=NewHBBFT}};
                 {_HBBFT, full} ->
@@ -145,7 +144,9 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT}, fixup_msgs(Msgs)};
-                {NewHBBFT, {result, {transactions, Stamps, Txns}}} ->
+                {NewHBBFT, {result, {transactions, Stamps0, BinTxns}}} ->
+                    Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
+                    Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus"),
                     lager:info("stamps ~p~n", [Stamps]),
                     %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
@@ -156,7 +157,8 @@ handle_message(Msg, Index, State=#state{hbbft=HBBFT}) ->
                     case miner:create_block(Stamps, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
-                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, TxnsToRemove),
+                            BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
+                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
                             {filter_signatures(State#state{hbbft=NewerHBBFT, artifact=Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
@@ -201,10 +203,10 @@ enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when lengt
     false;
 enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    case blockchain_block:verify_signature(Artifact,
-                                           Members,
-                                           term_to_binary(Signatures),
-                                           Threshold) of
+    case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
+                                            Members,
+                                            Signatures,
+                                            Threshold) of
         {true, ValidSignatures} ->
             %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets
             %% depending on message order. Given that the underlying artifact they're signing is the same though,
@@ -223,9 +225,8 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
 
 filter_txn_buf(HBBFT, Ledger) ->
     Buf = hbbft:buf(HBBFT),
-    NewBuf = lists:filter(fun(Txn) ->
-                                  Type = blockchain_transactions:type(Txn),
-                                  ok == Type:absorb(Txn, Ledger)
+    NewBuf = lists:filter(fun(BinTxn) ->
+                                  Txn = blockchain_txn:deserialize(BinTxn),
+                                  ok == blockchain_txn:absorb(Txn, Ledger)
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
-

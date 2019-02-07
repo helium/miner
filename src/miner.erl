@@ -15,8 +15,6 @@
           consensus_pos :: undefined | pos_integer(),
           batch_size = 500 :: pos_integer(),
           config_proxy ::  pid() | undefined,
-          gps_signal :: ebus:filter_id(),
-          add_gateway_signal :: ebus:filter_id(),
           blockchain :: undefined | blockchain:blockchain(),
           %% but every miner keeps a timer reference?
           block_timer = make_ref() :: reference(),
@@ -52,11 +50,7 @@
 -define(CONFIG_OBJECT_PATH, "/").
 -define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
 -define(CONFIG_OBJECT(M), ?CONFIG_OBJECT_INTERFACE ++ "." ++ M).
--define(CONFIG_MEMBER_POSITION, "Position").
--define(CONFIG_MEMBER_ADD_GW, "AddGateway").
 
-%% H3/assert_location
--define(H3_MINIMUM_RESOLUTION, 9).
 
 %% ==================================================================
 %% API calls
@@ -73,16 +67,8 @@ init(Args) ->
     case proplists:get_value(use_ebus, Args) of
         true ->
             {ok, SystemBus} = ebus:system(),
-            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []),
-            {ok, GPSSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
-                                                            ?CONFIG_OBJECT(?CONFIG_MEMBER_POSITION),
-                                                            self(), gps_location),
-            {ok, AddGwSignal} = ebus_proxy:add_signal_handler(ConfigProxy, "/",
-                                                              ?CONFIG_OBJECT(?CONFIG_MEMBER_ADD_GW),
-                                                              self(), add_gateway_request);
+            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []);
         false ->
-            GPSSignal = 0,
-            AddGwSignal = 0,
             ConfigProxy = undefined
     end,
 
@@ -91,8 +77,6 @@ init(Args) ->
     {ok, #state{curve=Curve,
                 block_time=BlockTime,
                 batch_size=BatchSize,
-                gps_signal=GPSSignal,
-                add_gateway_signal=AddGwSignal,
                 config_proxy=ConfigProxy}}.
 
 %%--------------------------------------------------------------------
@@ -158,8 +142,14 @@ in_consensus() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec create_block(Stamps :: [{non_neg_integer(), {pos_integer(), binary()}},...],
-                   Txns :: blockchain_transactions:transactions(),
-                   HBBFTRound :: non_neg_integer()) -> {ok, libp2p_crypto:pubkey_bin(), binary(), binary(), blockchain_transactions:transactions()} | {error, term()}.
+                   Txns :: blockchain_txn:txns(),
+                   HBBFTRound :: non_neg_integer())
+                  -> {ok,
+                      libp2p_crypto:pubkey_bin(),
+                      binary(),
+                      binary(),
+                      blockchain_txn:txns()} |
+                     {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
     gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
 
@@ -282,24 +272,25 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
     %% we expect every stamp to contain the same block hash
     case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
         [CurrentBlockHash] ->
-            SortedTransactions = lists:sort(fun blockchain_transactions:sort/2, Transactions),
-            {ValidTransactions, InvalidTransactions} = blockchain_transactions:validate(SortedTransactions, blockchain:ledger(Chain)),
+            SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Transactions),
+            {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, blockchain:ledger(Chain)),
             %% populate this from the last block, unless the last block was the genesis block in which case it will be 0
-            LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(CurrentBlock), 0),
+            LastBlockTimestamp = blockchain_block:time(CurrentBlock),
             BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps, X > LastBlockTimestamp]),
             lager:info("new block time is ~p", [BlockTime]),
-            MetaData = #{hbbft_round => HBBFTRound, block_time => BlockTime},
-            NewBlock = blockchain_block:new(CurrentBlockHash,
-                                            blockchain_block:height(CurrentBlock) + 1,
-                                            ValidTransactions,
-                                            << >>,
-                                            MetaData),
+            NewBlock = blockchain_block_v1:new(#{prev_hash => CurrentBlockHash,
+                                              height => blockchain_block:height(CurrentBlock) + 1,
+                                              transactions => ValidTransactions,
+                                              signatures => [],
+                                              hbbft_round => HBBFTRound,
+                                              time => BlockTime}),
             {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
-            Signature = SignFun(term_to_binary(NewBlock)),
+            BinNewBlock = blockchain_block:serialize(NewBlock),
+            Signature = SignFun(BinNewBlock),
             %% XXX: can we lose state here if we crash and recover later?
             lager:info("Worker:~p, Created Block: ~p, Txns: ~p", [self(), NewBlock, ValidTransactions]),
             %% return both valid and invalid transactions to be deleted from the buffer
-            {reply, {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), term_to_binary(NewBlock), Signature, ValidTransactions ++ InvalidTransactions}, State};
+            {reply, {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock, Signature, ValidTransactions ++ InvalidTransactions}, State};
         [_OtherBlockHash] ->
             {reply, {error, stale_hash}, State};
         List ->
@@ -314,18 +305,17 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
     %% * sign the block
     %% * tell hbbft to go to next round
     %% * add the block to blockchain
-    Block = blockchain_block:sign_block(term_to_binary(Signatures), binary_to_term(Tempblock)),
+    Block = blockchain_block:set_signatures(blockchain_block:deserialize(Tempblock), Signatures),
     case blockchain:add_block(Block, Chain) of
         ok ->
             erlang:cancel_timer(State#state.block_timer),
             Ref = set_next_block_timer(Chain, BlockTime),
             lager:info("sending the gossipped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
-            Address = blockchain_swarm:pubkey_bin(),
             libp2p_group_gossip:send(
               libp2p_swarm:gossip_group(Swarm),
               ?GOSSIP_PROTOCOL,
-              term_to_binary({block, Address, Block})
+              blockchain_gossip_handler:gossip_data(Swarm, Block)
              ),
             ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
             {reply, ok, State#state{block_timer=Ref}};
@@ -346,8 +336,8 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From, State = #state{batch_size=BatchSize,
                                                                                                  block_time=BlockTime}) ->
-    GenesisBlock = binary_to_term(BinaryGenesisBlock),
-    SignedGenesisBlock = blockchain_block:sign_block(term_to_binary(Signatures), GenesisBlock),
+    GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
+    SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
 
     case State#state.dkg_await of
@@ -443,7 +433,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
     NewState = case blockchain:get_block(Hash, Chain) of
                    {ok, Block} ->
                        %% XXX: the 0 default is probably incorrect here, but it would be rejected in the hbbft handler anyway so...
-                       NextRound = maps:get(hbbft_round, blockchain_block:meta(Block), 0) + 1,
+                       NextRound = blockchain_block:hbbft_round(Block) + 1,
                        libp2p_group_relcast:handle_input(ConsensusGroup, {next_round, NextRound, blockchain_block:transactions(Block), Sync}),
                        Ref = set_next_block_timer(Chain, BlockTime),
                        State#state{block_timer=Ref};
@@ -456,48 +446,6 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync}},
             State=#state{consensus_group=ConsensusGroup,
                          blockchain=Chain}) when ConsensusGroup == undefined andalso
                                                  Chain /= undefined ->
-    {noreply, State};
-handle_info({ebus_signal, _, SignalID, Msg}, State=#state{blockchain=Chain, gps_signal=SignalID}) ->
-    case ebus_message:args(Msg) of
-        {ok, [#{"lat" := Lat,
-                "lon" := Lon,
-                "h_accuracy" := HorizontalAcc
-               }]} ->
-            case Chain /= undefined of
-                true ->
-                    %% pick the best h3 index we can for the resolution
-                    {H3Index, Resolution} = miner_util:h3_index(Lat, Lon, HorizontalAcc),
-                    maybe_assert_location(H3Index, Resolution, Chain);
-                false ->
-                    ok
-            end;
-        {ok, [Args]} ->
-            lager:error("Invalid position_signal args: ~p", [Args]);
-        {error, Error} ->
-            lager:error("Failed to decode position message: ~p", [Error])
-    end,
-    {noreply, State};
-handle_info({ebus_signal, _, SignalID, Msg}, State=#state{add_gateway_signal=SignalID}) ->
-    case ebus_message:args(Msg) of
-        {ok, [#{
-                "addr" := AuthAddress,
-                "token" := AuthToken,
-                "owner" := OwnerStrAddress
-               }]} ->
-            catch(signal_add_gateway_status("sending", State)),
-            OwnerAddress = libp2p_crypto:b58_to_bin(OwnerStrAddress),
-            Result = blockchain_worker:add_gateway_request(OwnerAddress, AuthAddress, AuthToken),
-            lager:info("Requested gateway authorization from ~p result: ~p", [AuthAddress, Result]),
-            Status = case Result of
-                         ok -> "sent";
-                         _ -> "send_failed"
-                     end,
-            catch(signal_add_gateway_status(Status, State));
-        {ok, [Args]} ->
-            lager:error("Invalid add_gateway_signal args: ~p", [Args]);
-        {error, Error} ->
-            lager:error("Failed to decode add_gateway_signal message: ~p", [Error])
-    end,
     {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
@@ -523,16 +471,15 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
         true ->
             lager:info("Preparing to run DKG"),
             %% in the consensus group, run the dkg
-            GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
-            MetaData = #{hbbft_round => 0, block_time => 0},
-            GenesisBlock = blockchain_block:new_genesis_block(GenesisBlockTransactions, MetaData),
+            GenesisBlockTransactions = GenesisTransactions ++ [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
+            GenesisBlock = blockchain_block_v1:new_genesis_block(GenesisBlockTransactions),
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             miner_util:index_of(MyAddress, ConsensusAddrs),
                                             N,
                                             0, %% NOTE: F for DKG is 0
                                             F, %% NOTE: T for DKG is the byzantine F
                                             Curve,
-                                            term_to_binary(GenesisBlock), %% TODO we need real block serialization
+                                            blockchain_block:serialize(GenesisBlock),
                                             {miner, sign_genesis_block},
                                             {miner, genesis_block_done}]],
             %% make a simple hash of the consensus members
@@ -546,64 +493,11 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
--spec maybe_assert_location(h3:index(), h3:resolution(), blockchain:blockchain()) -> ok.
-maybe_assert_location(_, Resolution, _) when Resolution < ?H3_MINIMUM_RESOLUTION ->
-    %% wait for a better resolution
-    ok;
-maybe_assert_location(Location, _Resolution, Chain) ->
-    Address = blockchain_swarm:pubkey_bin(),
-    Ledger = blockchain:ledger(Chain),
-    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        {error, _} ->
-            ok;
-        {ok, GwInfo} ->
-            OwnerAddress = blockchain_ledger_gateway_v1:owner_address(GwInfo),
-            case blockchain_ledger_gateway_v1:location(GwInfo) of
-                undefined ->
-                    %% no location, try submitting the transaction
-                    lager:info("submitting assert location with h3 index ~p", [Location]),
-                    blockchain_worker:assert_location_request(OwnerAddress, Location);
-                OldLocation ->
-                    case {OldLocation, Location} of
-                        {Old, New} when Old == New ->
-                            ok;
-                        {Old, New} ->
-                            try (h3:get_resolution(New) < h3:get_resolution(Old) andalso h3:parent(Old, h3:get_resolution(New)) == New) of
-                                true ->
-                                    %% new index is a parent of the old one
-                                    ok;
-                                false ->
-                                    %% check if the parent at resolution H3_MINIMUM_RESOLUTION actually differs
-                                    case h3:parent(New, ?H3_MINIMUM_RESOLUTION) /= h3:parent(Old, ?H3_MINIMUM_RESOLUTION) of
-                                        true ->
-                                            lager:info("submitting assert location with h3 index ~p", [Location]),
-                                            blockchain_worker:assert_location_request(OwnerAddress, Location);
-                                        false ->
-                                            ok
-                                    end
-                            catch
-                                TypeOfError:Exception ->
-                                    lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p", [TypeOfError, Exception]),
-                                    ok
-                            end
-                    end
-            end
-    end.
 
--spec signal_add_gateway_status(string(), #state{}) -> ok.
-signal_add_gateway_status(_, #state{config_proxy=undefined}) ->
-    ok;
-signal_add_gateway_status(Status, _State=#state{config_proxy=Proxy}) ->
-    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
-                                        ?MINER_OBJECT(?MINER_MEMBER_ADD_GW_STATUS)),
-    ok = ebus_message:append_args(Msg, [string], [Status]),
-    ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
-    ok.
 
 set_next_block_timer(Chain, BlockTime) ->
     {ok, HeadBlock} = blockchain:head_block(Chain),
-    LastBlockTimestamp = maps:get(block_time, blockchain_block:meta(HeadBlock), erlang:system_time(seconds)),
+    LastBlockTimestamp = blockchain_block:time(HeadBlock),
     NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     erlang:send_after(NextBlockTime * 1000, self(), block_timeout).
-

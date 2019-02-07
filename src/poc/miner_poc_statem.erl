@@ -116,8 +116,8 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
             Secret = crypto:strong_rand_bytes(8),
             Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))),
             {ok, _, SigFun} = blockchain_swarm:keys(),
-            SignedTx = blockchain_txn_poc_request_v1:sign(Tx, SigFun),
-            ok = blockchain_worker:submit_txn(blockchain_txn_poc_request_v1, SignedTx),
+            SignedTx = blockchain_txn:sign(Tx, SigFun),
+            ok = blockchain_worker:submit_txn(SignedTx),
             lager:info("submitted poc request ~p", [Tx]),
             {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
     end;
@@ -135,12 +135,14 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
     lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
-            Txns = blockchain_block:poc_request_transactions(Block),
-            Filter = fun(Txn) ->
-                Address =:= blockchain_txn_poc_request_v1:gateway_address(Txn) andalso
-                crypto:hash(sha256, Secret) =:= blockchain_txn_poc_request_v1:hash(Txn) andalso
-                crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
-            end,
+            Txns = blockchain_block:transactions(Block),
+            Filter =
+                fun(Txn) ->
+                        blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1 andalso
+                            Address =:= blockchain_txn_poc_request_v1:gateway(Txn) andalso
+                            crypto:hash(sha256, Secret) =:= blockchain_txn:hash(Txn) andalso
+                            crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
+                end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
                     {ok, CurrHeight} = blockchain:height(Blockchain),
@@ -252,8 +254,8 @@ receiving(EventType, EventContent, Data) ->
 submitting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
     Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret),
     {ok, _, SigFun} = blockchain_swarm:keys(),
-    Txn1 = blockchain_txn_poc_receipts_v1:sign(Txn0, SigFun),
-    ok = blockchain_worker:submit_txn(blockchain_txn_poc_receipts_v1, Txn1),
+    Txn1 = blockchain_txn:sign(Txn0, SigFun),
+    ok = blockchain_worker:submit_txn(Txn1),
     lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
     {next_state, waiting, Data#data{waiting=?WAITING}};
 submitting(EventType, EventContent, Data) ->
@@ -273,7 +275,9 @@ waiting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockch
     lager:debug("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
-            Txns = lists:filter(fun blockchain_txn_poc_receipts_v1:is/1, blockchain_block:transactions(Block)),
+            Txns = lists:filter(fun(T) ->
+                                        blockchain_txn:type(T) =:= blockchain_txn_poc_receipts_v1
+                                end, blockchain_block:transactions(Block)),
             Filter = fun(Txn) ->
                 Address =:= blockchain_txn_poc_receipts_v1:challenger(Txn) andalso
                 Secret =:= blockchain_txn_poc_receipts_v1:secret(Txn)
@@ -362,7 +366,12 @@ target_test() ->
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
 
-    Block = blockchain_block:new(<<>>, 2, [], <<>>, #{}),
+    Block = blockchain_block_v1:new(#{prev_hash => <<>>,
+                                      height => 2,
+                                      transactions => [],
+                                      signatures => [],
+                                      hbbft_round => 0,
+                                      time => 0}),
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
 
