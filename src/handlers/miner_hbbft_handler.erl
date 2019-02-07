@@ -223,8 +223,6 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
 filter_txn_buf(HBBFT, Ledger) ->
     Buf = hbbft:buf(HBBFT),
     NewBuf = lists:filter(fun(Txn) ->
-                                  Type = blockchain_transactions:type(Txn),
-                                  ok == Type:absorb(Txn, Ledger)
+                                  ok == blockchain_txn:absorb(Txn, Ledger)
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
-
