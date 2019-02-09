@@ -14,7 +14,6 @@
           dkg_group :: undefined | pid(),
           consensus_pos :: undefined | pos_integer(),
           batch_size = 500 :: pos_integer(),
-          config_proxy ::  pid() | undefined,
           blockchain :: undefined | blockchain:blockchain(),
           %% but every miner keeps a timer reference?
           block_timer = make_ref() :: reference(),
@@ -25,6 +24,7 @@
          }).
 
 -export([start_link/1,
+         pubkey_bin/0,
          initial_dkg/2,
          relcast_info/1,
          relcast_queue/1,
@@ -41,17 +41,6 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
-%% DBus helper macros
--define(MINER_OBJECT_PATH, "/").
--define(MINER_INTERFACE, "com.helium.Miner").
--define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
--define(MINER_MEMBER_ADD_GW_STATUS, "AddGatewayStatus").
-
--define(CONFIG_OBJECT_PATH, "/").
--define(CONFIG_OBJECT_INTERFACE, "com.helium.Config").
--define(CONFIG_OBJECT(M), ?CONFIG_OBJECT_INTERFACE ++ "." ++ M).
-
-
 %% ==================================================================
 %% API calls
 %% ==================================================================
@@ -64,20 +53,20 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
-    case proplists:get_value(use_ebus, Args) of
-        true ->
-            {ok, SystemBus} = ebus:system(),
-            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []);
-        false ->
-            ConfigProxy = undefined
-    end,
-
     self() ! maybe_restore_consensus,
 
     {ok, #state{curve=Curve,
                 block_time=BlockTime,
-                batch_size=BatchSize,
-                config_proxy=ConfigProxy}}.
+                batch_size=BatchSize}}.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
+pubkey_bin() ->
+    gen_server:call(?MODULE, pubkey_bin).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -246,6 +235,9 @@ signed_block(Signatures, BinBlock) ->
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
+handle_call(pubkey_bin, __From, State) ->
+    Swarm = blockchain_swarm:swarm(),
+    {reply, libp2p_swarm:pubkey_bin(Swarm), State};
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->

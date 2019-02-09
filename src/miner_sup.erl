@@ -90,14 +90,12 @@ init(_Args) ->
     BlockTime = application:get_env(miner, block_time, 15000),
     BatchSize = application:get_env(miner, batch_size, 500),
     RadioDevice = application:get_env(miner, radio_device, undefined),
-    UseEBus = application:get_env(miner, use_ebus, false),
 
     MinerOpts = [
         {curve, Curve},
         {block_time, BlockTime},
         {batch_size, BatchSize},
-        {radio_device, RadioDevice},
-        {use_ebus, UseEBus}
+        {radio_device, RadioDevice}
     ],
 
     POCOpts = #{},
@@ -115,9 +113,15 @@ init(_Args) ->
                 []
         end,
 
+    EbusServer =
+        case application:get_env(miner, use_ebus, false) of
+            true -> ?WORKER(miner_ebus, []);
+            _ -> []
+        end,
+
     ChildSpecs =  [
         ?SUP(blockchain_sup, [BlockchainOpts]),
         ?WORKER(miner, [MinerOpts]),
         ?WORKER(miner_poc_statem, [POCOpts])
-    ] ++ OnionServer,
+    ] ++ EbusServer ++ OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
