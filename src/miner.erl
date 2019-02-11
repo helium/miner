@@ -403,9 +403,7 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
                            current_height = CurrHeight}) ->
     lager:info("election done at ~p", [CurrHeight]),
 
-    Block0 = binary_to_term(BinaryBlock),
-    Block = blockchain_block:sign_block(term_to_binary(Signatures), Block0),
-
+    Block = blockchain_block:set_signatures(blockchain_block:deserialize(BinaryBlock), Signatures),
 
     ok = blockchain:add_block(Block, Chain),
     Height = blockchain_block:height(Block),
@@ -609,17 +607,17 @@ initiate_election(Chain, Hash, Height, State) ->
 
     BlockFun =
         fun(N) ->
-                NewGroupTxn = [blockchain_txn_gen_consensus_group_v1:new(lists:sublist(OrderedGateways, N))],
+                NewGroupTxn = [blockchain_txn_consensus_group_v1:new(lists:sublist(OrderedGateways, N))],
                 %% no idea what to do here
-                MetaData = #{hbbft_round => Height},
 
                 {ok, CurrentBlock} = blockchain:head_block(Chain),
                 {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
-                blockchain_block:new(CurrentBlockHash,
-                                     blockchain_block:height(CurrentBlock) + 1,
-                                     NewGroupTxn,
-                                     << >>,
-                                     MetaData)
+                blockchain_block_v1:new(#{prev_hash => CurrentBlockHash,
+                                     height => blockchain_block:height(CurrentBlock) + 1,
+                                     hbbft_round => Height,
+                                     time => 0,
+                                     transactions => NewGroupTxn,
+                                     signatures => []})
         end,
     {_, State1} = do_dkg(OrderedGateways, BlockFun, sign_genesis_block,
                          election_done, State#state{current_height = Height}),
@@ -635,9 +633,8 @@ do_initial_dkg(GenesisTransactions, Addrs, State) ->
                 lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
                 %% in the consensus group, run the dkg
                 GenesisBlockTransactions = GenesisTransactions ++
-                    [blockchain_txn_gen_consensus_group_v1:new(ConsensusAddrs)],
-                MetaData = #{hbbft_round => 0, block_time => 0},
-                blockchain_block:new_genesis_block(GenesisBlockTransactions, MetaData)
+                    [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
+                blockchain_block:new_genesis_block(GenesisBlockTransactions)
         end,
     do_dkg(Addrs, GenesisBlockFun, sign_genesis_block, genesis_block_done, State).
 

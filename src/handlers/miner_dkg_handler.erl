@@ -215,7 +215,7 @@ enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when lengt
     false;
 enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
+    case blockchain_block_v1:verify_signatures(Artifact, %blockchain_block:deserialize(Artifact),
                                             Members,
                                             Signatures,
                                             Threshold) of
