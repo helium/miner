@@ -54,9 +54,12 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
                             end,
                     {reply_error, Reply, Member, State}
             end;
+        {ok, Args} ->
+            lager:warning("Invalid add gateway args: ~p", [Args]),
+            {reply_error, ?MINER_ERROR_BADARGS, Member, State};
         {error, Error} ->
-            lager:error("Invalid add gateway args: ~p", [Error]),
-            {reply_error, ?DBUS_ERROR_FAILED, Member, State}
+            lager:warning("Invalid add gateway args: ~p", [Error]),
+            {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
 
 handle_message(Member, _Msg, State) ->

@@ -244,26 +244,29 @@ signed_block(Signatures, BinBlock) ->
 %% ==================================================================
 %% handle_call functions
 %% ==================================================================
-handle_call(pubkey_bin, __From, State) ->
+handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
-handle_call({add_gateway_txn, OwnerB58}, _From, State) ->
+handle_call({add_gateway_txn, _}, _From, State=#state{blockchain=undefined} ) ->
+    {reply, {error, no_blockchain}, State};
+handle_call({add_gateway_txn, OwnerB58}, _From, State=#state{}) ->
     case (catch libp2p_crypto:b58_to_bin(OwnerB58)) of
         Owner when is_binary(Owner) ->
             {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
             PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-            Ledger = blockchain:ledger(State#state.blockchain),
+            Ledger = blockchain:ledger(blockchain_worker:blockchain()),
             case blockchain_ledger_v1:find_gateway_info(PubKeyBin, Ledger) of
                 {error, not_found} ->
                     Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin),
                     SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
                     {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
                 {ok, _} ->
-                    {reply, {error, gateway_already_active}}
+                    {reply, {error, gateway_already_active}, State}
             end;
         _ ->
-            {reply, {error, invalid_owner}}
+            {reply, {error, invalid_owner}, State}
     end;
+
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->

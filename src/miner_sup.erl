@@ -115,7 +115,7 @@ init(_Args) ->
 
     EbusServer =
         case application:get_env(miner, use_ebus, false) of
-            true -> ?WORKER(miner_ebus, []);
+            true -> [?WORKER(miner_ebus, [])];
             _ -> []
         end,
 
