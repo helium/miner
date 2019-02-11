@@ -248,20 +248,11 @@ init(Args) ->
     BatchSize = proplists:get_value(batch_size, Args),
     ok = blockchain_event:add_handler(self()),
 
-    case proplists:get_value(use_ebus, Args) of
-        true ->
-            {ok, SystemBus} = ebus:system(),
-            {ok, ConfigProxy} = ebus_proxy:start_link(SystemBus, "com.helium.Config", []);
-        false ->
-            ConfigProxy = undefined
-    end,
-
     self() ! maybe_restore_consensus,
 
     {ok, #state{curve=Curve,
                 block_time=BlockTime,
-                batch_size=BatchSize,
-                config_proxy=ConfigProxy}}.
+                batch_size=BatchSize}}.
 
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
