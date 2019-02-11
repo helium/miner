@@ -4,10 +4,11 @@
 
 -include_lib("ebus/include/ebus.hrl").
 
+-export([send/2]).
+
 -export([start_link/0, start_link/2, init/1, handle_message/3]).
 
--record(state, {
-               }).
+-record(state, {}).
 
 -define(SERVER, miner_ebus).
 
@@ -35,6 +36,13 @@ start_link() ->
 start_link(Bus, Args) ->
     ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME),
     ebus_object:start_link(Bus, ?MINER_OBJECT_PATH, ?MODULE, Args, []).
+
+-spec send(string(), string()) -> ok.
+send(Signal, Status) ->
+    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
+                                        ?MINER_OBJECT(Signal)),
+    ok = ebus_message:append_args(Msg, [string], [Status]),
+    ok = ebus:send(ebus_proxy:bus(?SERVER), Msg).
 
 init(_Args) ->
     erlang:register(?SERVER, self()),

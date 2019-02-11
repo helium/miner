@@ -41,23 +41,17 @@
     dkg_group :: undefined | pid(),
     consensus_pos :: undefined | pos_integer(),
     batch_size = 500 :: pos_integer(),
-    config_proxy ::  pid() | undefined,
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     block_time = 15000 :: number(),
     %% TODO: this probably doesn't have to be here
     curve :: 'SS512',
-    dkg_await :: undefined | {reference(), term()}
+    dkg_await :: undefined | {reference(), term()},
+    currently_syncing = false :: boolean()
 }).
 
 -include_lib("blockchain/include/blockchain.hrl").
-
-%% DBus helper macros
--define(MINER_OBJECT_PATH, "/").
--define(MINER_INTERFACE, "com.helium.Miner").
--define(MINER_OBJECT(M), ?MINER_INTERFACE ++ "." ++ M).
--define(MINER_MEMBER_SYNCING_STATUS, "SyncingStatus").
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -430,7 +424,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                    blockchain=Chain,
                    block_time=BlockTime}=State) when ConsensusGroup /= undefined andalso
                                                      Chain /= undefined ->
-    ok = signal_syncing_status(Sync, State),
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     erlang:cancel_timer(State#state.block_timer),
@@ -445,13 +438,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        lager:error("Error, Reason: ~p", [Reason]),
                        State
                end,
-    {noreply, NewState};
+    {noreply, signal_syncing_status(Sync, NewState)};
 handle_info({blockchain_event, {add_block, _Hash, Sync}},
             #state{consensus_group=ConsensusGroup,
                    blockchain=Chain}=State) when ConsensusGroup == undefined andalso
                                                  Chain /= undefined ->
-    ok = signal_syncing_status(Sync, State),
-    {noreply, State};
+    {noreply, signal_syncing_status(Sync, State)};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
@@ -505,19 +497,17 @@ do_initial_dkg(GenesisTransactions, Addrs, #state{curve=Curve}=State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec signal_syncing_status(boolean(), #state{}) -> ok.
-signal_syncing_status(_, #state{config_proxy=undefined}) ->
-    ok;
-signal_syncing_status(Syncing, #state{config_proxy=Proxy}) ->
-    Status = case Syncing of
-        true -> "StartSyncing";
-        false -> "StopSyncing"
-    end,
-    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
-                                        ?MINER_OBJECT(?MINER_MEMBER_SYNCING_STATUS)),
-    ok = ebus_message:append_args(Msg, [string], [Status]),
-    ok = ebus:send(ebus_proxy:bus(Proxy), Msg),
-    ok.
+-spec signal_syncing_status(boolean(), #state{}) -> #state{}.
+signal_syncing_status(true, #state{currently_syncing=true}=State) ->
+    State;
+signal_syncing_status(true, #state{currently_syncing=false}=State) ->
+    miner_ebus:send("SyncingStatus", "StartSyncing"),
+    State#state{currently_syncing=true};
+signal_syncing_status(false, #state{currently_syncing=true}=State) ->
+    miner_ebus:send("SyncingStatus", "StopSyncing"),
+    State#state{currently_syncing=false};
+signal_syncing_status(false, #state{currently_syncing=false}=State) ->
+    State.
 
 %%--------------------------------------------------------------------
 %% @doc
