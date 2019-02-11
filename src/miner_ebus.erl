@@ -19,6 +19,9 @@
 -define(MINER_MEMBER_PUBKEY, "PubKey").
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
 
+-define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
+-define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
+-define(MINER_ERROR_INTERNAL, "com.helium.Miner.Error.Internal").
 
 start_link() ->
     {ok, Bus} = ebus:system(),
@@ -44,7 +47,12 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
                     {reply, [{array, byte}], [TxnBin], State};
                 {error, Error} ->
                     lager:warning("Error requesting add gateway: ~p", [Error]),
-                    {reply_error, ?DBUS_ERROR_FAILED, Member, State}
+                    Reply = case Error of
+                                invalid_owner -> ?MINER_ERROR_BADARGS;
+                                gateway_already_active -> ?MINER_ERROR_GW_EXISTS;
+                                _ -> ?MINER_ERROR_INTERNAL
+                            end,
+                    {reply_error, Reply, Member, State}
             end;
         {error, Error} ->
             lager:error("Invalid add gateway args: ~p", [Error]),

@@ -73,7 +73,7 @@ pubkey_bin() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec add_gateway_txn(OwnerB58::string()) -> {ok, binary()} | {error, invalid_owner}.
+-spec add_gateway_txn(OwnerB58::string()) -> {ok, binary()} | {error, term()}.
 add_gateway_txn(OwnerB58) ->
     gen_server:call(?MODULE, {add_gateway_txn, OwnerB58}).
 
