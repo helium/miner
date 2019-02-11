@@ -25,6 +25,7 @@
 
 -export([start_link/1,
          pubkey_bin/0,
+         add_gateway_txn/1,
          initial_dkg/2,
          relcast_info/1,
          relcast_queue/1,
@@ -67,6 +68,14 @@ init(Args) ->
 -spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
 pubkey_bin() ->
     gen_server:call(?MODULE, pubkey_bin).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec add_gateway_txn(OwnerB58::string()) -> {ok, binary()} | {error, invalid_owner}.
+add_gateway_txn(OwnerB58) ->
+    gen_server:call(?MODULE, {add_gateway_txn, OwnerB58}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -238,6 +247,16 @@ signed_block(Signatures, BinBlock) ->
 handle_call(pubkey_bin, __From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
+handle_call({add_gateway_txn, OwnerB58}, _From, State) ->
+    case (catch libp2p_crypto:b58_to_bin(OwnerB58)) of
+        Owner when is_binary(Owner) ->
+            {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_sarm:swarm()),
+            Txn = blockchain_txn_add_gateway_v1:new(Owner, libp2p_crypto:pubkey_to_bin(PubKey)),
+            SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
+            {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
+        _ ->
+            {reply, {error, invalid_owner}}
+    end;
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
