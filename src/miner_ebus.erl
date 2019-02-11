@@ -37,7 +37,7 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_PUBKEY), _Msg, State=#state{}) ->
     PubKeyBin = miner:pubkey_bin(),
     {reply, [string], [libp2p_crypto:bin_to_b58(PubKeyBin)], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) ->
-    case ebus_messages:args(Msg) of
+    case ebus_message:args(Msg) of
         {ok, [OwnerB58]} ->
             case miner:add_gateway_txn(OwnerB58) of
                 {ok, TxnBin} ->

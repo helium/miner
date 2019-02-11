@@ -250,10 +250,17 @@ handle_call(pubkey_bin, __From, State) ->
 handle_call({add_gateway_txn, OwnerB58}, _From, State) ->
     case (catch libp2p_crypto:b58_to_bin(OwnerB58)) of
         Owner when is_binary(Owner) ->
-            {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_sarm:swarm()),
-            Txn = blockchain_txn_add_gateway_v1:new(Owner, libp2p_crypto:pubkey_to_bin(PubKey)),
-            SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
-            {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
+            {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+            Ledger = blockchain:ledger(State#state.blockchain),
+            case blockchain_ledger_v1:find_gateway_info(PubKeyBin, Ledger) of
+                {error, not_found} ->
+                    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin),
+                    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
+                    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
+                {ok, _} ->
+                    {reply, {error, gateway_already_active}}
+            end;
         _ ->
             {reply, {error, invalid_owner}}
     end;
