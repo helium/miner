@@ -423,8 +423,13 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
     Buf =
         case OldGroup of
             P when is_pid(P) ->
-                {ok, B} = libp2p_group_relcast:handle_command(P, get_buf),
-                B;
+                case is_process_alive(P) of
+                    true ->
+                        {ok, B} = libp2p_group_relcast:handle_command(P, get_buf),
+                        B;
+                    false ->
+                        []
+                end;
             _ ->
                 []
         end,
@@ -469,40 +474,48 @@ handle_cast(_Msg, State) ->
 %% ==================================================================
 %% TODO: how to restore state when consensus group changes
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
-handle_info(maybe_restore_consensus, State) ->
+handle_info(maybe_restore_consensus, State=#state{election_interval=Interval}) ->
     Chain = blockchain_worker:blockchain(),
     case Chain of
         undefined ->
             {noreply, State};
         Chain ->
-            Ledger = blockchain:ledger(Chain),
-            case blockchain_ledger_v1:consensus_members(Ledger) of
-                {error, _} ->
-                    {noreply, State#state{blockchain=Chain}};
-                {ok, Members} ->
-                    ConsensusAddrs = lists:sort(Members),
-                    case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
-                        true ->
-                            lager:info("restoring consensus group"),
-                            Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
-                            N = length(ConsensusAddrs),
-                            F = (N div 3),
-                            GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-                                                              Pos,
-                                                              N,
-                                                              F,
-                                                              State#state.batch_size,
-                                                              undefined,
-                                                              Chain]],
-                            Ref = set_next_block_timer(Chain, State#state.block_time),
-                            %% TODO generate a unique value (probably based on the public key from the DKG) to identify this consensus group
-                            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus", libp2p_group_relcast, GroupArg),
-                            lager:info("~p. Group: ~p~n", [self(), Group]),
-                            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                            {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-                            {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
-                        false ->
-                            {noreply, State#state{blockchain=Chain}}
+            {ok, Height} = blockchain:height(Chain),
+            case Height rem Interval == 0 andalso Height /= 0 of
+                true ->
+                    %% Restore an election round
+                    {ok, Hash} = blockchain:head_hash(Chain),
+                    {noreply, initiate_election(Chain, Hash, Height, State)};
+                false ->
+                    Ledger = blockchain:ledger(Chain),
+                    case blockchain_ledger_v1:consensus_members(Ledger) of
+                        {error, _} ->
+                            {noreply, State#state{blockchain=Chain}};
+                        {ok, ConsensusAddrs} ->
+                            case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
+                                true ->
+                                    lager:info("restoring consensus group"),
+                                    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
+                                    N = length(ConsensusAddrs),
+                                    F = (N div 3),
+                                    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                                      Pos,
+                                                                      N,
+                                                                      F,
+                                                                      State#state.batch_size,
+                                                                      undefined,
+                                                                      Chain]],
+                                    Ref = set_next_block_timer(Chain, State#state.block_time),
+                                    Name = "consensus_" ++ integer_to_list(max(0, Height + 1 - (Height rem Interval))),
+                                    lager:info("Restoring consensus group ~s", [Name]),
+                                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name, libp2p_group_relcast, GroupArg),
+                                    lager:info("~p. Group: ~p~n", [self(), Group]),
+                                    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                                                                         {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
+                                    {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
+                                false ->
+                                    {noreply, State#state{blockchain=Chain}}
+                            end
                     end
             end
     end;
