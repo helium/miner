@@ -73,7 +73,7 @@ handle_command({skip, Ref, Worker}, State) ->
             {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=HBBFT, ledger=Ledger0}) ->
+handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT, ledger=Ledger0}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
@@ -82,9 +82,9 @@ handle_command({next_round, NextRound, TxnsToRemove, Sync}, State=#state{hbbft=H
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(filter_txn_buf(HBBFT, Ledger), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [new_epoch || Sync], State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [new_epoch || Sync] ++ fixup_msgs(NextMsgs), State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
