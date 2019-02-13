@@ -26,6 +26,7 @@
 -export([start_link/1,
          pubkey_bin/0,
          add_gateway_txn/1,
+         assert_loc_txn/1,
          initial_dkg/2,
          relcast_info/1,
          relcast_queue/1,
@@ -41,6 +42,9 @@
         ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+
+
+-define(H3_MINIMUM_RESOLUTION, 9).
 
 %% ==================================================================
 %% API calls
@@ -76,6 +80,13 @@ pubkey_bin() ->
 -spec add_gateway_txn(OwnerB58::string()) -> {ok, binary()} | {error, term()}.
 add_gateway_txn(OwnerB58) ->
     gen_server:call(?MODULE, {add_gateway_txn, OwnerB58}).
+
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec assert_loc_txn(NewLocation::h3:h3index()) -> {ok, binary()} | {error, term()}.
+assert_loc_txn(NewLocation) ->
+    gen_server:call(?MODULE, {assert_loc_txn, NewLocation}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -265,6 +276,54 @@ handle_call({add_gateway_txn, OwnerB58}, _From, State=#state{}) ->
             end;
         _ ->
             {reply, {error, invalid_owner}, State}
+    end;
+handle_call({assert_loc_txn, NewLoc}, _From, State=#state{}) ->
+    {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    Ledger = blockchain:ledger(blockchain_worker:blockchain()),
+    case blockchain_ledger_v1:find_gateway_info(PubKeyBin, Ledger) of
+        {error, not_found} ->
+            {reply, {error, gateway_not_found}, State};
+        {ok, GwInfo} ->
+            Nonce = blockchain_ledger_gateway_v1:nonce(GwInfo),
+            Owner = blockchain_ledger_gateway_v1:owner_address(GwInfo),
+            MkTxn = fun() ->
+                            Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, NewLoc, Nonce+1),
+                            SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
+                            blockchain_txn:serialize(SignedTxn)
+                    end,
+            case blockchain_ledger_gateway_v1:location(GwInfo) of
+                NewLoc ->
+                    %% reqeusted == current, no need to assert again
+                    {reply, {error, assert_loc_exists}, State};
+                undefined ->
+                    %% current is not yet set, make txn
+                    {reply, {ok, MkTxn()}, State};
+                CurLoc ->
+                    %% current != requested
+                    try (h3:get_resolution(NewLoc) < h3:get_resolution(CurLoc) andalso
+                         h3:parent(CurLoc, h3:get_resolution(NewLoc)) == NewLoc) of
+                        true ->
+                            %% new index is a parent of the old one, so less accurate than current
+                            {reply, {error, assert_loc_parent}, State};
+                        false ->
+                            %% check if the parent at resolution H3_MINIMUM_RESOLUTION actually differs
+                            case h3:parent(NewLoc, ?H3_MINIMUM_RESOLUTION)
+                                /= h3:parent(CurLoc, ?H3_MINIMUM_RESOLUTION) of
+                                true ->
+                                    %% Different at minimum resolution
+                                    {reply, {ok, MkTxn()}, State};
+                                false ->
+                                    %% Not different enough
+                                    {reply, {error, assert_loc_exists}, State}
+                            end
+                    catch
+                        TypeOfError:Exception ->
+                            lager:error("No Parent from H3, TypeOfError: ~p, Exception: ~p",
+                                        [TypeOfError, Exception]),
+                            {erply, {error, h3_error}, State}
+                    end
+            end
     end;
 
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
