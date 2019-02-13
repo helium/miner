@@ -19,11 +19,8 @@
 
 -define(MINER_MEMBER_PUBKEY, "PubKey").
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
-<<<<<<< HEAD
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
-=======
 -define(MINER_MEMBER_SYNC_STATUS, "SyncStatus").
->>>>>>> Add sync status message
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
