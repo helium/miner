@@ -4,9 +4,9 @@
 
 -include_lib("ebus/include/ebus.hrl").
 
--export([send/2]).
+-export([send_signal/2]).
 
--export([start_link/0, start_link/2, init/1, handle_message/3]).
+-export([start_link/0, start_link/2, init/1, handle_message/3, handle_cast/2]).
 
 -record(state, {}).
 
@@ -37,12 +37,9 @@ start_link(Bus, Args) ->
     ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME),
     ebus_object:start_link(Bus, ?MINER_OBJECT_PATH, ?MODULE, Args, []).
 
--spec send(string(), string()) -> ok.
-send(Signal, Status) ->
-    {ok, Msg} = ebus_message:new_signal(?MINER_OBJECT_PATH,
-                                        ?MINER_OBJECT(Signal)),
-    ok = ebus_message:append_args(Msg, [string], [Status]),
-    ok = ebus:send(ebus_proxy:bus(?SERVER), Msg).
+-spec send_signal(string(), string()) -> ok.
+send_signal(Signal, Status) ->
+    gen_server:cast(?SERVER, {send_signal, Signal, Status}).
 
 init(_Args) ->
     erlang:register(?SERVER, self()),
@@ -101,3 +98,9 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.
+
+handle_cast({send_signal, Signal, Status}, State) ->
+    {noreply, State, {signal, ?MINER_OBJECT_PATH, ?MINER_INTERFACE, Signal, [string], [Status]}};
+handle_cast(_Msg, State) ->
+    lager:warning("unhandled msg: ~p", [_Msg]),
+    {noreply, State}.
