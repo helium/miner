@@ -148,7 +148,7 @@ basic(_Config) ->
     {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
     lists:foreach(
         fun(Msg) ->
-            ?assertMatch({blockchain_event, {add_block, _, true}}, Msg)
+            ?assertMatch({blockchain_event, {add_block, _, _}}, Msg)
         end,
         AddBlockMsgs
     ),
