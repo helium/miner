@@ -604,10 +604,10 @@ do_initial_dkg(GenesisTransactions, Addrs, #state{curve=Curve}=State) ->
 signal_syncing_status(true, #state{currently_syncing=true}=State) ->
     State;
 signal_syncing_status(true, #state{currently_syncing=false}=State) ->
-    miner_ebus:send("SyncingStatus", "StartSyncing"),
+    miner_ebus:send_signal("SyncingStatus", "StartSyncing"),
     State#state{currently_syncing=true};
 signal_syncing_status(false, #state{currently_syncing=true}=State) ->
-    miner_ebus:send("SyncingStatus", "StopSyncing"),
+    miner_ebus:send_signal("SyncingStatus", "StopSyncing"),
     State#state{currently_syncing=false};
 signal_syncing_status(false, #state{currently_syncing=false}=State) ->
     State.
