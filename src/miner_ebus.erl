@@ -19,7 +19,11 @@
 
 -define(MINER_MEMBER_PUBKEY, "PubKey").
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
+<<<<<<< HEAD
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
+=======
+-define(MINER_MEMBER_SYNC_STATUS, "SyncStatus").
+>>>>>>> Add sync status message
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
@@ -94,7 +98,12 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             lager:warning("Invalid assert_loc args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
-
+handle_message(?MINER_OBJECT(?MINER_MEMBER_SYNC_STATUS), _Msg, State) ->
+    Status = case miner:syncing_status() of
+        true -> "StartSyncing";
+        false -> "StopSyncing"
+    end,
+    {reply, [string], [Status], State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.

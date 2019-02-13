@@ -22,7 +22,8 @@
     sign_genesis_block/2,
     genesis_block_done/3,
     create_block/3,
-    signed_block/2
+    signed_block/2,
+    syncing_status/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -222,7 +223,6 @@ dkg_status() ->
             end
     end.
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
@@ -231,6 +231,15 @@ dkg_status() ->
 signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
     gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec syncing_status() -> boolean().
+syncing_status() ->
+    %% this should be a call so we don't loose state
+    gen_server:call(?MODULE, syncing_status, infinity).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -367,6 +376,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     {reply, ok, State#state{consensus_group=Group, block_timer=Ref, blockchain=Chain}};
+handle_call(syncing_status, _From, #state{currently_syncing=Status}=State) ->
+    {reply, Status, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
