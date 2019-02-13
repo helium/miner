@@ -58,7 +58,7 @@ basic(_Config) ->
     meck:new(miner_onion_server, [passthrough]),
     meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0) ->
         ?assertEqual(Data, Data0),
-        ?assertEqual(OnionCompactKey, OnionCompactKey0),
+        ?assertEqual(crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)), OnionCompactKey0),
         ok
     end),
 

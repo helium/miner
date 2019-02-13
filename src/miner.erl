@@ -6,64 +6,65 @@
 
 -behavior(gen_server).
 
--include_lib("blockchain/include/blockchain.hrl").
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
+-export([
+    start_link/1,
+    pubkey_bin/0,
+    add_gateway_txn/1,
+    assert_loc_txn/1,
+    initial_dkg/2,
+    relcast_info/1,
+    relcast_queue/1,
+    consensus_pos/0,
+    in_consensus/0,
+    hbbft_status/0,
+    hbbft_skip/0,
+    dkg_status/0,
+    sign_genesis_block/2,
+    genesis_block_done/3,
+    create_block/3,
+    signed_block/2,
+    syncing_status/0
+]).
+
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2
+]).
 
 -record(state, {
-          %% NOTE: a miner may or may not participate in consensus
-          consensus_group :: undefined | pid(),
-          dkg_group :: undefined | pid(),
-          consensus_pos :: undefined | pos_integer(),
-          batch_size = 500 :: pos_integer(),
-          blockchain :: undefined | blockchain:blockchain(),
-          %% but every miner keeps a timer reference?
-          block_timer = make_ref() :: reference(),
-          block_time = 15000 :: number(),
-          %% TODO: this probably doesn't have to be here
-          curve :: 'SS512',
-          dkg_await :: undefined | {reference(), term()}
-         }).
-
--export([start_link/1,
-         pubkey_bin/0,
-         add_gateway_txn/1,
-         assert_loc_txn/1,
-         initial_dkg/2,
-         relcast_info/1,
-         relcast_queue/1,
-         consensus_pos/0,
-         in_consensus/0,
-         hbbft_status/0,
-         hbbft_skip/0,
-         dkg_status/0,
-         sign_genesis_block/2,
-         genesis_block_done/3,
-         create_block/3,
-         signed_block/2
-        ]).
-
--export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
-
+    %% NOTE: a miner may or may not participate in consensus
+    consensus_group :: undefined | pid(),
+    dkg_group :: undefined | pid(),
+    consensus_pos :: undefined | pos_integer(),
+    batch_size = 500 :: pos_integer(),
+    blockchain :: undefined | blockchain:blockchain(),
+    %% but every miner keeps a timer reference?
+    block_timer = make_ref() :: reference(),
+    block_time = 15000 :: number(),
+    %% TODO: this probably doesn't have to be here
+    curve :: 'SS512',
+    dkg_await :: undefined | {reference(), term()},
+    currently_syncing = false :: boolean()
+}).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
 
-%% ==================================================================
-%% API calls
-%% ==================================================================
+-include_lib("blockchain/include/blockchain.hrl").
+
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
+
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
-
-init(Args) ->
-    Curve = proplists:get_value(curve, Args),
-    BlockTime = proplists:get_value(block_time, Args),
-    BatchSize = proplists:get_value(batch_size, Args),
-    ok = blockchain_event:add_handler(self()),
-
-    self() ! maybe_restore_consensus,
-
-    {ok, #state{curve=Curve,
-                block_time=BlockTime,
-                batch_size=BatchSize}}.
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -81,6 +82,7 @@ pubkey_bin() ->
 add_gateway_txn(OwnerB58) ->
     gen_server:call(?MODULE, {add_gateway_txn, OwnerB58}).
 
+%%--------------------------------------------------------------------
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
@@ -119,12 +121,17 @@ relcast_queue(Group) ->
         Pid ->
             try libp2p_group_relcast:queues(Pid) of
                 {_ModState, Inbound, Outbound} ->
-                    O = maps:map(fun(_, V) ->
-                                         [  erlang:binary_to_term(Value) || Value <- V]
-                                 end, Outbound),
+                    O = maps:map(
+                        fun(_, V) ->
+                            [erlang:binary_to_term(Value) || Value <- V]
+                        end,
+                        Outbound
+                    ),
                     I = [{Index,binary_to_term(B)} || {Index, B} <- Inbound],
-                    #{inbound => I,
-                      outbound => O}
+                    #{
+                        inbound => I,
+                        outbound => O
+                    }
             catch What:Why ->
                       {error, {What, Why}}
             end
@@ -238,7 +245,6 @@ dkg_status() ->
             end
     end.
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
@@ -248,13 +254,31 @@ signed_block(Signatures, BinBlock) ->
     %% this should be a call so we don't loose state
     gen_server:call(?MODULE, {signed_block, Signatures, BinBlock}, infinity).
 
-%% ==================================================================
-%% API casts
-%% ==================================================================
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec syncing_status() -> boolean().
+syncing_status() ->
+    %% this should be a call so we don't loose state
+    gen_server:call(?MODULE, syncing_status, infinity).
 
-%% ==================================================================
-%% handle_call functions
-%% ==================================================================
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
+
+init(Args) ->
+    Curve = proplists:get_value(curve, Args),
+    BlockTime = proplists:get_value(block_time, Args),
+    BatchSize = proplists:get_value(batch_size, Args),
+    ok = blockchain_event:add_handler(self()),
+
+    self() ! maybe_restore_consensus,
+
+    {ok, #state{curve=Curve,
+                block_time=BlockTime,
+                batch_size=BatchSize}}.
+
 handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
@@ -325,7 +349,6 @@ handle_call({assert_loc_txn, NewLoc}, _From, State=#state{}) ->
                     end
             end
     end;
-
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
@@ -343,7 +366,7 @@ handle_call(dkg_group, _From, State) ->
         {reply, State#state.dkg_group, State};
 handle_call({create_block, Stamps, Transactions, HBBFTRound},
             _From,
-            State=#state{blockchain=Chain}) when Chain /= undefined ->
+            #state{blockchain=Chain}=State) when Chain /= undefined ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
@@ -377,9 +400,9 @@ handle_call({create_block, Stamps, Transactions, HBBFTRound},
             lager:warning("got unexpected block hashes in stamp information ~p", [List]),
             {reply, {error, multiple_hashes}, State}
     end;
-handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus_group=ConsensusGroup,
-                                                                       blockchain=Chain,
-                                                                       block_time=BlockTime}) when ConsensusGroup /= undefined ->
+handle_call({signed_block, Signatures, Tempblock}, _From, #state{consensus_group=ConsensusGroup,
+                                                                 blockchain=Chain,
+                                                                 block_time=BlockTime}=State) when ConsensusGroup /= undefined ->
     %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
     %% * cancel the block timer
     %% * sign the block
@@ -403,7 +426,7 @@ handle_call({signed_block, Signatures, Tempblock}, _From, State=#state{consensus
             lager:error("signed_block, error: ~p", [Error]),
             {reply, ok, State}
     end;
-handle_call(in_consensus, _From, State=#state{consensus_pos=Pos}) ->
+handle_call(in_consensus, _From, #state{consensus_pos=Pos}=State) ->
     Reply = case Pos of
                 undefined -> false;
                 _ -> true
@@ -445,20 +468,17 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, PrivKey}, _From
                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     {reply, ok, State#state{consensus_group=Group, block_timer=Ref, blockchain=Chain}};
+handle_call(syncing_status, _From, #state{currently_syncing=Status}=State) ->
+    {reply, Status, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
 
-%% ==================================================================
-%% handle_cast functions
-%% ==================================================================
+
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
-%% ==================================================================
-%% handle_info functions
-%% ==================================================================
 %% TODO: how to restore state when consensus group changes
 %% presumably if there's a crash and the consensus members changed, this becomes pointless
 handle_info(maybe_restore_consensus, State) ->
@@ -503,9 +523,9 @@ handle_info(block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
 handle_info({blockchain_event, {add_block, Hash, Sync}},
-            State=#state{consensus_group=ConsensusGroup,
-                         blockchain=Chain,
-                         block_time=BlockTime}) when ConsensusGroup /= undefined andalso
+            #state{consensus_group=ConsensusGroup,
+                   blockchain=Chain,
+                   block_time=BlockTime}=State) when ConsensusGroup /= undefined andalso
                                                      Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
@@ -521,22 +541,25 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                        lager:error("Error, Reason: ~p", [Reason]),
                        State
                end,
-    {noreply, NewState};
-handle_info({blockchain_event, {add_block, _Hash, _Sync}},
-            State=#state{consensus_group=ConsensusGroup,
-                         blockchain=Chain}) when ConsensusGroup == undefined andalso
+    {noreply, signal_syncing_status(Sync, NewState)};
+handle_info({blockchain_event, {add_block, _Hash, Sync}},
+            #state{consensus_group=ConsensusGroup,
+                   blockchain=Chain}=State) when ConsensusGroup == undefined andalso
                                                  Chain /= undefined ->
-    {noreply, State};
+    {noreply, signal_syncing_status(Sync, State)};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
 
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
-
-%% ==================================================================
-%% Internal functions
-%% ==================================================================
-do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+do_initial_dkg(GenesisTransactions, Addrs, #state{curve=Curve}=State) ->
     SortedAddrs = lists:sort(Addrs),
     lager:info("SortedAddrs: ~p", [SortedAddrs]),
     N = blockchain_worker:num_consensus_members(),
@@ -573,8 +596,26 @@ do_initial_dkg(GenesisTransactions, Addrs, State=#state{curve=Curve}) ->
             {false, State}
     end.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec signal_syncing_status(boolean(), #state{}) -> #state{}.
+signal_syncing_status(true, #state{currently_syncing=true}=State) ->
+    State;
+signal_syncing_status(true, #state{currently_syncing=false}=State) ->
+    miner_ebus:send_signal("SyncingStatus", "StartSyncing"),
+    State#state{currently_syncing=true};
+signal_syncing_status(false, #state{currently_syncing=true}=State) ->
+    miner_ebus:send_signal("SyncingStatus", "StopSyncing"),
+    State#state{currently_syncing=false};
+signal_syncing_status(false, #state{currently_syncing=false}=State) ->
+    State.
 
-
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 set_next_block_timer(Chain, BlockTime) ->
     {ok, HeadBlock} = blockchain:head_block(Chain),
     LastBlockTimestamp = blockchain_block:time(HeadBlock),

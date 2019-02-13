@@ -128,7 +128,6 @@ basic(_Config) ->
         fun(_) ->
             B = create_block(ConsensusMembers, []),
             ok = blockchain:add_block(B, Chain),
-            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
             timer:sleep(100)
         end,
         lists:seq(1, 4)

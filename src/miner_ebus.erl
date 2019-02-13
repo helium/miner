@@ -4,10 +4,11 @@
 
 -include_lib("ebus/include/ebus.hrl").
 
--export([start_link/0, start_link/2, init/1, handle_message/3]).
+-export([send_signal/2]).
 
--record(state, {
-               }).
+-export([start_link/0, start_link/2, init/1, handle_message/3, handle_cast/2]).
+
+-record(state, {}).
 
 -define(SERVER, miner_ebus).
 
@@ -19,6 +20,7 @@
 -define(MINER_MEMBER_PUBKEY, "PubKey").
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
+-define(MINER_MEMBER_SYNC_STATUS, "SyncStatus").
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
@@ -35,6 +37,10 @@ start_link() ->
 start_link(Bus, Args) ->
     ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME),
     ebus_object:start_link(Bus, ?MINER_OBJECT_PATH, ?MODULE, Args, []).
+
+-spec send_signal(string(), string()) -> ok.
+send_signal(Signal, Status) ->
+    gen_server:cast(?SERVER, {send_signal, Signal, Status}).
 
 init(_Args) ->
     erlang:register(?SERVER, self()),
@@ -89,7 +95,18 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             lager:warning("Invalid assert_loc args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
-
+handle_message(?MINER_OBJECT(?MINER_MEMBER_SYNC_STATUS), _Msg, State) ->
+    Status = case miner:syncing_status() of
+        true -> "StartSyncing";
+        false -> "StopSyncing"
+    end,
+    {reply, [string], [Status], State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.
+
+handle_cast({send_signal, Signal, Status}, State) ->
+    {noreply, State, {signal, ?MINER_OBJECT_PATH, ?MINER_INTERFACE, Signal, [string], [Status]}};
+handle_cast(_Msg, State) ->
+    lager:warning("unhandled msg: ~p", [_Msg]),
+    {noreply, State}.
