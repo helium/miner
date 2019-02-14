@@ -82,7 +82,6 @@ bulk_payment_test(Config) ->
     TxnFrequency = proplists:get_value(txn_frequency, Config),
     Amount = proplists:get_value(amount, Config),
 
-    %% Do ping pong between payer and payee
     [Payer, Payee | _Tail] = Miners,
     PayerPubkey = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeePubkey = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
