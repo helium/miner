@@ -1,4 +1,4 @@
--module(miner_payment_txn_SUITE).
+-module(miner_bulk_txn_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -13,13 +13,15 @@
         ]).
 
 -export([
-         single_payment_test/1
+         bulk_payment_test/1
         ]).
+
+-define(BALANCE, 100000000).
 
 %% common test callbacks
 
 all() -> [
-          single_payment_test
+          bulk_payment_test
          ].
 
 init_per_suite(Config) ->
@@ -32,7 +34,7 @@ init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, ?BALANCE) || Addr <- Addresses],
     DKGResults = miner_ct_utils:pmap(fun(Miner) ->
                                              ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions, Addresses])
                                      end, Miners),
@@ -69,70 +71,98 @@ init_per_testcase(_TestCase, Config0) ->
                                                      end, Miners)
                                    end),
 
-    Config.
+    [{total_txns, 100}, {txn_frequency, 10}, {amount, 1000} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
-single_payment_test(Config) ->
+bulk_payment_test(Config) ->
     Miners = proplists:get_value(miners, Config),
+    TotalTxns = proplists:get_value(total_txns, Config),
+    TxnFrequency = proplists:get_value(txn_frequency, Config),
+    Amount = proplists:get_value(amount, Config),
+
+    %% Do ping pong between payer and payee
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayerPubkey = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayeePubkey = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
 
     %% check initial balances
-    %% FIXME: really need to be setting the balances elsewhere
-    5000 = get_balance(Payer, PayerAddr),
-    5000 = get_balance(Payee, PayerAddr),
+    ?BALANCE = get_balance(Payer, PayerPubkey),
+    ?BALANCE = get_balance(Payee, PayerPubkey),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
 
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
-    %% send some helium tokens from payer to payee
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
-
     {ok, _Pubkey, SigFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
-    SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
+    %% Let's check whether 100 txns made 10 at a time work within reasonable bounds of time/height
+    _AllTxns = lists:foldl(fun(NonceList, Acc0) ->
+                               {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+                               Txns = lists:reverse(lists:foldl(fun(Nonce, Acc) ->
+                                                                         Txn = ct_rpc:call(Payer,
+                                                                                           blockchain_txn_payment_v1,
+                                                                                           new,
+                                                                                           [PayerPubkey, PayeePubkey, Amount, Fee, Nonce]),
+                                                                         SignedTxn = ct_rpc:call(Payer,
+                                                                                                 blockchain_txn_payment_v1,
+                                                                                                 sign,
+                                                                                                 [Txn, SigFun]),
+                                                                         ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
+                                                                         [SignedTxn | Acc]
+                                                                 end, [], NonceList)),
+                               [Txns | Acc0]
+                       end, [], partition(lists:seq(1, TotalTxns), TxnFrequency)),
 
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
-
-    %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
+    %% Presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
     Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
 
-    %% XXX: wait till the blockchain grows by 2 blocks
-    %% assuming that the transaction makes it within 2 blocks
+    %% Wait till the blockchain grows by 5 blocks
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                       {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 2
+                                      Height >= CurrentHeight + 5
                               end,
                               Miners
                              )
            end,
            60,
-           timer:seconds(1)
+           timer:seconds(10)
           ),
 
-    PayerBalance = get_balance(Payer, PayerAddr),
-    PayeeBalance = get_balance(Payee, PayeeAddr),
+    Chain3 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    {ok, FinalHeight} = ct_rpc:call(Payer, blockchain, height, [Chain3]),
 
-    4000 = PayerBalance + Fee,
-    6000 = PayeeBalance,
+    ok = lists:foreach(fun(Height) ->
+                               {ok, Block} = ct_rpc:call(Payer, blockchain, get_block, [Height, Chain3]),
+                               Txns = ct_rpc:call(Payer, blockchain_block, transactions, [Block]),
+                               ct:pal("Height: ~p, Txns: ~p", [Height, length(Txns)])
+                       end, lists:seq(1, FinalHeight)),
+
+    PayerBalance = get_balance(Payer, PayerPubkey),
+    PayeeBalance = get_balance(Payee, PayeePubkey),
+
+    ?BALANCE = PayerBalance + (TotalTxns * Amount),
+    ?BALANCE = PayeeBalance - (TotalTxns * Amount),
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
-
 
 get_balance(Miner, Addr) ->
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
     ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
+
+partition([], _) -> [];
+partition(L, N) ->
+    try lists:split(N, L) of
+        {H, T} -> [H | partition(T, N)]
+    catch
+        error:badarg -> [L]
+    end.
