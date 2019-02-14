@@ -17,7 +17,6 @@
     erl_base58,
     dkg,
     hbbft,
-    h3,
     relcast, %% dialyzer needs this to build plt
     clique, %% dialyzer needs this to build plt
     ebus,
