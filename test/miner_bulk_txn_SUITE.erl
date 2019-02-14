@@ -118,14 +118,14 @@ bulk_payment_test(Config) ->
     Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
 
-    %% Wait till the blockchain grows by 5 blocks
+    %% Wait till the blockchain grows by 10 blocks
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                       {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 5
+                                      Height >= CurrentHeight + 10
                               end,
                               Miners
                              )
