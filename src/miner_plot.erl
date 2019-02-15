@@ -152,14 +152,14 @@ truncate(New, List, Limit) ->
     end.
 
 
-avg_interval([H]) ->
-    H;
+avg_interval([_H]) ->
+    ?minutes(11);
 avg_interval([H|T]) ->
     Is = get_intervals(H, T, []),
     lists:sum(Is) div length(Is).
 
-median_interval([H]) ->
-    H;
+median_interval([_H]) ->
+    ?minutes(11);
 median_interval([H|T]) ->
     case lists:sort(get_intervals(H, T, [])) of
         [I] ->
@@ -186,7 +186,7 @@ process_line({Time, Txns}, #stats{times = Times0,
     Interval =
         case Times0 of
             [] ->
-                ?minutes(10);
+                ?minutes(11);
             _ ->
                 Time - lists:last(Times0)
         end,

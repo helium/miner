@@ -1,6 +1,6 @@
 set xdata time
 set timefmt "%s"
-set xrange [time(0) - 2*60*60:]
+set xrange [time(0) - 6*60*60:]
 #set term x11 1 noraise
 set term qt noraise
 
