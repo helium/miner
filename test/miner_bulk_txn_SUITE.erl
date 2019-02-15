@@ -40,9 +40,9 @@ init_per_testcase(_TestCase, Config0) ->
                                      end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner, in_consensus, [])
-                                         end, Miners),
+    NonConsensusMiners = lists:filter(fun(Miner) ->
+                                              false == ct_rpc:call(Miner, miner, in_consensus, [])
+                                      end, Miners),
 
     %% ensure that blockchain is undefined for non_consensus miners
     true = lists:all(fun(Res) ->
@@ -95,23 +95,26 @@ bulk_payment_test(Config) ->
 
     {ok, _Pubkey, SigFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
-    %% Let's check whether 100 txns made 10 at a time work within reasonable bounds of time/height
-    _AllTxns = lists:foldl(fun(NonceList, Acc0) ->
-                               {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-                               Txns = lists:reverse(lists:foldl(fun(Nonce, Acc) ->
-                                                                         Txn = ct_rpc:call(Payer,
-                                                                                           blockchain_txn_payment_v1,
-                                                                                           new,
-                                                                                           [PayerPubkey, PayeePubkey, Amount, Fee, Nonce]),
-                                                                         SignedTxn = ct_rpc:call(Payer,
-                                                                                                 blockchain_txn_payment_v1,
-                                                                                                 sign,
-                                                                                                 [Txn, SigFun]),
-                                                                         ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
-                                                                         [SignedTxn | Acc]
-                                                                 end, [], NonceList)),
-                               [Txns | Acc0]
-                       end, [], partition(lists:seq(1, TotalTxns), TxnFrequency)),
+    %% Let's do `total_txns` txns made `txn_frequency` at a time
+    %% We construct a partitioned list like [[1, 2,....,10], [11, 12,...20], ..., [91, 92,...100]] which will serve
+    %% as an incrementing NonceList to maintain ordering and we just pump the txns one at a time.
+    %% Since the submission is pretty much instant, we try to mimic the goal of pumping multiple txns at once
+    _ = lists:foldl(fun(NonceList, Acc0) ->
+                            {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+                            Txns = lists:reverse(lists:foldl(fun(Nonce, Acc) ->
+                                                                     Txn = ct_rpc:call(Payer,
+                                                                                       blockchain_txn_payment_v1,
+                                                                                       new,
+                                                                                       [PayerPubkey, PayeePubkey, Amount, Fee, Nonce]),
+                                                                     SignedTxn = ct_rpc:call(Payer,
+                                                                                             blockchain_txn_payment_v1,
+                                                                                             sign,
+                                                                                             [Txn, SigFun]),
+                                                                     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
+                                                                     [SignedTxn | Acc]
+                                                             end, [], NonceList)),
+                            [Txns | Acc0]
+                    end, [], partition(lists:seq(1, TotalTxns), TxnFrequency)),
 
     %% Presumably the transaction wouldn't have made it to the blockchain yet
     %% get the current height here
@@ -134,9 +137,13 @@ bulk_payment_test(Config) ->
            timer:seconds(10)
           ),
 
+    %% Expectation is that the `total_txns` would have made it in by 10 blocks, so we get the chain
+    %% here and the final height of the chain (which should be >= 10).
     Chain3 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     {ok, FinalHeight} = ct_rpc:call(Payer, blockchain, height, [Chain3]),
 
+    %% This is mostly just for checking the logs and seeing how many txns make it in a particular
+    %% block at each block height.
     ok = lists:foreach(fun(Height) ->
                                {ok, Block} = ct_rpc:call(Payer, blockchain, get_block, [Height, Chain3]),
                                Txns = ct_rpc:call(Payer, blockchain_block, transactions, [Block]),
@@ -146,6 +153,8 @@ bulk_payment_test(Config) ->
     PayerBalance = get_balance(Payer, PayerPubkey),
     PayeeBalance = get_balance(Payee, PayeePubkey),
 
+    %% So if everything went as expected, we should have the PayerBalance decrease by Amount*TotalTxns
+    %% and PayeeBalance increase by Amount*TotalTxns
     ?BALANCE = PayerBalance + (TotalTxns * Amount),
     ?BALANCE = PayeeBalance - (TotalTxns * Amount),
 
@@ -158,6 +167,8 @@ get_balance(Miner, Addr) ->
     {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
     ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
 
+%% NOTE: This partitions a given list [1, 2, ...100] into N equal sized chunks, while keeping
+%% the ordering intact. So partition([1, 2, ...100], 10) -> [1,2,..10], [11, 12,...20], and so on...
 partition([], _) -> [];
 partition(L, N) ->
     try lists:split(N, L) of
