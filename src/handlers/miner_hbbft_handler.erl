@@ -174,7 +174,7 @@ callback_message(_, _, _) -> none.
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
-    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, ledger=undefined}).
+    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, ledger=undefined}, [compressed]).
 
 deserialize(BinState) ->
     State = binary_to_term(BinState),
