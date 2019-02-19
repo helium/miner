@@ -24,9 +24,6 @@
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
--define(MINER_ERROR_ASSERT_LOC_EXISTS, "com.helium.Miner.Error.AssertLocExists").
--define(MINER_ERROR_ASSERT_LOC_PARENT, "com.helium.Miner.Error.AssertLocParent").
-
 -define(MINER_ERROR_INTERNAL, "com.helium.Miner.Error.Internal").
 
 start_link() ->
