@@ -24,7 +24,6 @@
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_GW_EXISTS, "com.helium.Miner.Error.GatewayExists").
--define(MINER_ERROR_GW_NOT_FOUND, "com.helium.Miner.Error.GatewayNotFound").
 -define(MINER_ERROR_ASSERT_LOC_EXISTS, "com.helium.Miner.Error.AssertLocExists").
 -define(MINER_ERROR_ASSERT_LOC_PARENT, "com.helium.Miner.Error.AssertLocParent").
 
@@ -74,16 +73,14 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
     end;
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state{}) ->
     case ebus_message:args(Msg) of
-        {ok, [H3Index]} ->
-            case miner:assert_loc_txn(H3Index) of
+        {ok, [H3Index, Owner, Nonce, Fee]} ->
+            case miner:assert_loc_txn(H3Index, Owner, Nonce, Fee) of
                 {ok, TxnBin} ->
                     {reply, [{array, byte}], [TxnBin], State};
                 {error, Error} ->
                     lager:warning("Error requesting assert_loc: ~p", [Error]),
                     Reply = case Error of
-                                gateway_not_found -> ?MINER_ERROR_GW_NOT_FOUND;
-                                assert_loc_exists -> ?MINER_ERROR_ASSERT_LOC_EXISTS;
-                                assert_loc_parent -> ?MINER_ERROR_ASSERT_LOC_PARENT;
+                                invalid_owner -> ?MINER_ERROR_BADARGS;
                                 _ -> ?MINER_ERROR_INTERNAL
                             end,
                     {reply_error, Reply, Member, State}
