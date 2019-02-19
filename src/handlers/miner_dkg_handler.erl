@@ -158,7 +158,7 @@ serialize(State) ->
                   Other ->
                       tpke_privkey:serialize(Other)
               end,
-    term_to_binary(State#state{dkg=SerializedDKG, g1=G1, g2=G2, privkey=PrivKey}).
+    term_to_binary(State#state{dkg=SerializedDKG, g1=G1, g2=G2, privkey=PrivKey}, [compressed]).
 
 deserialize(BinState) ->
     State = binary_to_term(BinState),
