@@ -642,7 +642,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                     lager:info("nc processing block for ~p", [Height]),
                     case Height rem Interval == 0 andalso Height /= 0 of
                         false ->
-                            {noreply, State};
+                            {noreply, signal_syncing_status(Sync, State)};
                         %% this consensus group has aged out.  for the first draft, we
                         %% grab the block hash and convert it into an integer to use as a
                         %% seed for the random operations that come next.  Then, we use
