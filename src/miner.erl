@@ -703,7 +703,7 @@ do_initial_dkg(GenesisTransactions, Addrs, State) ->
                     [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
                 blockchain_block:new_genesis_block(GenesisBlockTransactions)
         end,
-    do_dkg(Addrs, GenesisBlockFun, sign_genesis_block, genesis_block_done, State).
+    do_dkg(SortedAddrs, GenesisBlockFun, sign_genesis_block, genesis_block_done, State).
 
 do_dkg(Addrs, ArtifactFun, Sign, Done, State=#state{curve = Curve,
                                                  current_height = CurrHeight,
