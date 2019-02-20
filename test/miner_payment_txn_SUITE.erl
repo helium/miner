@@ -35,8 +35,9 @@ init_per_testcase(_TestCase, Config0) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, undefined, 0, 0) || Addr <- Addresses],
     DKGResults = miner_ct_utils:pmap(fun(Miner) ->
-                                             ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions, Addresses])
+                                             ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions ++ AddGwTxns, Addresses])
                                      end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
@@ -59,6 +60,8 @@ init_per_testcase(_TestCase, Config0) ->
                                         end, Miners)),
     Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
     {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Chain]),
+
+    ct:pal("non consensus nodes ~p", [NonConsensusMiners]),
 
     _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
                                                       ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
@@ -101,20 +104,13 @@ single_payment_test(Config) ->
 
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
-    %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
-    %% get the current height here
-    Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
-
-    %% XXX: wait till the blockchain grows by 2 blocks
-    %% assuming that the transaction makes it within 2 blocks
+    %% wait until all the nodes agree the payment has happened
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
-                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 2
+                                      4000 == get_balance(Miner, PayerAddr) + Fee andalso
+                                      6000 == get_balance(Miner, PayeeAddr)
                               end,
                               Miners
                              )
