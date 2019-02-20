@@ -102,6 +102,15 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+requesting(info, Msg, #data{blockchain=undefined}=Data) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
+            {keep_state,  Data};
+        Chain ->
+            self() ! Msg,
+            {keep_state,  Data#data{blockchain=Chain}}
+    end;
 requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
                                                                  last_submit=LastSubmit,
                                                                  address=Address,

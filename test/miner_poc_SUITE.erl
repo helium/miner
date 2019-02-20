@@ -8,7 +8,8 @@
 ]).
 
 -export([
-    basic/1
+    basic/1,
+    startup/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -22,7 +23,7 @@
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [basic].
+    [basic, startup].
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -183,6 +184,60 @@ basic(_Config) ->
     meck:unload(miner_onion),
     ?assert(meck:validate(miner_onion_handler)),
     meck:unload(miner_onion_handler),
+    ok.
+
+startup(_Config) ->
+    % Create chain but never integrate to leave blockchain = undefined
+    BaseDir = "data/miner_poc_SUITE/startup",
+    {PrivKey, PubKey} = new_random_key(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Opts = [
+        {key, {PubKey, SigFun}}
+        ,{seed_nodes, []}
+        ,{port, 0}
+        ,{num_consensus_members, 7}
+        ,{base_dir, BaseDir}
+    ],
+    {ok, _Sup} = blockchain_sup:start_link(Opts),
+    ?assert(erlang:is_pid(blockchain_swarm:swarm())),
+
+    {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
+
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+
+    % Send fake notify
+    ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
+
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+
+    % Now add genesis
+    % Generate fake blockchains (just the keys)
+    RandomKeys = generate_keys(6),
+    Address = blockchain_swarm:pubkey_bin(),
+    ConsensusMembers = [
+        {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
+    ] ++ RandomKeys,
+
+    % Create genesis block
+    Balance = 5000,
+    GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
+                     || {Addr, _} <- ConsensusMembers],
+    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
+    Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
+    GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
+    ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
+
+    Chain = blockchain_worker:blockchain(),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+
+    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain_block:hash_block(HeadBlock)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:head_block(Chain)),
+    ?assertEqual({ok, blockchain_block:hash_block(GenesisBlock)}, blockchain:genesis_hash(Chain)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:genesis_block(Chain)),
+    ?assertEqual({ok, 1}, blockchain:height(Chain)),
+
+    % Now this should match the chain
+    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
     ok.
 
 %% ------------------------------------------------------------------
