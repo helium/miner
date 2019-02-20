@@ -285,7 +285,7 @@ build_asserts(LatLongs, {PrivKey, PubKey}) ->
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
             Index = h3:from_geo(LatLong, 9),
 
-            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
+            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1, 0),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
             SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
             [SignedAssertLocationTx|Acc]
