@@ -28,7 +28,7 @@
          chain :: undefined | blockchain:blockchain(),
          stats :: undefined | #stats{},
          height = 0 :: integer(),
-         fd :: undefined | port()
+         fd :: undefined | pid()
         }).
 
 %%%===================================================================

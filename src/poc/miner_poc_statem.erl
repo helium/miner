@@ -51,7 +51,7 @@
 
 
 -record(data, {
-    blockchain :: blockchain:blockchain(),
+    blockchain :: blockchain:blockchain() | undefined,
     last_submit = 0 :: non_neg_integer(),
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
