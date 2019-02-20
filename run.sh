@@ -78,7 +78,7 @@ for node in ${nodes[@]}; do
         echo "miner-dev$node, in_consensus: true"
     else
         echo "miner-dev$node, in_consensus: false"
-        non_consensus_node=$node
+        non_consensus_node+=" $node"
     fi
 done
 echo "Node not in consensus: $non_consensus_node"
@@ -94,4 +94,6 @@ done
 echo "Exported Genesis file: $exported_genesis_file"
 
 echo "Loading Genesis block on $non_consensus_node"
-./_build/dev/rel/miner-dev$non_consensus_node/bin/miner-dev$non_consensus_node genesis load $exported_genesis_file
+for node in $non_consensus_node; do
+    ./_build/dev/rel/miner-dev$node/bin/miner-dev$node genesis load $exported_genesis_file
+done
