@@ -51,7 +51,7 @@
 
 
 -record(data, {
-    blockchain :: blockchain:blockchain(),
+    blockchain :: blockchain:blockchain() | undefined,
     last_submit = 0 :: non_neg_integer(),
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
@@ -102,6 +102,15 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+requesting(info, Msg, #data{blockchain=undefined}=Data) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
+            {keep_state,  Data};
+        Chain ->
+            self() ! Msg,
+            {keep_state,  Data#data{blockchain=Chain}}
+    end;
 requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
                                                                  last_submit=LastSubmit,
                                                                  address=Address,
