@@ -74,7 +74,7 @@
  {<<"recon">>,{pkg,<<"recon">>,<<"2.4.0">>},0},
  {<<"relcast">>,
   {git,"https://github.com/helium/relcast.git",
-       {ref,"893072ee4436bcac0890dbcfc3150acd51a4c29a"}},
+       {ref,"f1068b441ea5f2e2d420822680958e4519bf3016"}},
   0},
  {<<"rocksdb">>,
   {git,"https://gitlab.com/evanmcc/erlang-rocksdb",
