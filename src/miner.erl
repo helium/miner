@@ -86,12 +86,14 @@ add_gateway_txn(OwnerB58) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec assert_loc_txn(NewLocation::h3:h3index(),
+-spec assert_loc_txn(H3String::string(),
                      OwnerB58::string(),
                      Nonce::non_neg_integer(),
                      Fee::pos_integer()) -> {ok, binary()} | {error, term()}.
-assert_loc_txn(NewLocation, OwnerB58, Nonce, Fee) ->
-    gen_server:call(?MODULE, {assert_loc_txn, NewLocation, OwnerB58, Nonce, Fee}).
+assert_loc_txn(H3String, OwnerB58, Nonce, Fee) ->
+    H3Index = h3:from_string(H3String),
+    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
+    gen_server:call(?MODULE, {assert_loc_txn, H3Index, Owner, Nonce, Fee}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -304,17 +306,12 @@ handle_call({add_gateway_txn, OwnerB58}, _From, State=#state{}) ->
         _ ->
             {reply, {error, invalid_owner}, State}
     end;
-handle_call({assert_loc_txn, NewLoc, OwnerB58, Nonce, Fee}, _From, State=#state{}) ->
-     case (catch libp2p_crypto:b58_to_bin(OwnerB58)) of
-         Owner when is_binary(Owner) ->
-             {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-             PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-             Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, NewLoc, Nonce, Fee),
-             SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
-             {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
-         _ ->
-             {reply, {error, invalid_owner}, State}
-     end;
+handle_call({assert_loc_txn, H3Index, Owner, Nonce, Fee}, _From, State=#state{}) ->
+    {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, H3Index, Nonce, Fee),
+    SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
+    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State) ->
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
