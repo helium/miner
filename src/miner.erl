@@ -12,7 +12,7 @@
 -export([
     start_link/1,
     pubkey_bin/0,
-    add_gateway_txn/1,
+    add_gateway_txn/3,
     assert_loc_txn/4,
     initial_dkg/2,
     relcast_info/1,
@@ -78,9 +78,12 @@ pubkey_bin() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec add_gateway_txn(OwnerB58::string()) -> {ok, binary()} | {error, term()}.
-add_gateway_txn(OwnerB58) ->
-    gen_server:call(?MODULE, {add_gateway_txn, OwnerB58}).
+-spec add_gateway_txn(OwnerB58::string(),
+                      Fee::pos_integer(),
+                      Amount::non_neg_integer()) -> {ok, binary()}.
+add_gateway_txn(OwnerB58, Fee, Amount) ->
+    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
+    gen_server:call(?MODULE, {add_gateway_txn, Owner, Fee, Amount}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -89,7 +92,7 @@ add_gateway_txn(OwnerB58) ->
 -spec assert_loc_txn(H3String::string(),
                      OwnerB58::string(),
                      Nonce::non_neg_integer(),
-                     Fee::pos_integer()) -> {ok, binary()} | {error, term()}.
+                     Fee::pos_integer()) -> {ok, binary()}.
 assert_loc_txn(H3String, OwnerB58, Nonce, Fee) ->
     H3Index = h3:from_string(H3String),
     Owner = libp2p_crypto:b58_to_bin(OwnerB58),
@@ -287,25 +290,12 @@ init(Args) ->
 handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
-handle_call({add_gateway_txn, _}, _From, State=#state{blockchain=undefined} ) ->
-    {reply, {error, no_blockchain}, State};
-handle_call({add_gateway_txn, OwnerB58}, _From, State=#state{}) ->
-    case (catch libp2p_crypto:b58_to_bin(OwnerB58)) of
-        Owner when is_binary(Owner) ->
-            {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-            Ledger = blockchain:ledger(blockchain_worker:blockchain()),
-            case blockchain_ledger_v1:find_gateway_info(PubKeyBin, Ledger) of
-                {error, not_found} ->
-                    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin),
-                    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
-                    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
-                {ok, _} ->
-                    {reply, {error, gateway_already_active}, State}
-            end;
-        _ ->
-            {reply, {error, invalid_owner}, State}
-    end;
+handle_call({add_gateway_txn, Owner, Fee, Amount}, _From, State=#state{}) ->
+    {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Amount, Fee),
+    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
+    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call({assert_loc_txn, H3Index, Owner, Nonce, Fee}, _From, State=#state{}) ->
     {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
