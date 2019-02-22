@@ -261,7 +261,7 @@ receiving(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 submitting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret, 0),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
