@@ -303,7 +303,7 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
 
-            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
+            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway, 0, 0),
             SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
             SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
             [SignedGatewayAddGatewayTx|Acc]
