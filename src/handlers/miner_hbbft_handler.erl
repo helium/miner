@@ -209,13 +209,49 @@ callback_message(_, _, _) -> none.
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
-    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, chain=undefined}, [compressed]).
+    Fields = record_info(fields, state),
+    StateList0 = tuple_to_list(State),
+    StateList = tl(StateList0),
+    lists:foldl(fun({K = hbbft, _}, M) ->
+                        M#{K => SerializedHBBFT};
+                   ({K = sk, _}, M) ->
+                        M#{K => term_to_binary(SerializedSK,  [compressed])};
+                   ({chain, _}, M) ->
+                        M;
+                   ({K, V}, M)->
+                        VB = term_to_binary(V, [compressed]),
+                        M#{K => VB}
+                end,
+                #{},
+                lists:zip(Fields, StateList)).
 
-deserialize(BinState) ->
+deserialize(BinState) when is_binary(BinState) ->
     State = binary_to_term(BinState),
     SK = tpke_privkey:deserialize(State#state.sk),
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
-    State#state{hbbft=HBBFT, sk=SK}.
+    State#state{hbbft=HBBFT, sk=SK};
+deserialize(#{sk := SKSer,
+              hbbft := HBBFTSer} = StateMap) ->
+    SK = tpke_privkey:deserialize(SKSer),
+    HBBFT = hbbft:deserialize(HBBFTSer, SK),
+    Fields = record_info(fields, state),
+    DeserList = lists:map(fun(hbbft) ->
+                                  HBBFT;
+                             (sk) ->
+                                  SK;
+                             (ledger) ->
+                                  undefined;
+                             (K)->
+                                  #{K := V} = StateMap,
+                                  case V of
+                                      undefined ->
+                                          undefined;
+                                      _ ->
+                                          binary_to_term(V)
+                                  end
+                          end,
+                          Fields),
+    list_to_tuple([state | DeserList]).
 
 restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
