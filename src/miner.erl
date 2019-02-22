@@ -80,7 +80,7 @@ pubkey_bin() ->
 %%--------------------------------------------------------------------
 -spec add_gateway_txn(OwnerB58::string(),
                       Fee::pos_integer(),
-                      Amount::non_neg_integer()) -> {ok, binary()} | {error, term()}.
+                      Amount::non_neg_integer()) -> {ok, binary()}.
 add_gateway_txn(OwnerB58, Fee, Amount) ->
     Owner = libp2p_crypto:b58_to_bin(OwnerB58),
     gen_server:call(?MODULE, {add_gateway_txn, Owner, Fee, Amount}).
@@ -92,7 +92,7 @@ add_gateway_txn(OwnerB58, Fee, Amount) ->
 -spec assert_loc_txn(H3String::string(),
                      OwnerB58::string(),
                      Nonce::non_neg_integer(),
-                     Fee::pos_integer()) -> {ok, binary()} | {error, term()}.
+                     Fee::pos_integer()) -> {ok, binary()}.
 assert_loc_txn(H3String, OwnerB58, Nonce, Fee) ->
     H3Index = h3:from_string(H3String),
     Owner = libp2p_crypto:b58_to_bin(OwnerB58),
