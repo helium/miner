@@ -48,8 +48,8 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_PUBKEY), _Msg, State=#state{}) ->
     {reply, [string], [libp2p_crypto:bin_to_b58(PubKeyBin)], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) ->
     case ebus_message:args(Msg) of
-        {ok, [OwnerB58]} ->
-            case miner:add_gateway_txn(OwnerB58) of
+        {ok, [OwnerB58, Fee, Amount]} ->
+            case (catch miner:add_gateway_txn(OwnerB58, Fee, Amount)) of
                 {ok, TxnBin} ->
                     {reply, [{array, byte}], [TxnBin], State};
                 {error, Error} ->
@@ -59,7 +59,10 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
                                 gateway_already_active -> ?MINER_ERROR_GW_EXISTS;
                                 _ -> ?MINER_ERROR_INTERNAL
                             end,
-                    {reply_error, Reply, Member, State}
+                    {reply_error, Reply, Member, State};
+                {'EXIT', Why} ->
+                    lager:warning("Error requesting assert loc: ~p", [Why]),
+                    {reply_error, ?MINER_ERROR_BADARGS, Member, State}
             end;
         {ok, Args} ->
             lager:warning("Invalid add gateway args: ~p", [Args]),
