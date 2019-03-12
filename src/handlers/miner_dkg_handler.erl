@@ -72,11 +72,11 @@ handle_command(timeout, State) ->
     end.
 
 handle_message(BinMsg, Index, State=#state{n = N, t = T,
-                                        curve = Curve,
-                                        g1 = G1, g2 = G2,
-                                        members = Members,
-                                        sigmod = SigMod, sigfun = SigFun,
-                                        donemod = DoneMod, donefun = DoneFun}) ->
+                                           curve = Curve,
+                                           g1 = G1, g2 = G2,
+                                           members = Members,
+                                           sigmod = SigMod, sigfun = SigFun,
+                                           donemod = DoneMod, donefun = DoneFun}) ->
     Msg = binary_to_term(BinMsg),
     %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
@@ -154,7 +154,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     case State#state.timer of
                         undefined -> ok;
                         OldTimer ->
-                            OldTimer  ! cancel
+                            OldTimer ! cancel
                     end,
 
                     {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undefined, signatures=[{Address, Signature}|State#state.signatures]},
