@@ -22,13 +22,11 @@
     in_consensus/0,
     hbbft_status/0,
     hbbft_skip/0,
-    dkg_status/0,
-    sign_genesis_block/2,
-    genesis_block_done/4,
-    election_done/4,
     create_block/3,
     signed_block/2,
-    syncing_status/0
+    syncing_status/0,
+    start_chain/2,
+    handoff_consensus/3
 ]).
 
 %% ------------------------------------------------------------------
@@ -44,6 +42,7 @@
 -record(state, {
     %% NOTE: a miner may or may not participate in consensus
     consensus_group :: undefined | pid(),
+    consensus_start :: undefined | pos_integer(),
     dkg_group :: undefined | pid(),
     consensus_pos :: undefined | pos_integer(),
     batch_size = 500 :: pos_integer(),
@@ -57,7 +56,8 @@
     currently_syncing = false :: boolean(),
     election_interval :: pos_integer(),
     current_dkg = undefined :: undefined | pos_integer(),
-    current_height = -1 :: integer()
+    current_height = -1 :: integer(),
+    handoff_waiting = no :: no | {next_block, any()} | yes
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -186,35 +186,6 @@ create_block(Stamps, Txns, HBBFTRound) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec sign_genesis_block(GenesisBlock :: binary(),
-                         PrivKey :: tpke_privkey:privkey()) -> {ok, libp2p_crypto:pubkey_bin(), binary()}.
-sign_genesis_block(GenesisBlock, PrivKey) ->
-    gen_server:call(?MODULE, {sign_genesis_block, GenesisBlock, PrivKey}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec genesis_block_done(GenesisBLock :: binary(),
-                         Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
-                         Members :: [libp2p_crypto:address()],
-                         PrivKey :: tpke_privkey:privkey()) -> ok.
-genesis_block_done(GenesisBlock, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures, Members, PrivKey}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec election_done(binary(), [{libp2p_crypto:address(), binary()}],
-                    [libp2p_crypto:address()], tpke_privkey:privkey()) -> ok.
-election_done(SignedArtifact, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {election_done, SignedArtifact, Signatures, Members, PrivKey}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_status() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
@@ -285,6 +256,12 @@ signed_block(Signatures, BinBlock) ->
 syncing_status() ->
     %% this should be a call so we don't loose state
     gen_server:call(?MODULE, syncing_status, infinity).
+
+handoff_consensus(ConsensusGroup, Members, ProofBlock) ->
+    gen_server:call(?MODULE, {handoff_consensus, ConsensusGroup,
+                              Members, ProofBlock},
+                    infinity).
+
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -520,6 +497,21 @@ handle_call({election_done, BinaryBlock, Signatures, Members, PrivKey}, _From,
 
 handle_call(syncing_status, _From, #state{currently_syncing=Status}=State) ->
     {reply, Status, State};
+handle_call({handoff_consensus, NewConsensusGroup, Members, ProofBlock}, From,
+            State) ->
+    %% this is annoyingly async and tricky.
+    %% 0. validate proof block against members
+    %% 1. Set a state flag
+    %% 2. add block to unconditionally add
+    %% 3. case waiting: start unconditional round
+    %%         in progress: return to loop
+
+    case libp2p_group_relcast:handle_call(State#state.consensus_group,
+                                          {unconditional_start, new_group_block(Members)}) of
+        {_, already_started} ->
+            %% try again after the next block finishes.
+
+    {noreply, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
@@ -585,8 +577,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                          election_interval = Interval,
                          current_height = CurrHeight,
                          blockchain = Chain,
-                         block_time = BlockTime}) when ConsensusGroup /= undefined andalso
-                                                       Chain /= undefined ->
+                         block_time = BlockTime,
+                         handoff_waiting = Waiting}) when ConsensusGroup /= undefined andalso
+                                                          Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     lager:info("add block ~p", [Hash]),
@@ -598,23 +591,39 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                     Height when Height > CurrHeight ->
                         erlang:cancel_timer(State#state.block_timer),
                         lager:info("processing block for ~p", [Height]),
-                        Round = blockchain_block:hbbft_round(Block) + 1,
-                        NextRound = Round + 1,
-                        case Height rem Interval == 0 andalso Height /= 0 of
-                            false ->
-                                libp2p_group_relcast:handle_input(
-                                  ConsensusGroup, {next_round, NextRound,
-                                                   blockchain_block:transactions(Block),
-                                                   Sync}),
-                                Ref = set_next_block_timer(Chain, BlockTime),
-                                State#state{block_timer = Ref,
-                                            current_height = Height};
-                            %% this consensus group has aged out.  for the first draft, we
-                            %% grab the block hash and convert it into an integer to use as a
-                            %% seed for the random operations that come next.  Then, we use
-                            %% that to select a new consensus group deterministically (ish).
-                            true ->
-                                %% signal the existing group to stop.
+                        case Waiting of
+                            no ->
+                                Round = blockchain_block:hbbft_round(Block) + 1,
+                                NextRound = Round + 1,
+                                case Height > (Start + Interval) of
+                                    false ->
+                                        libp2p_group_relcast:handle_input(
+                                          ConsensusGroup, {next_round, NextRound,
+                                                           blockchain_block:transactions(Block),
+                                                           Sync}),
+                                        Ref = set_next_block_timer(Chain, BlockTime),
+                                        State#state{block_timer = Ref,
+                                                    current_height = Height};
+                                    %% this consensus group has aged out.  for the first draft, we
+                                    %% grab the block hash and convert it into an integer to use as a
+                                    %% seed for the random operations that come next.  Then, we use
+                                    %% that to select a new consensus group deterministically (ish).
+                                    true ->
+                                        case erlang:whereis(miner_election_mgr) of
+                                            undefined ->
+                                                %% election isn't running, start one
+                                                miner_sup:start_election(Chain, Hash, Height, State);
+                                            _ ->
+                                                %% election running
+                                                %% signal the existing group to stop.
+                                        end
+                                end;
+                            {next_block, Txns} ->
+                                %% unconditionally start a new round with these txns
+                                
+
+
+
                                 ok = libp2p_group_relcast:handle_input(ConsensusGroup, stop),
 
                                 initiate_election(Chain, Hash, Height, State)
@@ -664,107 +673,10 @@ handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.
 
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
-
 %% ==================================================================
 %% Internal functions
 %% =================================================================
 
-initiate_election(Chain, Hash, Height, State) ->
-    Ledger = blockchain:ledger(Chain),
-    OrderedGateways = blockchain_election:new_group(Ledger, Hash),
-    lager:info("height ~p ordered: ~p", [Height, OrderedGateways]),
-
-    BlockFun =
-        fun(N) ->
-                NewGroupTxn = [blockchain_txn_consensus_group_v1:new(lists:sublist(OrderedGateways, N))],
-                %% no idea what to do here
-
-                {ok, CurrentBlock} = blockchain:head_block(Chain),
-                {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
-                blockchain_block_v1:new(#{prev_hash => CurrentBlockHash,
-                                     height => blockchain_block:height(CurrentBlock) + 1,
-                                     hbbft_round => Height,
-                                     time => 0,
-                                     transactions => NewGroupTxn,
-                                     signatures => []})
-        end,
-    {_, State1} = do_dkg(OrderedGateways, BlockFun, sign_genesis_block,
-                         election_done, State#state{current_height = Height}),
-    State1.
-
-do_initial_dkg(GenesisTransactions, Addrs, State) ->
-    lager:info("do initial"),
-    SortedAddrs = lists:sort(Addrs),
-    lager:info("SortedAddrs: ~p", [SortedAddrs]),
-    GenesisBlockFun =
-        fun(N) ->
-                ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
-                lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-                %% in the consensus group, run the dkg
-                GenesisBlockTransactions = GenesisTransactions ++
-                    [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
-                blockchain_block:new_genesis_block(GenesisBlockTransactions)
-        end,
-    do_dkg(SortedAddrs, GenesisBlockFun, sign_genesis_block, genesis_block_done, State).
-
-do_dkg(Addrs, ArtifactFun, Sign, Done, State=#state{curve = Curve,
-                                                 current_height = CurrHeight,
-                                                 current_dkg = CurrDkg}) ->
-    N = blockchain_worker:num_consensus_members(),
-    lager:info("N: ~p", [N]),
-    F = ((N-1) div 3),
-    lager:info("F: ~p", [F]),
-    ConsensusAddrs = lists:sublist(Addrs, 1, N),
-    lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
-    MyAddress = blockchain_swarm:pubkey_bin(),
-    Artifact = ArtifactFun(N),
-    lager:info("MyAddress: ~p", [MyAddress]),
-    case lists:member(MyAddress, ConsensusAddrs) of
-        true when CurrDkg /= CurrHeight ->
-            lager:info("Preparing to run DKG at height ~p ", [CurrHeight]),
-            miner_ebus:send_signal("ConsensusElect", "Elected"),
-
-            GroupArg = [miner_dkg_handler, [ConsensusAddrs,
-                                            miner_util:index_of(MyAddress, ConsensusAddrs),
-                                            N,
-                                            0, %% NOTE: F for DKG is 0
-                                            F, %% NOTE: T for DKG is the byzantine F
-                                            Curve,
-                                            blockchain_block:serialize(Artifact),
-                                            {miner, Sign},
-                                            {miner, Done}]],
-            %% make a simple hash of the consensus members
-            DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
-            DKGCount = integer_to_list(CurrHeight),
-            {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                                    "dkg-"++DKGHash++DKGCount,
-                                                    libp2p_group_relcast,
-                                                    GroupArg),
-            ok = libp2p_group_relcast:handle_input(DKGGroup, start),
-            Pos = miner_util:index_of(MyAddress, ConsensusAddrs),
-            lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p",
-                       [CurrHeight, MyAddress, Pos]),
-            {true, State#state{consensus_pos = Pos,
-                               dkg_group = DKGGroup,
-                               current_dkg = CurrHeight}};
-        true ->
-            lager:info("not restarting DKG"),
-            {true, State};
-        false ->
-            miner_ebus:send_signal("ConsensusElect", "Defeated"),
-            lager:info("not in DKG this round at height ~p", [CurrHeight]),
-            {false, State#state{consensus_pos = undefined,
-                                consensus_group = undefined,
-                                dkg_group = undefined}}
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec signal_syncing_status(boolean(), #state{}) -> #state{}.
 signal_syncing_status(true, #state{currently_syncing=true}=State) ->
     State;
@@ -777,10 +689,6 @@ signal_syncing_status(false, #state{currently_syncing=true}=State) ->
 signal_syncing_status(false, #state{currently_syncing=false}=State) ->
     State.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 set_next_block_timer(Chain, BlockTime) ->
     {ok, HeadBlock} = blockchain:head_block(Chain),
     LastBlockTimestamp = blockchain_block:time(HeadBlock),

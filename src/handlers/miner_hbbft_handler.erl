@@ -49,6 +49,14 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 chain=Chain
                }}.
 
+handle_command({unconditional_start, Txns}, State) ->
+    case hbbft:unconditional_start(Txns, State#state.hbbft) of
+        {_HBBFT, already_started} ->
+            {reply, {error, already_started}, ignore};
+        {NewHBBFT, {send, Msgs}} ->
+            lager:notice("force-started HBBFT round"),
+            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+    end;
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
         {_HBBFT, already_started} ->
