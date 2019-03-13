@@ -31,11 +31,13 @@
 -define(WRITE_RADIO_PACKET, 16#0).
 -define(WRITE_RADIO_PACKET_ACK, 16#80).
 -define(READ_RADIO_PACKET, 16#81).
+-define(READ_RADIO_PACKET_EXTENDED, 16#82).
 
 -record(state, {
     host :: string(),
     port :: integer(),
     socket :: gen_tcp:socket() | undefined,
+    udp_socket :: gen_udp:socket(),
     compact_key :: ecc_compact:compact_key(),
     ecdh_fun,
     sender :: undefined | {pid(), term()}
@@ -110,10 +112,12 @@ send_receipt(Data, OnionCompactKey) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
+    {ok, UDP} = gen_udp:open(5678, [{ip, {127,0,0,1}}, binary, {active, once}, {reuseaddr, true}]),
     State = #state{
         host = maps:get(radio_host, Args),
         port = maps:get(radio_port, Args),
         compact_key = blockchain_swarm:pubkey_bin(),
+        udp_socket = UDP,
         ecdh_fun = maps:get(ecdh_fun, Args)
     },
     self() ! connect,
@@ -152,14 +156,42 @@ handle_info(connect, #state{host=Host, port=Port}=State) ->
              _ = reconnect(),
             {noreply, State}
     end;
-handle_info({tcp, _Socket, <<?READ_RADIO_PACKET,
+handle_info({_, Socket, <<?READ_RADIO_PACKET,
+                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
+                             1:8/integer, %% onions are type 1 broadcast?
                              IV:12/binary,
                              OnionCompactKey:33/binary,
                              Tag:4/binary,
                              CipherText/binary>>},
             #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
     ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
+    ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State};
+handle_info({_, Socket, <<?READ_RADIO_PACKET_EXTENDED,
+                             _RSSI:8/integer-signed,
+                             _Channel:8/integer-unsigned,
+                             CRCStatus:8/integer,
+                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
+                             1:8/integer, %% onions are type 1 broadcast?
+                             IV:12/binary,
+                             OnionCompactKey:33/binary,
+                             Tag:4/binary,
+                             CipherText/binary>>},
+            #state{ecdh_fun=ECDHFun, socket=Socket}=State) when CRCStatus == 1 ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, State};
+handle_info({_, Socket, <<?READ_RADIO_PACKET, _/binary>> = Packet}, #state{udp_socket=UDP}=State) ->
+    %% some other packet, just forward it to gw-demo for now
+    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, State};
+handle_info({_, Socket, <<?READ_RADIO_PACKET_EXTENDED, _/binary>> = Packet}, #state{udp_socket=UDP}=State) ->
+    %% some other packet, just forward it to gw-demo for now
+    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, State};
+
 %% handle ack from radio
 handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
     lager:info("received ACK from Radio"),
@@ -205,7 +237,13 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("decrypted a layer: ~p~n", [Data]),
             _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey]),
-            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, AAD/binary, InnerLayer/binary>>)
+            %% append more bytes based on the layer-data to pad the packet length back up
+            BytesThisLayer = <<Tag/binary, Size:8/integer-unsigned, Data:Size/binary>>,
+            Padding = binary:part(crypto:hash(sha512, <<Data/binary, InnerLayer/binary>>), 0, byte_size(BytesThisLayer)),
+            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
+                                   0:32/integer, %% broadcast packet
+                                   1:8/integer, %% onion packet
+                                   AAD/binary, InnerLayer/binary, Padding/binary>>)
     end,
     ok = inet:setopts(Socket, [{active, once}]).
 
@@ -226,8 +264,9 @@ reconnect() ->
                       ecc_compact:compact_key(),
                       binary()) -> binary().
 construct_onion([], _, _, _) ->
-    %% TODO: make up some random data so nobody can tell if they're the last link in the chain
-    crypto:strong_rand_bytes(20);
+    %% as packets are decrypted we add deterministic padding to keep the packet
+    %% size the same, but we don't need to do that here
+    <<>>;
 construct_onion([{Data, PubKey} | Tail], OnionECDH, OnionCompactKey, IV) ->
     SecretKey = OnionECDH(libp2p_crypto:bin_to_pubkey(PubKey)),
     InnerLayer = construct_onion(Tail, OnionECDH, OnionCompactKey, IV),

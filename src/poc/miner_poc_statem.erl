@@ -203,7 +203,7 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             N = erlang:length(Path),
             OnionList = lists:zip(blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N), Path),
             Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, OnionList),
-            lager:info("onion created ~p", [Onion]),
+            lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
