@@ -285,7 +285,7 @@ waiting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockch
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = lists:filter(fun(T) ->
-                                        blockchain_txn:type(T) =:= blockchain_txn_poc_receipts_v1
+                                    blockchain_txn:type(T) =:= blockchain_txn_poc_receipts_v1
                                 end, blockchain_block:transactions(Block)),
             Filter = fun(Txn) ->
                 Address =:= blockchain_txn_poc_receipts_v1:challenger(Txn) andalso

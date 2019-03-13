@@ -80,11 +80,11 @@ decrypt(Onion) ->
 send_receipt(Data, OnionCompactKey) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    OnionCompactKeyBin = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Hash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Gateways = maps:filter(
         fun(_Address, Info) ->
             case blockchain_ledger_gateway_v1:last_poc_info(Info) of
-                {_, OnionCompactKeyBin} -> true;
+                {_, Hash} -> true;
                 _ -> false
             end
         end,
@@ -200,6 +200,7 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
+            % _ = erlang:spawn(?MODULE, send_witness, [OnionCompactKey]),
             lager:error("could not decrypt");
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("decrypted a layer: ~p~n", [Data]),
