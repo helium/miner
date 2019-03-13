@@ -15,7 +15,8 @@
     send/1,
     construct_onion/2,
     decrypt/1,
-    send_receipt/2
+    send_receipt/2,
+    send_witness/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -95,10 +96,44 @@ send_receipt(Data, OnionCompactKey) ->
     case maps:keys(Gateways) of
         [Challenger] ->
             Address = blockchain_swarm:pubkey_bin(),
-            Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), Data),
+            Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
             EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
+
+            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+            {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
+            _ = miner_poc_handler:send(Stream, EncodedReceipt);
+        _Other ->
+            lager:warning("not gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
+    end,
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec send_witness(binary(), libp2p_crypto:pubkey()) -> ok.
+send_witness(Data, OnionCompactKey) ->
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    Hash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Gateways = maps:filter(
+        fun(_Address, Info) ->
+            case blockchain_ledger_gateway_v1:last_poc_info(Info) of
+                {_, Hash} -> true;
+                _ -> false
+            end
+        end,
+        blockchain_ledger_v1:active_gateways(Ledger)
+    ),
+    case maps:keys(Gateways) of
+        [Challenger] ->
+            Address = blockchain_swarm:pubkey_bin(),
+            Receipt0 = blockchain_poc_witness_v1:new(Address, os:system_time(), 0, Data),
+            {ok, _, SigFun} = blockchain_swarm:keys(),
+            Receipt1 = blockchain_poc_witness_v1:sign(Receipt0, SigFun),
+            EncodedReceipt = blockchain_poc_witness_v1:encode(Receipt1),
 
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
             {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
@@ -232,8 +267,8 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
-            % _ = erlang:spawn(?MODULE, send_witness, [OnionCompactKey]),
-            lager:error("could not decrypt");
+            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, CipherText), OnionCompactKey]),
+            lager:info("could not decrypt");
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
             lager:info("decrypted a layer: ~p~n", [Data]),
             _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey]),

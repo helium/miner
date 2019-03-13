@@ -61,8 +61,11 @@ basic(_Config) ->
         ?assertEqual(crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)), OnionCompactKey0),
         ok
     end),
+    meck:expect(miner_onion_server, send_witness, fun(_Data0, _OnionCompactKey0) ->
+        ok
+    end),
 
-    ok = gen_tcp:send(Sock, <<16#81, Onion/binary>>),
+    ok = gen_tcp:send(Sock, <<16#81, 0:32/integer-unsigned-little, 1:8/integer, Onion/binary>>),
     {ok, _} = gen_tcp:recv(Sock, 0),
 
     ?assert(meck:validate(miner_onion_server)),
@@ -70,3 +73,4 @@ basic(_Config) ->
     ?assert(meck:validate(blockchain_swarm)),
     meck:unload(blockchain_swarm),
     ok.
+

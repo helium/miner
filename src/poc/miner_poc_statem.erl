@@ -12,7 +12,8 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    receipt/1
+    receipt/1,
+    witness/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -59,6 +60,7 @@
     challengees = [] :: [libp2p_crypto:pubkey_bin()],
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
+    witnesses = [] :: blockchain_poc_receipt_v1:poc_witnesses(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     waiting = ?WAITING :: non_neg_integer()
@@ -72,6 +74,9 @@ start_link(Args) ->
 
 receipt(Data) ->
     gen_statem:cast(?SERVER, {receipt, Data}).
+
+witness(Data) ->
+    gen_statem:cast(?SERVER, {witness, Data}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -230,6 +235,8 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:debug("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
+receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
+    {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
@@ -243,15 +250,7 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
             {keep_state, Data};
         true ->
             Receipts1 = [Receipt|Receipts0],
-            case erlang:length(Receipts1) == erlang:length(Challengees) of
-                false ->
-                    lager:debug("waiting for more"),
-                    {keep_state, Data#data{receipts=Receipts1}};
-                true ->
-                    lager:info("got all ~p receipts, submitting", [erlang:length(Receipts1)]),
-                    self() ! submit,
-                    {next_state, submitting, Data#data{receipts=Receipts1}}
-            end
+            {keep_state, Data#data{receipts=Receipts1}}
     end;
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -260,8 +259,8 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submitting(info, submit, #data{address=Address, receipts=Receipts, secret=Secret}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Address, Secret, 0),
+submitting(info, submit, #data{address=Address, receipts=Receipts, witnesses=Witnesses, secret=Secret}=Data) ->
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Witnesses, Address, Secret, 0),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
