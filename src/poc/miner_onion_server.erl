@@ -19,6 +19,10 @@
     send_witness/2
 ]).
 
+-ifdef(EQC).
+-export([try_decrypt/5]).
+-endif.
+
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
@@ -262,25 +266,30 @@ handle_info(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
+    case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
+        error ->
+            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, CipherText), OnionCompactKey]),
+            lager:info("could not decrypt");
+        {ok, Data, NextPacket} ->
+            lager:info("decrypted a layer: ~p~n", [Data]),
+            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey]),
+            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
+                                   0:32/integer, %% broadcast packet
+                                   1:8/integer, %% onion packet
+                                   NextPacket/binary>>)
+    end,
+    ok = inet:setopts(Socket, [{active, once}]).
+
+try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
     AAD = <<IV/binary, OnionCompactKey/binary>>,
     PubKey = libp2p_crypto:bin_to_pubkey(OnionCompactKey),
     SharedKey = ECDHFun(PubKey),
     case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
         error ->
-            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, CipherText), OnionCompactKey]),
-            lager:info("could not decrypt");
+            error;
         <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
-            lager:info("decrypted a layer: ~p~n", [Data]),
-            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey]),
-            %% append more bytes based on the layer-data to pad the packet length back up
-            BytesThisLayer = <<Tag/binary, Size:8/integer-unsigned, Data:Size/binary>>,
-            Padding = binary:part(crypto:hash(sha512, <<Data/binary, InnerLayer/binary>>), 0, byte_size(BytesThisLayer)),
-            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
-                                   0:32/integer, %% broadcast packet
-                                   1:8/integer, %% onion packet
-                                   AAD/binary, InnerLayer/binary, Padding/binary>>)
-    end,
-    ok = inet:setopts(Socket, [{active, once}]).
+            {ok, Data, <<AAD/binary, InnerLayer/binary>>}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
