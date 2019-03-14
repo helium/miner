@@ -126,8 +126,9 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
         false ->
             {keep_state, Data};
         true ->
-            #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
-            Secret = crypto:strong_rand_bytes(8),
+            Keys = libp2p_crypto:generate_keys(ecc_compact),
+            Secret = libp2p_crypto:keys_to_bin(Keys),
+            #{secret := PvtOnionKey, public := OnionCompactKey} = Keys,
             Tx = blockchain_txn_poc_request_v1:new(Address, crypto:hash(sha256, Secret), crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn:sign(Tx, SigFun),
