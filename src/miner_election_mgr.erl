@@ -13,7 +13,7 @@
 
          %% internal
          genesis_block_done/4,
-         election_done/2,
+         election_done/4,
          sign_genesis_block/2,
 
          %% info
@@ -83,9 +83,10 @@ sign_genesis_block(GenesisBlock, PrivKey) ->
 genesis_block_done(GenesisBlock, Signatures, Members, PrivKey) ->
     gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures, Members, PrivKey}, infinity).
 
--spec election_done([libp2p_crypto:address()], tpke_privkey:privkey()) -> ok.
-election_done(Members, PrivKey) ->
-    gen_server:call(?MODULE, {election_done, Members, PrivKey}).
+-spec election_done(binary(), [{libp2p_crypto:pubkey_bin(), binary()}],
+                    [libp2p_crypto:address()], tpke_privkey:privkey()) -> ok.
+election_done(Artifact, Signatures, Members, PrivKey) ->
+    gen_server:call(?MODULE, {election_done, Artifact, Signatures, Members, PrivKey}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -139,18 +140,21 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     miner:start_chain(Group, Chain),
     {reply, ok, State#state{current_dkg = undefined}};
-handle_call({election_done, Members, PrivKey}, _From,
+handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{batch_size = BatchSize,
-                           initial_height = Height}) ->
+                           initial_height = Height,
+                           tries = Tries}) ->
     lager:info("election done at ~p ~p", [Height, PrivKey]),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
     Chain = blockchain_worker:blockchain(),
 
+    Proof = term_to_binary(Signatures, [compressed]),
+
     %% first we need to add ourselves to the chain for the existing
     %% group to validate
-    blockchain_txn_manager:submit(blockchain_txn_consensus_group_v1:new(Members), Members),
+    blockchain_txn_manager:submit(blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Tries), Members),
     blockchain_txn_manager ! timeout, % awful
 
     GroupArg = [miner_hbbft_handler, [Members,
@@ -185,11 +189,13 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
     end;
 handle_call({start_election, Hash, Height}, _From,
             #state{current_dkg = undefined} = State0) ->
+    lager:info("election started at ~p", [Height]),
     State = State0#state{initial_height = Height,
                          tries = 0},
     State1 = initiate_election(Hash, Height, State),
-    {reply, ok, State1};
+    {reply, State1#state.current_dkg /= undefined, State1};
 handle_call({start_election, _Hash, _Height}, _From, State) ->
+    lager:info("election started at ~p, already running", [_Height]),
     {reply, already_running, State};
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
@@ -232,26 +238,26 @@ initiate_election(Hash, Height, State) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OrderedGateways = blockchain_election:new_group(Ledger, Hash),
-    lager:info("height ~p ordered: ~p", [Height, OrderedGateways]),
 
-    %% TODO can we get rid of this without uglying up the code even more?
-    BlockFun = fun(_N) -> undefined end,
-    {_, State1} = do_dkg(OrderedGateways, BlockFun, undefined,
+    BlockFun = fun(N) ->
+                       ConsensusAddrs = lists:sublist(OrderedGateways, 1, N),
+                       term_to_binary(ConsensusAddrs)
+               end,
+    {_, State1} = do_dkg(OrderedGateways, BlockFun, {?MODULE, sign_genesis_block},
                          election_done, State),
     State1.
 
 do_initial_dkg(GenesisTransactions, Addrs, State) ->
     lager:info("do initial"),
     SortedAddrs = lists:sort(Addrs),
-    lager:info("SortedAddrs: ~p", [SortedAddrs]),
     GenesisBlockFun =
         fun(N) ->
                 ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
                 lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
                 %% in the consensus group, run the dkg
                 GenesisBlockTransactions = GenesisTransactions ++
-                    [blockchain_txn_consensus_group_v1:new(ConsensusAddrs)],
-                blockchain_block:new_genesis_block(GenesisBlockTransactions)
+                    [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
+                {genesis, blockchain_block:new_genesis_block(GenesisBlockTransactions)}
         end,
     do_dkg(SortedAddrs, GenesisBlockFun, {?MODULE, sign_genesis_block}, genesis_block_done, State).
 
@@ -268,8 +274,8 @@ do_dkg(Addrs, ArtifactFun, Sign, Done,
     MyAddress = blockchain_swarm:pubkey_bin(),
     Artifact =
         case ArtifactFun(N) of
-            undefined -> undefined;
-            Art -> blockchain_block:serialize(Art)
+            {genesis, Art} -> blockchain_block:serialize(Art);
+            Art -> Art
         end,
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
@@ -289,7 +295,7 @@ do_dkg(Addrs, ArtifactFun, Sign, Done,
                                             {?MODULE, Done}]],
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
-            DKGCount = integer_to_list(Height),
+            DKGCount = "-" ++ integer_to_list(Height),
             DKGTries = "-" ++ integer_to_list(Tries),
             {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                     "dkg-"++DKGHash++DKGCount++DKGTries,

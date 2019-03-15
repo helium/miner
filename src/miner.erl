@@ -308,10 +308,10 @@ handle_call({handoff_consensus, NewConsensusGroup}, _From,
             #state{handoff_waiting = Waiting} = State) ->
     %% TODO: what happens if the block containing the thing is already synced here?
     case Waiting of
-        undefined -> ok;
         Pid when is_pid(Pid) ->
             %% stale, kill it
-            libp2p_group_relcast:handle_command(Pid, {stop, 0})
+            libp2p_group_relcast:handle_command(Pid, {stop, 0});
+        _ -> ok
     end,
     %% do we need to wait on this until the old group is gone?  assuming this is safe for now
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
@@ -400,11 +400,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                          consensus_start = Start,
                          blockchain = Chain,
                          block_time = BlockTime,
-                         handoff_waiting = Waiting}) when ConsensusGroup /= undefined andalso
+                         handoff_waiting = Waiting,
+                         election_epoch = Epoch}) when ConsensusGroup /= undefined andalso
                                                           Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
-    lager:info("add block ~p", [Hash]),
+    lager:info("add block @ ~p ~p ~p", [ConsensusGroup, Start, Epoch]),
 
     NewState =
         case blockchain:get_block(Hash, Chain) of
@@ -413,15 +414,28 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                     Height when Height > CurrHeight ->
                         erlang:cancel_timer(State#state.block_timer),
                         lager:info("processing block for ~p", [Height]),
-                        Round = blockchain_block:hbbft_round(Block) + 1,
+                        Round = blockchain_block:hbbft_round(Block),
                         Txns = blockchain_block:transactions(Block),
                         case has_new_group(Txns) of
                             %% not here yet, regular round
                             false ->
+                                lager:info("reg round"),
                                 case Height > (Start + Interval) of
                                     true when Waiting == undefined ->
-                                        miner_election_mgr:start_election(Hash, Height);
-                                    _ -> ok
+                                        lager:info("starting election ~p ~p ~p ~p",
+                                                   [Height, Start, Interval, Waiting]),
+                                        Waiting1 =
+                                            case miner_election_mgr:start_election(Hash, Height) of
+                                                already_running ->
+                                                    running;
+                                                true ->
+                                                    waiting_in;
+                                                false ->
+                                                    waiting_out
+                                            end;
+                                    _ ->
+                                        Waiting1 = Waiting,
+                                        ok
                                 end,
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
@@ -429,12 +443,15 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
                                 State#state{block_timer = set_next_block_timer(Chain, BlockTime),
+                                            handoff_waiting = Waiting1,
                                             current_height = Height};
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
                             {true, true} ->
                                 %% it's possible that waiting hasn't been set, I'm not entirely
                                 %% sure how to handle that at this point
+                                lager:info("stay in"),
+
                                 Buf = get_buf(ConsensusGroup),
                                 set_buf(Waiting, Buf),
 
@@ -453,11 +470,15 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
                             {true, false} ->
+                                lager:info("leave"),
+
                                 libp2p_group_relcast:handle_command(ConsensusGroup, stop),
 
                                 State#state{block_timer = undefined,
                                             handoff_waiting = undefined,
                                             consensus_group = undefined,
+                                            election_epoch = State#state.election_epoch + 1,
+                                            consensus_start = Height,
                                             current_height = Height}
                             end;
                     _Height ->
@@ -475,20 +496,70 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                          current_height = CurrHeight,
                          consensus_start = Start,
                          handoff_waiting = Waiting,
+                         election_epoch = Epoch,
                          blockchain = Chain}) when ConsensusGroup == undefined andalso
                                                    Chain /= undefined ->
-    lager:info("non-consensus block"),
+    lager:info("non-consensus block @ ~p ~p", [Start, Epoch]),
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
                 Height when Height > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
-                    case Height > (Start + Interval) of
-                        true when Waiting == undefined ->
-                            miner_election_mgr:start_election(Hash, Height);
-                        _ -> ok
-                    end,
-                    {noreply, signal_syncing_status(Sync, State)};
+                    Txns = blockchain_block:transactions(Block),
+                    case has_new_group(Txns) of
+                        false ->
+                            lager:info("reg round"),
+                            case Height > (Start + Interval) of
+                                true when Waiting == undefined ->
+                                    lager:info("nc starting election ~p ~p ~p ~p",
+                                               [Height, Start, Interval, Waiting]),
+                                    Waiting1 =
+                                        case miner_election_mgr:start_election(Hash, Height) of
+                                            already_running ->
+                                                running;
+                                            true ->
+                                                waiting_in;
+                                            false ->
+                                                waiting_out
+                                        end;
+                                _ ->
+                                    Waiting1 = Waiting,
+                                    ok
+                            end,
+                            {noreply, signal_syncing_status(Sync, State#state{handoff_waiting = Waiting1,
+                                                                              current_height = Height})};
+                        {true, true} ->
+                            %% it's possible that waiting hasn't been set, I'm not entirely
+                            %% sure how to handle that at this point
+                            lager:info("nc start group"),
+                            Round = blockchain_block:hbbft_round(Block),
+                            NextRound = Round + 1,
+                            libp2p_group_relcast:handle_input(
+                              Waiting, {next_round, NextRound,
+                                        blockchain_block:transactions(Block),
+                                        Sync}),
+                            catch libp2p_group_relcast:handle_command(ConsensusGroup, stop),
+                            lager:info("nc got here"),
+                            {noreply,
+                             State#state{block_timer = set_next_block_timer(Chain, State#state.block_time),
+                                         handoff_waiting = undefined,
+                                         consensus_group = Waiting,
+                                         election_epoch = State#state.election_epoch + 1,
+                                         current_height = Height,
+                                         consensus_start = Height}};
+                        %% we're not a member of the new group, we can shut down
+                        {true, false} ->
+                            lager:info("nc stay out"),
+
+                            {noreply,
+                             State#state{block_timer = undefined,
+                                         handoff_waiting = undefined,
+                                         consensus_group = undefined,
+                                         election_epoch = State#state.election_epoch + 1,
+                                         consensus_start = Height,
+                                         current_height = Height}}
+                    end;
+
                 _ ->
                     {noreply, signal_syncing_status(Sync, State)}
             end;
@@ -507,6 +578,10 @@ handle_info(_Msg, State) ->
 %% Internal functions
 %% =================================================================
 
+%% TODO: rip this out.  we should update the flag at the start of
+%% add-block events and then pass the state through normally, this
+%% action should be taken via asynchronous tick to control the rate at
+%% which we talk to dbus
 -spec signal_syncing_status(boolean(), #state{}) -> #state{}.
 signal_syncing_status(true, #state{currently_syncing=true}=State) ->
     State;
