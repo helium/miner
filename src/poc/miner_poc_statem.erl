@@ -121,9 +121,10 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
                                                                  address=Address,
                                                                  delay=Delay}=Data) ->
     {ok, CurrHeight} = blockchain:height(Blockchain),
-    lager:debug("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastSubmit]),
+    lager:info("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastSubmit]),
     case (CurrHeight - LastSubmit) > Delay of
         false ->
+            lager:info("last PoC request was ~p ago, waiting", [CurrHeight - LastSubmit]),
             {keep_state, Data};
         true ->
             Keys = libp2p_crypto:generate_keys(ecc_compact),
@@ -147,7 +148,7 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
                                                              address=Address,
                                                              secret=Secret,
                                                              onion_keys={_, OnionCompactKey}}=Data) ->
-    lager:debug("got block ~p checking content", [Hash]),
+    lager:info("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = blockchain_block:transactions(Block),
@@ -165,7 +166,7 @@ mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockcha
                     lager:info("request was mined @ ~p, hash: ~p, targeting now, secret: ~p", [CurrHeight, Hash, Secret]),
                     {next_state, targeting, Data#data{last_submit=CurrHeight, retry=?CHALLENGE_RETRY}};
                 _ ->
-                    lager:debug("request not found in block ~p", [Hash]),
+                    lager:info("request not found in block ~p", [Hash]),
                     {keep_state, Data}
             end;
         {error, _Reason} ->
@@ -234,9 +235,10 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
     self() ! submit,
     {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}};
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
-    lager:debug("got block ~p decreasing timeout", [_Hash]),
+    lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
+     lager:info("got witness ~p", [Witness]),
     {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
                                           ,challengees=Challengees}=Data) ->
@@ -281,7 +283,7 @@ waiting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockch
                                                               address=Address,
                                                               secret=Secret,
                                                               waiting=Waiting}=Data) ->
-    lager:debug("got block ~p checking content", [Hash]),
+    lager:info("got block ~p checking content", [Hash]),
     case blockchain:get_block(Hash, Blockchain) of
         {ok, Block} ->
             Txns = lists:filter(fun(T) ->
