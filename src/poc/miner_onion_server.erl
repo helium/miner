@@ -109,7 +109,7 @@ send_receipt(Data, OnionCompactKey) ->
             {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
             _ = miner_poc_handler:send(Stream, EncodedReceipt);
         _Other ->
-            lager:warning("not gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
+            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
     end,
     ok.
 
@@ -143,7 +143,7 @@ send_witness(Data, OnionCompactKey) ->
             {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
             _ = miner_poc_handler:send(Stream, EncodedReceipt);
         _Other ->
-            lager:warning("not gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
+            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Other])
     end,
     ok.
 
