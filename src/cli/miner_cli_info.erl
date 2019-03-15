@@ -68,7 +68,8 @@ info_height_usage() ->
 info_height(["info", "height"], [], []) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
-    [clique_status:text(integer_to_list(Height))];
+    Epoch = integer_to_list(miner:election_epoch()),
+    [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
 info_height([_, _, _], [], []) ->
     usage.
 
@@ -90,6 +91,6 @@ info_in_consensus_usage() ->
     ].
 
 info_in_consensus(["info", "in_consensus"], [], []) ->
-    [clique_status:text(atom_to_list(miner:in_consensus()))];
+    [clique_status:text(atom_to_list(miner_election_mgr:in_consensus()))];
 info_in_consensus([_, _, _], [], []) ->
     usage.

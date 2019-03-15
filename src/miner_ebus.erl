@@ -89,7 +89,7 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_SYNC_STATUS), _Msg, State) ->
     end,
     {reply, [string], [Status], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_CONSENSUS), _Msg, State) ->
-    Status = case miner:in_consensus() of
+    Status = case miner_election_mgr:in_consensus() of
         true -> "Elected";
         false -> "Defeated"
     end,

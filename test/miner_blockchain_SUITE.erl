@@ -212,9 +212,11 @@ election_test(Config) ->
                                            true == lists:all(fun(Miner) ->
                                                                      Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 2
+                                                                     Epoch > 3
                                                              end, shuffle(Miners))
-                                  end, 120, timer:seconds(1)),
+                                           %%TODO fixme back to 120s
+                                           %%for slow machines
+                                  end, 40, timer:seconds(1)),
     ok.
 
 election_check([], _Miners, Owner) ->
