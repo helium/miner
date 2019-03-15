@@ -30,39 +30,49 @@
          donefun :: atom(),
          done_called = false :: boolean(),
          sent_conf = false :: boolean(),
-         timer :: undefined | pid()
+         timer :: undefined | pid(),
+         genesis = false :: boolean()
         }).
 
-init([Members, Id, N, F, T, Curve, ThingToSign, {SigMod, SigFun}, {DoneMod, DoneFun}]) when is_binary(ThingToSign), is_atom(SigMod), is_atom(SigFun), is_atom(DoneMod), is_atom(DoneFun) ->
+init([Members, Id, N, F, T, Curve,
+      ThingToSign,
+      Sign,
+      {DoneMod, DoneFun}]) ->
     {G1, G2} = generate(Curve, Members),
     DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}]),
     lager:info("DKG~p started", [Id]),
-    {ok, #state{n=N,
-                id=Id,
-                f=F,
-                t=T,
-                g1=G1, g2=G2,
-                curve=Curve,
-                dkg=DKG,
-                signatures_required=N,
-                artifact=ThingToSign,
-                sigmod=SigMod, sigfun=SigFun,
-                donemod=DoneMod, donefun=DoneFun,
-                members=Members}}.
+    State = case Sign of
+                undefined ->  #state{};
+                {SigMod, SigFun} ->
+                    #state{sigmod = SigMod,
+                           sigfun = SigFun,
+                           genesis = true}
+            end,
+    {ok, State#state{n = N,
+                     id = Id,
+                     f = F,
+                     t = T,
+                     g1 = G1, g2 = G2,
+                     curve = Curve,
+                     dkg = DKG,
+                     signatures_required = N,
+                     artifact = ThingToSign,
+                     donemod = DoneMod, donefun = DoneFun,
+                     members = Members}}.
 
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
-handle_command({status, Ref, Worker}, State) ->
+handle_command(status, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
-    Worker ! {Ref, maps:merge(#{
-                     id => State#state.id,
-                     members => State#state.members,
-                     signatures_required => State#state.signatures_required,
-                     signatures => length(State#state.signatures),
-                     sent_conf => State#state.sent_conf
-                    }, Map)},
-    {reply, ok, ignore};
+    Map1 = maps:merge(#{
+                        id => State#state.id,
+                        members => State#state.members,
+                        signatures_required => State#state.signatures_required,
+                        signatures => length(State#state.signatures),
+                        sent_conf => State#state.sent_conf
+                       }, Map),
+    {reply, Map1, ignore};
 handle_command(timeout, State) ->
     case dkg_hybriddkg:handle_msg(State#state.dkg, State#state.id, timeout) of
         {_DKG, ok} ->
@@ -76,7 +86,8 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                            g1 = G1, g2 = G2,
                                            members = Members,
                                            sigmod = SigMod, sigfun = SigFun,
-                                           donemod = DoneMod, donefun = DoneFun}) ->
+                                           donemod = DoneMod, donefun = DoneFun,
+                                           genesis = Genesis}) ->
     Msg = binary_to_term(BinMsg),
     %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
@@ -139,26 +150,42 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                 {NewDKG, {result, {Shard, VK, VKs}}} ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve), Shard, State#state.id - 1),
-                    %% We need to accumulate `Threshold` count ECDSA signatures over the provided artifact.
-                    %% The artifact is (just once) going to be a genesis block, the other times it will be
-                    %% the evidence an election was run.
-                    {Address, Signature, Threshold} = case SigMod:SigFun(State#state.artifact, PrivateKey) of
-                                                          {ok, A, S, Th} ->
-                                                              {A, S, Th};
-                                                          {ok, A, S} ->
-                                                              %% don't change the signature threshold, leave it as the default of N
-                                                              Th = State#state.signatures_required,
-                                                              {A, S, Th}
-                                                      end,
-
                     case State#state.timer of
                         undefined -> ok;
                         OldTimer ->
                             OldTimer ! cancel
                     end,
+                    case Genesis of
+                        true ->
+                            %% We need to accumulate `Threshold` count ECDSA signatures over
+                            %% the provided artifact.  The artifact is (just once) going to be
+                            %% a genesis block, the other times it will be the evidence an
+                            %% election was run.
+                            {Address, Signature, Threshold} = case SigMod:SigFun(State#state.artifact, PrivateKey) of
+                                                                  {ok, A, S, Th} ->
+                                                                      {A, S, Th};
+                                                                  {ok, A, S} ->
+                                                                      %% don't change the
+                                                                      %% signature threshold,
+                                                                      %% leave it as the
+                                                                      %% default of N
+                                                                      Th = State#state.signatures_required,
+                                                                      {A, S, Th}
+                                                              end,
 
-                    {State#state{dkg=NewDKG, privkey=PrivateKey, signatures_required=Threshold, timer=undefined, signatures=[{Address, Signature}|State#state.signatures]},
-                     [{multicast, term_to_binary({signature, Address, Signature})}]}
+                            {State#state{dkg=NewDKG, privkey=PrivateKey,
+                                         signatures_required=Threshold, timer=undefined,
+                                         signatures=[{Address, Signature}|State#state.signatures]},
+                             [{multicast, term_to_binary({signature, Address, Signature})}]};
+                        false when State#state.done_called == false ->
+                            %% election done functions are different, since we don't care about
+                            %% signatures, which come from hbbft
+                            ok = DoneMod:DoneFun(Members, PrivateKey),
+                            %% stop the handler
+                            {State#state{done_called = true}, [{stop, 60000}]};
+                        false ->
+                            {State, []}
+                    end
             end
     end.
 

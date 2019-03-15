@@ -85,7 +85,7 @@ genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
             OldGenesisTransactions = OldAccounts ++ OldGateways,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-            miner:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
+            miner_election_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]
@@ -114,7 +114,7 @@ genesis_forge(["genesis", "forge", Addrs], [], []) ->
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, undefined, 0, 0) || Addr <- Addresses],
-    miner:initial_dkg(InitialPaymentTransactions ++ AddGwTxns, Addresses),
+    miner_election_mgr:initial_dkg(InitialPaymentTransactions ++ AddGwTxns, Addresses),
     [clique_status:text("ok")];
 genesis_forge([_, _, _], [], []) ->
     usage.

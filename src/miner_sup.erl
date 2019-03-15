@@ -98,11 +98,15 @@ init(_Args) ->
 
     MinerOpts =
         [
-         {curve, Curve},
          {block_time, BlockTime},
-         {batch_size, BatchSize},
          {radio_device, RadioDevice},
          {election_interval, application:get_env(miner, election_interval, 30)}
+        ],
+
+    ElectOpts =
+        [
+         {curve, Curve},
+         {batch_size, BatchSize}
         ],
 
     POCOpts = #{},
@@ -129,6 +133,7 @@ init(_Args) ->
     ChildSpecs =  [
         ?SUP(blockchain_sup, [BlockchainOpts]),
         ?WORKER(miner, [MinerOpts]),
+        ?WORKER(miner_election_mgr, [ElectOpts]),
         ?WORKER(miner_poc_statem, [POCOpts])
     ] ++ EbusServer ++ OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
