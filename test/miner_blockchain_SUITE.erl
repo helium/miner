@@ -51,7 +51,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitAdd = [begin
-                   Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr),
+                   Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr, 1, 1),
                    SignedTx = blockchain_txn_add_gateway_v1:sign(Tx, OwnerSigFun),
                    blockchain_txn_add_gateway_v1:sign_request(SignedTx, GSigFun)
                end
@@ -60,7 +60,7 @@ init_per_testcase(_TestCase, Config0) ->
     Txns = InitialPayment ++ InitAdd,
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
-                           ct_rpc:call(Miner, miner, initial_dkg, [Txns, Addresses])
+                           ct_rpc:call(Miner, miner_election_mgr, initial_dkg, [Txns, Addresses])
                    end, Miners),
     ?assertEqual([ok], lists:usort(DKGResults)),
     Config.
@@ -73,7 +73,7 @@ consensus_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     NumNonConsensusMiners = length(Miners) - NumConsensusMiners,
     ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                              true == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                       end, Miners),
     ?assertEqual(NumConsensusMiners, length(ConsensusMiners)),
     ?assertEqual(NumNonConsensusMiners, length(Miners) - NumConsensusMiners),
@@ -82,7 +82,7 @@ consensus_test(Config) ->
 genesis_load_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                 false == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                          end, Miners),
 
     %% ensure that blockchain is undefined for non_consensus miners
@@ -96,7 +96,7 @@ genesis_load_test(Config) ->
 
     %% get the genesis block from the first Consensus Miner
     ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                true == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                         end, Miners)),
 
     Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
@@ -113,12 +113,12 @@ growth_test(Config) ->
 
     %% check consensus miners
     ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                              true == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                       end, Miners),
 
     %% check non consensus miners
     NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                 false == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                          end, Miners),
 
     %% get the first consensus miner
@@ -159,12 +159,12 @@ election_test(Config) ->
 
     %% check consensus miners
     ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                              true == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                       end, Miners),
 
     %% check non consensus miners
     NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                 false == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                          end, Miners),
 
     %% get the first consensus miner
@@ -210,10 +210,9 @@ election_test(Config) ->
     %% one election can happen.
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-                                                                     ct:pal("miner ~p height ~p", [Miner, Height]),
-                                                                     Height > 16
+                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                                     Epoch > 2
                                                              end, shuffle(Miners))
                                   end, 120, timer:seconds(1)),
     ok.
@@ -223,7 +222,7 @@ election_check([], _Miners, Owner) ->
 election_check(NotSeen0, Miners, Owner) ->
     timer:sleep(500),
     ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                              true == ct_rpc:call(Miner, miner_election_mgr, in_consensus, [])
                                       end, Miners),
     NotSeen = NotSeen0 -- ConsensusMiners,
     Owner ! {not_seen, NotSeen},

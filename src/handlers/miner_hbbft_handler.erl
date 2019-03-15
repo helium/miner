@@ -9,21 +9,23 @@
 
 -export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
 
--record(state, {
-          n :: non_neg_integer(),
-          f :: non_neg_integer(),
-          id :: non_neg_integer(),
-          hbbft :: hbbft:hbbft_data(),
-          sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
-          seq = 0,
-          deferred = [],
-          signatures = [],
-          signatures_required = 0,
-          artifact :: undefined | binary(),
-          members :: [libp2p_crypto:pubkey_bin()],
-          ledger :: undefined | blockchain_ledger_v1:ledger(),
-          chain :: undefined | blockchain:blockchain()
-         }).
+-record(state,
+        {
+         n :: non_neg_integer(),
+         f :: non_neg_integer(),
+         id :: non_neg_integer(),
+         hbbft :: hbbft:hbbft_data(),
+         sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+         seq = 0,
+         deferred = [],
+         signatures = [],
+         signatures_required = 0,
+         artifact :: undefined | binary(),
+         members :: [libp2p_crypto:pubkey_bin()],
+         ledger :: undefined | blockchain_ledger_v1:ledger(),
+         chain :: undefined | blockchain:blockchain(),
+         signed = 0 :: pos_integer()
+        }).
 
 stamp(Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
@@ -67,9 +69,14 @@ handle_command(start_acs, State) ->
     end;
 handle_command(get_buf, State) ->
     {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
+handle_command({set_buf, Buf}, State) ->
+    {reply, ok, [], State#state{hbbft = hbbft:buf(Buf, State#state.hbbft)}};
 handle_command(stop, State) ->
     %% TODO add ignore support for this four tuple to use ignore
     {reply, ok, [{stop, timer:minutes(5)}], State};
+handle_command({stop, Timeout}, State) ->
+    %% TODO add ignore support for this four tuple to use ignore
+    {reply, ok, [{stop, Timeout}], State};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
@@ -138,13 +145,16 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                  (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
                 true ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
-                    case enough_signatures(NewState) of
-                        {ok, Signatures} ->
-                            ok = miner:signed_block(Signatures, State#state.artifact);
-                        false ->
-                            false
-                    end,
-                    {NewState, []};
+                    NewState1 =
+                        case enough_signatures(NewState) of
+                            {ok, Signatures} when Round > NewState#state.signed ->
+                                %% no point in doing this more than once
+                                ok = miner:signed_block(Signatures, State#state.artifact),
+                                NewState#state{signed = Round};
+                            _ ->
+                                NewState
+                        end,
+                    {NewState1, []};
                 false when R > Round ->
                     defer;
                 false ->
