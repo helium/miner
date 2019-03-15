@@ -195,56 +195,14 @@ handle_info(connect, #state{host=Host, port=Port}=State) ->
              _ = reconnect(),
             {noreply, State}
     end;
-handle_info({_, Socket, <<?READ_RADIO_PACKET,
-                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
-                             1:8/integer, %% onions are type 1 broadcast?
-                             IV:12/binary,
-                             OnionCompactKey:33/binary,
-                             Tag:4/binary,
-                             CipherText/binary>>},
-            #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
-handle_info({_, Socket, <<?READ_RADIO_PACKET_EXTENDED,
-                             _RSSI:8/integer-signed,
-                             _Channel:8/integer-unsigned,
-                             CRCStatus:8/integer,
-                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
-                             1:8/integer, %% onions are type 1 broadcast?
-                             IV:12/binary,
-                             OnionCompactKey:33/binary,
-                             Tag:4/binary,
-                             CipherText/binary>>},
-            #state{ecdh_fun=ECDHFun, socket=Socket}=State) when CRCStatus == 1 ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
-handle_info({_, Socket, <<?READ_RADIO_PACKET, _/binary>> = Packet}, #state{udp_socket=UDP}=State) ->
-    %% some other packet, just forward it to gw-demo for now
-    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
-handle_info({_, Socket, <<?READ_RADIO_PACKET_EXTENDED, _/binary>> = Packet}, #state{udp_socket=UDP}=State) ->
-    %% some other packet, just forward it to gw-demo for now
-    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
-
-%% handle ack from radio
-handle_info({tcp, Socket, <<?WRITE_RADIO_PACKET_ACK>>}, State) ->
-    lager:info("received ACK from Radio"),
-    case State#state.sender of
-        undefined -> ok;
-        From ->
-            gen_server:reply(From, ok)
-    end,
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State#state{sender=undefined}};
 handle_info({tcp, Socket, Packet}, State) ->
-    lager:warning("got unhandled TCP packet ~p", [Packet]),
+    NewState = handle_packet(Packet, State),
     ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
+    {noreply, NewState};
+handle_info({udp, Socket, _Host, _Port, Packet}, State) ->
+    NewState = handle_packet(Packet, State),
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, NewState};
 handle_info({tcp_closed, _Socket}, State) ->
     lager:warning("tcp_closed"),
     _ = reconnect(),
@@ -319,3 +277,48 @@ construct_onion([{Data, PubKey} | Tail], OnionECDH, OnionCompactKey, IV) ->
                                              IV, {<<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary>>,
                                                   <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
     <<Tag:4/binary, CipherText/binary>>.
+
+
+handle_packet(<<?READ_RADIO_PACKET,
+                0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
+                1:8/integer, %% onions are type 1 broadcast?
+                IV:12/binary,
+                OnionCompactKey:33/binary,
+                Tag:4/binary,
+                CipherText/binary>>,
+            #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
+    State;
+handle_packet(<<?READ_RADIO_PACKET_EXTENDED,
+                             _RSSI:8/integer-signed,
+                             _Channel:8/integer-unsigned,
+                             CRCStatus:8/integer,
+                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
+                             1:8/integer, %% onions are type 1 broadcast?
+                             IV:12/binary,
+                             OnionCompactKey:33/binary,
+                             Tag:4/binary,
+                             CipherText/binary>>,
+              #state{ecdh_fun=ECDHFun, socket=Socket}=State) when CRCStatus == 1 ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket),
+    State;
+handle_packet(<<?READ_RADIO_PACKET, _/binary>> = Packet, #state{udp_socket=UDP}=State) ->
+    %% some other packet, just forward it to gw-demo for now
+    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
+    State;
+handle_packet(<<?READ_RADIO_PACKET_EXTENDED, _/binary>> = Packet, #state{udp_socket=UDP}=State) ->
+    %% some other packet, just forward it to gw-demo for now
+    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
+    State;
+handle_packet(<<?WRITE_RADIO_PACKET_ACK>>, State) ->
+    lager:info("received ACK from Radio"),
+    case State#state.sender of
+        undefined -> ok;
+        From ->
+            gen_server:reply(From, ok)
+    end,
+    State#state{sender=undefined};
+handle_packet(Packet, State) ->
+    lager:warning("unknown packet ~p", [Packet]),
+    State.
+
