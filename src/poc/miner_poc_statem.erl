@@ -148,14 +148,23 @@ requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Bloc
             Secret = libp2p_crypto:keys_to_bin(Keys),
             #{secret := PvtOnionKey, public := OnionCompactKey} = Keys,
             Tx = blockchain_txn_poc_request_v1:new(
-                Address, crypto:hash(sha256, Secret),
+                Address,
+                crypto:hash(sha256, Secret),
                 crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
             ),
             {ok, _, SigFun} = blockchain_swarm:keys(),
             SignedTx = blockchain_txn:sign(Tx, SigFun),
-            ok = blockchain_worker:submit_txn(SignedTx),
-            lager:info("submitted poc request ~p", [Tx]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
+            lager:info("submitting poc request ~p", [Tx]),
+            % Self = self(),
+            Result = blockchain_worker:submit_txn(SignedTx, fun(R) -> R end),
+            case Result of
+                ok ->
+                    lager:info("submitted poc request"),
+                    {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}};
+                {error, Error} ->
+                    lager:error("failed to submit PoC request ~p, retrying on next block", [Error]),
+                    {keep_state, Data}
+            end
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).

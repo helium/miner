@@ -113,6 +113,12 @@ basic(_Config) ->
         ok = blockchain:add_block(B, Chain),
         ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true})
     end),
+    meck:expect(blockchain_worker, submit_txn, fun(Txn, Callback) ->
+        B = create_block(ConsensusMembers, [Txn]),
+        ok = blockchain:add_block(B, Chain),
+        ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
+        Callback(ok)
+    end),
 
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
