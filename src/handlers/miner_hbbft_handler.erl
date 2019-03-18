@@ -50,7 +50,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain, ElectionEpoch, EpochStart, Round,
                 signatures_required = N - F,
                 hbbft = HBBFT,
                 ledger=Ledger,
-                chain=Chain
+                chain=Chain,
                 election_epoch=ElectionEpoch,
                 epoch_start=EpochStart}}.
 

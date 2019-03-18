@@ -84,7 +84,7 @@ genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
             OldGenesisTransactions = OldAccounts ++ OldGateways,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-            miner_election_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
+            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]

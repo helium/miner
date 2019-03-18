@@ -426,7 +426,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             false ->
                                 lager:info("reg round"),
                                 NextElection = Start + Interval,
-                                miner_election_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+                                miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,
@@ -499,7 +499,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                         false ->
                             lager:info("nc reg round"),
                             NextElection = Start + Interval,
-                            miner_election_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+                            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
                             {noreply, signal_syncing_status(Sync, State#state{current_height = Height})};
                         {true, true} ->
                             %% it's possible that waiting hasn't been set, I'm not entirely
@@ -558,10 +558,10 @@ handle_info(timeout, #state{election_interval = Interval} = State) ->
             {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
             NextElection = EpochStart + Interval,
             {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
-            Hash = blockchain_block:hash(ElectionBlock),
-            miner_election_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+            Hash = blockchain_block:hash_block(ElectionBlock),
+            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
             %% potentially we're also part of a consensus_group
-            miner_election_mgr:maybe_start_consensus_group(Epoch, EpochStart),
+            miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
             {noreply, State#state{blockchain = Chain, election_epoch = Epoch }}
     end;
 handle_info(_Msg, State) ->

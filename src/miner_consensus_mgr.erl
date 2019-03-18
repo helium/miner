@@ -1,4 +1,4 @@
--module(miner_election_mgr).
+-module(miner_consensus_mgr).
 
 -behaviour(gen_server).
 
