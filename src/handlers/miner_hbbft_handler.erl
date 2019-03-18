@@ -24,7 +24,9 @@
          members :: [libp2p_crypto:pubkey_bin()],
          ledger :: undefined | blockchain_ledger_v1:ledger(),
          chain :: undefined | blockchain:blockchain(),
-         signed = 0 :: pos_integer()
+         signed = 0 :: pos_integer(),
+         election_epoch = 0 :: pos_integer(),
+         epoch_start = 0 :: pos_integer()
         }).
 
 stamp(Chain) ->
@@ -32,24 +34,25 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
-init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
+init([Members, Id, N, F, BatchSize, SK, Chain, ElectionEpoch, EpochStart]) ->
+    init([Members, Id, N, F, BatchSize, SK, Chain, ElectionEpoch, EpochStart, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, ElectionEpoch, EpochStart, Round, Buf]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
                        {?MODULE, stamp, [Chain]}, Round, Buf),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
 
     lager:info("HBBFT~p started~n", [Id]),
-    {ok, #state{n=N,
-                id=Id - 1,
-                sk=SK,
-                f=F,
-                members=Members,
-                signatures_required=N - F,
-                hbbft=HBBFT,
+    {ok, #state{n = N,
+                id = Id - 1,
+                sk = SK,
+                f = F,
+                members = Members,
+                signatures_required = N - F,
+                hbbft = HBBFT,
                 ledger=Ledger,
                 chain=Chain
-               }}.
+                election_epoch=ElectionEpoch,
+                epoch_start=EpochStart}}.
 
 handle_command({unconditional_start, Txns}, State) ->
     case hbbft:unconditional_start(Txns, State#state.hbbft) of
@@ -134,7 +137,9 @@ handle_command(Txn, State=#state{ledger=Ledger, chain=Chain, hbbft=HBBFT}) ->
             {reply, Error, ignore}
     end.
 
-handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
+handle_message(BinMsg, Index, State=#state{hbbft = HBBFT,
+                                           election_epoch = ElectionEpoch,
+                                           epoch_start = EpochStart}) ->
     Msg = binary_to_term(BinMsg),
     %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
@@ -183,7 +188,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
                     NewRound = hbbft:round(NewHBBFT),
-                    case miner:create_block(Stamps, Txns, NewRound) of
+                    case miner:create_block(Stamps, Txns, NewRound, ElectionEpoch, EpochStart) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
                             BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],

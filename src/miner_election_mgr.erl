@@ -9,7 +9,8 @@
          start_link/1,
 
          initial_dkg/2,
-         start_election/2,
+         maybe_start_election/4,
+         maybe_start_consensus_group/2,
 
          %% internal
          genesis_block_done/4,
@@ -34,6 +35,7 @@
          dkg_await :: undefined | {reference(), term()},
          hash :: undefined | binary(),
          consensus_pos :: undefined | pos_integer(),
+         election_epoch = 1 :: pos_integer(),
          initial_height :: undefined | pos_integer(),
          curve :: atom(),
          batch_size :: integer(),
@@ -68,8 +70,13 @@ in_consensus() ->
 initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
-start_election(Hash, Height) ->
-    gen_server:call(?MODULE, {start_election, Hash, Height}, infinity).
+maybe_start_election(_Hash, Height, NextElection, _ElectionEpoch) when Height =/= NextElection ->
+    ok;
+maybe_start_election(Hash, Height, _, ElectionEpoch) ->
+    gen_server:call(?MODULE, {start_election, Hash, Height, ElectionEpoch}, infinity).
+
+maybe_start_consensus_group(StartEpoch, StartHeight) ->
+    gen_server:call(?MODULE, {maybe_start_consensus_group, StartEpoch, StartHeight}, infinity).
 
 -spec sign_genesis_block(GenesisBlock :: binary(), PrivKey :: tpke_privkey:privkey()) ->
                                 {ok, libp2p_crypto:pubkey_bin(), binary()}.
@@ -111,7 +118,9 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey}, _From,
-            #state{batch_size = BatchSize} = State) ->
+            #state{batch_size = BatchSize,
+                   election_epoch = ElectionEpoch,
+                   initial_height = EpochStart} = State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -132,6 +141,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       BatchSize,
                                       PrivKey,
                                       Chain,
+                                      ElectionEpoch,
+                                      EpochStart,
                                       1,
                                       []]],
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus_1",
@@ -142,6 +153,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{batch_size = BatchSize,
+                           election_epoch = Epoch,
                            initial_height = Height,
                            tries = Tries}) ->
     lager:info("election done at ~p ~p", [Height, PrivKey]),
@@ -164,6 +176,8 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                       BatchSize,
                                       PrivKey,
                                       Chain,
+                                      Epoch,
+                                      Height,
                                       1, % gets set later
                                       []]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
@@ -174,10 +188,50 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     ok = miner:handoff_consensus(Group),
     {reply, ok, State#state{current_dkg = undefined}};
+handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
+            State = #state{batch_size = BatchSize}) ->
+    lager:info("try cold start consensus group at ~p", [StartHeight]),
+
+    N = blockchain_worker:num_consensus_members(),
+    F = ((N - 1) div 3),
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    case blockchain_ledger_v1:consensus_members(Ledger) of
+        {error, _} ->
+            {reply, ok, State};
+        {ok, ConsensusAddrs} ->
+            case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
+                true ->
+                    lager:info("restoring consensus group"),
+                    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
+                    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                      Pos,
+                                                      N,
+                                                      F,
+                                                      BatchSize,
+                                                      undefined,
+                                                      Chain,
+                                                      StartEpoch,
+                                                      StartHeight]],
+                    %% while this won't reflect the actual height, it has to be deterministic
+                    Name = "consensus_" ++ integer_to_list(StartHeight),
+                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                         Name,
+                                                         libp2p_group_relcast, GroupArg),
+                    %% this isn't super safe?  must make sure that a prior group wasn't running
+                    ok = miner:handoff_consensus(Group),
+                    {reply, ok, State#state{consensus_pos = Pos,
+                                            election_epoch = StartEpoch,
+                                            initial_height = StartHeight}};
+                false ->
+                    {reply, ok, State}
+            end
+    end;
 handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
     {reply, Group, State};
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
     State = State0#state{initial_height = 1,
+                         election_epoch = 1,
                          tries = 0},
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
@@ -187,10 +241,11 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
-handle_call({start_election, Hash, Height}, _From,
+handle_call({start_election, Hash, Height, ElectionEpoch}, _From,
             #state{current_dkg = undefined} = State0) ->
     lager:info("election started at ~p", [Height]),
     State = State0#state{initial_height = Height,
+                         election_epoch = ElectionEpoch,
                          tries = 0},
     State1 = initiate_election(Hash, Height, State),
     {reply, State1#state.current_dkg /= undefined, State1};
@@ -244,7 +299,7 @@ initiate_election(Hash, Height, State) ->
                        term_to_binary(ConsensusAddrs)
                end,
     {_, State1} = do_dkg(OrderedGateways, BlockFun, {?MODULE, sign_genesis_block},
-                         election_done, State),
+                         election_done, State#state{initial_height = Height}),
     State1.
 
 do_initial_dkg(GenesisTransactions, Addrs, State) ->
