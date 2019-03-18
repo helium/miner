@@ -66,7 +66,7 @@ dkg_status_usage() ->
 
 dkg_status(["dkg", "status"], [], []) ->
     Status =
-        try miner_election_mgr:dkg_status() of
+        try miner_consensus_mgr:dkg_status() of
             Stat -> Stat
         catch _:_ ->
                 not_running
