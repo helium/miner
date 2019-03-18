@@ -118,52 +118,53 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             self() ! Msg,
             {keep_state,  Data#data{blockchain=Chain}}
     end;
-requesting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
+requesting(info, {blockchain_event, {add_block, Hash, false}}, #data{blockchain=Blockchain,
                                                                  last_challenge=LastChallenge0,
                                                                  address=Address,
                                                                  delay=Delay}=Data) ->
-    {ok, CurrHeight} = blockchain:height(Blockchain),
-    LastChallenge1 = case LastChallenge0 < CurrHeight of
-        false ->
-            LastChallenge0;
-        true ->
-            Ledger = blockchain:ledger(Blockchain),
-            case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-                {error, _} ->
+    Ledger = blockchain:ledger(Blockchain),
+    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+        {error, Error} ->
+            lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
+            {keep_state, Data};
+        {ok, Gw} ->
+            {ok, CurrHeight} = blockchain:height(Blockchain),
+            LastChallenge1 = case LastChallenge0 < CurrHeight of
+                false ->
                     LastChallenge0;
-                {ok, Gw} ->
+                true ->
                     case blockchain_ledger_gateway_v1:last_poc_challenge(Gw) of
                         undefined -> LastChallenge0;
                         Other -> Other
                     end
-            end
-    end,
-    lager:info("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastChallenge1]),
-    case (CurrHeight - LastChallenge1) > Delay of
-        false ->
-            lager:info("last PoC request was ~p ago, waiting", [CurrHeight - LastChallenge1]),
-            {keep_state, Data};
-        true ->
-            Keys = libp2p_crypto:generate_keys(ecc_compact),
-            Secret = libp2p_crypto:keys_to_bin(Keys),
-            #{secret := PvtOnionKey, public := OnionCompactKey} = Keys,
-            Tx = blockchain_txn_poc_request_v1:new(
-                Address,
-                crypto:hash(sha256, Secret),
-                crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
-            ),
-            {ok, _, SigFun} = blockchain_swarm:keys(),
-            SignedTx = blockchain_txn:sign(Tx, SigFun),
-            lager:info("submitting poc request ~p", [Tx]),
-            % Self = self(),
-            Result = blockchain_worker:submit_txn(SignedTx, fun(R) -> R end),
-            case Result of
-                ok ->
-                    lager:info("submitted poc request"),
-                    {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}};
-                {error, Error} ->
-                    lager:error("failed to submit PoC request ~p, retrying on next block", [Error]),
-                    {keep_state, Data}
+            end,
+            lager:info("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastChallenge1]),
+            case (CurrHeight - LastChallenge1) > Delay of
+                false ->
+                    lager:info("last PoC request was ~p ago, waiting", [CurrHeight - LastChallenge1]),
+                    {keep_state, Data};
+                true ->
+                    Keys = libp2p_crypto:generate_keys(ecc_compact),
+                    Secret = libp2p_crypto:keys_to_bin(Keys),
+                    #{secret := PvtOnionKey, public := OnionCompactKey} = Keys,
+                    Tx = blockchain_txn_poc_request_v1:new(
+                        Address,
+                        crypto:hash(sha256, Secret),
+                        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+                    ),
+                    {ok, _, SigFun} = blockchain_swarm:keys(),
+                    SignedTx = blockchain_txn:sign(Tx, SigFun),
+                    lager:info("submitting poc request ~p", [Tx]),
+                    % Self = self(),
+                    Result = blockchain_worker:submit_txn(SignedTx, fun(R) -> R end),
+                    case Result of
+                        ok ->
+                            lager:info("submitted poc request"),
+                            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}};
+                        {error, Error} ->
+                            lager:error("failed to submit PoC request ~p, retrying on next block", [Error]),
+                            {keep_state, Data}
+                    end
             end
     end;
 requesting(EventType, EventContent, Data) ->
