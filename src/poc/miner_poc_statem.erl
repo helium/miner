@@ -119,9 +119,9 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             {keep_state,  Data#data{blockchain=Chain}}
     end;
 requesting(info, {blockchain_event, {add_block, Hash, false}}, #data{blockchain=Blockchain,
-                                                                 last_challenge=LastChallenge0,
-                                                                 address=Address,
-                                                                 delay=Delay}=Data) ->
+                                                                     last_challenge=LastChallenge0,
+                                                                     address=Address,
+                                                                     delay=Delay}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, Error} ->
@@ -155,14 +155,17 @@ requesting(info, {blockchain_event, {add_block, Hash, false}}, #data{blockchain=
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     SignedTx = blockchain_txn:sign(Tx, SigFun),
                     lager:info("submitting poc request ~p", [Tx]),
-                    % Self = self(),
-                    Result = blockchain_worker:submit_txn(SignedTx, fun(R) -> R end),
-                    case Result of
-                        ok ->
+                    Self = self(),
+                    _ = blockchain_worker:submit_txn(SignedTx, fun(R) -> Self ! {?MODULE, R} end),
+                    receive
+                        {?MODULE, ok} ->
                             lager:info("submitted poc request"),
                             {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}};
-                        {error, Error} ->
+                        {?MODULE, {error, Error}} ->
                             lager:error("failed to submit PoC request ~p, retrying on next block", [Error]),
+                            {keep_state, Data}
+                    after 10000 ->
+                        lager:error("failed to submit PoC request timeout, retrying on next block"),
                             {keep_state, Data}
                     end
             end
