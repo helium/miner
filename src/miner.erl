@@ -317,7 +317,7 @@ handle_call({handoff_consensus, NewConsensusGroup}, _From,
     case Waiting of
         Pid when is_pid(Pid) ->
             %% stale, kill it
-            libp2p_group_relcast:handle_command(Pid, {stop, 0});
+            catch libp2p_group_relcast:handle_command(Pid, {stop, 0});
         _ -> ok
     end,
     %% do we need to wait on this until the old group is gone?  assuming this is safe for now
@@ -462,7 +462,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             {true, false} ->
                                 lager:info("leave"),
 
-                                libp2p_group_relcast:handle_command(ConsensusGroup, stop),
+                                catch libp2p_group_relcast:handle_command(ConsensusGroup, stop),
 
                                 State#state{block_timer = undefined,
                                             handoff_waiting = undefined,
@@ -585,10 +585,11 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
             {ok, Block} = blockchain:get_block(Height, Chain),
             {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
             NextElection = EpochStart + Interval,
-            {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
-            Hash = blockchain_block:hash_block(ElectionBlock),
+            lager:info("ElectionBlock = ~p + ~p  = ~p", [NextElection, EpochStart, NextElection]),
             case Height > NextElection of
                 true ->
+                    {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
+                    Hash = blockchain_block:hash_block(ElectionBlock),
                     miner_consensus_mgr:start_election(Hash, NextElection, Epoch + 1);
                 false ->
                     ok
