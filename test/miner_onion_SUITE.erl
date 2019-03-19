@@ -40,32 +40,88 @@ basic(_Config) ->
     {ok, Port} = inet:port(LSock),
 
     #{secret := PrivateKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivateKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivateKey3, public := PubKey3} = libp2p_crypto:generate_keys(ecc_compact),
 
     meck:new(blockchain_swarm, [passthrough]),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),
 
-    {ok, _Server} = miner_onion_server:start_link(#{
+    {ok, Server} = miner_onion_server:start_link(#{
         radio_host => "127.0.0.1",
         radio_port => Port,
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
     {ok, Sock} = gen_tcp:accept(LSock),
 
-    Data = <<1, 2, 3>>,
+    Data1 = <<1, 2, 3>>,
+    Data2 = <<4, 5, 6>>,
+    Data3 = <<7, 8, 9>>,
     #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
-    Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, [{Data, libp2p_crypto:pubkey_to_bin(PubKey)}]),
+    Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, [{Data1, libp2p_crypto:pubkey_to_bin(PubKey)},
+                                                                                                           {Data2, libp2p_crypto:pubkey_to_bin(PubKey2)},
+                                                                                                           {Data3, libp2p_crypto:pubkey_to_bin(PubKey3)}]),
+    ct:pal("constructed onion ~p", [Onion]),
+
+    meck:new(miner_onion_server, [passthrough]),
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0) ->
+        ?assertEqual(Data1, Data0),
+        ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
+    end),
+
+    ok = gen_tcp:send(Sock, <<16#81, 0:32/integer-unsigned-little, 1:8/integer, Onion/binary>>),
+    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, X/binary>>} = gen_tcp:recv(Sock, 0),
+
+    
+    timer:sleep(2000),
+    %% check that the packet size is the same
+    % ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(X)), for later
+    gen_server:stop(Server),
+    ct:pal("~p~n", [X]),
+
+    ?assert(meck:validate(miner_onion_server)),
+    meck:unload(miner_onion_server),
+    ?assert(meck:validate(blockchain_swarm)),
+    meck:unload(blockchain_swarm),
+
+    meck:new(blockchain_swarm, [passthrough]),
+    meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey2) end),
+
+    Parent = self(),
 
     meck:new(miner_onion_server, [passthrough]),
     meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0) ->
-        ?assertEqual(Data, Data0),
-        ?assertEqual(crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)), OnionCompactKey0),
-        ok
+        Passed = Data2 == Data0 andalso libp2p_crypto:pubkey_to_bin(OnionCompactKey) == OnionCompactKey0,
+        Parent ! {passed, Passed}
     end),
 
-    ok = gen_tcp:send(Sock, <<16#81, Onion/binary>>),
-    {ok, _} = gen_tcp:recv(Sock, 0),
+    {ok, _Server} = miner_onion_server:start_link(#{
+        radio_host => "127.0.0.1",
+        radio_port => Port,
+        ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey2)
+    }),
+    {ok, Sock2} = gen_tcp:accept(LSock),
 
-    ?assert(meck:validate(miner_onion_server)),
+    %% check we can't decrypt the original
+    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, Onion/binary>>),
+    ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
+
+    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, X/binary>>),
+    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, Y/binary>>} = gen_tcp:recv(Sock2, 0, 2000),
+
+    %% check we can't decrypt the next layer
+    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, Y/binary>>),
+    ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
+
+    % ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)), for later
+
+    receive
+        {passed, true} -> ok;
+        {passed, false} -> ct:fail("wrong data")
+    after 2000 ->
+        ct:fail("timeout")
+    end,
+
+    % ?assert(meck:validate(miner_onion_server)), we won't do this because of error timeout
     meck:unload(miner_onion_server),
     ?assert(meck:validate(blockchain_swarm)),
     meck:unload(blockchain_swarm),

@@ -113,6 +113,12 @@ basic(_Config) ->
         ok = blockchain:add_block(B, Chain),
         ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true})
     end),
+    meck:expect(blockchain_worker, submit_txn, fun(Txn, Callback) ->
+        B = create_block(ConsensusMembers, [Txn]),
+        ok = blockchain:add_block(B, Chain),
+        ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
+        Callback(ok)
+    end),
 
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
@@ -141,11 +147,11 @@ basic(_Config) ->
     % Capture all trace messages from statem
     Msgs = loop([]),
 
-    % ct:pal("MARKER ~p~n", [Msgs]),
+    ct:pal("MARKER ~p~n", [Msgs]),
     % ?assert(false),
 
     % First few are blocks
-    {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
+    {AddBlockMsgs, Msgs1} = lists:split(3, Msgs),
     lists:foreach(
         fun(Msg) ->
             ?assertMatch({blockchain_event, {add_block, _, _}}, Msg)
@@ -203,12 +209,12 @@ startup(_Config) ->
 
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Send fake notify
     ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
@@ -237,7 +243,7 @@ startup(_Config) ->
     ?assertEqual({ok, 1}, blockchain:height(Chain)),
 
     % Now this should match the chain
-    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
     ok.
 
 %% ------------------------------------------------------------------
@@ -269,7 +275,7 @@ send_receipts(LatLongs) ->
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             {Mega, Sec, Micro} = os:timestamp(),
             Timestamp = Mega * 1000000 * 1000000 + Sec * 1000000 + Micro,
-            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, <<>>),
+            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, <<>>),
             SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
             miner_poc_statem:receipt(SignedReceipt)
         end,

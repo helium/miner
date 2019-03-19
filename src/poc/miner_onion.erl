@@ -23,7 +23,7 @@ dial_framed_stream(Swarm, Address, Args) ->
         Swarm,
         Address,
         ?ONION_VERSION,
-        libp2p_onion_handler,
+        miner_onion_handler,
         Args
     ).
 
@@ -37,5 +37,5 @@ add_stream_handler(Swarm) ->
     libp2p_swarm:add_stream_handler(
         TID,
         ?ONION_VERSION,
-        {libp2p_framed_stream, server, [libp2p_onion_handler, self(), TID]}
+        {libp2p_framed_stream, server, [miner_onion_handler, self(), TID]}
     ).
