@@ -133,7 +133,7 @@ init(_Args) ->
     ChildSpecs =  [
         ?SUP(blockchain_sup, [BlockchainOpts]),
         ?WORKER(miner, [MinerOpts]),
-        ?WORKER(miner_election_mgr, [ElectOpts]),
+        ?WORKER(miner_consensus_mgr, [ElectOpts]),
         ?WORKER(miner_poc_statem, [POCOpts])
     ] ++ EbusServer ++ OnionServer,
     {ok, {SupFlags, ChildSpecs}}.

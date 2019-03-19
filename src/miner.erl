@@ -51,7 +51,7 @@
     current_dkg = undefined :: undefined | pos_integer(),
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid(),
-    election_epoch = 1 :: pos_integer()
+    election_epoch = 0 :: pos_integer()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -284,13 +284,13 @@ init(Args) ->
     %% TODO: move this into the the chain
     Interval = proplists:get_value(election_interval, Args, 30),
     ok = blockchain_event:add_handler(self()),
-
+ 
     %% TODO THIS SHOULD BE 120s
     ColdStart = application:get_env(miner, cold_start_timeout_secs, 15),
-
+    erlang:send_after(timer:seconds(ColdStart), self(), cold_start_timeout),
+    lager:info("STARTING UP MINER"),
     {ok, #state{block_time=BlockTime,
-                election_interval = Interval},
-     timer:seconds(ColdStart)}.  %% backup timer for cold stars
+                election_interval = Interval}}.
 
 handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
@@ -337,6 +337,7 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     {reply, ok, State#state{consensus_group = ConsensusGroup,
                             blockchain = Chain,
                             consensus_start = 1,
+                            election_epoch = 1,
                             block_timer = Ref}};
 handle_call(election_epoch, _From, State) ->
     {reply, State#state.election_epoch, State};
@@ -480,19 +481,45 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
         end,
     {noreply, signal_syncing_status(Sync, NewState)};
 handle_info({blockchain_event, {add_block, Hash, Sync}},
-            State=#state{consensus_group = ConsensusGroup,
-                         election_interval = Interval,
-                         current_height = CurrHeight,
-                         consensus_start = Start,
-                         handoff_waiting = Waiting,
-                         election_epoch = Epoch,
-                         blockchain = Chain}) when ConsensusGroup == undefined andalso
-                                                   Chain /= undefined ->
-    lager:info("non-consensus block @ ~p ~p", [Start, Epoch]),
+            State0 = #state{consensus_group = ConsensusGroup,
+                            election_interval = Interval,
+                            current_height = CurrHeight,
+                            consensus_start = Start,
+                            handoff_waiting = Waiting,
+                            election_epoch = Epoch,
+                            blockchain = Chain}) when ConsensusGroup == undefined andalso
+                                                      Chain /= undefined ->
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
-            case blockchain_block:height(Block) of
-                Height when Height > CurrHeight ->
+            Height = blockchain_block:height(Block),
+            lager:info("non-consensus block ~p @ ~p ~p", [Height, Start, Epoch]),
+            %% if none of this stuff is set and we're no longer
+            %% syncing, we might need to start a consensus group
+            Epoch1 =
+                case Sync == false andalso Epoch == 0 of
+                    true ->
+                        lager:info("attempting to restore consensus group"),
+                        {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
+                        miner_consensus_mgr:maybe_start_consensus_group(ElectionEpoch, EpochStart),
+                        %%{ok, Top} = blockchain:height(Chain),
+                        case Height of
+                            %% it's possible that we've already processed the block that would
+                            %% have started the election, so try this on restore
+                            Ht when Ht > EpochStart + Interval ->
+                                {ok, ElectionBlock} = blockchain:get_block(EpochStart, Chain),
+                                EHash = blockchain_block:hash_block(ElectionBlock),
+                                miner_consensus_mgr:start_election(EHash, EpochStart + Interval,
+                                                                   ElectionEpoch+ 1);
+                            _ ->
+                                ok
+                        end,
+                        ElectionEpoch;
+                    false ->
+                        Epoch
+                end,
+            State = State0#state{election_epoch = Epoch1},
+            case Height of
+                H when H > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
                     Txns = blockchain_block:transactions(Block),
                     case has_new_group(Txns) of
@@ -520,7 +547,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                          election_epoch = State#state.election_epoch + 1,
                                          current_height = Height,
                                          consensus_start = Height}};
-                        %% we're not a member of the new group, we can shut down
+                        %% we're not a member of the new group, we can stay down
                         {true, false} ->
                             lager:info("nc stay out"),
 
@@ -538,31 +565,39 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
             end;
         {error, Reason} ->
             lager:error("Error, Reason: ~p", [Reason]),
-            {noreply, signal_syncing_status(Sync, State)}
+            {noreply, signal_syncing_status(Sync, State0)}
     end;
 handle_info({blockchain_event, {add_block, _Hash, Sync}},
             State=#state{blockchain = Chain}) when Chain == undefined ->
     {noreply, signal_syncing_status(Sync, State#state{blockchain = blockchain_worker:blockchain()})};
-handle_info(timeout, #state{election_interval = Interval} = State) ->
+handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
     %% here we assume that we've gotten no input for some large number
-    %% of seconds, so we go into cold start mode, assuming that the
-    %% last block that we know about is actually the last block, and
-    %% that the whole network may be waiting.
+    %% of seconds after start, so we go into cold start mode, assuming
+    %% that the last block that we know about is actually the last
+    %% block, and that the whole network may be waiting.
     Chain = blockchain_worker:blockchain(),
-    case Chain of
-        undefined ->
+    case Chain == undefined orelse State#state.election_epoch /= 0 of
+        true ->
             {noreply, State};
-        Chain ->
+        false ->
+            lager:info("cold start blockchain"),
             {ok, Height} = blockchain:height(Chain),
             {ok, Block} = blockchain:get_block(Height, Chain),
             {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
             NextElection = EpochStart + Interval,
             {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
             Hash = blockchain_block:hash_block(ElectionBlock),
-            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+            case Height > NextElection of
+                true ->
+                    miner_consensus_mgr:start_election(Hash, NextElection, Epoch + 1);
+                false ->
+                    ok
+            end,
             %% potentially we're also part of a consensus_group
-            miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
-            {noreply, State#state{blockchain = Chain, election_epoch = Epoch }}
+            {ok, Group} = miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
+            {noreply, State#state{blockchain = Chain,
+                                  election_epoch = Epoch,
+                                  consensus_group = Group}}
     end;
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
@@ -640,9 +675,15 @@ has_new_group(Txns) ->
         [Txn] ->
             lager:info("has new group, ~p ~p", [MyAddress, blockchain_txn_consensus_group_v1:members(Txn)]),
             {true, lists:member(MyAddress, blockchain_txn_consensus_group_v1:members(Txn))};
-        %% I suspect that this doesn't properly handle the case where two of these get into a
-        %% single transaction, but hopefully that isn't possible and would likely be a chain
-        %% fork anyway?
-        _ ->
+        [_|_] ->
+            lists:foreach(fun(T) ->
+                                  case blockchain_txn:type(T) == blockchain_txn_consensus_group_v1 of
+                                      true ->
+                                          lager:info("txn ~p", [T]);
+                                      _ -> ok
+                                  end
+                          end, Txns),
+            error(duplicate_group_txn);
+        [] ->
             false
     end.

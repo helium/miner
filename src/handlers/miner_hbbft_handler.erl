@@ -160,8 +160,13 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT,
                     {NewState1, []};
                 false when R > Round ->
                     defer;
+                false when R < Round ->
+                    %% don't log on late sigs
+                    ignore;
                 false ->
                     lager:warning("Invalid signature ~p from ~p for round ~p in our round ~p", [Signature, Address, R, Round]),
+                    lager:warning("member? ~p", [lists:member(Address, State#state.members)]),
+                    lager:warning("valid? ~p", [libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))]),
                     %% invalid signature somehow
                     ignore
             end;
