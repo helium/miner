@@ -147,11 +147,11 @@ basic(_Config) ->
     % Capture all trace messages from statem
     Msgs = loop([]),
 
-    % ct:pal("MARKER ~p~n", [Msgs]),
+    ct:pal("MARKER ~p~n", [Msgs]),
     % ?assert(false),
 
     % First few are blocks
-    {AddBlockMsgs, Msgs1} = lists:split(4, Msgs),
+    {AddBlockMsgs, Msgs1} = lists:split(3, Msgs),
     lists:foreach(
         fun(Msg) ->
             ?assertMatch({blockchain_event, {add_block, _, _}}, Msg)
