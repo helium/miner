@@ -48,25 +48,25 @@
 -define(MINING_TIMEOUT, 5).
 -define(CHALLENGE_RETRY, 3).
 -define(CHALLENGE_TIMEOUT, 3).
--define(WAITING, 10).
-
-
+-define(RECEIPTS_TIMEOUT, 10).
 
 -record(data, {
     blockchain :: blockchain:blockchain() | undefined,
-    last_challenge = 0 :: non_neg_integer(),
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
-    onion_keys :: {ecc_compact:private_key(), ecc_compact:compact_key()} | undefined,
+    onion_keys :: keys() | undefined,
     challengees = [] :: [libp2p_crypto:pubkey_bin()],
-    challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
     witnesses = [] :: blockchain_poc_receipt_v1:poc_witnesses(),
+    challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
-    waiting = ?WAITING :: non_neg_integer()
+    receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
+
+-type data() :: #data{}.
+-type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -118,46 +118,17 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             self() ! Msg,
             {keep_state,  Data#data{blockchain=Chain}}
     end;
-requesting(info, {blockchain_event, {add_block, Hash, false}}, #data{blockchain=Blockchain,
-                                                                     last_challenge=LastChallenge0,
-                                                                     address=Address,
-                                                                     delay=Delay}=Data) ->
-    Ledger = blockchain:ledger(Blockchain),
-    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        {error, Error} ->
-            lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
+requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{address=Address}=Data) ->
+    case allow_request(BlockHash, Data) of
+        false ->
+            lager:info("request not allowed yet (~p)", [BlockHash]),
             {keep_state, Data};
-        {ok, Gw} ->
-            {ok, CurrHeight} = blockchain:height(Blockchain),
-            LastChallenge1 = case LastChallenge0 < CurrHeight of
-                false ->
-                    LastChallenge0;
-                true ->
-                    case blockchain_ledger_gateway_v1:last_poc_challenge(Gw) of
-                        undefined -> LastChallenge0;
-                        Other -> Other
-                    end
-            end,
-            lager:info("got block ~p @ height ~p (~p)", [Hash, CurrHeight, LastChallenge1]),
-            case (CurrHeight - LastChallenge1) > Delay of
-                false ->
-                    lager:info("last PoC request was ~p ago, waiting", [CurrHeight - LastChallenge1]),
-                    {keep_state, Data};
-                true ->
-                    Keys = libp2p_crypto:generate_keys(ecc_compact),
-                    Secret = libp2p_crypto:keys_to_bin(Keys),
-                    #{secret := PvtOnionKey, public := OnionCompactKey} = Keys,
-                    Tx = blockchain_txn_poc_request_v1:new(
-                        Address,
-                        crypto:hash(sha256, Secret),
-                        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
-                    ),
-                    {ok, _, SigFun} = blockchain_swarm:keys(),
-                    SignedTx = blockchain_txn:sign(Tx, SigFun),
-                    lager:info("submitting poc request ~p", [Tx]),
-                    ok = blockchain_worker:submit_txn(SignedTx),
-                    {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
-            end
+        true ->
+            lager:info("request allowed @ ~p", [BlockHash]),
+            {Txn, Keys, Secret} = create_request(Address),
+            ok = blockchain_worker:submit_txn(Txn),
+            lager:info("submitted poc request ~p", [Txn]),
+            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -166,46 +137,18 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
-                                                             address=Address,
-                                                             secret=Secret,
-                                                             onion_keys={_, OnionCompactKey},
-                                                             mining_timeout=MiningTimeout}=Data0) ->
-    lager:info("got block ~p checking content", [Hash]),
-    case blockchain:get_block(Hash, Blockchain) of
-        {ok, Block} ->
-            Txns = blockchain_block:transactions(Block),
-            Filter =
-                fun(Txn) ->
-                    blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1 andalso
-                    Address =:= blockchain_txn_poc_request_v1:gateway(Txn) andalso
-                    crypto:hash(sha256, Secret) =:= blockchain_txn:hash(Txn) andalso
-                    crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)) =:= blockchain_txn_poc_request_v1:onion(Txn)
-                end,
-            case lists:filter(Filter, Txns) of
-                [_POCReq] ->
-                    {ok, CurrHeight} = blockchain:height(Blockchain),
-                    self() ! {target, <<Secret/binary, Hash/binary>>},
-                    lager:info("request was mined @ ~p, hash: ~p, targeting now, secret: ~p", [CurrHeight, Hash, Secret]),
-                    Data1 = Data0#data{
-                        last_challenge=CurrHeight,
-                        retry=?CHALLENGE_RETRY,
-                        mining_timeout=?MINING_TIMEOUT
-                    },
-                    {next_state, targeting, Data1};
-                _ ->
-                    lager:info("request not found in block ~p", [Hash]),
-                    case MiningTimeout > 0 of
-                        true ->
-                            {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
-                        false ->
-                            lager:error("did not see PoC request in last ~p block, retrying", [?MINING_TIMEOUT]),
-                            {next_state, requesting, Data0#data{mining_timeout=?MINING_TIMEOUT}}
-                    end
-            end;
+mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{secret=Secret,
+                                                                  mining_timeout=MiningTimeout}=Data0) ->
+    lager:info("got block ~p checking content", [BlockHash]),
+    case find_request(BlockHash, Data0) of
+        ok ->
+            self() ! {target, <<Secret/binary, BlockHash/binary>>},
+            lager:info("request was mined @ ~p", [BlockHash]),
+            Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
+            {next_state, targeting, Data1};
         {error, _Reason} ->
-            lager:error("failed to get block ~p : ~p", [Hash, _Reason]),
-            case MiningTimeout > 0 of
+             lager:info("request not found in block ~p : ~p", [BlockHash, _Reason]),
+             case MiningTimeout > 0 of
                 true ->
                     {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
                 false ->
@@ -237,7 +180,7 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
-                                                                onion_keys={PvtOnionKey, OnionCompactKey}
+                                                                onion_keys= #{secret := PvtOnionKey, public := OnionCompactKey}
                                                                }=Data) ->
     case blockchain_poc_path:build(Target, Gateways) of
         {error, Reason} ->
@@ -308,7 +251,7 @@ submitting(info, submit, #data{address=Address, receipts=Receipts, witnesses=Wit
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
     lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
-    {next_state, waiting, Data#data{waiting=?WAITING}};
+    {next_state, waiting, Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
 submitting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
@@ -316,34 +259,16 @@ submitting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-waiting(info, {blockchain_event, {add_block, _Hash, _}}, #data{waiting=0}=Data) ->
-    lager:warning("I have been waiting for ~p blocks abandoning last request", [?WAITING]),
-    {next_state, requesting,  Data#data{waiting=?WAITING}};
-waiting(info, {blockchain_event, {add_block, Hash, _}}, #data{blockchain=Blockchain,
-                                                              address=Address,
-                                                              secret=Secret,
-                                                              waiting=Waiting}=Data) ->
-    lager:info("got block ~p checking content", [Hash]),
-    case blockchain:get_block(Hash, Blockchain) of
-        {ok, Block} ->
-            Txns = lists:filter(fun(T) ->
-                                    blockchain_txn:type(T) =:= blockchain_txn_poc_receipts_v1
-                                end, blockchain_block:transactions(Block)),
-            Filter = fun(Txn) ->
-                Address =:= blockchain_txn_poc_receipts_v1:challenger(Txn) andalso
-                Secret =:= blockchain_txn_poc_receipts_v1:secret(Txn)
-            end,
-            case lists:filter(Filter, Txns) of
-                [_POCReceipt] ->
-                    lager:info("found my receipt got mined in ~p, moving one", [Hash]),
-                    {next_state, requesting,  Data#data{waiting=?WAITING}};
-                _ ->
-                    lager:info("did not find my receipt in ~p"),
-                    {keep_state,  Data#data{waiting=Waiting-1}}
-            end;
+waiting(info, {blockchain_event, {add_block, _BlockHash, _}}, #data{receipts_timeout=0}=Data) ->
+    lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
+    {next_state, requesting,  Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
+waiting(info, {blockchain_event, {add_block, BlockHash, _}}, #data{receipts_timeout=Timeout}=Data) ->
+    case find_receipts(BlockHash, Data) of
+        ok ->
+            {next_state, requesting,  Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
         {error, _Reason} ->
-            lager:error("failed to get block ~p : ~p", [Hash, _Reason]),
-            {keep_state,  Data#data{waiting=Waiting-1}}
+             lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
+            {keep_state,  Data#data{receipts_timeout=Timeout-1}}
     end;
 waiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -351,6 +276,116 @@ waiting(EventType, EventContent, Data) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec allow_request(binary(), data()) -> boolean().
+allow_request(BlockHash, #data{blockchain=Blockchain,
+                               address=Address,
+                               delay=Delay}) ->
+    Ledger = blockchain:ledger(Blockchain),
+    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+        {error, Error} ->
+            lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
+            false;
+        {ok, GwInfo} ->
+            case blockchain:get_block(BlockHash, Blockchain) of
+                {error, Error} ->
+                    lager:warning("failed to get block ~p : ~p", [BlockHash, Error]),
+                    false;
+                {ok, Block} ->
+                    Height = blockchain_block:height(Block),
+                    LastChallenge = case blockchain_ledger_gateway_v1:last_poc_challenge(GwInfo) of
+                        undefined -> 0;
+                        Other -> Other
+                    end,
+                    lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
+                    (Height - LastChallenge) > Delay
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec create_request(libp2p_crypto:pubkey_bin()) -> {blockchain_txn_poc_request_v1:txn_poc_request(),
+                                                     keys(),
+                                                     binary()}.
+create_request(Address) ->
+    Keys = libp2p_crypto:generate_keys(ecc_compact),
+    Secret = libp2p_crypto:keys_to_bin(Keys),
+    #{public := OnionCompactKey} = Keys,
+    Tx = blockchain_txn_poc_request_v1:new(
+        Address,
+        crypto:hash(sha256, Secret),
+        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+    ),
+    {ok, _, SigFun} = blockchain_swarm:keys(),
+    {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec find_request(binary(), data()) -> ok | {error, any()}.
+find_request(BlockHash, #data{blockchain=Blockchain,
+                              address=Address,
+                              secret=Secret,
+                              onion_keys= #{public := OnionCompactKey}}) ->
+    lager:info("got block ~p checking content", [BlockHash]),
+    case blockchain:get_block(BlockHash, Blockchain) of
+        {error, _Reason}=Error ->
+            lager:error("failed to get block ~p : ~p", [BlockHash, _Reason]),
+            Error;
+        {ok, Block} ->
+            Txns = blockchain_block:transactions(Block),
+            Filter =
+                fun(Txn) ->
+                    blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1  andalso
+                    blockchain_txn_poc_request_v1:gateway(Txn) =:= Address andalso
+                    blockchain_txn:hash(Txn) =:= crypto:hash(sha256, Secret) andalso
+                    blockchain_txn_poc_request_v1:onion(Txn) =:= crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+                end,
+            case lists:filter(Filter, Txns) of
+                [_POCReq] ->
+                    ok;
+                _ ->
+                    lager:info("request not found in block ~p", [BlockHash]),
+                    {error, not_found}
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec find_receipts(binary(), data()) -> ok | {error, any()}.
+find_receipts(BlockHash, #data{blockchain=Blockchain,
+                               address=Address,
+                               secret=Secret}) ->
+    lager:info("got block ~p checking content", [BlockHash]),
+    case blockchain:get_block(BlockHash, Blockchain) of
+        {error, _Reason}=Error ->
+            lager:error("failed to get block ~p : ~p", [BlockHash, _Reason]),
+            Error;
+        {ok, Block} ->
+            Txns = blockchain_block:transactions(Block),
+            Filter =
+                fun(Txn) ->
+                    blockchain_txn:type(Txn) =:= blockchain_txn_poc_receipts_v1 andalso
+                    blockchain_txn_poc_receipts_v1:challenger(Txn) =:= Address andalso
+                    blockchain_txn_poc_receipts_v1:secret(Txn) =:= Secret
+                end,
+            case lists:filter(Filter, Txns) of
+                [_POCReceipts] ->
+                    ok;
+                _ ->
+                    lager:info("request not found in block ~p", [BlockHash]),
+                    {error, not_found}
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
