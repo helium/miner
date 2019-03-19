@@ -297,12 +297,14 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                     false;
                 {ok, Block} ->
                     Height = blockchain_block:height(Block),
-                    LastChallenge = case blockchain_ledger_gateway_v1:last_poc_challenge(GwInfo) of
-                        undefined -> 0;
-                        Other -> Other
-                    end,
-                    lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
-                    (Height - LastChallenge) > Delay
+                    case blockchain_ledger_gateway_v1:last_poc_challenge(GwInfo) of
+                        undefined ->
+                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                            true;
+                        LastChallenge ->
+                            lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
+                            (Height - LastChallenge) > Delay
+                    end
             end
     end.
 
