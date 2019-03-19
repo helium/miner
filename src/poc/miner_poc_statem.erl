@@ -155,19 +155,8 @@ requesting(info, {blockchain_event, {add_block, Hash, false}}, #data{blockchain=
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     SignedTx = blockchain_txn:sign(Tx, SigFun),
                     lager:info("submitting poc request ~p", [Tx]),
-                    Self = self(),
-                    _ = blockchain_worker:submit_txn(SignedTx, fun(R) -> Self ! {?MODULE, R} end),
-                    receive
-                        {?MODULE, ok} ->
-                            lager:info("submitted poc request"),
-                            {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}};
-                        {?MODULE, {error, Error}} ->
-                            lager:error("failed to submit PoC request ~p, retrying on next block", [Error]),
-                            {keep_state, Data}
-                    after 10000 ->
-                        lager:error("failed to submit PoC request timeout, retrying on next block"),
-                            {keep_state, Data}
-                    end
+                    ok = blockchain_worker:submit_txn(SignedTx),
+                    {next_state, mining, Data#data{secret=Secret, onion_keys={PvtOnionKey, OnionCompactKey}}}
             end
     end;
 requesting(EventType, EventContent, Data) ->
