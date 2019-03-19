@@ -29,17 +29,17 @@ devrelease:
 	$(REBAR) as dev release -n miner-dev
 
 devrel:
-	$(REBAR) as dev release -n miner-dev1
-	$(REBAR) as dev release -n miner-dev2
-	$(REBAR) as dev release -n miner-dev3
-	$(REBAR) as dev release -n miner-dev4
-	$(REBAR) as dev release -n miner-dev5
-	$(REBAR) as dev release -n miner-dev6
-	$(REBAR) as dev release -n miner-dev7
-	$(REBAR) as dev release -n miner-dev8
+	$(REBAR) as dev, miner1 release -n miner1
+	$(REBAR) as dev, miner2 release -n miner2
+	$(REBAR) as dev, miner3 release -n miner3
+	$(REBAR) as dev, miner4 release -n miner4
+	$(REBAR) as dev, miner5 release -n miner5
+	$(REBAR) as dev, miner6 release -n miner6
+	$(REBAR) as dev, miner7 release -n miner7
+	$(REBAR) as dev, miner8 release -n miner8
 
 startdevrel:
-	./_build/default/rel/miner-dev/bin/miner-dev ping && ./_build/default/rel/miner-dev/bin/miner-dev restart || ./_build/default/rel/miner-dev/bin/miner-dev start
+	./_build/default/rel/miner/bin/miner ping && ./_build/default/rel/miner/bin/miner restart || ./_build/default/rel/miner/bin/miner start
 
 stopdevrel:
-	./_build/default/rel/miner-dev/bin/miner-dev stop
+	./_build/default/rel/miner/bin/miner stop
