@@ -79,7 +79,6 @@ genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
             OldGateways = [blockchain_txn_gen_gateway_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(gateway_address, X)),
                                                           libp2p_crypto:b58_to_bin(proplists:get_value(owner_address, X)),
                                                           proplists:get_value(location, X),
-                                                          proplists:get_value(last_poc_challenge, X),
                                                           proplists:get_value(nonce, X),
                                                           proplists:get_value(score, X)) || X <- proplists:get_value(gateways, Config)],
             OldGenesisTransactions = OldAccounts ++ OldGateways,
@@ -111,7 +110,9 @@ genesis_forge_usage() ->
 
 genesis_forge(["genesis", "forge", Addrs], [], []) ->
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses ],
+    %% IntitialGatewayTransactions = [ blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0) || Addr <- Addresses ],
+    %% miner:initial_dkg((InitialPaymentTransactions ++ IntitialGatewayTransactions), Addresses),
     miner:initial_dkg(InitialPaymentTransactions, Addresses),
     [clique_status:text("ok")];
 genesis_forge([_, _, _], [], []) ->
