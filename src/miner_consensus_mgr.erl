@@ -10,6 +10,7 @@
 
          initial_dkg/2,
          maybe_start_election/4,
+         start_election/3,
          maybe_start_consensus_group/2,
 
          %% internal
@@ -35,7 +36,7 @@
          dkg_await :: undefined | {reference(), term()},
          hash :: undefined | binary(),
          consensus_pos :: undefined | pos_integer(),
-         election_epoch = 1 :: pos_integer(),
+         election_epoch = 0 :: pos_integer(),
          initial_height :: undefined | pos_integer(),
          curve :: atom(),
          batch_size :: integer(),
@@ -73,6 +74,9 @@ initial_dkg(GenesisTransactions, Addrs) ->
 maybe_start_election(_Hash, Height, NextElection, _ElectionEpoch) when Height =/= NextElection ->
     ok;
 maybe_start_election(Hash, Height, _, ElectionEpoch) ->
+    start_election(Hash, Height, ElectionEpoch).
+
+start_election(Hash, Height, ElectionEpoch) ->
     gen_server:call(?MODULE, {start_election, Hash, Height, ElectionEpoch}, infinity).
 
 maybe_start_consensus_group(StartEpoch, StartHeight) ->
@@ -156,7 +160,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                            election_epoch = Epoch,
                            initial_height = Height,
                            tries = Tries}) ->
-    lager:info("election done at ~p ~p", [Height, PrivKey]),
+    lager:info("election done at ~p epoch ~p tries ~p", [Height, Epoch, Tries]),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
@@ -219,10 +223,9 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
                     %% this isn't super safe?  must make sure that a prior group wasn't running
-                    ok = miner:handoff_consensus(Group),
-                    {reply, ok, State#state{consensus_pos = Pos,
-                                            election_epoch = StartEpoch,
-                                            initial_height = StartHeight}};
+                    {reply, {ok, Group}, State#state{consensus_pos = Pos,
+                                                     election_epoch = StartEpoch,
+                                                     initial_height = StartHeight}};
                 false ->
                     {reply, ok, State}
             end
