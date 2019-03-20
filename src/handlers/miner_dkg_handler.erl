@@ -98,6 +98,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                         true when State#state.done_called == false ->
                             %% this needs to be a call so we know the callback succeeded so we
                             %% can terminate
+                            lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
                             ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
                                                  Members, State#state.privkey),
                             %% stop the handler
