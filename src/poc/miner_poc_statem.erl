@@ -223,8 +223,8 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
 receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
      lager:info("got witness ~p", [Witness]),
     {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
-receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0
-                                          ,challengees=Challengees}=Data) ->
+receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
+                                          challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Address = blockchain_poc_receipt_v1:address(Receipt),
     % TODO: Also check onion layer secret

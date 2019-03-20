@@ -41,7 +41,7 @@ basic(_Config) ->
 
     #{secret := PrivateKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := PrivateKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
-    #{secret := PrivateKey3, public := PubKey3} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := _PrivateKey3, public := PubKey3} = libp2p_crypto:generate_keys(ecc_compact),
 
     meck:new(blockchain_swarm, [passthrough]),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),

@@ -83,41 +83,23 @@ basic(_Config) ->
         {{37.781281, -122.461038}, new_random_key(ecc_compact)},
         {{37.781349, -122.458892}, new_random_key(ecc_compact)},
         {{37.781468, -122.456617}, new_random_key(ecc_compact)},
-        {{37.781637, -122.4543}, new_random_key(ecc_compact)},
-        {{37.832976, -122.12726}, new_random_key(ecc_compact)} % This should be excluded cause too far
+        {{37.781637, -122.4543}, new_random_key(ecc_compact)}
     ],
 
     % Add a Gateway
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    Block = create_block(ConsensusMembers, AddGatewayTxs),
-    ok = blockchain:add_block(Block, Chain),
-    ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
-
+    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+   
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    Block2 = create_block(ConsensusMembers, AssertLocaltionTxns),
-    ok = blockchain:add_block(Block2, Chain),
-    ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block2), true}),
+    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+
     ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
-
-    % Start poc statem
-    {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
-    _ = erlang:trace(Statem, true, ['receive']),
-
-    ?assertMatch({requesting, _}, sys:get_state(Statem)),
 
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn) ->
-        B = create_block(ConsensusMembers, [Txn]),
-        ok = blockchain:add_block(B, Chain),
-        ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true})
-    end),
-    meck:expect(blockchain_worker, submit_txn, fun(Txn, Callback) ->
-        B = create_block(ConsensusMembers, [Txn]),
-        ok = blockchain:add_block(B, Chain),
-        ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(B), true}),
-        Callback(ok)
+        add_block(Chain, ConsensusMembers, [Txn])
     end),
 
     meck:new(miner_onion, [passthrough]),
@@ -130,59 +112,65 @@ basic(_Config) ->
         ?assertEqual(self(), Stream)
     end),
 
-    % Add some blocks to pass the delay
+    % Start poc statem @ height 3
+    {ok, Statem} = miner_poc_statem:start_link(#{}),
+    ?assertMatch({requesting, _}, sys:get_state(Statem)),
+
+    % Add some block to start process
+    ok = add_block(Chain, ConsensusMembers, []),
+
+    % 3 previous blocks + 1 block to start process + 1 block with poc req txn
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
+
+    SubmitedTxns0 = get_submited_txn(Statem),
+    ?assertEqual(1, erlang:length(SubmitedTxns0)),
+    [PocReqTxn] = SubmitedTxns0,
+    ?assertEqual(blockchain_txn_poc_request_v1, blockchain_txn:type(PocReqTxn)),
+    Gateway = blockchain_txn_poc_request_v1:gateway(PocReqTxn),
+    ?assertEqual(blockchain_swarm:pubkey_bin(), Gateway),
+    
+    ok = miner_ct_utils:wait_until(fun() ->
+        case sys:get_state(Statem) of
+            {receiving, _} -> true;
+            _Other -> false
+        end
+    end),
+
+    % Send receipts and add 3 block to pass timeout
+    ok = send_receipts(LatLongs),
+    timer:sleep(100),
     lists:foreach(
         fun(_) ->
-            B = create_block(ConsensusMembers, []),
-            ok = blockchain:add_block(B, Chain),
+            ok = add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 4)
     ),
-    % 3 initial blocks + 4 blocks added + 1 mining block
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 8} =:= blockchain:height(Chain) end),
 
-    ok = send_receipts(LatLongs),
+     % 5 previous blocks + 4 block to pass receiving timeout + 1 block with poc receipts txn
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 10} =:= blockchain:height(Chain) end),
 
-    % Capture all trace messages from statem
-    Msgs = loop([]),
+    SubmitedTxns1 = get_submited_txn(Statem),
+    ?assertEqual(2, erlang:length(SubmitedTxns1)),
+    [_, PocReceiptsTxn] = SubmitedTxns1,
+    ?assertEqual(blockchain_txn_poc_receipts_v1, blockchain_txn:type(PocReceiptsTxn)),
 
-    ct:pal("MARKER ~p~n", [Msgs]),
-    % ?assert(false),
+    ?assert(0 < erlang:length(blockchain_txn_poc_receipts_v1:receipts(PocReceiptsTxn))),
+    ?assertEqual(blockchain_swarm:pubkey_bin(), blockchain_txn_poc_receipts_v1:challenger(PocReceiptsTxn)),
+    ?assertEqual([], blockchain_txn_poc_receipts_v1:witnesses(PocReceiptsTxn)),
+    Hash = blockchain_txn_poc_request_v1:hash(PocReqTxn),
+    ?assertEqual(Hash, crypto:hash(sha256, blockchain_txn_poc_receipts_v1:secret(PocReceiptsTxn))),
 
-    % First few are blocks
-    {AddBlockMsgs, Msgs1} = lists:split(3, Msgs),
-    lists:foreach(
-        fun(Msg) ->
-            ?assertMatch({blockchain_event, {add_block, _, _}}, Msg)
-        end,
-        AddBlockMsgs
-    ),
+    ok = miner_ct_utils:wait_until(fun() ->
+        case sys:get_state(Statem) of
+            {requesting, _} -> true;
+            _Other -> false
+        end
+    end),
 
-    % Filter extra useless add block
-    Msgs2 = lists:filter(
-        fun({blockchain_event, _}) -> false;
-           (_) -> true
-        end,
-        Msgs1
-    ),
-
-    % Then target
-    [TargetMsg|Msgs3] = Msgs2,
-    ?assertMatch({target, _}, TargetMsg),
-
-    % Then challenge
-    [ChallengeMsg|Msgs4] = Msgs3,
-    ?assertMatch({challenge, _, _, _}, ChallengeMsg),
-
-    % Receipts and submit
-    lists:foreach(
-        fun({receipt, _}) -> ok;
-           (submit) -> ok;
-           (_) -> error
-        end,
-        Msgs4
-    ),
+    Ledger = blockchain:ledger(Chain),
+    {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(blockchain_swarm:pubkey_bin(), Ledger),
+    ?assertEqual(5, blockchain_ledger_gateway_v1:last_poc_challenge(GwInfo)),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
@@ -250,23 +238,19 @@ startup(_Config) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-loop(Acc) ->
-    receive
-        {trace, _, 'receive', {blockchain_event, _}=Msg} ->
-            loop([Msg|Acc]);
-        {trace, _, 'receive', {target, _}=Msg} ->
-            loop([Msg|Acc]);
-        {trace, _, 'receive', {challenge, _, _, _}=Msg} ->
-            loop([Msg|Acc]);
-        {trace, _, 'receive', {'$gen_cast', {receipt, _}=Msg}} ->
-            loop([Msg|Acc]);
-        {trace, _, 'receive', submit} ->
-            loop([submit|Acc]);
-        _M ->
-            loop(Acc)
-    after 2500 ->
-        lists:reverse(Acc)
-    end.
+get_submited_txn(Pid) ->
+    History = meck:history(blockchain_worker, Pid),
+    Filter =
+        fun({_, {blockchain_worker, submit_txn, [Txn]}, _}) ->
+            {true, Txn};
+        (_) ->
+            false
+        end,
+    lists:filtermap(Filter, History).
+
+add_block(Chain, ConsensusMembers, Txns) ->
+    B = create_block(ConsensusMembers, Txns),
+    ok = blockchain:add_block(B, Chain).
 
 send_receipts(LatLongs) ->
     lists:foreach(
