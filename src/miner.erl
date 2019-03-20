@@ -284,29 +284,39 @@ handle_call({assert_loc_txn, H3Index, Owner, Nonce, Fee}, _From, State=#state{})
     SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
     {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call(consensus_group, _From, State) ->
-        {reply, State#state.consensus_group, State};
+    {reply, State#state.consensus_group, State};
 handle_call(syncing_status, _From, #state{currently_syncing=Status}=State) ->
     {reply, Status, State};
 handle_call({handoff_consensus, NewConsensusGroup}, _From,
             #state{handoff_waiting = Waiting} = State) ->
-    case Waiting of
-        Pid when is_pid(Pid) ->
-            %% stale, kill it
-            catch libp2p_group_relcast:handle_command(Pid, {stop, 0});
-        {pending, Buf, NextRound, Block, Sync} ->
-            set_buf(NewConsensusGroup, Buf),
-            libp2p_group_relcast:handle_input(
-              NewConsensusGroup, {next_round, NextRound,
-                                  blockchain_block:transactions(Block),
-                                  Sync});
-        _ -> ok
-    end,
+    lager:info("handing off consensus from ~p or ~p to ~p",
+               [State#state.consensus_group,
+                Waiting,
+                NewConsensusGroup]),
+    {Group, Waiting1} =
+        case Waiting of
+            Pid when is_pid(Pid) ->
+                %% stale, kill it
+                catch libp2p_group_relcast:handle_command(Pid, {stop, 0}),
+                {State#state.consensus_group, Waiting};
+            %% here, we've already transitioned, so do the handoff
+            {pending, Buf, NextRound, Block, Sync} ->
+                set_buf(NewConsensusGroup, Buf),
+                libp2p_group_relcast:handle_input(
+                  NewConsensusGroup, {next_round, NextRound,
+                                      blockchain_block:transactions(Block),
+                                      Sync}),
+                {NewConsensusGroup, undefined};
+            _ ->
+                {State#state.consensus_group, Waiting}
+        end,
     %% do we need to wait on this until the old group is gone?  assuming this is safe for now
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server,
                                           [blockchain_txn_handler, self(),
                                            NewConsensusGroup]}),
-    {reply, ok, State#state{handoff_waiting = NewConsensusGroup}};
+    {reply, ok, State#state{handoff_waiting = Waiting1,
+                            consensus_group = Group}};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
@@ -433,6 +443,8 @@ handle_cast(_Msg, State) ->
 %%                     end
 %%             end
 %%     end;
+handle_info(block_timeout, State) when State#state.consensus_group == undefined ->
+    {noreply, State};
 handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
@@ -545,12 +557,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
             lager:info("non-consensus block ~p @ ~p ~p", [Height, Start, Epoch]),
             %% if none of this stuff is set and we're no longer
             %% syncing, we might need to start a consensus group
-            Restore1 =
+            {ConsensusGroup1, Restore1} =
                 case Sync == false andalso Restore == true of
                     true ->
                         lager:info("attempting to restore consensus group"),
                         {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
-                        miner_consensus_mgr:maybe_start_consensus_group(ElectionEpoch, EpochStart),
+                        Group = miner_consensus_mgr:maybe_start_consensus_group(ElectionEpoch, EpochStart),
                         case Height of
                             %% it's possible that we've already processed the block that would
                             %% have started the election, so try this on restore
@@ -562,11 +574,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             _ ->
                                 ok
                         end,
-                        false;
+                        {Group, false};
                     false ->
-                        Restore
+                        {undefined, Restore}
                 end,
-            State = State0#state{try_restore = Restore1, cold_start = undefined},
+            State = State0#state{try_restore = Restore1,
+                                 consensus_group = ConsensusGroup1,
+                                 cold_start = undefined},
             case Height of
                 H when H > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
@@ -646,7 +660,7 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
                     ok
             end,
             %% potentially we're also part of a consensus_group
-            {ok, Group} = miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
+            Group = miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
             {noreply, State#state{blockchain = Chain,
                                   election_epoch = Epoch,
                                   consensus_group = Group}}
