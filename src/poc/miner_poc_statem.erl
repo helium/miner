@@ -215,8 +215,14 @@ challenging(EventType, EventContent, Data) ->
 %%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
     lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
-    self() ! submit,
-    {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}};
+    case length(Data#data.witnesses ++ Data#data.receipts) of
+        0 ->
+            %% we got nothing, no reason to submit
+            {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
+        _ ->
+            self() ! submit,
+            {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}}
+    end;
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
