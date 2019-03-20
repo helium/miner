@@ -83,11 +83,11 @@ decrypt(Onion) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), libp2p_crypto:pubkey()) -> ok.
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin()) -> ok.
 send_receipt(Data, OnionCompactKey) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    OnionCompactKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    OnionCompactKeyHash = crypto:hash(sha256, OnionCompactKey),
     Gateways = maps:filter(
         fun(_Address, Info) ->
             case blockchain_ledger_gateway_v1:last_poc_info(Info) of
@@ -117,11 +117,11 @@ send_receipt(Data, OnionCompactKey) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_witness(binary(), libp2p_crypto:pubkey()) -> ok.
+-spec send_witness(binary(), libp2p_crypto:pubkey_bin()) -> ok.
 send_witness(Data, OnionCompactKey) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    Hash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Hash = crypto:hash(sha256, OnionCompactKey),
     Gateways = maps:filter(
         fun(_Address, Info) ->
             case blockchain_ledger_gateway_v1:last_poc_info(Info) of
