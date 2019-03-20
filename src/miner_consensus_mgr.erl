@@ -196,7 +196,7 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:consensus_members(Ledger) of
         {error, _} ->
-            {reply, ok, State};
+            {reply, undefined, State};
         {ok, ConsensusAddrs} ->
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                 true ->
@@ -215,11 +215,11 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
                     %% this isn't super safe?  must make sure that a prior group wasn't running
-                    {reply, {ok, Group}, State#state{consensus_pos = Pos,
+                    {reply, Group, State#state{consensus_pos = Pos,
                                                      election_epoch = StartEpoch,
                                                      initial_height = StartHeight}};
                 false ->
-                    {reply, ok, State}
+                    {reply, undefined, State}
             end
     end;
 handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
