@@ -122,9 +122,7 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey}, _From,
-            #state{batch_size = BatchSize,
-                   election_epoch = ElectionEpoch,
-                   initial_height = EpochStart} = State) ->
+            #state{batch_size = BatchSize} = State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -145,8 +143,6 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       BatchSize,
                                       PrivKey,
                                       Chain,
-                                      ElectionEpoch,
-                                      EpochStart,
                                       1,
                                       []]],
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus_1",
@@ -180,8 +176,6 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                       BatchSize,
                                       PrivKey,
                                       Chain,
-                                      Epoch,
-                                      Height,
                                       1, % gets set later
                                       []]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
@@ -214,9 +208,7 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
                                                       F,
                                                       BatchSize,
                                                       undefined,
-                                                      Chain,
-                                                      StartEpoch,
-                                                      StartHeight]],
+                                                      Chain]],
                     %% while this won't reflect the actual height, it has to be deterministic
                     Name = "consensus_" ++ integer_to_list(StartHeight),
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
@@ -244,6 +236,9 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
+handle_call({start_election, _Hash, Height, _ElectionEpoch}, _From, State)
+  when Height =< State#state.initial_height ->
+    {reply, already_ran, State};
 handle_call({start_election, Hash, Height, ElectionEpoch}, _From,
             #state{current_dkg = undefined} = State0) ->
     lager:info("election started at ~p", [Height]),
