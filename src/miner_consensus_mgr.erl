@@ -36,7 +36,7 @@
          dkg_await :: undefined | {reference(), term()},
          hash :: undefined | binary(),
          consensus_pos :: undefined | pos_integer(),
-         initial_height :: undefined | pos_integer(),
+         initial_height = 0 :: non_neg_integer(),
          curve :: atom(),
          batch_size :: integer(),
          initial_txns :: [any()],
@@ -71,6 +71,7 @@ initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
 maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
+    lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
     ok;
 maybe_start_election(Hash, Height, _) ->
     start_election(Hash, Height).
@@ -237,6 +238,7 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
     end;
 handle_call({start_election, _Hash, Height}, _From, State)
   when Height =< State#state.initial_height ->
+    lager:info("election already ran at ~p bc initial ~p", [Height, State#state.initial_height]),
     {reply, already_ran, State};
 handle_call({start_election, Hash, Height}, _From,
             #state{current_dkg = undefined} = State0) ->

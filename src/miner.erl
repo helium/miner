@@ -50,7 +50,6 @@
     block_time = 15000 :: number(),
     currently_syncing = false :: boolean(),
     election_interval :: pos_integer(),
-    current_dkg = undefined :: undefined | pos_integer(),
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid(),
     election_epoch = 1 :: pos_integer()
@@ -117,7 +116,13 @@ relcast_info(Group) ->
 %%--------------------------------------------------------------------
 %% TODO: spec
 relcast_queue(Group) ->
-    case gen_server:call(?MODULE, Group, 60000) of
+    Mod = case Group of
+              dkg_group ->
+                  miner_consensus_mgr;
+              _ ->
+                  ?MODULE
+          end,
+    case gen_server:call(Mod, Group, 60000) of
         undefined -> #{};
         Pid ->
             try libp2p_group_relcast:queues(Pid) of
@@ -514,13 +519,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync}} = Event,
             %% syncing, we might need to start a consensus group
             lager:info("attempting to restore consensus group"),
             {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
-            ConsensusHeight = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+            {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
             Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
             case Height of
                 %% it's possible that we've already processed the block that would
                 %% have started the election, so try this on restore
                 Ht when Ht > (EpochStart + Interval) ->
-                    {ok, ElectionBlock} = blockchain:get_block(EpochStart, Chain),
+                    {ok, ElectionBlock} = blockchain:get_block(EpochStart + Interval, Chain),
                     EHash = blockchain_block:hash_block(ElectionBlock),
                     miner_consensus_mgr:start_election(EHash, EpochStart + Interval);
                 _ ->
@@ -622,17 +627,17 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
             {ok, Block} = blockchain:get_block(Height, Chain),
             {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
             NextElection = EpochStart + Interval,
+            {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
             lager:info("ElectionBlock = ~p + ~p  = ~p", [Interval, EpochStart, NextElection]),
             case Height > NextElection of
                 true ->
-                    {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
+                    {ok, ElectionBlock} = blockchain:get_block(ConsensusHeight, Chain),
                     Hash = blockchain_block:hash_block(ElectionBlock),
                     miner_consensus_mgr:start_election(Hash, NextElection);
                 false ->
                     ok
             end,
             %% potentially we're also part of a consensus_group
-            ConsensusHeight = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
             Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
             {noreply, State#state{blockchain = Chain,
                                   election_epoch = Epoch,
