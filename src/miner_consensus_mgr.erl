@@ -9,9 +9,9 @@
          start_link/1,
 
          initial_dkg/2,
-         maybe_start_election/4,
-         start_election/3,
-         maybe_start_consensus_group/2,
+         maybe_start_election/3,
+         start_election/2,
+         maybe_start_consensus_group/1,
 
          %% internal
          genesis_block_done/4,
@@ -36,7 +36,6 @@
          dkg_await :: undefined | {reference(), term()},
          hash :: undefined | binary(),
          consensus_pos :: undefined | pos_integer(),
-         election_epoch = 0 :: pos_integer(),
          initial_height :: undefined | pos_integer(),
          curve :: atom(),
          batch_size :: integer(),
@@ -71,16 +70,16 @@ in_consensus() ->
 initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
-maybe_start_election(_Hash, Height, NextElection, _ElectionEpoch) when Height =/= NextElection ->
+maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
     ok;
-maybe_start_election(Hash, Height, _, ElectionEpoch) ->
-    start_election(Hash, Height, ElectionEpoch).
+maybe_start_election(Hash, Height, _) ->
+    start_election(Hash, Height).
 
-start_election(Hash, Height, ElectionEpoch) ->
-    gen_server:call(?MODULE, {start_election, Hash, Height, ElectionEpoch}, infinity).
+start_election(Hash, Height) ->
+    gen_server:call(?MODULE, {start_election, Hash, Height}, infinity).
 
-maybe_start_consensus_group(StartEpoch, StartHeight) ->
-    gen_server:call(?MODULE, {maybe_start_consensus_group, StartEpoch, StartHeight}, infinity).
+maybe_start_consensus_group(StartHeight) ->
+    gen_server:call(?MODULE, {maybe_start_consensus_group, StartHeight}, infinity).
 
 -spec sign_genesis_block(GenesisBlock :: binary(), PrivKey :: tpke_privkey:privkey()) ->
                                 {ok, libp2p_crypto:pubkey_bin(), binary()}.
@@ -153,10 +152,9 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{batch_size = BatchSize,
-                           election_epoch = Epoch,
                            initial_height = Height,
                            tries = Tries}) ->
-    lager:info("election done at ~p epoch ~p tries ~p", [Height, Epoch, Tries]),
+    lager:info("election done at ~p tries ~p", [Height, Tries]),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
@@ -187,7 +185,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     ok = miner:handoff_consensus(Group),
     {reply, ok, State#state{current_dkg = undefined}};
-handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
+handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State = #state{batch_size = BatchSize}) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
 
@@ -218,8 +216,7 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
                                                          libp2p_group_relcast, GroupArg),
                     %% this isn't super safe?  must make sure that a prior group wasn't running
                     {reply, Group, State#state{consensus_pos = Pos,
-                                                     election_epoch = StartEpoch,
-                                                     initial_height = StartHeight}};
+                                               initial_height = StartHeight}};
                 false ->
                     lager:info("not restoring consensus group: not a member"),
                     {reply, undefined, State}
@@ -229,7 +226,6 @@ handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
     {reply, Group, State};
 handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
     State = State0#state{initial_height = 1,
-                         election_epoch = 1,
                          tries = 0},
     case do_initial_dkg(GenesisTransactions, Addrs, State) of
         {true, DKGState} ->
@@ -239,14 +235,13 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
-handle_call({start_election, _Hash, Height, _ElectionEpoch}, _From, State)
+handle_call({start_election, _Hash, Height}, _From, State)
   when Height =< State#state.initial_height ->
     {reply, already_ran, State};
-handle_call({start_election, Hash, Height, ElectionEpoch}, _From,
+handle_call({start_election, Hash, Height}, _From,
             #state{current_dkg = undefined} = State0) ->
     lager:info("election started at ~p", [Height]),
     State = State0#state{initial_height = Height,
-                         election_epoch = ElectionEpoch,
                          tries = 0},
     State1 = initiate_election(Hash, Height, State),
     {reply, State1#state.current_dkg /= undefined, State1};
@@ -269,13 +264,18 @@ handle_cast(_Msg, State) ->
 
 %% for the genesis block, since there will be an operator, we don't
 %% bother to set up a timeout for the dkg.
-handle_info(dkg_timeout, State) ->
+handle_info(dkg_timeout, #state{current_dkg = OldDKG,
+                                tries = Tries} = State) ->
     %% kill the running dkg
+    catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
+
     %% extract another consensus list
     %% restart the dkg
-    Timeout = application:get_env(miner, dkg_timeout, timer:seconds(120)),
-    Ref = erlang:send_after(Timeout, self, dkg_timeout),
-    {noreply, State#state{timer_ref = Ref}};
+    Timeout = application:get_env(miner, dkg_timeout, timer:seconds(1200000)),
+    Ref = erlang:send_after(Timeout, self(), dkg_timeout),
+    {noreply, State#state{timer_ref = Ref,
+                          current_dkg = undefined,
+                          tries = Tries + 1}};
 handle_info(_Info, State) ->
     lager:warning("unexpected message ~p", [_Info]),
     {noreply, State}.

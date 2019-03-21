@@ -433,7 +433,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             false ->
                                 lager:info("reg round"),
                                 NextElection = Start + Interval,
-                                miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+                                miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,
@@ -495,47 +495,57 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                 State
         end,
     {noreply, signal_syncing_status(Sync, NewState#state{cold_start = undefined})};
+handle_info({blockchain_event, {add_block, Hash, Sync}} = Event,
+            State = #state{consensus_group = ConsensusGroup,
+                           election_interval = Interval,
+                           consensus_start = Start,
+                           election_epoch = Epoch,
+                           try_restore = Restore,
+                           blockchain = Chain}) when ConsensusGroup == undefined andalso
+                                                     Chain /= undefined andalso
+                                                     Sync == false andalso
+                                                     Restore == true ->
+    cancel_cold_start(State#state.cold_start),
+    case blockchain:get_block(Hash, Chain) of
+        {ok, Block} ->
+            Height = blockchain_block:height(Block),
+            lager:info("non-consensus restore check ~p @ ~p ~p", [Height, Start, Epoch]),
+            %% if none of this stuff is set and we're no longer
+            %% syncing, we might need to start a consensus group
+            lager:info("attempting to restore consensus group"),
+            {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
+            ConsensusHeight = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+            Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
+            case Height of
+                %% it's possible that we've already processed the block that would
+                %% have started the election, so try this on restore
+                Ht when Ht > (EpochStart + Interval) ->
+                    {ok, ElectionBlock} = blockchain:get_block(EpochStart, Chain),
+                    EHash = blockchain_block:hash_block(ElectionBlock),
+                    miner_consensus_mgr:start_election(EHash, EpochStart + Interval);
+                _ ->
+                    ok
+            end,
+            handle_info(Event, State#state{try_restore = false,
+                                           consensus_group = Group,
+                                           cold_start = undefined});
+        _ ->
+            handle_info(Event, State#state{cold_start = undefined})
+        end;
 handle_info({blockchain_event, {add_block, Hash, Sync}},
-            State0 = #state{consensus_group = ConsensusGroup,
-                            election_interval = Interval,
-                            current_height = CurrHeight,
-                            consensus_start = Start,
-                            handoff_waiting = Waiting,
-                            election_epoch = Epoch,
-                            try_restore = Restore,
-                            blockchain = Chain}) when ConsensusGroup == undefined andalso
-                                                      Chain /= undefined ->
-    cancel_cold_start(State0#state.cold_start),
+            #state{consensus_group = ConsensusGroup,
+                   election_interval = Interval,
+                   current_height = CurrHeight,
+                   consensus_start = Start,
+                   handoff_waiting = Waiting,
+                   election_epoch = Epoch,
+                   blockchain = Chain} = State) when ConsensusGroup == undefined andalso
+                                                     Chain /= undefined ->
+    cancel_cold_start(State#state.cold_start),
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             Height = blockchain_block:height(Block),
             lager:info("non-consensus block ~p @ ~p ~p", [Height, Start, Epoch]),
-            %% if none of this stuff is set and we're no longer
-            %% syncing, we might need to start a consensus group
-            {ConsensusGroup1, Restore1} =
-                case Sync == false andalso Restore == true of
-                    true ->
-                        lager:info("attempting to restore consensus group"),
-                        {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
-                        Group = miner_consensus_mgr:maybe_start_consensus_group(ElectionEpoch, EpochStart),
-                        case Height of
-                            %% it's possible that we've already processed the block that would
-                            %% have started the election, so try this on restore
-                            Ht when Ht > (EpochStart + Interval) ->
-                                {ok, ElectionBlock} = blockchain:get_block(EpochStart, Chain),
-                                EHash = blockchain_block:hash_block(ElectionBlock),
-                                miner_consensus_mgr:start_election(EHash, EpochStart + Interval,
-                                                                   ElectionEpoch+ 1);
-                            _ ->
-                                ok
-                        end,
-                        {Group, false};
-                    false ->
-                        {undefined, Restore}
-                end,
-            State = State0#state{try_restore = Restore1,
-                                 consensus_group = ConsensusGroup1,
-                                 cold_start = undefined},
             case Height of
                 H when H > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
@@ -544,7 +554,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                         false ->
                             lager:info("nc reg round"),
                             NextElection = Start + Interval,
-                            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
+                            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                             {noreply, signal_syncing_status(Sync, State#state{current_height = Height})};
                         {true, true} ->
                             lager:info("nc start group"),
@@ -592,7 +602,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
             end;
         {error, Reason} ->
             lager:error("Error, Reason: ~p", [Reason]),
-            {noreply, signal_syncing_status(Sync, State0)}
+            {noreply, signal_syncing_status(Sync, State)}
     end;
 handle_info({blockchain_event, {add_block, _Hash, Sync}},
             State=#state{blockchain = Chain}) when Chain == undefined ->
@@ -617,12 +627,13 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
                 true ->
                     {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
                     Hash = blockchain_block:hash_block(ElectionBlock),
-                    miner_consensus_mgr:start_election(Hash, NextElection, Epoch + 1);
+                    miner_consensus_mgr:start_election(Hash, NextElection);
                 false ->
                     ok
             end,
             %% potentially we're also part of a consensus_group
-            Group = miner_consensus_mgr:maybe_start_consensus_group(Epoch, EpochStart),
+            ConsensusHeight = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+            Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
             {noreply, State#state{blockchain = Chain,
                                   election_epoch = Epoch,
                                   consensus_group = Group}}
