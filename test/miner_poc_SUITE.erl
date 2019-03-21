@@ -158,7 +158,7 @@ basic(_Config) ->
     ?assert(0 < erlang:length(blockchain_txn_poc_receipts_v1:receipts(PocReceiptsTxn))),
     ?assertEqual(blockchain_swarm:pubkey_bin(), blockchain_txn_poc_receipts_v1:challenger(PocReceiptsTxn)),
     ?assertEqual([], blockchain_txn_poc_receipts_v1:witnesses(PocReceiptsTxn)),
-    Hash = blockchain_txn_poc_request_v1:hash(PocReqTxn),
+    Hash = blockchain_txn_poc_request_v1:secret_hash(PocReqTxn),
     ?assertEqual(Hash, crypto:hash(sha256, blockchain_txn_poc_receipts_v1:secret(PocReceiptsTxn))),
 
     ok = miner_ct_utils:wait_until(fun() ->

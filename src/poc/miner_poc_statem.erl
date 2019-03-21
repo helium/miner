@@ -125,7 +125,7 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{addres
             {keep_state, Data};
         true ->
             lager:info("request allowed @ ~p", [BlockHash]),
-            {Txn, Keys, Secret} = create_request(Address),
+            {Txn, Keys, Secret} = create_request(Address, BlockHash),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
             {next_state, mining, Data#data{secret=Secret, onion_keys=Keys}}
@@ -251,8 +251,13 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submitting(info, submit, #data{address=Address, receipts=Receipts, witnesses=Witnesses, secret=Secret}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Witnesses, Address, Secret, 0),
+submitting(info, submit, #data{address=Address,
+                               receipts=Receipts,
+                               witnesses=Witnesses,
+                               secret=Secret,
+                               onion_keys= #{public := OnionCompactKey}}=Data) ->
+    OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(OnionKeyHash, Receipts, Witnesses, Address, Secret, 0),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
@@ -318,17 +323,17 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_request(libp2p_crypto:pubkey_bin()) -> {blockchain_txn_poc_request_v1:txn_poc_request(),
-                                                     keys(),
-                                                     binary()}.
-create_request(Address) ->
+-spec create_request(libp2p_crypto:pubkey_bin(), binary()) ->
+    {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
+create_request(Address, BlockHash) ->
     Keys = libp2p_crypto:generate_keys(ecc_compact),
     Secret = libp2p_crypto:keys_to_bin(Keys),
     #{public := OnionCompactKey} = Keys,
     Tx = blockchain_txn_poc_request_v1:new(
         Address,
         crypto:hash(sha256, Secret),
-        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+        BlockHash
     ),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
@@ -351,10 +356,12 @@ find_request(BlockHash, #data{blockchain=Blockchain,
             Txns = blockchain_block:transactions(Block),
             Filter =
                 fun(Txn) ->
+                    SecretHash = crypto:hash(sha256, Secret),
+                    OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
                     blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1  andalso
                     blockchain_txn_poc_request_v1:gateway(Txn) =:= Address andalso
-                    blockchain_txn:hash(Txn) =:= crypto:hash(sha256, Secret) andalso
-                    blockchain_txn_poc_request_v1:onion(Txn) =:= crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+                    blockchain_txn_poc_request_v1:secret_hash(Txn) =:= SecretHash andalso
+                    blockchain_txn_poc_request_v1:onion_key_hash(Txn) =:= OnionKeyHash
                 end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
