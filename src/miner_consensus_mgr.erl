@@ -166,6 +166,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
 
     %% first we need to add ourselves to the chain for the existing
     %% group to validate
+    %% TODO we should also add this to the buffer of the local chain
     blockchain_txn_manager:submit(blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Tries), Members),
     blockchain_txn_manager ! timeout, % awful
 
@@ -196,6 +197,7 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:consensus_members(Ledger) of
         {error, _} ->
+            lager:info("not restoring consensus group: no chain"),
             {reply, undefined, State};
         {ok, ConsensusAddrs} ->
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
@@ -219,6 +221,7 @@ handle_call({maybe_start_consensus_group, StartEpoch, StartHeight}, _From,
                                                      election_epoch = StartEpoch,
                                                      initial_height = StartHeight}};
                 false ->
+                    lager:info("not restoring consensus group: not a member"),
                     {reply, undefined, State}
             end
     end;

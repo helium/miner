@@ -213,8 +213,7 @@ signed_block(Signatures, BinBlock) ->
               libp2p_swarm:gossip_group(Swarm),
               ?GOSSIP_PROTOCOL,
               blockchain_gossip_handler:gossip_data(Swarm, Block)
-             ),
-            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true});
+             );
         Error ->
             lager:error("signed_block, error: ~p", [Error])
     end,
@@ -308,8 +307,9 @@ handle_call({handoff_consensus, NewConsensusGroup}, _From,
                                       Sync}),
                 {NewConsensusGroup, undefined};
             _ ->
-                {State#state.consensus_group, Waiting}
+                {State#state.consensus_group, NewConsensusGroup}
         end,
+    lager:info("NEW ~p", [{Group, Waiting1}]),
     %% do we need to wait on this until the old group is gone?  assuming this is safe for now
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server,
@@ -398,51 +398,6 @@ handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
-%% there are three cases here:
-
-%% 1. chain cold restore (uncommon but for testing).  here, we set a
-%%    timeout for 30s after start, and then if we haven't gotten
-%%    anything by then, we assume cold start and that the current
-%%    block is the latest, then do what would be expected
-
-%% 2. behind, need to sync
-%% 3. up to date
-%% handle_info(maybe_restore_consensus, State) ->
-%%     Chain = blockchain_worker:blockchain(),
-%%     case Chain of
-%%         undefined ->
-%%             {noreply, State};
-%%         Chain ->
-%%             {ok, Height} = blockchain:height(Chain),
-%%             case Height rem Interval == 0 andalso Height /= 0 of
-%%                 true ->
-%%                     %% Restore an election round
-%%                     {ok, Hash} = blockchain:head_hash(Chain),
-%%                     {noreply, initiate_election(Chain, Hash, Height, State)};
-%%                 false ->
-%%                                     N = length(ConsensusAddrs),
-%%                                     F = (N div 3),
-%%                                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-%%                                                                       Pos,
-%%                                                                       N,
-%%                                                                       F,
-%%                                                                       State#state.batch_size,
-%%                                                                       undefined,
-%%                                                                       Chain]],
-%%                                     Ref = set_next_block_timer(Chain, State#state.block_time),
-%%                                     Name = "consensus_" ++ integer_to_list(max(0, Height + 1 - (Height rem Interval))),
-%%                                     lager:info("Restoring consensus group ~s", [Name]),
-%%                                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name, libp2p_group_relcast, GroupArg),
-%%                                     lager:info("~p. Group: ~p~n", [self(), Group]),
-%%                                     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-%%                                                                          {libp2p_framed_stream, server, [blockchain_txn_handler, self(), Group]}),
-%%                                     {noreply, State#state{consensus_group=Group, block_timer=Ref, consensus_pos=Pos, blockchain=Chain}};
-%%                                 false ->
-%%                                     {noreply, State#state{blockchain=Chain}}
-%%                             end
-%%                     end
-%%             end
-%%     end;
 handle_info(block_timeout, State) when State#state.consensus_group == undefined ->
     {noreply, State};
 handle_info(block_timeout, State) ->
@@ -491,7 +446,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             {true, true} ->
                                 %% it's possible that waiting hasn't been set, I'm not entirely
                                 %% sure how to handle that at this point
-                                lager:info("stay in"),
+                                lager:info("stay in ~p", [Waiting]),
                                 Buf = get_buf(ConsensusGroup),
                                 NextRound = Round + 1,
 
@@ -592,21 +547,28 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection, Epoch + 1),
                             {noreply, signal_syncing_status(Sync, State#state{current_height = Height})};
                         {true, true} ->
+                            lager:info("nc start group"),
                             %% it's possible that waiting hasn't been set, I'm not entirely
                             %% sure how to handle that at this point
-                            lager:info("nc start group"),
                             Round = blockchain_block:hbbft_round(Block),
                             NextRound = Round + 1,
-                            libp2p_group_relcast:handle_input(
-                              Waiting, {next_round, NextRound,
-                                        blockchain_block:transactions(Block),
-                                        Sync}),
-                            catch libp2p_group_relcast:handle_command(ConsensusGroup, stop),
+                            {NewGroup, Waiting1} =
+                                case Waiting of
+                                    Pid when is_pid(Pid) ->
+                                        libp2p_group_relcast:handle_input(
+                                          Waiting, {next_round, NextRound,
+                                                    blockchain_block:transactions(Block),
+                                                    Sync}),
+                                        {Waiting, undefined};
+                                    undefined ->
+                                        {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
+                                         {pending, [], NextRound, Block, Sync}}
+                                end,
                             lager:info("nc got here"),
                             {noreply,
                              State#state{block_timer = set_next_block_timer(Chain, State#state.block_time),
-                                         handoff_waiting = undefined,
-                                         consensus_group = Waiting,
+                                         handoff_waiting = Waiting1,
+                                         consensus_group = NewGroup,
                                          election_epoch = State#state.election_epoch + 1,
                                          current_height = Height,
                                          consensus_start = Height,
@@ -645,12 +607,12 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
         true ->
             {noreply, State};
         false ->
-            lager:info("cold start blockchain"),
             {ok, Height} = blockchain:height(Chain),
+            lager:info("cold start blockchain at known height ~p", [Height]),
             {ok, Block} = blockchain:get_block(Height, Chain),
             {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
             NextElection = EpochStart + Interval,
-            lager:info("ElectionBlock = ~p + ~p  = ~p", [NextElection, EpochStart, NextElection]),
+            lager:info("ElectionBlock = ~p + ~p  = ~p", [Interval, EpochStart, NextElection]),
             case Height > NextElection of
                 true ->
                     {ok, ElectionBlock} = blockchain:get_block(NextElection, Chain),
