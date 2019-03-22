@@ -126,7 +126,7 @@ basic(_Config) ->
     ?assertEqual(1, erlang:length(SubmitedTxns0)),
     [PocReqTxn] = SubmitedTxns0,
     ?assertEqual(blockchain_txn_poc_request_v1, blockchain_txn:type(PocReqTxn)),
-    Gateway = blockchain_txn_poc_request_v1:gateway(PocReqTxn),
+    Gateway = blockchain_txn_poc_request_v1:challenger(PocReqTxn),
     ?assertEqual(blockchain_swarm:pubkey_bin(), Gateway),
     
     ok = miner_ct_utils:wait_until(fun() ->
@@ -259,7 +259,7 @@ send_receipts(LatLongs) ->
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             {Mega, Sec, Micro} = os:timestamp(),
             Timestamp = Mega * 1000000 * 1000000 + Sec * 1000000 + Micro,
-            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, <<>>),
+            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, <<>>, radio),
             SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
             miner_poc_statem:receipt(SignedReceipt)
         end,

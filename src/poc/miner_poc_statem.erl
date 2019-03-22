@@ -137,12 +137,13 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{secret=Secret,
+mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Challenger,
+                                                                  secret=Secret,
                                                                   mining_timeout=MiningTimeout}=Data0) ->
     lager:info("got block ~p checking content", [BlockHash]),
     case find_request(BlockHash, Data0) of
         ok ->
-            self() ! {target, <<Secret/binary, BlockHash/binary>>},
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>},
             lager:info("request was mined @ ~p", [BlockHash]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
@@ -232,10 +233,10 @@ receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
                                           challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
-    Address = blockchain_poc_receipt_v1:address(Receipt),
+    Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     % TODO: Also check onion layer secret
     case blockchain_poc_receipt_v1:is_valid(Receipt)
-         andalso lists:member(Address, Challengees)
+         andalso lists:member(Gateway, Challengees)
     of
         false ->
             lager:warning("ignoring receipt ~p", [Receipt]),
@@ -251,13 +252,13 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submitting(info, submit, #data{address=Address,
+submitting(info, submit, #data{address=Challenger,
                                receipts=Receipts,
                                witnesses=Witnesses,
                                secret=Secret,
                                onion_keys= #{public := OnionCompactKey}}=Data) ->
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
-    Txn0 = blockchain_txn_poc_receipts_v1:new(OnionKeyHash, Receipts, Witnesses, Address, Secret, 0),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(OnionKeyHash, Receipts, Witnesses, Challenger, Secret),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
@@ -344,7 +345,7 @@ create_request(Address, BlockHash) ->
 %%--------------------------------------------------------------------
 -spec find_request(binary(), data()) -> ok | {error, any()}.
 find_request(BlockHash, #data{blockchain=Blockchain,
-                              address=Address,
+                              address=Challenger,
                               secret=Secret,
                               onion_keys= #{public := OnionCompactKey}}) ->
     lager:info("got block ~p checking content", [BlockHash]),
@@ -359,7 +360,7 @@ find_request(BlockHash, #data{blockchain=Blockchain,
                     SecretHash = crypto:hash(sha256, Secret),
                     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
                     blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1  andalso
-                    blockchain_txn_poc_request_v1:gateway(Txn) =:= Address andalso
+                    blockchain_txn_poc_request_v1:challenger(Txn) =:= Challenger andalso
                     blockchain_txn_poc_request_v1:secret_hash(Txn) =:= SecretHash andalso
                     blockchain_txn_poc_request_v1:onion_key_hash(Txn) =:= OnionKeyHash
                 end,
@@ -378,7 +379,7 @@ find_request(BlockHash, #data{blockchain=Blockchain,
 %%--------------------------------------------------------------------
 -spec find_receipts(binary(), data()) -> ok | {error, any()}.
 find_receipts(BlockHash, #data{blockchain=Blockchain,
-                               address=Address,
+                               address=Challenger,
                                secret=Secret}) ->
     lager:info("got block ~p checking content", [BlockHash]),
     case blockchain:get_block(BlockHash, Blockchain) of
@@ -390,7 +391,7 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
             Filter =
                 fun(Txn) ->
                     blockchain_txn:type(Txn) =:= blockchain_txn_poc_receipts_v1 andalso
-                    blockchain_txn_poc_receipts_v1:challenger(Txn) =:= Address andalso
+                    blockchain_txn_poc_receipts_v1:challenger(Txn) =:= Challenger andalso
                     blockchain_txn_poc_receipts_v1:secret(Txn) =:= Secret
                 end,
             case lists:filter(Filter, Txns) of

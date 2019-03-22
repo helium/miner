@@ -91,17 +91,26 @@ send_receipt(Data, OnionCompactKey) ->
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, _Reason} ->
             lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]);
-        {ok, PoC} ->
-            Challenger = blockchain_ledger_poc_v1:gateway(PoC),
-            Address = blockchain_swarm:pubkey_bin(),
-            Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data),
-            {ok, _, SigFun} = blockchain_swarm:keys(),
-            Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
-            EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
+        {ok, PoCs} ->
+            lists:foreach(
+                fun(PoC) ->
+                    Challenger = blockchain_ledger_poc_v1:challenger(PoC),
+                    Address = blockchain_swarm:pubkey_bin(),
+                    Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data, radio),
+                    {ok, _, SigFun} = blockchain_swarm:keys(),
+                    Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
+                    EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
 
-            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-            {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-            _ = miner_poc_handler:send(Stream, EncodedReceipt)
+                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                    case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                        {error, _Reason} ->
+                            lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
+                        {ok, Stream} ->
+                            _ = miner_poc_handler:send(Stream, EncodedReceipt)
+                    end
+                end,
+                PoCs
+            )
     end,
     ok.
 
@@ -117,17 +126,26 @@ send_witness(Data, OnionCompactKey) ->
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, _Reason} ->
             lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]);
-        {ok, PoC} ->
-            Challenger = blockchain_ledger_poc_v1:gateway(PoC),
-            Address = blockchain_swarm:pubkey_bin(),
-            Receipt0 = blockchain_poc_witness_v1:new(Address, os:system_time(), 0, Data),
-            {ok, _, SigFun} = blockchain_swarm:keys(),
-            Receipt1 = blockchain_poc_witness_v1:sign(Receipt0, SigFun),
-            EncodedReceipt = blockchain_poc_witness_v1:encode(Receipt1),
+        {ok, PoCs} ->
+            lists:foreach(
+                fun(PoC) ->
+                    Challenger = blockchain_ledger_poc_v1:challenger(PoC),
+                    Address = blockchain_swarm:pubkey_bin(),
+                    Witness0 = blockchain_poc_witness_v1:new(Address, os:system_time(), 0, Data, radio),
+                    {ok, _, SigFun} = blockchain_swarm:keys(),
+                    Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
+                    EncodedWitness = blockchain_poc_witness_v1:encode(Witness1),
 
-            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-            {ok, Stream} = miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []),
-            _ = miner_poc_handler:send(Stream, EncodedReceipt)
+                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                    case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                        {error, _Reason} ->
+                            lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
+                        {ok, Stream} ->
+                            _ = miner_poc_handler:send(Stream, EncodedWitness)
+                    end
+                end,
+                PoCs
+            )
     end,
     ok.
 
