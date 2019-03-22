@@ -70,11 +70,11 @@ in_consensus() ->
 initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
-maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
+maybe_start_election(_Hash, Height, NextElection) when Height < NextElection ->
     lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
     ok;
-maybe_start_election(Hash, Height, _) ->
-    start_election(Hash, Height).
+maybe_start_election(Hash, _, NextElection) ->
+    start_election(Hash, NextElection).
 
 start_election(Hash, Height) ->
     gen_server:call(?MODULE, {start_election, Hash, Height}, infinity).
@@ -216,8 +216,15 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
                     %% this isn't super safe?  must make sure that a prior group wasn't running
+                    Height =
+                        case StartHeight >= State#state.initial_height of
+                            true ->
+                                StartHeight;
+                            _ ->
+                                State#state.initial_height
+                        end,
                     {reply, Group, State#state{consensus_pos = Pos,
-                                               initial_height = StartHeight}};
+                                               initial_height = Height}};
                 false ->
                     lager:info("not restoring consensus group: not a member"),
                     {reply, undefined, State}

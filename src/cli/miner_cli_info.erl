@@ -68,7 +68,12 @@ info_height_usage() ->
 info_height(["info", "height"], [], []) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
-    Epoch = integer_to_list(miner:election_epoch()),
+    Epoch =
+    try integer_to_list(miner:election_epoch()) of
+        E -> E
+    catch _:_ ->
+            io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
+    end,
     [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
 info_height([_, _, _], [], []) ->
     usage.

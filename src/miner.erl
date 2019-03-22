@@ -262,9 +262,10 @@ init(Args) ->
             {ok, Top} = blockchain:height(Chain),
             {ok, Block} = blockchain:get_block(Top, Chain),
             {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
+            self() ! init,
 
             %% TODO THIS SHOULD BE 120s
-            ColdStart = application:get_env(miner, cold_start_timeout_secs, 15),
+            ColdStart = application:get_env(miner, cold_start_timeout_secs, 10),
             Ref = erlang:send_after(timer:seconds(ColdStart), self(), cold_start_timeout),
             {ok, State#state{blockchain = Chain,
                              cold_start = Ref,
@@ -310,16 +311,12 @@ handle_call({handoff_consensus, NewConsensusGroup}, _From,
                   NewConsensusGroup, {next_round, NextRound,
                                       blockchain_block:transactions(Block),
                                       Sync}),
+                start_txn_handler(NewConsensusGroup),
                 {NewConsensusGroup, undefined};
             _ ->
                 {State#state.consensus_group, NewConsensusGroup}
         end,
     lager:info("NEW ~p", [{Group, Waiting1}]),
-    %% do we need to wait on this until the old group is gone?  assuming this is safe for now
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                                         {libp2p_framed_stream, server,
-                                          [blockchain_txn_handler, self(),
-                                           NewConsensusGroup]}),
     {reply, ok, State#state{handoff_waiting = Waiting1,
                             consensus_group = Group}};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
@@ -463,6 +460,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                               Waiting, {next_round, NextRound,
                                                         blockchain_block:transactions(Block),
                                                         Sync}),
+                                            start_txn_handler(Waiting),
                                             {Waiting, undefined};
                                         undefined ->
                                             {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
@@ -517,20 +515,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}} = Event,
             lager:info("non-consensus restore check ~p @ ~p ~p", [Height, Start, Epoch]),
             %% if none of this stuff is set and we're no longer
             %% syncing, we might need to start a consensus group
-            lager:info("attempting to restore consensus group"),
-            {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
-            {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
-            Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
-            case Height of
-                %% it's possible that we've already processed the block that would
-                %% have started the election, so try this on restore
-                Ht when Ht > (EpochStart + Interval) ->
-                    {ok, ElectionBlock} = blockchain:get_block(EpochStart + Interval, Chain),
-                    EHash = blockchain_block:hash_block(ElectionBlock),
-                    miner_consensus_mgr:start_election(EHash, EpochStart + Interval);
-                _ ->
-                    ok
-            end,
+            Group = restore(Chain, Block, Height, Interval),
             handle_info(Event, State#state{try_restore = false,
                                            consensus_group = Group,
                                            cold_start = undefined});
@@ -574,6 +559,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                                           Waiting, {next_round, NextRound,
                                                     blockchain_block:transactions(Block),
                                                     Sync}),
+                                        start_txn_handler(Waiting),
                                         {Waiting, undefined};
                                     undefined ->
                                         {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
@@ -612,6 +598,18 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
 handle_info({blockchain_event, {add_block, _Hash, Sync}},
             State=#state{blockchain = Chain}) when Chain == undefined ->
     {noreply, signal_syncing_status(Sync, State#state{blockchain = blockchain_worker:blockchain()})};
+handle_info(init, #state{consensus_group = OldGroup, blockchain = Chain} = State) ->
+    {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+    Group =
+        case OldGroup of
+            undefined ->
+                G = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
+                start_txn_handler(G),
+                G;
+            P when is_pid(P) ->
+                P
+        end,
+    {noreply, State#state{consensus_group = Group}};
 handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
     %% here we assume that we've gotten no input for some large number
     %% of seconds after start, so we go into cold start mode, assuming
@@ -625,22 +623,8 @@ handle_info(cold_start_timeout, #state{election_interval = Interval} = State) ->
             {ok, Height} = blockchain:height(Chain),
             lager:info("cold start blockchain at known height ~p", [Height]),
             {ok, Block} = blockchain:get_block(Height, Chain),
-            {Epoch, EpochStart} = blockchain_block_v1:election_info(Block),
-            NextElection = EpochStart + Interval,
-            {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
-            lager:info("ElectionBlock = ~p + ~p  = ~p", [Interval, EpochStart, NextElection]),
-            case Height > NextElection of
-                true ->
-                    {ok, ElectionBlock} = blockchain:get_block(ConsensusHeight, Chain),
-                    Hash = blockchain_block:hash_block(ElectionBlock),
-                    miner_consensus_mgr:start_election(Hash, NextElection);
-                false ->
-                    ok
-            end,
-            %% potentially we're also part of a consensus_group
-            Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
+            Group = restore(Chain, Block, Height, Interval),
             {noreply, State#state{blockchain = Chain,
-                                  election_epoch = Epoch,
                                   consensus_group = Group}}
     end;
 handle_info(_Msg, State) ->
@@ -650,6 +634,24 @@ handle_info(_Msg, State) ->
 %% ==================================================================
 %% Internal functions
 %% =================================================================
+
+restore(Chain, Block, Height, Interval) ->
+    lager:info("attempting to restore"),
+    {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
+    {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+    Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
+    start_txn_handler(Group),
+    case Height of
+        %% it's possible that we've already processed the block that would
+        %% have started the election, so try this on restore
+        Ht when Ht > (EpochStart + Interval) ->
+            {ok, ElectionBlock} = blockchain:get_block(EpochStart + Interval, Chain),
+            EHash = blockchain_block:hash_block(ElectionBlock),
+            miner_consensus_mgr:start_election(EHash, EpochStart + Interval);
+        _ ->
+            ok
+    end,
+    Group.
 
 %% TODO: rip this out.  we should update the flag at the start of
 %% add-block events and then pass the state through normally, this
@@ -736,3 +738,10 @@ cancel_cold_start(undefined) ->
     ok;
 cancel_cold_start(Ref) ->
     erlang:cancel_timer(Ref).
+
+start_txn_handler(undefined) ->
+    ok;
+start_txn_handler(Group) ->
+    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+                                         {libp2p_framed_stream, server,
+                                          [blockchain_txn_handler, self(), Group]}).
