@@ -181,7 +181,7 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
-                                                                onion_keys= #{secret := PvtOnionKey, public := OnionCompactKey}
+                                                                onion_keys=OnionKey
                                                                }=Data) ->
     case blockchain_poc_path:build(Target, Gateways) of
         {error, Reason} ->
@@ -192,8 +192,9 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
-            OnionList = lists:zip(blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N), Path),
-            Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, OnionList),
+            [<<IV:16/integer-unsigned-little, _/binary>> | Hashes] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
+            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], Hashes),
+            {Onion, _} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),

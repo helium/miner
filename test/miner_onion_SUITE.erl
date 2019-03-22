@@ -56,10 +56,10 @@ basic(_Config) ->
     Data1 = <<1, 2, 3>>,
     Data2 = <<4, 5, 6>>,
     Data3 = <<7, 8, 9>>,
-    #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
-    Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, [{Data1, libp2p_crypto:pubkey_to_bin(PubKey)},
-                                                                                                           {Data2, libp2p_crypto:pubkey_to_bin(PubKey2)},
-                                                                                                           {Data3, libp2p_crypto:pubkey_to_bin(PubKey3)}]),
+    OnionKey = #{public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
+    {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, [{PubKey, Data1},
+                                                              {PubKey2, Data2},
+                                                              {PubKey3, Data3}]),
     ct:pal("constructed onion ~p", [Onion]),
 
     meck:new(miner_onion_server, [passthrough]),
@@ -74,7 +74,7 @@ basic(_Config) ->
     
     timer:sleep(2000),
     %% check that the packet size is the same
-    % ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(X)), for later
+    ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(X)),
     gen_server:stop(Server),
     ct:pal("~p~n", [X]),
 
@@ -112,7 +112,7 @@ basic(_Config) ->
     ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, Y/binary>>),
     ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
 
-    % ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)), for later
+    ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
 
     receive
         {passed, true} -> ok;

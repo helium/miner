@@ -13,7 +13,6 @@
 -export([
     start_link/1,
     send/1,
-    construct_onion/2,
     decrypt/1,
     send_receipt/2,
     send_witness/2
@@ -61,15 +60,6 @@ start_link(Args) ->
 -spec send(binary()) -> ok.
 send(Data) ->
     gen_server:call(?MODULE, {send, Data}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec construct_onion({ecc_compact:private_key(), ecc_compact:compact_key()}, [{binary(), ecc_compact:compact_key()}]) -> binary().
-construct_onion({PvtOnionKey, OnionCompactKey}, DataAndPubkeys) ->
-    IV = crypto:strong_rand_bytes(12),
-    <<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary, (construct_onion(DataAndPubkeys, PvtOnionKey, OnionCompactKey, IV))/binary>>.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -177,7 +167,7 @@ handle_call(socket, _From, State=#state{socket=Socket}) ->
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({decrypt, <<IV:12/binary,
+handle_cast({decrypt, <<IV:2/binary,
                         OnionCompactKey:33/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
@@ -241,14 +231,11 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket) ->
     ok = inet:setopts(Socket, [{active, once}]).
 
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    AAD = <<IV/binary, OnionCompactKey/binary>>,
-    PubKey = libp2p_crypto:bin_to_pubkey(OnionCompactKey),
-    SharedKey = ECDHFun(PubKey),
-    case crypto:block_decrypt(aes_gcm, SharedKey, IV, {AAD, CipherText, Tag}) of
+    case blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
         error ->
             error;
-        <<Size:8/integer-unsigned, Data:Size/binary, InnerLayer/binary>> ->
-            {ok, Data, <<AAD/binary, InnerLayer/binary>>}
+        {Payload, NextLayer} ->
+            {ok, Payload, NextLayer}
     end.
 
 %%--------------------------------------------------------------------
@@ -260,31 +247,10 @@ reconnect() ->
     lager:warning("trying to reconnect in 5s"),
     erlang:send_after(timer:seconds(5), self(), connect).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec construct_onion([{binary(), ecc_compact:compact_key()}] | [], ecc_compact:private_key(),
-                      ecc_compact:compact_key(),
-                      binary()) -> binary().
-construct_onion([], _, _, _) ->
-    %% as packets are decrypted we add deterministic padding to keep the packet
-    %% size the same, but we don't need to do that here
-    <<>>;
-construct_onion([{Data, PubKey} | Tail], OnionECDH, OnionCompactKey, IV) ->
-    SecretKey = OnionECDH(libp2p_crypto:bin_to_pubkey(PubKey)),
-    InnerLayer = construct_onion(Tail, OnionECDH, OnionCompactKey, IV),
-    {CipherText, Tag} = crypto:block_encrypt(aes_gcm,
-                                             SecretKey,
-                                             IV, {<<IV/binary, (libp2p_crypto:pubkey_to_bin(OnionCompactKey))/binary>>,
-                                                  <<(byte_size(Data)):8/integer, Data/binary, InnerLayer/binary>>, 4}),
-    <<Tag:4/binary, CipherText/binary>>.
-
-
 handle_packet(<<?READ_RADIO_PACKET,
                 0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
                 1:8/integer, %% onions are type 1 broadcast?
-                IV:12/binary,
+                IV:2/binary,
                 OnionCompactKey:33/binary,
                 Tag:4/binary,
                 CipherText/binary>>,
@@ -297,7 +263,7 @@ handle_packet(<<?READ_RADIO_PACKET_EXTENDED,
                              CRCStatus:8/integer,
                              0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
                              1:8/integer, %% onions are type 1 broadcast?
-                             IV:12/binary,
+                             IV:2/binary,
                              OnionCompactKey:33/binary,
                              Tag:4/binary,
                              CipherText/binary>>,
