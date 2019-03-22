@@ -236,7 +236,8 @@ filter_txn_buf(HBBFT, Ledger, Chain) ->
 
 fake_block(Chain, HBBFT) ->
     {ok, Height} = blockchain:height(Chain),
-    blockchain_block_v1:new(#{prev_hash => blockchain:head_hash(Chain),
+    {ok, HeadHash} = blockchain:head_hash(Chain),
+    blockchain_block_v1:new(#{prev_hash => HeadHash,
                               height => Height + 1,
                               transactions => [],
                               signatures => [],
