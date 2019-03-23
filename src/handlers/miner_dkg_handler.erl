@@ -56,6 +56,8 @@ init([Members, Id, N, F, T, Curve,
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
+handle_command({stop, Timeout}, State) ->
+    {reply, ok, [{stop, Timeout}], State};
 handle_command(status, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
     Map1 = maps:merge(#{
