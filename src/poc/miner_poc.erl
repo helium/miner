@@ -23,7 +23,7 @@ dial_framed_stream(Swarm, Address, Args) ->
         Swarm,
         Address,
         ?POC_VERSION,
-        libp2p_poc_handler,
+        miner_poc_handler,
         Args
     ).
 
@@ -37,5 +37,5 @@ add_stream_handler(Swarm) ->
     libp2p_swarm:add_stream_handler(
         TID,
         ?POC_VERSION,
-        {libp2p_framed_stream, server, [libp2p_poc_handler, self(), TID]}
+        {libp2p_framed_stream, server, [miner_poc_handler, self(), TID]}
     ).

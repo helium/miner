@@ -128,7 +128,7 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{addres
             {Txn, Keys, Secret} = create_request(Address, BlockHash),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, receipts=[], witnesses=[]}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -169,7 +169,7 @@ targeting(info, _, #data{retry=0}=Data) ->
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Entropy}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
-    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger),
+    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
     lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
     self() ! {challenge, Entropy, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
@@ -216,12 +216,13 @@ challenging(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
-    lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
     case length(Data#data.witnesses ++ Data#data.receipts) of
         0 ->
+            lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
             {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
         _ ->
+            lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             self() ! submit,
             {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}}
     end;
@@ -230,6 +231,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
     {keep_state, Data#data{challenge_timeout=T-1}};
 receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
      lager:info("got witness ~p", [Witness]),
+     %% TODO Validate the witness is correct
     {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
                                           challengees=Challengees}=Data) ->
@@ -476,7 +478,7 @@ target_test() ->
                                       hbbft_round => 0,
                                       time => 0}),
     Hash = blockchain_block:hash_block(Block),
-    {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
+    {Target, Gateways} = blockchain_poc_path:target(Hash, undefined, blockchain_swarm:pubkey_bin()),
 
     [{LL, _}|_] = LatLongs,
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
