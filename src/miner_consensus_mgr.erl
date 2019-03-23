@@ -408,4 +408,4 @@ do_dkg(Addrs, Artifact, Sign, Done,
     end.
 
 get_dkg_timeout() ->
-    application:get_env(miner, dkg_timeout, timer:seconds(15)).
+    application:get_env(miner, dkg_timeout, timer:seconds(60)).
