@@ -55,7 +55,8 @@
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
     onion_keys :: keys() | undefined,
-    challengees = [] :: [libp2p_crypto:pubkey_bin()],
+    challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
+    packet_hashes = [] :: [binary()],
     receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
     witnesses = [] :: blockchain_poc_receipt_v1:poc_witnesses(),
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
@@ -194,13 +195,14 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | Hashes] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
             OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], Hashes),
-            {Onion, _} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
+            {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
+            LayerHashes = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, Data#data{challengees=Path}};
+                    {next_state, receiving, Data#data{challengees=lists:zip(Path, Hashes), packet_hashes=LayerHashes}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
@@ -229,24 +231,46 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
-receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
+receiving(cast, {witness, Witness}, #data{witnesses=Witnesses, packet_hashes=PacketHashes}=Data) ->
      lager:info("got witness ~p", [Witness]),
-     %% TODO Validate the witness is correct
-    {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
+     %% Validate the witness is correct
+     case blockchain_poc_witness_v1:is_valid(Witness) of
+         false ->
+             lager:warning("ignoring invalid witness ~p", [Witness]),
+             {keep_state, Data};
+         true ->
+             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+             %% check this is a known layer of the packet
+             case lists:member(PacketHash, PacketHashes) of
+                 true ->
+                     {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
+                 false ->
+                     lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                     {keep_state, Data}
+             end
+     end;
 receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
                                           challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
-    % TODO: Also check onion layer secret
-    case blockchain_poc_receipt_v1:is_valid(Receipt)
-         andalso lists:member(Gateway, Challengees)
-    of
+    LayerData = blockchain_poc_receipt_v1:data(Receipt),
+    case blockchain_poc_receipt_v1:is_valid(Receipt) of
         false ->
-            lager:warning("ignoring receipt ~p", [Receipt]),
+            lager:warning("ignoring invalid receipt ~p", [Receipt]),
             {keep_state, Data};
         true ->
-            Receipts1 = [Receipt|Receipts0],
-            {keep_state, Data#data{receipts=Receipts1}}
+            %% Also check onion layer secret
+            case lists:keyfind(Gateway, 1, Challengees) of
+                {Gateway, LayerData} ->
+                    Receipts1 = [Receipt|Receipts0],
+                    {keep_state, Data#data{receipts=Receipts1}};
+                {Gateway, OtherData} ->
+                    lager:warning("Got incorrect layer data ~p from ~p (expected ~p)", [Gateway, OtherData, Data]),
+                    {keep_state, Data};
+                false ->
+                    lager:warning("Got unexpected receipt from ~p", [Gateway]),
+                    {keep_state, Data}
+            end
     end;
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
