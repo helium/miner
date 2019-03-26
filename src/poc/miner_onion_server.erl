@@ -89,14 +89,14 @@ send_receipt(Data, OnionCompactKey, Type) ->
                     Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data, Type),
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
-                    EncodedReceipt = blockchain_poc_receipt_v1:encode(Receipt1),
+                    EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
 
                     P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
                     case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
                         {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, <<1, EncodedReceipt/binary>>)
+                            _ = miner_poc_handler:send(Stream, EncodedReceipt)
                     end
                 end,
                 PoCs
@@ -124,14 +124,14 @@ send_witness(Data, OnionCompactKey) ->
                     Witness0 = blockchain_poc_witness_v1:new(Address, os:system_time(), 0, Data),
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
-                    EncodedWitness = blockchain_poc_witness_v1:encode(Witness1),
+                    EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
 
                     P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
                     case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
                         {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, <<2, EncodedWitness/binary>>)
+                            _ = miner_poc_handler:send(Stream, EncodedWitness)
                     end
                 end,
                 PoCs
