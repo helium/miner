@@ -452,7 +452,7 @@ send_onion(P2P, Onion, Retry) ->
             ok;
         {error, Reason} ->
             lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
-            timer:sleep(timer:seconds(5)),
+            timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
 
