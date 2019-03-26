@@ -96,7 +96,7 @@ send_receipt(Data, OnionCompactKey, Type) ->
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
                         {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, EncodedReceipt)
+                            _ = miner_poc_handler:send(Stream, <<1, EncodedReceipt/binary>>)
                     end
                 end,
                 PoCs
@@ -131,7 +131,7 @@ send_witness(Data, OnionCompactKey) ->
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]);
                         {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, EncodedWitness)
+                            _ = miner_poc_handler:send(Stream, <<2, EncodedWitness/binary>>)
                     end
                 end,
                 PoCs
