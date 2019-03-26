@@ -122,7 +122,6 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
 requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
-            lager:info("request not allowed yet (~p)", [BlockHash]),
             {keep_state, Data};
         true ->
             lager:info("request allowed @ ~p", [BlockHash]),
@@ -141,7 +140,6 @@ requesting(EventType, EventContent, Data) ->
 mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Challenger,
                                                                   secret=Secret,
                                                                   mining_timeout=MiningTimeout}=Data0) ->
-    lager:info("got block ~p checking content", [BlockHash]),
     case find_request(BlockHash, Data0) of
         ok ->
             self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>},
@@ -149,7 +147,6 @@ mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Challe
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
         {error, _Reason} ->
-             lager:info("request not found in block ~p : ~p", [BlockHash, _Reason]),
              case MiningTimeout > 0 of
                 true ->
                     {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
