@@ -218,7 +218,7 @@ handle_info(_Msg, State) ->
 decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type) ->
     case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
-            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, CipherText), OnionCompactKey]),
+            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey]),
             lager:info("could not decrypt packet received via ~p", [Type]);
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
