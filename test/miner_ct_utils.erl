@@ -158,7 +158,7 @@ init_per_testcase(TestCase, Config) ->
     end,
 
     %% Miner configuration, can be input from os env
-    TotalMiners = get_config("T", 8),
+    TotalMiners = get_config("T", 7),
     NumConsensusMembers = get_config("N", 7),
     SeedNodes = [],
     Port = get_config("PORT", 0),
@@ -169,7 +169,7 @@ init_per_testcase(TestCase, Config) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(miner_ct_utils:randname(5)),
-            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000+I, 46000+I}}
+            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 46000+I}}
         end,
         lists:seq(1, TotalMiners)
     ),
