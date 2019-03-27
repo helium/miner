@@ -238,13 +238,18 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0, packet_hashes=Pa
             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
             %% check this is a known layer of the packet
             case lists:member(PacketHash, PacketHashes) of
-                true ->
-                    Witnesses = maps:get(PacketHash, Responses0, []),
-                    Responses1 = maps:put(PacketHash, [Witness|Witnesses], Responses0),
-                    {keep_state, Data#data{responses=Responses1}};
                 false ->
                     lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
-                    {keep_state, Data}
+                    {keep_state, Data};
+                true ->
+                    Witnesses = maps:get(PacketHash, Responses0, []),
+                    case elrang:length(Witnesses) >= 5 of
+                        true ->
+                            {keep_state, Data};
+                        false ->
+                            Responses1 = maps:put(PacketHash, [Witness|Witnesses], Responses0),
+                            {keep_state, Data#data{responses=Responses1}}
+                    end
             end
     end;
 receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
