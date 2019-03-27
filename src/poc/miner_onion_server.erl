@@ -143,10 +143,11 @@ send_witness(Data, OnionCompactKey) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
-    {ok, UDP} = gen_udp:open(5678, [{ip, {127,0,0,1}}, binary, {active, once}, {reuseaddr, true}]),
+    UDPPort = maps:get(radio_udp_port, Args),
+    {ok, UDP} = gen_udp:open(UDPPort, [{ip, {127,0,0,1}}, binary, {active, once}, {reuseaddr, true}]),
     State = #state{
         host = maps:get(radio_host, Args),
-        port = maps:get(radio_port, Args),
+        port = maps:get(radio_tcp_port, Args),
         compact_key = blockchain_swarm:pubkey_bin(),
         udp_socket = UDP,
         ecdh_fun = maps:get(ecdh_fun, Args)

@@ -48,7 +48,8 @@ basic(_Config) ->
 
     {ok, Server} = miner_onion_server:start_link(#{
         radio_host => "127.0.0.1",
-        radio_port => Port,
+        radio_tcp_port => Port,
+        radio_udp_port => 5678,
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
     {ok, Sock} = gen_tcp:accept(LSock),
@@ -98,7 +99,8 @@ basic(_Config) ->
 
     {ok, _Server} = miner_onion_server:start_link(#{
         radio_host => "127.0.0.1",
-        radio_port => Port,
+        radio_tcp_port => Port,
+        radio_udp_port => 5678,
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey2)
     }),
     {ok, Sock2} = gen_tcp:accept(LSock),
