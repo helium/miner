@@ -189,8 +189,8 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
-            [<<IV:16/integer-unsigned-little, _/binary>> | Hashes] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
-            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], Hashes),
+            [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
+            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
             {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
             LayerHashes = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
@@ -198,7 +198,7 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, Data#data{challengees=lists:zip(Path, Hashes), packet_hashes=LayerHashes}};
+                    {next_state, receiving, Data#data{challengees=lists:zip(Path, LayerData), packet_hashes=LayerHashes}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
@@ -286,19 +286,21 @@ submitting(info, submit, #data{address=Challenger,
                                responses=Responses0,
                                secret=Secret,
                                challengees=Challengees,
+                               packet_hashes=LayerHashes,
                                onion_keys= #{public := OnionCompactKey}}=Data) ->
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Path1 = lists:foldl(
-        fun({Challengee, PacketHash}, Acc) ->
+        fun({{Challengee, _LayerData}, LayerHash}, Acc) ->
             Receipt = maps:get(Challengee, Responses0, undefined),
-            Witnesses = maps:get(PacketHash, Responses0, []),
+            Witnesses = maps:get(LayerHash, Responses0, []),
             E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
             [E|Acc]
         end,
         [],
-        Challengees
+        %% the last layer only hash a packet hash because it's composed entirely of padding
+        lists:zip(Challengees ++ [{<<>>, <<>>}], LayerHashes)
     ),
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, Path1),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
