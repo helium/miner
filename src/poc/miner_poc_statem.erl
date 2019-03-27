@@ -298,7 +298,7 @@ submitting(info, submit, #data{address=Challenger,
         [],
         Challengees
     ),
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, OnionKeyHash, Secret, Path1),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, Path1),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
