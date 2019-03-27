@@ -9,7 +9,8 @@
 
 -export([
     basic/1,
-    startup/1
+    startup/1,
+    dist/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -28,6 +29,22 @@ all() ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
+
+dist(Config0) ->
+    TestCase = poc_dist,
+    Config = miner_ct_utils:init_per_testcase(TestCase, Config0),
+    Miners = proplists:get_value(miners, Config),
+    Addresses = proplists:get_value(addresses, Config),
+    InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    DKGResults = miner_ct_utils:pmap(
+        fun(Miner) ->
+            ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions, Addresses])
+        end,
+        Miners
+    ),
+    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+    miner_ct_utils:end_per_testcase(TestCase, Config),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @public

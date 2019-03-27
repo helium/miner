@@ -166,22 +166,16 @@ init_per_testcase(TestCase, Config) ->
     BlockTime = get_config("BT", 15000),
     BatchSize = get_config("BS", 500),
 
-    MinerNames = lists:map(
-        fun(_M) ->
-            list_to_atom(miner_ct_utils:randname(5))
+    MinersAndPorts = miner_ct_utils:pmap(
+        fun(I) ->
+            MinerName = list_to_atom(miner_ct_utils:randname(5)),
+            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000+I, 46000+I}}
         end,
         lists:seq(1, TotalMiners)
     ),
 
-    Miners = miner_ct_utils:pmap(
-        fun(Miner) ->
-            miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
-        end,
-        MinerNames
-    ),
-
     ConfigResult = miner_ct_utils:pmap(
-        fun(Miner) ->
+        fun({Miner, {TCPPort, UDPPort}}) ->
             ct_rpc:call(Miner, cover, start, []),
             ct_rpc:call(Miner, application, load, [lager]),
             ct_rpc:call(Miner, application, load, [miner]),
@@ -204,13 +198,15 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
             ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
             ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
-            % ct_rpc:call(Miner, application, set_env, [miner, radio_device, {"127.0.0.1", 45000, 5678}]),
+            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {"127.0.0.1", TCPPort, UDPPort}]),
 
             {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
         end,
-        Miners
+        MinersAndPorts
     ),
+
+    Miners = [M || {M, _} <- MinersAndPorts],
 
     %% check that the config loaded correctly on each miner
     true = lists:all(
@@ -248,6 +244,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, _} = ct_cover:add_nodes(Miners),
     [
         {miners, Miners},
+        {ports, MinersAndPorts},
         {addresses, Addresses},
         {num_consensus_members, NumConsensusMembers}
         | Config
