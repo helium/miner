@@ -243,7 +243,7 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0, packet_hashes=Pa
                     {keep_state, Data};
                 true ->
                     Witnesses = maps:get(PacketHash, Responses0, []),
-                    case elrang:length(Witnesses) > 5 of
+                    case erlang:length(Witnesses) > 5 of
                         true ->
                             {keep_state, Data};
                         false ->
