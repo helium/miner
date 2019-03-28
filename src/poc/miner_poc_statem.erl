@@ -57,8 +57,7 @@
     onion_keys :: keys() | undefined,
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [binary()],
-    receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
-    witnesses = [] :: blockchain_poc_receipt_v1:poc_witnesses(),
+    responses = #{},
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
@@ -128,7 +127,7 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{addres
             {Txn, Keys, Secret} = create_request(Address, BlockHash),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, receipts=[], witnesses=[]}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, responses=#{}}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -190,8 +189,8 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
-            [<<IV:16/integer-unsigned-little, _/binary>> | Hashes] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
-            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], Hashes),
+            [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
+            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
             {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
             LayerHashes = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
@@ -199,7 +198,7 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, Data#data{challengees=lists:zip(Path, Hashes), packet_hashes=LayerHashes}};
+                    {next_state, receiving, Data#data{challengees=lists:zip(Path, LayerData), packet_hashes=LayerHashes}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
@@ -214,8 +213,8 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
-    case length(Data#data.witnesses ++ Data#data.receipts) of
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0, responses=Responses}=Data) ->
+    case maps:size(Responses) of
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
@@ -228,26 +227,32 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
-receiving(cast, {witness, Witness}, #data{witnesses=Witnesses, packet_hashes=PacketHashes}=Data) ->
-     lager:info("got witness ~p", [Witness]),
-     %% Validate the witness is correct
-     case blockchain_poc_witness_v1:is_valid(Witness) of
-         false ->
-             lager:warning("ignoring invalid witness ~p", [Witness]),
-             {keep_state, Data};
-         true ->
-             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
-             %% check this is a known layer of the packet
-             case lists:member(PacketHash, PacketHashes) of
-                 true ->
-                     {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
-                 false ->
-                     lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
-                     {keep_state, Data}
-             end
-     end;
-receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
-                                          challengees=Challengees}=Data) ->
+receiving(cast, {witness, Witness}, #data{responses=Responses0, packet_hashes=PacketHashes}=Data) ->
+    lager:info("got witness ~p", [Witness]),
+    %% Validate the witness is correct
+    case blockchain_poc_witness_v1:is_valid(Witness) of
+        false ->
+            lager:warning("ignoring invalid witness ~p", [Witness]),
+            {keep_state, Data};
+        true ->
+            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+            %% check this is a known layer of the packet
+            case lists:member(PacketHash, PacketHashes) of
+                false ->
+                    lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                    {keep_state, Data};
+                true ->
+                    Witnesses = maps:get(PacketHash, Responses0, []),
+                    case erlang:length(Witnesses) >= 5 of
+                        true ->
+                            {keep_state, Data};
+                        false ->
+                            Responses1 = maps:put(PacketHash, [Witness|Witnesses], Responses0),
+                            {keep_state, Data#data{responses=Responses1}}
+                    end
+            end
+    end;
+receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
@@ -259,8 +264,14 @@ receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
             %% Also check onion layer secret
             case lists:keyfind(Gateway, 1, Challengees) of
                 {Gateway, LayerData} ->
-                    Receipts1 = [Receipt|Receipts0],
-                    {keep_state, Data#data{receipts=Receipts1}};
+                    case maps:get(Gateway, Responses0, undefined) of
+                        undefined ->
+                            Responses1 = maps:put(Gateway, Receipt, Responses0),
+                            {keep_state, Data#data{responses=Responses1}};
+                        _ ->
+                            lager:warning("Already got this receipt ~p for ~p ignoring", [Receipt, Gateway]),
+                            {keep_state, Data}
+                    end;
                 {Gateway, OtherData} ->
                     lager:warning("Got incorrect layer data ~p from ~p (expected ~p)", [Gateway, OtherData, Data]),
                     {keep_state, Data};
@@ -277,12 +288,24 @@ receiving(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 submitting(info, submit, #data{address=Challenger,
-                               receipts=Receipts,
-                               witnesses=Witnesses,
+                               responses=Responses0,
                                secret=Secret,
+                               challengees=Challengees,
+                               packet_hashes=LayerHashes,
                                onion_keys= #{public := OnionCompactKey}}=Data) ->
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
-    Txn0 = blockchain_txn_poc_receipts_v1:new(OnionKeyHash, Receipts, Witnesses, Challenger, Secret),
+    Path1 = lists:foldl(
+        fun({{Challengee, _LayerData}, LayerHash}, Acc) ->
+            Receipt = maps:get(Challengee, Responses0, undefined),
+            Witnesses = maps:get(LayerHash, Responses0, []),
+            E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
+            [E|Acc]
+        end,
+        [],
+        %% the last layer only hash a packet hash because it's composed entirely of padding
+        lists:zip(Challengees ++ [{<<>>, <<>>}], LayerHashes)
+    ),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),

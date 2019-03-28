@@ -9,7 +9,8 @@
 
 -export([
     basic/1,
-    startup/1
+    startup/1,
+    dist/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -23,11 +24,89 @@
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [startup].
+    [startup, dist].
 
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
+
+dist(Config0) ->
+    RPCTimeout = timer:seconds(2),
+    miner_fake_radio_backplane:start_link(45000, lists:seq(46001, 46008)),
+
+    TestCase = poc_dist,
+    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+    Miners = proplists:get_value(miners, Config),
+    Addresses = proplists:get_value(addresses, Config),
+    InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    IntitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0) || Addr <- Addresses],
+    InitialTransactions = InitialPaymentTransactions ++ IntitialGatewayTransactions,
+
+    DKGResults = miner_ct_utils:pmap(
+        fun(Miner) ->
+            ct_rpc:call(Miner, miner, initial_dkg, [InitialTransactions, Addresses])
+        end,
+        Miners
+    ),
+    ?assert(lists:all(fun(Res) -> Res == ok end, DKGResults)),
+
+
+    Self = self(),
+    [M|_] = Miners,
+    ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
+
+    %% wait until one node has a working chain
+    ok = miner_ct_utils:wait_until(
+        fun() ->
+            lists:any(
+                fun(Miner) ->
+                    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                        {badrpc, Reason} ->
+                            ct:fail(Reason),
+                            false;
+                        undefined ->
+                            false;
+                        Chain ->
+                            Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain], RPCTimeout),
+                            ActiveGteways = ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
+                            maps:size(ActiveGteways) == erlang:length(Addresses)
+                    end
+                end,
+                Miners
+            )
+        end,
+        10,
+        timer:seconds(6)
+    ),
+
+    %% obtain the genesis block
+    GenesisBlock = lists:foldl(
+                     fun(Miner, undefined) ->
+                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                                 {badrpc, Reason} ->
+                                     ct:fail(Reason),
+                                     false;
+                                 undefined ->
+                                     false;
+                                 Chain ->
+                                     {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain]),
+                                     GBlock
+                             end;
+                        (_, Acc) ->
+                             Acc
+                     end, undefined, Miners),
+
+    ?assertNotEqual(undefined, GenesisBlock),
+
+    %% load the genesis block on all the nodes
+    lists:foreach(fun(Miner) ->
+                          rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                  end, Miners),
+
+    ?assertEqual({0, 0}, rcv_loop(M, 25, {length(Miners), length(Miners)})),
+
+    miner_ct_utils:end_per_testcase(TestCase, Config),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @public
@@ -197,12 +276,12 @@ startup(_Config) ->
 
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Send fake notify
     ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
@@ -231,12 +310,44 @@ startup(_Config) ->
     ?assertEqual({ok, 1}, blockchain:height(Chain)),
 
     % Now this should match the chain
-    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
     ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+rcv_loop(_Miner, _, {0, 0}=Acc) ->
+    Acc;
+rcv_loop(_Miner, 0, Acc) ->
+    Acc;
+rcv_loop(Miner, I, Acc0) ->
+    receive
+        {blockchain_event, {add_block, Hash, false}} ->
+            Acc1 = case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+                undefined ->
+                    Acc0;
+                Chain ->
+                    {ok, Block} = ct_rpc:call(Miner, blockchain, get_block, [Hash, Chain]),
+                    lists:foldl(
+                        fun(Txn, {Reqs, Recs}=A) ->
+                            case blockchain_txn:type(Txn) of
+                                blockchain_txn_poc_receipts_v1 ->
+                                    {Reqs, Recs-1};
+                                blockchain_txn_poc_request_v1 ->
+                                    {Reqs-1, Recs};
+                                _ ->
+                                    A
+                            end
+                        end,
+                        Acc0,
+                        blockchain_block:transactions(Block)
+                    )
+            end,
+            rcv_loop(Miner, I-1, Acc1);
+        {blockchain_event, {add_block, _Hash, true}} ->
+            rcv_loop(Miner, I, Acc0)
+    end.
 
 get_submited_txn(Pid) ->
     History = meck:history(blockchain_worker, Pid),
