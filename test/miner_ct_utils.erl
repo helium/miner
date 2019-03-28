@@ -166,45 +166,57 @@ init_per_testcase(TestCase, Config) ->
     BlockTime = get_config("BT", 15000),
     BatchSize = get_config("BS", 500),
 
-    MinerNames = lists:map(fun(_M) -> list_to_atom(miner_ct_utils:randname(5)) end, lists:seq(1, TotalMiners)),
+    MinersAndPorts = miner_ct_utils:pmap(
+        fun(I) ->
+            MinerName = list_to_atom(miner_ct_utils:randname(5)),
+            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 46000+I}}
+        end,
+        lists:seq(1, TotalMiners)
+    ),
 
-    Miners = miner_ct_utils:pmap(fun(Miner) ->
-                                         miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE)
-                                 end, MinerNames),
+    ConfigResult = miner_ct_utils:pmap(
+        fun({Miner, {TCPPort, UDPPort}}) ->
+            ct_rpc:call(Miner, cover, start, []),
+            ct_rpc:call(Miner, application, load, [lager]),
+            ct_rpc:call(Miner, application, load, [miner]),
+            ct_rpc:call(Miner, application, load, [blockchain]),
+            ct_rpc:call(Miner, application, load, [libp2p]),
+            %% give each miner its own log directory
+            LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
+            ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+            %% set blockchain configuration
+            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+            Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
+            BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+            ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
 
-    ConfigResult = miner_ct_utils:pmap(fun(Miner) ->
-                                               ct_rpc:call(Miner, cover, start, []),
-                                               ct_rpc:call(Miner, application, load, [lager]),
-                                               ct_rpc:call(Miner, application, load, [miner]),
-                                               ct_rpc:call(Miner, application, load, [blockchain]),
-                                               ct_rpc:call(Miner, application, load, [libp2p]),
-                                               %% give each miner its own log directory
-                                               LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
-                                               ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
-                                               %% set blockchain configuration
-                                               #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-                                               Key = {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)},
-                                               BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
-                                               ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
-                                               ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
-                                               ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
-                                               ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
-                                               ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+            %% set miner configuration
+            ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+            ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
+            ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
+            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {"127.0.0.1", TCPPort, UDPPort}]),
 
-                                               %% set miner configuration
-                                               ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
-                                               ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
-                                               ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
+            {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+            ok
+        end,
+        MinersAndPorts
+    ),
 
-                                               {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
-                                               ok
-                                       end, Miners),
+    Miners = [M || {M, _} <- MinersAndPorts],
 
     %% check that the config loaded correctly on each miner
-    true = lists:all(fun(ok) -> true;
-                        (Res) -> ct:pal("config setup failure: ~p", [Res]),
-                                 false
-                     end, ConfigResult),
+    true = lists:all(
+        fun(ok) -> true;
+        (Res) ->
+            ct:pal("config setup failure: ~p", [Res]),
+            false
+        end,
+        ConfigResult
+    ),
 
     %% get the first miner's listen addrs
     [First | Rest] = Miners,
@@ -212,21 +224,31 @@ init_per_testcase(TestCase, Config) ->
     FirstListenAddr = hd(ct_rpc:call(First, libp2p_swarm, listen_addrs, [FirstSwarm])),
 
     %% tell the rest of the miners to connect to the first miner
-    lists:foreach(fun(Miner) ->
-                          Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
-                          ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, FirstListenAddr])
-                  end, Rest),
+    lists:foreach(
+        fun(Miner) ->
+            Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+            ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, FirstListenAddr])
+        end,
+        Rest
+    ),
 
     %% accumulate the address of each miner
-    Addresses = lists:foldl(fun(Miner, Acc) ->
-                        Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
-                        [Address | Acc]
-                end, [], Miners),
+    Addresses = lists:foldl(
+        fun(Miner, Acc) ->
+            Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+            [Address | Acc]
+        end,
+        [],
+        Miners
+    ),
     {ok, _} = ct_cover:add_nodes(Miners),
-
-    [{miners, Miners},
-     {addresses, Addresses},
-     {num_consensus_members, NumConsensusMembers} | Config].
+    [
+        {miners, Miners},
+        {ports, MinersAndPorts},
+        {addresses, Addresses},
+        {num_consensus_members, NumConsensusMembers}
+        | Config
+    ].
 
 end_per_testcase(_TestCase, Config) ->
     Miners = proplists:get_value(miners, Config),

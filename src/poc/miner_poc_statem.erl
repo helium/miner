@@ -55,9 +55,9 @@
     address :: libp2p_crypto:pubkey_bin(),
     secret :: binary() | undefined,
     onion_keys :: keys() | undefined,
-    challengees = [] :: [libp2p_crypto:pubkey_bin()],
-    receipts = [] :: blockchain_poc_receipt_v1:poc_receipts(),
-    witnesses = [] :: blockchain_poc_receipt_v1:poc_witnesses(),
+    challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
+    packet_hashes = [] :: [binary()],
+    responses = #{},
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     delay = ?BLOCK_DELAY :: non_neg_integer(),
@@ -121,14 +121,13 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
 requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
-            lager:info("request not allowed yet (~p)", [BlockHash]),
             {keep_state, Data};
         true ->
             lager:info("request allowed @ ~p", [BlockHash]),
-            {Txn, Keys, Secret} = create_request(Address),
+            {Txn, Keys, Secret} = create_request(Address, BlockHash),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys}}
+            {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, responses=#{}}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -137,17 +136,16 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{secret=Secret,
+mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Challenger,
+                                                                  secret=Secret,
                                                                   mining_timeout=MiningTimeout}=Data0) ->
-    lager:info("got block ~p checking content", [BlockHash]),
     case find_request(BlockHash, Data0) of
         ok ->
-            self() ! {target, <<Secret/binary, BlockHash/binary>>},
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>},
             lager:info("request was mined @ ~p", [BlockHash]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
         {error, _Reason} ->
-             lager:info("request not found in block ~p : ~p", [BlockHash, _Reason]),
              case MiningTimeout > 0 of
                 true ->
                     {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
@@ -168,7 +166,7 @@ targeting(info, _, #data{retry=0}=Data) ->
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Entropy}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
-    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger),
+    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
     lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
     self() ! {challenge, Entropy, Target, Gateways},
     {next_state, challenging, Data#data{challengees=[]}};
@@ -180,7 +178,7 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
-                                                                onion_keys= #{secret := PvtOnionKey, public := OnionCompactKey}
+                                                                onion_keys=OnionKey
                                                                }=Data) ->
     case blockchain_poc_path:build(Target, Gateways) of
         {error, Reason} ->
@@ -191,14 +189,16 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
-            OnionList = lists:zip(blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N), Path),
-            Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, OnionList),
+            [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
+            OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
+            {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
+            LayerHashes = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, Data#data{challengees=Path}};
+                    {next_state, receiving, Data#data{challengees=lists:zip(Path, LayerData), packet_hashes=LayerHashes}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
@@ -213,36 +213,72 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0}=Data) ->
-    lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
-    case length(Data#data.witnesses ++ Data#data.receipts) of
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0, responses=Responses}=Data) ->
+    case maps:size(Responses) of
         0 ->
+            lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
             {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
         _ ->
+            lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             self() ! submit,
             {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}}
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
-receiving(cast, {witness, Witness}, #data{witnesses=Witnesses}=Data) ->
-     lager:info("got witness ~p", [Witness]),
-    {keep_state, Data#data{witnesses=[Witness|Witnesses]}};
-receiving(cast, {receipt, Receipt}, #data{receipts=Receipts0,
-                                          challengees=Challengees}=Data) ->
-    lager:info("got receipt ~p", [Receipt]),
-    Address = blockchain_poc_receipt_v1:address(Receipt),
-    % TODO: Also check onion layer secret
-    case blockchain_poc_receipt_v1:is_valid(Receipt)
-         andalso lists:member(Address, Challengees)
-    of
+receiving(cast, {witness, Witness}, #data{responses=Responses0, packet_hashes=PacketHashes}=Data) ->
+    lager:info("got witness ~p", [Witness]),
+    %% Validate the witness is correct
+    case blockchain_poc_witness_v1:is_valid(Witness) of
         false ->
-            lager:warning("ignoring receipt ~p", [Receipt]),
+            lager:warning("ignoring invalid witness ~p", [Witness]),
             {keep_state, Data};
         true ->
-            Receipts1 = [Receipt|Receipts0],
-            {keep_state, Data#data{receipts=Receipts1}}
+            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+            %% check this is a known layer of the packet
+            case lists:member(PacketHash, PacketHashes) of
+                false ->
+                    lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                    {keep_state, Data};
+                true ->
+                    Witnesses = maps:get(PacketHash, Responses0, []),
+                    case erlang:length(Witnesses) >= 5 of
+                        true ->
+                            {keep_state, Data};
+                        false ->
+                            Responses1 = maps:put(PacketHash, [Witness|Witnesses], Responses0),
+                            {keep_state, Data#data{responses=Responses1}}
+                    end
+            end
+    end;
+receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
+    lager:info("got receipt ~p", [Receipt]),
+    Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
+    LayerData = blockchain_poc_receipt_v1:data(Receipt),
+    case blockchain_poc_receipt_v1:is_valid(Receipt) of
+        false ->
+            lager:warning("ignoring invalid receipt ~p", [Receipt]),
+            {keep_state, Data};
+        true ->
+            %% Also check onion layer secret
+            case lists:keyfind(Gateway, 1, Challengees) of
+                {Gateway, LayerData} ->
+                    case maps:get(Gateway, Responses0, undefined) of
+                        undefined ->
+                            Responses1 = maps:put(Gateway, Receipt, Responses0),
+                            {keep_state, Data#data{responses=Responses1}};
+                        _ ->
+                            lager:warning("Already got this receipt ~p for ~p ignoring", [Receipt, Gateway]),
+                            {keep_state, Data}
+                    end;
+                {Gateway, OtherData} ->
+                    lager:warning("Got incorrect layer data ~p from ~p (expected ~p)", [Gateway, OtherData, Data]),
+                    {keep_state, Data};
+                false ->
+                    lager:warning("Got unexpected receipt from ~p", [Gateway]),
+                    {keep_state, Data}
+            end
     end;
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -251,8 +287,25 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-submitting(info, submit, #data{address=Address, receipts=Receipts, witnesses=Witnesses, secret=Secret}=Data) ->
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Receipts, Witnesses, Address, Secret, 0),
+submitting(info, submit, #data{address=Challenger,
+                               responses=Responses0,
+                               secret=Secret,
+                               challengees=Challengees,
+                               packet_hashes=LayerHashes,
+                               onion_keys= #{public := OnionCompactKey}}=Data) ->
+    OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+    Path1 = lists:foldl(
+        fun({{Challengee, _LayerData}, LayerHash}, Acc) ->
+            Receipt = maps:get(Challengee, Responses0, undefined),
+            Witnesses = maps:get(LayerHash, Responses0, []),
+            E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
+            [E|Acc]
+        end,
+        [],
+        %% the last layer only hash a packet hash because it's composed entirely of padding
+        lists:zip(Challengees ++ [{<<>>, <<>>}], LayerHashes)
+    ),
+    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
@@ -318,17 +371,17 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_request(libp2p_crypto:pubkey_bin()) -> {blockchain_txn_poc_request_v1:txn_poc_request(),
-                                                     keys(),
-                                                     binary()}.
-create_request(Address) ->
+-spec create_request(libp2p_crypto:pubkey_bin(), binary()) ->
+    {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
+create_request(Address, BlockHash) ->
     Keys = libp2p_crypto:generate_keys(ecc_compact),
     Secret = libp2p_crypto:keys_to_bin(Keys),
     #{public := OnionCompactKey} = Keys,
     Tx = blockchain_txn_poc_request_v1:new(
         Address,
         crypto:hash(sha256, Secret),
-        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+        crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+        BlockHash
     ),
     {ok, _, SigFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
@@ -339,7 +392,7 @@ create_request(Address) ->
 %%--------------------------------------------------------------------
 -spec find_request(binary(), data()) -> ok | {error, any()}.
 find_request(BlockHash, #data{blockchain=Blockchain,
-                              address=Address,
+                              address=Challenger,
                               secret=Secret,
                               onion_keys= #{public := OnionCompactKey}}) ->
     lager:info("got block ~p checking content", [BlockHash]),
@@ -351,10 +404,12 @@ find_request(BlockHash, #data{blockchain=Blockchain,
             Txns = blockchain_block:transactions(Block),
             Filter =
                 fun(Txn) ->
+                    SecretHash = crypto:hash(sha256, Secret),
+                    OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
                     blockchain_txn:type(Txn) =:= blockchain_txn_poc_request_v1  andalso
-                    blockchain_txn_poc_request_v1:gateway(Txn) =:= Address andalso
-                    blockchain_txn:hash(Txn) =:= crypto:hash(sha256, Secret) andalso
-                    blockchain_txn_poc_request_v1:onion(Txn) =:= crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey))
+                    blockchain_txn_poc_request_v1:challenger(Txn) =:= Challenger andalso
+                    blockchain_txn_poc_request_v1:secret_hash(Txn) =:= SecretHash andalso
+                    blockchain_txn_poc_request_v1:onion_key_hash(Txn) =:= OnionKeyHash
                 end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
@@ -371,7 +426,7 @@ find_request(BlockHash, #data{blockchain=Blockchain,
 %%--------------------------------------------------------------------
 -spec find_receipts(binary(), data()) -> ok | {error, any()}.
 find_receipts(BlockHash, #data{blockchain=Blockchain,
-                               address=Address,
+                               address=Challenger,
                                secret=Secret}) ->
     lager:info("got block ~p checking content", [BlockHash]),
     case blockchain:get_block(BlockHash, Blockchain) of
@@ -383,7 +438,7 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
             Filter =
                 fun(Txn) ->
                     blockchain_txn:type(Txn) =:= blockchain_txn_poc_receipts_v1 andalso
-                    blockchain_txn_poc_receipts_v1:challenger(Txn) =:= Address andalso
+                    blockchain_txn_poc_receipts_v1:challenger(Txn) =:= Challenger andalso
                     blockchain_txn_poc_receipts_v1:secret(Txn) =:= Secret
                 end,
             case lists:filter(Filter, Txns) of
@@ -417,7 +472,7 @@ send_onion(P2P, Onion, Retry) ->
             ok;
         {error, Reason} ->
             lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
-            timer:sleep(timer:seconds(5)),
+            timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
 
@@ -467,7 +522,7 @@ target_test() ->
                                       hbbft_round => 0,
                                       time => 0}),
     Hash = blockchain_block:hash_block(Block),
-    {Target, Gateways} = blockchain_poc_path:target(Hash, undefined),
+    {Target, Gateways} = blockchain_poc_path:target(Hash, undefined, blockchain_swarm:pubkey_bin()),
 
     [{LL, _}|_] = LatLongs,
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),

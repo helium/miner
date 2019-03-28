@@ -379,7 +379,6 @@ handle_call({signed_block, Signatures, Tempblock}, _From, #state{consensus_group
               ?GOSSIP_PROTOCOL,
               blockchain_gossip_handler:gossip_data(Swarm, Block)
              ),
-            ok = blockchain_worker:notify({add_block, blockchain_block:hash_block(Block), true}),
             {reply, ok, State#state{block_timer=Ref}};
         Error ->
             lager:error("signed_block, error: ~p", [Error]),

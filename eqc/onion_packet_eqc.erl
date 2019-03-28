@@ -15,12 +15,12 @@ prop_onion_packet() ->
 
     ?FORALL({{KeyType, DataAndKeys}, DecryptOrder}, {gen_data_and_keys(KeyMap), gen_decrypt_order()},
             begin
-                #{secret := PvtOnionKey, public := OnionCompactKey} = libp2p_crypto:generate_keys(KeyType),
+                OnionKey = libp2p_crypto:generate_keys(KeyType),
                 DataVals = [Data || {Data, _Key} <- DataAndKeys],
                 ECDHFuns = [libp2p_crypto:mk_ecdh_fun(PvtKey) || {_Data, #{secret := PvtKey}} <- DataAndKeys],
-                DataAndBinKeys = [{Data, libp2p_crypto:pubkey_to_bin(Key)} || {Data, #{public := Key}} <- DataAndKeys],
+                DataAndBinKeys = [{Key, Data} || {Data, #{public := Key}} <- DataAndKeys],
                 %% construct onion in "correct" order
-                Onion = miner_onion_server:construct_onion({libp2p_crypto:mk_ecdh_fun(PvtOnionKey), OnionCompactKey}, DataAndBinKeys),
+                {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, DataAndBinKeys),
                 ShuffledDataAndKeys = shuffle(DataAndKeys, DecryptOrder),
                 ShuffledECDHFuns = [libp2p_crypto:mk_ecdh_fun(PvtKey) || {_Data, #{secret := PvtKey}} <- ShuffledDataAndKeys],
                 %% decrypt onion in "correct" order
@@ -53,7 +53,7 @@ shuffle(List, Seed) ->
 
 decrypt_onion(_, [], Acc) ->
     lists:reverse(Acc);
-decrypt_onion(<<IV:12/binary,
+decrypt_onion(<<IV:2/binary,
                 OnionCompactKey:33/binary,
                 Tag:4/binary,
                 CipherText/binary>>, [ECDHFun|Tail], Acc) ->
@@ -73,7 +73,8 @@ gen_key_type() ->
     eqc_gen:elements([ecc_compact, ed25519]).
 
 gen_data_and_keys(KeyMap) ->
-    ?LET(KeyType, gen_key_type(), {KeyType, eqc_gen:list(gen_data_and_key(maps:get(KeyType, KeyMap)))}).
+    ?LET(KeyType, gen_key_type(), {KeyType, ?SUCHTHAT(List, eqc_gen:list(gen_data_and_key(maps:get(KeyType, KeyMap))), length(List) > 2 ) }).
 
 gen_data_and_key(KeyList) ->
-    ?SUCHTHAT({Data, _K}, ?LET(Key, eqc_gen:elements(KeyList), {eqc_gen:binary(), Key}), byte_size(Data) > 0).
+    %% XXX all the layer datas have to be the same size right now
+    ?LET(Key, eqc_gen:elements(KeyList), {eqc_gen:binary(4), Key}).
