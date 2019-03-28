@@ -158,7 +158,7 @@ init_per_testcase(TestCase, Config) ->
     end,
 
     %% Miner configuration, can be input from os env
-    TotalMiners = get_config("T", 7),
+    TotalMiners = get_config("T", 8),
     NumConsensusMembers = get_config("N", 7),
     SeedNodes = [],
     Port = get_config("PORT", 0),

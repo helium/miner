@@ -55,9 +55,10 @@ dist(Config0) ->
     [M|_] = Miners,
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
 
+    %% wait until one node has a working chain
     ok = miner_ct_utils:wait_until(
         fun() ->
-            lists:all(
+            lists:any(
                 fun(Miner) ->
                     case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
                         {badrpc, Reason} ->
@@ -78,9 +79,31 @@ dist(Config0) ->
         timer:seconds(6)
     ),
 
-    % timer:sleep(timer:seconds(120)),
+    %% obtain the genesis block
+    GenesisBlock = lists:foldl(
+                     fun(Miner, undefined) ->
+                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                                 {badrpc, Reason} ->
+                                     ct:fail(Reason),
+                                     false;
+                                 undefined ->
+                                     false;
+                                 Chain ->
+                                     {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain]),
+                                     GBlock
+                             end;
+                        (_, Acc) ->
+                             Acc
+                     end, undefined, Miners),
 
-    ?assertEqual({0, 0}, rcv_loop(M, 25, {7, 7})),
+    ?assertNotEqual(undefined, GenesisBlock),
+
+    %% load the genesis block on all the nodes
+    lists:foreach(fun(Miner) ->
+                          rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                  end, Miners),
+
+    ?assertEqual({0, 0}, rcv_loop(M, 25, {length(Miners), length(Miners)})),
 
     miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
