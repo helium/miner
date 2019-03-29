@@ -51,7 +51,7 @@
     currently_syncing = false :: boolean(),
     election_interval :: pos_integer(),
     current_height = -1 :: integer(),
-    handoff_waiting :: undefined | pid(),
+    handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
     election_epoch = 1 :: pos_integer()
 }).
 
@@ -347,9 +347,23 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
         case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
             [CurrentBlockHash] ->
                 SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
-                {ValidTransactions, InvalidTransactions} =
-                    blockchain_txn:validate(SortedTransactions, blockchain:ledger(Chain)),
                 NewHeight = blockchain_block:height(CurrentBlock) + 1,
+                %% populate this from the last block, unless the last block was the genesis
+                %% block in which case it will be 0
+                LastBlockTimestamp = blockchain_block:time(CurrentBlock),
+                BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps,
+                                                     X > LastBlockTimestamp]),
+                FakeBlock = blockchain_block_v1:new(
+                             #{prev_hash => CurrentBlockHash,
+                               height => NewHeight,
+                               transactions => [],
+                               signatures => [],
+                               hbbft_round => HBBFTRound,
+                               time => BlockTime,
+                               election_epoch => 1,
+                               epoch_start => 0}),
+                {ValidTransactions, InvalidTransactions} =
+                    blockchain_txn:validate(SortedTransactions, FakeBlock, blockchain:ledger(Chain)),
                 {ElectionEpoch, EpochStart} =
                     case has_new_group(ValidTransactions) of
                         {true, _} ->
@@ -357,11 +371,6 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                         _ ->
                             {ElectionEpoch0, EpochStart0}
                     end,
-                %% populate this from the last block, unless the last block was the genesis
-                %% block in which case it will be 0
-                LastBlockTimestamp = blockchain_block:time(CurrentBlock),
-                BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps,
-                                                     X > LastBlockTimestamp]),
                 lager:info("new block time is ~p", [BlockTime]),
                 NewBlock = blockchain_block_v1:new(
                              #{prev_hash => CurrentBlockHash,
@@ -481,7 +490,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
 
                                 catch libp2p_group_relcast:handle_command(ConsensusGroup, stop),
 
-                                State#state{block_timer = undefined,
+                                State#state{block_timer = make_ref(),
                                             handoff_waiting = undefined,
                                             consensus_group = undefined,
                                             election_epoch = State#state.election_epoch + 1,
@@ -579,7 +588,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                             lager:info("nc stay out"),
 
                             {noreply,
-                             State#state{block_timer = undefined,
+                             State#state{block_timer = make_ref(),
                                          handoff_waiting = undefined,
                                          consensus_group = undefined,
                                          election_epoch = State#state.election_epoch + 1,

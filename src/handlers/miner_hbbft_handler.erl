@@ -24,7 +24,7 @@
          members :: [libp2p_crypto:pubkey_bin()],
          ledger :: undefined | blockchain_ledger_v1:ledger(),
          chain :: undefined | blockchain:blockchain(),
-         signed = 0 :: pos_integer()
+         signed = 0 :: non_neg_integer()
         }).
 
 stamp(Chain) ->
@@ -50,14 +50,14 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 ledger=Ledger,
                 chain=Chain}}.
 
-handle_command({unconditional_start, Txns}, State) ->
-    case hbbft:unconditional_start(Txns, State#state.hbbft) of
-        {_HBBFT, already_started} ->
-            {reply, {error, already_started}, ignore};
-        {NewHBBFT, {send, Msgs}} ->
-            lager:notice("force-started HBBFT round"),
-            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
-    end;
+%handle_command({unconditional_start, Txns}, State) ->
+    %case hbbft:unconditional_start(Txns, State#state.hbbft) of
+        %{_HBBFT, already_started} ->
+            %{reply, {error, already_started}, ignore};
+        %{NewHBBFT, {send, Msgs}} ->
+            %lager:notice("force-started HBBFT round"),
+            %{reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+    %end;
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
         {_HBBFT, already_started} ->
@@ -273,4 +273,7 @@ fake_block(Chain, HBBFT) ->
                               transactions => [],
                               signatures => [],
                               hbbft_round => hbbft:round(HBBFT),
-                              time => erlang:system_time(second)}).
+                              time => erlang:system_time(second),
+                              election_epoch => 1,
+                              epoch_start => 0
+                             }).

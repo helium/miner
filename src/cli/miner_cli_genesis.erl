@@ -113,7 +113,7 @@ genesis_forge(["genesis", "forge", Addrs], [], []) ->
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     InitialGatewayTransactions = [ blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0) || Addr <- Addresses ],
-    miner_election_mgr:initial_dkg(InitialPaymentTransactions ++ InitialGatewayTransactions, Addresses),
+    miner_consensus_mgr:initial_dkg(InitialPaymentTransactions ++ InitialGatewayTransactions, Addresses),
     [clique_status:text("ok")];
 genesis_forge([_, _, _], [], []) ->
     usage.

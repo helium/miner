@@ -37,7 +37,7 @@
          hash :: undefined | binary(),
          consensus_pos :: undefined | pos_integer(),
          initial_height = 0 :: non_neg_integer(),
-         initial_hash :: binary(),
+         initial_hash :: undefined | binary(),
          n :: undefined | pos_integer(),
          curve :: atom(),
          batch_size :: integer(),
