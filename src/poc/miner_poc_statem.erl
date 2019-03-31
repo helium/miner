@@ -502,7 +502,7 @@ target_test() ->
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
             Index = h3:from_geo(LatLong, 9),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
-            G1 = blockchain_ledger_gateway_v1:score(Score, G0),
+            G1 = blockchain_ledger_gateway_v1:score(0, Score, G0),
             maps:put(Address, G1, Acc)
 
         end,

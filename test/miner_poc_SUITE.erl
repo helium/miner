@@ -81,29 +81,52 @@ dist(Config0) ->
 
     %% obtain the genesis block
     GenesisBlock = lists:foldl(
-                     fun(Miner, undefined) ->
-                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
-                                 {badrpc, Reason} ->
-                                     ct:fail(Reason),
-                                     false;
-                                 undefined ->
-                                     false;
-                                 Chain ->
-                                     {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain]),
-                                     GBlock
-                             end;
-                        (_, Acc) ->
-                             Acc
-                     end, undefined, Miners),
+        fun(Miner, undefined) ->
+            case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                {badrpc, Reason} ->
+                    ct:fail(Reason),
+                    false;
+                undefined ->
+                    false;
+                Chain ->
+                    {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain]),
+                    GBlock
+            end;
+        (_, Acc) ->
+                Acc
+        end,
+        undefined,
+        Miners
+    ),
 
     ?assertNotEqual(undefined, GenesisBlock),
 
     %% load the genesis block on all the nodes
-    lists:foreach(fun(Miner) ->
-                          rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                  end, Miners),
+    lists:foreach(
+        fun(Miner) ->
+            rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+        end,
+        Miners
+    ),
 
     ?assertEqual({0, 0}, rcv_loop(M, 25, {length(Miners), length(Miners)})),
+
+    %% wait until one node has a working chain
+ 
+    case ct_rpc:call(M, blockchain_worker, blockchain, [], RPCTimeout) of
+        {badrpc, Reason} -> ct:fail(Reason);
+        undefined -> ok;
+        Chain ->
+            Ledger = ct_rpc:call(M, blockchain, ledger, [Chain], RPCTimeout),
+            ActiveGateways = ct_rpc:call(M, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
+            lists:foreach(
+                fun(G) ->
+                    Scores = blockchain_ledger_gateway_v1:score(G),
+                    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Scores])
+                end,
+                maps:values(ActiveGateways).
+            )
+    end,
 
     miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
