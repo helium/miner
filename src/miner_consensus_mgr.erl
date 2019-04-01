@@ -12,6 +12,7 @@
          maybe_start_election/3,
          start_election/2,
          maybe_start_consensus_group/1,
+         cancel_dkg/1,
 
          %% internal
          genesis_block_done/4,
@@ -66,7 +67,8 @@ consensus_pos() ->
 in_consensus() ->
     gen_server:call(?MODULE, in_consensus).
 
-
+cancel_dkg(Height) ->
+    gen_server:call(?MODULE, {cancel_dkg, Height}, infinity).
 
 initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
@@ -157,7 +159,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                            initial_height = Height,
                            tries = Tries}) ->
     lager:info("election done at ~p tries ~p", [Height, Tries]),
-    erlang:cancel_timer(State#state.timer_ref),
+    cancel_timer(State#state.timer_ref),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
@@ -248,6 +250,15 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
+handle_call({cancel_dkg, Height}, _From, State) ->
+    Ref =
+        case State#state.initial_height =< Height of
+            true ->
+                cancel_timer(State#state.timer_ref);
+            false ->
+                State#state.timer_ref
+        end,
+    {reply, ok, State#state{timer_ref = Ref}};
 handle_call({start_election, _Hash, Height}, _From, State)
   when Height =< State#state.initial_height ->
     lager:info("election already ran at ~p bc initial ~p", [Height, State#state.initial_height]),
@@ -299,6 +310,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 initiate_election(Hash, Height, State) ->
+    %% make sure we clear any lingering timers
+    cancel_timer(State#state.timer_ref),
     Chain = blockchain_worker:blockchain(),
     N = blockchain_worker:num_consensus_members(),
 
@@ -409,3 +422,8 @@ do_dkg(Addrs, Artifact, Sign, Done,
 
 get_dkg_timeout() ->
     application:get_env(miner, dkg_timeout, timer:seconds(60)).
+
+cancel_timer(undefined) ->
+    ok;
+cancel_timer(Ref) ->
+    erlang:cancel_timer(Ref).
