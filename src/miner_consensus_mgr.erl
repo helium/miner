@@ -10,9 +10,8 @@
 
          initial_dkg/2,
          maybe_start_election/3,
-         start_election/2,
+         start_election/3,
          maybe_start_consensus_group/1,
-         cancel_dkg/1,
 
          %% internal
          genesis_block_done/4,
@@ -43,7 +42,9 @@
          curve :: atom(),
          batch_size :: integer(),
          tries = 0 :: integer(),
-         timer_ref :: undefined | reference()
+         timeout_interval :: pos_integer(),
+         chain :: undefined | blockchain:blockchain(),
+         election_running = false :: boolean()
         }).
 
 %%%===================================================================
@@ -67,20 +68,17 @@ consensus_pos() ->
 in_consensus() ->
     gen_server:call(?MODULE, in_consensus).
 
-cancel_dkg(Height) ->
-    gen_server:call(?MODULE, {cancel_dkg, Height}, infinity).
-
 initial_dkg(GenesisTransactions, Addrs) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
 
-maybe_start_election(_Hash, Height, NextElection) when Height < NextElection ->
+maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
     lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
     ok;
 maybe_start_election(Hash, _, NextElection) ->
-    start_election(Hash, NextElection).
+    start_election(Hash, NextElection, NextElection).
 
-start_election(Hash, Height) ->
-    gen_server:call(?MODULE, {start_election, Hash, Height}, infinity).
+start_election(Hash, CurrentHeight, StartHeight) ->
+    gen_server:call(?MODULE, {start_election, Hash, CurrentHeight, StartHeight}, infinity).
 
 maybe_start_consensus_group(StartHeight) ->
     gen_server:call(?MODULE, {maybe_start_consensus_group, StartHeight}, infinity).
@@ -113,8 +111,14 @@ init(Args) ->
 
     BatchSize = proplists:get_value(batch_size, Args),
     Curve = proplists:get_value(curve, Args),
+    Interval = proplists:get_value(interval, Args, 10),  %% longer in prod?
+
+    ok = blockchain_event:add_handler(self()),
+    Chain = blockchain_worker:blockchain(),
 
     {ok, #state{batch_size = BatchSize,
+                timeout_interval = Interval,
+                chain = Chain,
                 curve = Curve}}.
 
 %% in the call handlers, we wait for the dkg to return, and then once
@@ -159,7 +163,6 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                            initial_height = Height,
                            tries = Tries}) ->
     lager:info("election done at ~p tries ~p", [Height, Tries]),
-    cancel_timer(State#state.timer_ref),
 
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
@@ -191,8 +194,8 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     ok = miner:handoff_consensus(Group),
     {reply, ok, State#state{current_dkg = undefined,
                             tries = 1,
-                            initial_hash = undefined,
-                            timer_ref = undefined}};
+                            election_running = false,
+                            initial_hash = undefined}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State = #state{batch_size = BatchSize}) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
@@ -250,25 +253,18 @@ handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {reply, ok, NonDKGState}
     end;
-handle_call({cancel_dkg, Height}, _From, State) ->
-    Ref =
-        case State#state.initial_height =< Height of
-            true ->
-                cancel_timer(State#state.timer_ref);
-            false ->
-                State#state.timer_ref
-        end,
-    {reply, ok, State#state{timer_ref = Ref}};
-handle_call({start_election, _Hash, Height}, _From, State)
+handle_call({start_election, _Hash, _Current, Height}, _From, State)
   when Height =< State#state.initial_height ->
     lager:info("election already ran at ~p bc initial ~p", [Height, State#state.initial_height]),
     {reply, already_ran, State};
-handle_call({start_election, Hash, Height}, _From,
-            #state{current_dkg = undefined} = State0) ->
-    lager:info("election started at ~p", [Height]),
-    State = State0#state{initial_height = Height,
-                         tries = 1},
-    State1 = initiate_election(Hash, Height, State),
+handle_call({start_election, Hash, CurrentHeight, StartHeight}, _From,
+            #state{current_dkg = undefined, timeout_interval = Interval} = State0) ->
+    lager:info("election started at ~p curr ~p", [StartHeight, CurrentHeight]),
+    Diff = CurrentHeight - StartHeight,
+    Tries = (Diff div Interval) + 1,
+    State = State0#state{initial_height = StartHeight,
+                         tries = Tries},
+    State1 = initiate_election(Hash, StartHeight, State),
     {reply, State1#state.current_dkg /= undefined, State1};
 handle_call({start_election, _Hash, _Height}, _From, State) ->
     lager:info("election started at ~p, already running", [_Height]),
@@ -287,17 +283,40 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-%% for the genesis block, since there will be an operator, we don't
-%% bother to set up a timeout for the dkg.
-handle_info(dkg_timeout, #state{current_dkg = OldDKG} = State) ->
-    %% kill the running dkg
-    catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
-    %% restart the dkg
-    State1 = restart_election(State),
-    {noreply, State1};
+handle_info({blockchain_event, {add_block, Hash, _Sync}}, #state{current_dkg = OldDKG,
+                                                                 initial_height = Height,
+                                                                 timeout_interval = Interval,
+                                                                 tries = Tries} = State)
+  when State#state.chain /= undefined andalso
+       State#state.election_running == true andalso
+       Height =/= 0 ->
+
+    case blockchain:get_block(Hash, State#state.chain) of
+        {ok, Block} ->
+            NextRestart = Height + (Interval * Tries),
+            lager:info("restart? h ~p next ~p", [Height, NextRestart]),
+
+            case blockchain_block:height(Block) of
+                NewHeight when NewHeight >= NextRestart ->
+                    catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
+                    %% restart the dkg
+                    State1 = restart_election(State, Height),
+                    {noreply, State1};
+                _Error ->
+                    {noreply, State}
+                end;
+        _Error ->
+            {noreply, State}
+    end;
 handle_info(_Info, State) ->
-    lager:warning("unexpected message ~p", [_Info]),
-    {noreply, State}.
+    case State#state.chain of
+        undefined ->
+            Chain = blockchain_worker:blockchain(),
+            {noreply, State#state{chain = Chain}};
+        _ ->
+            lager:warning("unexpected message ~p", [_Info]),
+            {noreply, State}
+    end.
 
 terminate(_Reason, _State) ->
     ok.
@@ -310,8 +329,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 initiate_election(Hash, Height, State) ->
-    %% make sure we clear any lingering timers
-    cancel_timer(State#state.timer_ref),
     Chain = blockchain_worker:blockchain(),
     N = blockchain_worker:num_consensus_members(),
 
@@ -323,25 +340,19 @@ initiate_election(Hash, Height, State) ->
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
                          election_done, State#state{initial_height = Height,
                                                     n = N,
+                                                    election_running = true,
                                                     initial_hash = Hash}),
 
-    %% TODO: the timeout here should be generously longer than even the
-    %% longest dkg, as the potential for chain-forking dkg timeouts is
-    %% IMMENSE. I suspect that even the timeout prior to the restart
-    %% should be threaded through the existing consensus group for safety.
-
-    Timeout = get_dkg_timeout(),
-    Ref = erlang:send_after(Timeout, self(), dkg_timeout),
-    State1#state{timer_ref = Ref}.
+    State1.
 
 restart_election(#state{n = N,
                         initial_hash = Hash,
-                        tries = Try0} = State) ->
-    lager:warning("RESTARTING ELECTION, HERE BE LASERSHARKS"),
+                        tries = Try0} = State, Height) ->
 
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     Try = Try0 + 1,
+    lager:warning("restarting election at ~p try ~p", [Height, Try]),
 
     OrderedGateways = blockchain_election:new_group(Ledger, Hash, N, Try),
     ConsensusAddrs = lists:sublist(OrderedGateways, (N * (Try - 1)) + 1, N),
@@ -355,9 +366,7 @@ restart_election(#state{n = N,
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
                          election_done, State#state{tries = Try}),
-    Timeout = get_dkg_timeout(),
-    Ref = erlang:send_after(Timeout, self(), dkg_timeout),
-    State1#state{timer_ref = Ref}.
+    State1.
 
 do_initial_dkg(GenesisTransactions, Addrs, State) ->
     lager:info("do initial"),
@@ -419,11 +428,3 @@ do_dkg(Addrs, Artifact, Sign, Done,
             {false, State#state{consensus_pos = undefined,
                                 current_dkg = undefined}}
     end.
-
-get_dkg_timeout() ->
-    application:get_env(miner, dkg_timeout, timer:seconds(60)).
-
-cancel_timer(undefined) ->
-    ok;
-cancel_timer(Ref) ->
-    erlang:cancel_timer(Ref).

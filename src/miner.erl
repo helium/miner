@@ -256,7 +256,7 @@ init(Args) ->
     State = #state{block_time=BlockTime,
                    election_interval = Interval},
     case blockchain_worker:blockchain() of
-            undefined ->
+        undefined ->
             {ok, State};
         Chain ->
             {ok, Top} = blockchain:height(Chain),
@@ -442,8 +442,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                         case has_new_group(Txns) of
                             %% not here yet, regular round
                             false ->
-                                lager:info("reg round"),
                                 NextElection = Start + Interval,
+                                lager:info("reg round c ~p n ~p", [Height, NextElection]),
                                 miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
@@ -656,7 +656,7 @@ restore(Chain, Block, Height, Interval) ->
         Ht when Ht > (EpochStart + Interval) ->
             {ok, ElectionBlock} = blockchain:get_block(EpochStart + Interval, Chain),
             EHash = blockchain_block:hash_block(ElectionBlock),
-            miner_consensus_mgr:start_election(EHash, EpochStart + Interval);
+            miner_consensus_mgr:start_election(EHash, Height, EpochStart + Interval);
         _ ->
             ok
     end,
