@@ -14,8 +14,8 @@
     start_link/1,
     send/1,
     decrypt/1,
-    send_receipt/4,
-    send_witness/3
+    send_receipt/3,
+    send_witness/2
 ]).
 
 -ifdef(EQC).
@@ -73,6 +73,11 @@ decrypt(Onion) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p) -> ok.
+send_receipt(_Data, _OnionCompactKey, _Type) ->
+    ok = blockchain_event:add_handler(self()),
+    send_receipt(_Data, _OnionCompactKey, _Type, 3).
+
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, non_neg_integer()) -> ok.
 send_receipt(_Data, _OnionCompactKey, _Type, 0) ->
     lager:error("failed to send receipts, max retry");
@@ -82,7 +87,9 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, _Reason} ->
-            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]);
+            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
+            ok = wait_until_next_block(),
+            send_receipt(Data, OnionCompactKey, Type, Retry-1);
         {ok, PoCs} ->
             lists:foreach(
                 fun(PoC) ->
@@ -97,6 +104,7 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
                     case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
                         {error, _Reason} ->
                             lager:error("failed to dial challenger ~p (~p)", [Challenger, _Reason]),
+                            ok = wait_until_next_block(),
                             send_receipt(Data, OnionCompactKey, Type, Retry-1);
                         {ok, Stream} ->
                             _ = miner_poc_handler:send(Stream, EncodedReceipt)
@@ -111,6 +119,11 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+-spec  send_witness(binary(), libp2p_crypto:pubkey_bin()) -> ok.
+send_witness(_Data, _OnionCompactKey) ->
+    ok = blockchain_event:add_handler(self()),
+    send_witness(_Data, _OnionCompactKey, 3).
+
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, 0) ->
     lager:error("failed to send witness, max retry");
@@ -120,7 +133,9 @@ send_witness(Data, OnionCompactKey, Retry) ->
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, _Reason} ->
-            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]);
+            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
+            ok = wait_until_next_block(),
+            send_witness(Data, OnionCompactKey, Retry-1);
         {ok, PoCs} ->
             lists:foreach(
                 fun(PoC) ->
@@ -135,6 +150,7 @@ send_witness(Data, OnionCompactKey, Retry) ->
                     case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]),
+                            ok = wait_until_next_block(),
                             send_witness(Data, OnionCompactKey, Retry-1);
                         {ok, Stream} ->
                             _ = miner_poc_handler:send(Stream, EncodedWitness)
@@ -222,14 +238,25 @@ handle_info(_Msg, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+-spec wait_until_next_block() -> ok.
+wait_until_next_block() ->
+    receive
+        {blockchain_event, {add_block, _BlockHash, _}} ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
 decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type) ->
     case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
-            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey, 3]),
+            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey]),
             lager:info("could not decrypt packet received via ~p", [Type]);
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
-            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, 3]),
+            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type]),
             gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
                                    0:32/integer, %% broadcast packet
                                    1:8/integer, %% onion packet
