@@ -227,10 +227,13 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
 receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{challenge_timeout=T-1}};
-receiving(cast, {witness, Witness}, #data{responses=Responses0, packet_hashes=PacketHashes}=Data) ->
+receiving(cast, {witness, Witness}, #data{responses=Responses0,
+                                          packet_hashes=PacketHashes,
+                                          blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
-    case blockchain_poc_witness_v1:is_valid(Witness) of
+    Ledger = blockchain:ledger(Chain),
+    case validate_witness(Witness, Ledger) of
         false ->
             lager:warning("ignoring invalid witness ~p", [Witness]),
             {keep_state, Data};
@@ -335,6 +338,27 @@ waiting(EventType, EventContent, Data) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
+validate_witness(Witness, Ledger) ->
+    Gateway = blockchain_poc_witness_v1:gateway(Witness),
+    case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
+        {error, _Reason} ->
+            lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
+            false;
+        {ok, GwInfo} ->
+            case blockchain_ledger_gateway_v1:location(GwInfo) of
+                undefined ->
+                    lager:warning("ignoring witness ~p location undefined", [Gateway]),
+                    false;
+                _ ->
+                    blockchain_poc_witness_v1:is_valid(Witness)
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
