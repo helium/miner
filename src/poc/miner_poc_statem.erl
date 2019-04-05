@@ -192,7 +192,8 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
             OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
             {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
-            LayerHashes = [ crypto:hash(sha256, L) || L <- Layers ],
+            %% no witness will exist for the first layer hash as it is delivered over p2p
+            [_|LayerHashes] = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
             [Start|_] = Path,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
@@ -305,8 +306,7 @@ submitting(info, submit, #data{address=Challenger,
             [E|Acc]
         end,
         [],
-        %% the last layer only hash a packet hash because it's composed entirely of padding
-        lists:zip(Challengees ++ [{<<>>, <<>>}], LayerHashes)
+        lists:zip(Challengees, LayerHashes)
     ),
     Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
     {ok, _, SigFun} = blockchain_swarm:keys(),
@@ -346,6 +346,7 @@ waiting(EventType, EventContent, Data) ->
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
 validate_witness(Witness, Ledger) ->
     Gateway = blockchain_poc_witness_v1:gateway(Witness),
+    %% TODO this should be against the ledger at the time the receipt was mined
     case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
         {error, _Reason} ->
             lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
