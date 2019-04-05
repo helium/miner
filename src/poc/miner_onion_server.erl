@@ -91,8 +91,8 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
             ok = wait_until_next_block(),
             send_receipt(Data, OnionCompactKey, Type, Retry-1);
         {ok, PoCs} ->
-            lists:foreach(
-                fun(PoC) ->
+            Results = lists:foldl(
+                fun(PoC, Acc) ->
                     Challenger = blockchain_ledger_poc_v1:challenger(PoC),
                     Address = blockchain_swarm:pubkey_bin(),
                     Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data, Type),
@@ -104,14 +104,22 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
                     case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
                         {error, _Reason} ->
                             lager:error("failed to dial challenger ~p (~p)", [Challenger, _Reason]),
-                            ok = wait_until_next_block(),
-                            send_receipt(Data, OnionCompactKey, Type, Retry-1);
+                            [error|Acc];
                         {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, EncodedReceipt)
+                            _ = miner_poc_handler:send(Stream, EncodedReceipt),
+                            Acc
                     end
                 end,
+                [],
                 PoCs
-            )
+            ),
+            case Results == [] of
+                true ->
+                    ok;
+                false ->
+                    ok = wait_until_next_block(),
+                    send_receipt(Data, OnionCompactKey, Type, Retry-1)
+            end
     end,
     ok.
 
