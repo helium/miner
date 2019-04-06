@@ -118,7 +118,7 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             self() ! Msg,
             {keep_state,  Data#data{blockchain=Chain}}
     end;
-requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{address=Address}=Data) ->
+requesting(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
             {keep_state, Data};
