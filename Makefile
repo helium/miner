@@ -20,7 +20,7 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) dialyzer && $(REBAR) as test do eunit,ct,xref 2>&1 | tee build.log | sed 's/^\(\x1b\[[0-9;]*m\)*>>>/---/'
+	$(REBAR) do dialyzer,xref && $(REBAR) as test do eunit,ct
 
 release:
 	$(REBAR) as prod release -n miner
