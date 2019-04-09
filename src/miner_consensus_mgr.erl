@@ -419,7 +419,8 @@ do_dkg(Addrs, Artifact, Sign, Done,
                                             Curve,
                                             Artifact,
                                             Sign,
-                                            {?MODULE, Done}]],
+                                            {?MODULE, Done}],
+                        [{db_opts, [{in_memory, true}]}]],
             %% the opts are added in the third position of the list
             %% The below are for in_memory_mode
             %% [{db_opts, [{in_memory_mode, true}]},
