@@ -218,6 +218,11 @@ handle_info(connect, #state{host=Host, port=Port}=State) ->
              _ = reconnect(),
             {noreply, State}
     end;
+handle_info({tcp, Socket, <<Byte:8/integer, _/binary>>}, State)
+  when Byte == ?READ_RADIO_PACKET; Byte == ?READ_RADIO_PACKET_EXTENDED ->
+    %% the packets received from the 1310 are garbage on the rev3 boards, so just null route them for now
+    ok = inet:setopts(Socket, [{active, once}]),
+    {noreply, State};
 handle_info({tcp, Socket, Packet}, State) ->
     NewState = handle_packet(Packet, State),
     ok = inet:setopts(Socket, [{active, once}]),
