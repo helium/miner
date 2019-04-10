@@ -7,3 +7,14 @@
 ## we are time warp safe
 +c true
 +C multi_time_warp
+
+# don't steal CPU from other processes
++sbwt very_short
++sbwtdio none
++sbwtdcpu none
+
+# pin schedulers to threads
++stbt db
+
+# disable load compaction, try to evenly load CPUs
++sub true
