@@ -21,7 +21,6 @@
           signatures_required = 0,
           artifact :: undefined | binary(),
           members :: [libp2p_crypto:pubkey_bin()],
-          ledger :: undefined | blockchain_ledger_v1:ledger(),
           chain :: undefined | blockchain:blockchain()
          }).
 
@@ -30,10 +29,10 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
-    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
-
+init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
+    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
+    Chain1 = blockchain:ledger(Ledger, Chain0),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
                 id=Id-1,
@@ -42,8 +41,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain]) ->
                 members=Members,
                 signatures_required=N-F,
                 hbbft=HBBFT,
-                ledger=Ledger,
-                chain=Chain
+                chain=Chain1
                }}.
 
 handle_command(start_acs, State) ->
@@ -75,18 +73,19 @@ handle_command({skip, Ref, Worker}, State) ->
             {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT, chain=Chain, ledger=Ledger0}) ->
+handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT, chain=Chain}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
-            Ledger = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
+            Ledger0 = blockchain:ledger(Chain),
+            Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
 
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(filter_txn_buf(HBBFT, Ledger, Chain), NextRound, TxnsToRemove) of
+            case hbbft:next_round(filter_txn_buf(HBBFT, Chain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{ledger=Ledger, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -95,8 +94,8 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
-handle_command(Txn, State=#state{ledger=Ledger, chain=Chain, hbbft=HBBFT}) ->
-    case blockchain_txn:absorb(Txn, fake_block(Chain, HBBFT), Ledger) of
+handle_command(Txn, State=#state{chain=Chain}) ->
+    case blockchain_txn:absorb(Txn, Chain) of
         ok ->
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
                 {NewHBBFT, ok} ->
@@ -107,6 +106,7 @@ handle_command(Txn, State=#state{ledger=Ledger, chain=Chain, hbbft=HBBFT}) ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end;
         Error ->
+            lager:error("chain: ~p", [Chain]),
             lager:error("hbbft_handler speculative absorb failed, error: ~p", [Error]),
             {reply, Error, ignore}
     end.
@@ -176,7 +176,7 @@ callback_message(_, _, _) -> none.
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
-    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, ledger=undefined, chain=undefined}, [compressed]).
+    term_to_binary(State#state{hbbft=SerializedHBBFT, sk=SerializedSK, chain=undefined}, [compressed]).
 
 deserialize(BinState) ->
     State = binary_to_term(BinState),
@@ -188,9 +188,8 @@ restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
     %% because we have non-serializable data in it (rocksdb refs)
     {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
-    Ledger = NewState#state.ledger,
     Chain = NewState#state.chain,
-    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft), Ledger, Chain), ledger=Ledger, chain=Chain}}.
+    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft), Chain), chain=Chain}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
@@ -226,20 +225,10 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
                  end, Signatures),
     State#state{signatures=FilteredSignatures}.
 
-filter_txn_buf(HBBFT, Ledger, Chain) ->
+filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
     NewBuf = lists:filter(fun(BinTxn) ->
                                   Txn = blockchain_txn:deserialize(BinTxn),
-                                  ok == blockchain_txn:absorb(Txn, fake_block(Chain, HBBFT), Ledger)
+                                  ok == blockchain_txn:absorb(Txn, Chain)
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
-
-fake_block(Chain, HBBFT) ->
-    {ok, Height} = blockchain:height(Chain),
-    {ok, HeadHash} = blockchain:head_hash(Chain),
-    blockchain_block_v1:new(#{prev_hash => HeadHash,
-                              height => Height + 1,
-                              transactions => [],
-                              signatures => [],
-                              hbbft_round => hbbft:round(HBBFT),
-                              time => erlang:system_time(second)}).
