@@ -29,10 +29,10 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
-    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
-
+init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
+    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
+    Chain1 = blockchain:ledger(Ledger, Chain0),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
                 id=Id-1,
@@ -41,7 +41,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain]) ->
                 members=Members,
                 signatures_required=N-F,
                 hbbft=HBBFT,
-                chain=blockchain:ledger(Ledger, Chain)
+                chain=Chain1
                }}.
 
 handle_command(start_acs, State) ->
