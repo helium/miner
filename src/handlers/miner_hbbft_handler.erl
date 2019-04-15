@@ -29,10 +29,8 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
-    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
-    Chain1 = blockchain:ledger(Ledger, Chain0),
+init([Members, Id, N, F, BatchSize, SK, Chain]) ->
+    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain]}),
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n=N,
                 id=Id-1,
@@ -41,7 +39,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
                 members=Members,
                 signatures_required=N-F,
                 hbbft=HBBFT,
-                chain=Chain1
+                chain=Chain
                }}.
 
 handle_command(start_acs, State) ->
@@ -77,15 +75,12 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
-            Ledger0 = blockchain:ledger(Chain),
-            Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
-
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(filter_txn_buf(HBBFT, Chain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
