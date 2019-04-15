@@ -79,13 +79,13 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
         N when N > 0 ->
             Ledger0 = blockchain:ledger(Chain),
             Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
-
+            NewChain = blockchain:ledger(Ledger1, Chain),
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(filter_txn_buf(HBBFT, Chain), NextRound, TxnsToRemove) of
+            case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -97,17 +97,22 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
 handle_command(Txn, State=#state{chain=Chain}) ->
     case blockchain_txn:is_valid(Txn, Chain) of
         ok ->
-            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                {NewHBBFT, ok} ->
-                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
-                {_HBBFT, full} ->
-                    {reply, {error, full}, ignore};
-                {NewHBBFT, {send, Msgs}} ->
-                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+            case blockchain_txn:absorb(Txn, Chain) of
+                ok ->
+                    case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
+                        {NewHBBFT, ok} ->
+                            {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                        {_HBBFT, full} ->
+                            {reply, {error, full}, ignore};
+                        {NewHBBFT, {send, Msgs}} ->
+                            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+                    end;
+                Error ->
+                    lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                    {reply, Error, ignore}
             end;
         Error ->
-            lager:error("chain: ~p", [Chain]),
-            lager:error("hbbft_handler speculative absorb failed, error: ~p", [Error]),
+            lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
             {reply, Error, ignore}
     end.
 
@@ -231,7 +236,13 @@ filter_txn_buf(HBBFT, Chain) ->
                                   Txn = blockchain_txn:deserialize(BinTxn),
                                   case blockchain_txn:is_valid(Txn, Chain) of
                                       ok ->
-                                          true;
+                                          case blockchain_txn:absorb(Txn, Chain) of
+                                              ok ->
+                                                  true;
+                                              Other ->
+                                                  lager:info("Transaction ~p could not be re-absorbed ~p", [Txn, Other]),
+                                                  false
+                                          end;
                                       Other ->
                                           lager:info("Transaction ~p became invalid ~p", [Txn, Other]),
                                           false
