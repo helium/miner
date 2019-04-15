@@ -229,6 +229,12 @@ filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
     NewBuf = lists:filter(fun(BinTxn) ->
                                   Txn = blockchain_txn:deserialize(BinTxn),
-                                  ok == blockchain_txn:is_valid(Txn, Chain)
+                                  case blockchain_txn:is_valid(Txn, Chain) of
+                                      ok ->
+                                          true;
+                                      Other ->
+                                          lager:info("Transaction ~p became invalid ~p", [Txn, Other]),
+                                          false
+                                  end
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
