@@ -95,7 +95,7 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             {reply, error, ignore}
     end;
 handle_command(Txn, State=#state{chain=Chain}) ->
-    case blockchain_txn:absorb(Txn, Chain) of
+    case blockchain_txn:is_valid(Txn, Chain) of
         ok ->
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
                 {NewHBBFT, ok} ->
@@ -229,6 +229,6 @@ filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
     NewBuf = lists:filter(fun(BinTxn) ->
                                   Txn = blockchain_txn:deserialize(BinTxn),
-                                  ok == blockchain_txn:absorb(Txn, Chain)
+                                  ok == blockchain_txn:is_valid(Txn, Chain)
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
