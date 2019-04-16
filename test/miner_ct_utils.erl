@@ -151,7 +151,9 @@ shuffle(List) ->
 init_per_testcase(TestCase, Config) ->
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
-    case net_kernel:start([list_to_atom("runner-miner@"++Hostname), shortnames]) of
+    case net_kernel:start([list_to_atom("runner-miner" ++
+                                        integer_to_list(erlang:system_time(nanosecond)) ++
+                                        "@"++Hostname), shortnames]) of
         {ok, _} -> ok;
         {error, {already_started, _}} -> ok;
         {error, {{already_started, _},_}} -> ok
