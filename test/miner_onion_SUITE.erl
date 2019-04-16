@@ -70,10 +70,11 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    ok = gen_tcp:send(Sock, <<16#81, 0:32/integer-unsigned-little, 1:8/integer, Onion/binary>>),
-    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, X/binary>>} = gen_tcp:recv(Sock, 0),
+    {ok, UDP} = gen_udp:open(0, [binary, {active, false}, {reuseaddr, true}]),
 
-    
+    ok = gen_udp:send(UDP, "127.0.0.1",  5678, <<16#81, 0:32/integer-unsigned-little, 1:8/integer, Onion/binary>>),
+    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, X/binary>>} = gen_tcp:recv(Sock, 0, 5000),
+
     timer:sleep(2000),
     %% check that the packet size is the same
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(X)),
@@ -106,14 +107,14 @@ basic(_Config) ->
     {ok, Sock2} = gen_tcp:accept(LSock),
 
     %% check we can't decrypt the original
-    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, Onion/binary>>),
+    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, Onion/binary>>),
     ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
 
-    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, X/binary>>),
+    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, X/binary>>),
     {ok, <<0:8/integer, 0:32/integer, 1:8/integer, Y/binary>>} = gen_tcp:recv(Sock2, 0, 2000),
 
     %% check we can't decrypt the next layer
-    ok = gen_tcp:send(Sock2, <<16#81, 0:32/integer, 1:8/integer, Y/binary>>),
+    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, Y/binary>>),
     ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
 
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
