@@ -31,6 +31,8 @@ stamp(Chain) ->
 
 init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
+    %% Create a new ledger context to be used for speculative absorbs
+    %% and attach it to the chain in our state
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
     Chain1 = blockchain:ledger(Ledger, Chain0),
     lager:info("HBBFT~p started~n", [Id]),
@@ -77,6 +79,10 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
+            %% we've advanced to a new round, we need to destroy the old ledger context
+            %% (with the old speculatively absorbed changes that may now be invalid/stale)
+            %% and create a new one, and then use that new context to filter the pending
+            %% transactions to remove any that have become invalid
             Ledger0 = blockchain:ledger(Chain),
             Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
             NewChain = blockchain:ledger(Ledger1, Chain),
