@@ -232,14 +232,14 @@ deserialize(BinState) when is_binary(BinState) ->
     State#state{hbbft=HBBFT, sk=SK};
 deserialize(#{sk := SKSer,
               hbbft := HBBFTSer} = StateMap) ->
-    SK = tpke_privkey:deserialize(SKSer),
+    SK = tpke_privkey:deserialize(binary_to_term(SKSer)),
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
     DeserList = lists:map(fun(hbbft) ->
                                   HBBFT;
                              (sk) ->
                                   SK;
-                             (ledger) ->
+                             (chain) ->
                                   undefined;
                              (K)->
                                   #{K := V} = StateMap,
