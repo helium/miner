@@ -31,6 +31,8 @@ stamp(Chain) ->
 
 init([Members, Id, N, F, BatchSize, SK, Chain0]) ->
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500, {?MODULE, stamp, [Chain0]}),
+    %% Create a new ledger context to be used for speculative absorbs
+    %% and attach it to the chain in our state
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain0)),
     Chain1 = blockchain:ledger(Ledger, Chain0),
     lager:info("HBBFT~p started~n", [Id]),
@@ -77,15 +79,19 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
+            %% we've advanced to a new round, we need to destroy the old ledger context
+            %% (with the old speculatively absorbed changes that may now be invalid/stale)
+            %% and create a new one, and then use that new context to filter the pending
+            %% transactions to remove any that have become invalid
             Ledger0 = blockchain:ledger(Chain),
             Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
-
+            NewChain = blockchain:ledger(Ledger1, Chain),
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(filter_txn_buf(HBBFT, Chain), NextRound, TxnsToRemove) of
+            case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=blockchain:ledger(Ledger1, Chain), hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -95,19 +101,24 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             {reply, error, ignore}
     end;
 handle_command(Txn, State=#state{chain=Chain}) ->
-    case blockchain_txn:absorb(Txn, Chain) of
+    case blockchain_txn:is_valid(Txn, Chain) of
         ok ->
-            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                {NewHBBFT, ok} ->
-                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
-                {_HBBFT, full} ->
-                    {reply, {error, full}, ignore};
-                {NewHBBFT, {send, Msgs}} ->
-                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+            case blockchain_txn:absorb(Txn, Chain) of
+                ok ->
+                    case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
+                        {NewHBBFT, ok} ->
+                            {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                        {_HBBFT, full} ->
+                            {reply, {error, full}, ignore};
+                        {NewHBBFT, {send, Msgs}} ->
+                            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+                    end;
+                Error ->
+                    lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                    {reply, Error, ignore}
             end;
         Error ->
-            lager:error("chain: ~p", [Chain]),
-            lager:error("hbbft_handler speculative absorb failed, error: ~p", [Error]),
+            lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
             {reply, Error, ignore}
     end.
 
@@ -229,6 +240,18 @@ filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
     NewBuf = lists:filter(fun(BinTxn) ->
                                   Txn = blockchain_txn:deserialize(BinTxn),
-                                  ok == blockchain_txn:absorb(Txn, Chain)
+                                  case blockchain_txn:is_valid(Txn, Chain) of
+                                      ok ->
+                                          case blockchain_txn:absorb(Txn, Chain) of
+                                              ok ->
+                                                  true;
+                                              Other ->
+                                                  lager:info("Transaction ~p could not be re-absorbed ~p", [Txn, Other]),
+                                                  false
+                                          end;
+                                      Other ->
+                                          lager:info("Transaction ~p became invalid ~p", [Txn, Other]),
+                                          false
+                                  end
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).

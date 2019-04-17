@@ -129,6 +129,73 @@ single_payment_test(Config) ->
     4000 = PayerBalance + Fee,
     6000 = PayeeBalance,
 
+    %% put the transaction into and then suspend one of the consensus group members
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+
+    SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+
+    %ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn2]),
+
+    [Candidate|_] = lists:filter(fun(Miner) ->
+                                         ct_rpc:call(Miner, miner, in_consensus, [])
+                                 end, Miners),
+    Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
+    false = Group == undefined,
+    ok = libp2p_group_relcast:handle_command(Group, SignedTxn2),
+    ct_rpc:call(Candidate, sys, suspend, [Group]),
+
+    {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
+
+    %% XXX: wait till the blockchain grows by 1 block
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true =:= lists:all(
+                              fun(Miner) ->
+                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                      Height >= CurrentHeight2 + 1
+                              end,
+                              Miners -- [Candidate]
+                             )
+           end,
+           60,
+           timer:seconds(1)
+          ),
+
+    %% the transaction should not have cleared
+    PayerBalance2 = get_balance(Payer, PayerAddr),
+    PayeeBalance2 = get_balance(Payee, PayeeAddr),
+
+    4000 = PayerBalance2 + Fee,
+    6000 = PayeeBalance2,
+
+    ct_rpc:call(Candidate, sys, resume, [Group]),
+
+    {ok, CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
+
+    %% XXX: wait till the blockchain grows by 2 block
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true =:= lists:all(
+                              fun(Miner) ->
+                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                      Height >= CurrentHeight3 + 2
+                              end,
+                              Miners
+                             )
+           end,
+           60,
+           timer:seconds(1)
+          ),
+
+    %% the transaction should have cleared
+    PayerBalance3 = get_balance(Payer, PayerAddr),
+    PayeeBalance3 = get_balance(Payee, PayeeAddr),
+
+    3000 = PayerBalance3 + Fee,
+    7000 = PayeeBalance3,
+
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
 
