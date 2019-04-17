@@ -355,8 +355,10 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                                                      X > LastBlockTimestamp]),
                 {ValidTransactions, InvalidTransactions} =
                     blockchain_txn:validate(SortedTransactions, Chain),
+                %% is there some cheaper way to do this?  maybe it's
+                %% cheap enough?
                 {ElectionEpoch, EpochStart} =
-                    case has_new_group(ValidTransactions) of
+                    case blockchain_election:has_new_group(ValidTransactions) of
                         {true, _} ->
                             {ElectionEpoch0 + 1, NewHeight};
                         _ ->
@@ -395,7 +397,6 @@ handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
-
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -429,7 +430,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                         lager:info("processing block for ~p", [Height]),
                         Round = blockchain_block:hbbft_round(Block),
                         Txns = blockchain_block:transactions(Block),
-                        case has_new_group(Txns) of
+                        case blockchain_election:has_new_group(Txns) of
                             %% not here yet, regular round
                             false ->
                                 NextElection = next_election(Start, Interval),
@@ -513,7 +514,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                 H when H > CurrHeight ->
                     lager:info("nc processing block for ~p", [Height]),
                     Txns = blockchain_block:transactions(Block),
-                    case has_new_group(Txns) of
+                    case blockchain_election:has_new_group(Txns) of
                         false ->
                             lager:info("nc reg round"),
                             NextElection = next_election(Start, Interval),
@@ -665,27 +666,6 @@ set_buf(ConsensusGroup, Buf) ->
             end;
         _ ->
             {error, no_group}
-    end.
-
-has_new_group(Txns) ->
-    MyAddress = blockchain_swarm:pubkey_bin(),
-    case lists:filter(fun(T) ->
-                              %% TODO: ideally move to versionless types?
-                              blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                      end, Txns) of
-        [Txn] ->
-            {true, lists:member(MyAddress, blockchain_txn_consensus_group_v1:members(Txn))};
-        [_|_] ->
-            lists:foreach(fun(T) ->
-                                  case blockchain_txn:type(T) == blockchain_txn_consensus_group_v1 of
-                                      true ->
-                                          lager:info("txn ~p", [T]);
-                                      _ -> ok
-                                  end
-                          end, Txns),
-            error(duplicate_group_txn);
-        [] ->
-            false
     end.
 
 start_txn_handler(undefined) ->

@@ -246,7 +246,12 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
             %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets
             %% depending on message order. Given that the underlying artifact they're signing is the same though,
             %% it should be ok as long as we disregard the signatures for testing equality but check them for validity
-            {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+            case length(ValidSignatures) >= Threshold of
+                true ->
+                    {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+                false ->
+                    false
+            end;
         false ->
             false
     end.

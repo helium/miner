@@ -358,6 +358,11 @@ initiate_election(Hash, Height, State) ->
 
     State1.
 
+%%% TODO: Eventually we'll want to keep some of the existing consensus
+%%% members in the group.  However, once we have that constraint, we
+%%% should weaken it a little each restart, so that a group with many
+%%% downed members (that are still less than F) can't stall a restart
+%%% forever.
 restart_election(#state{n = N, tries = Try0} = State, Hash, Height) ->
 
     Chain = blockchain_worker:blockchain(),
