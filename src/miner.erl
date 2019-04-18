@@ -47,7 +47,7 @@
     block_timer = make_ref() :: reference(),
     block_time = 15000 :: number(),
     currently_syncing = false :: boolean(),
-    election_interval :: pos_integer(),
+    election_interval :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
     election_epoch = 1 :: pos_integer()

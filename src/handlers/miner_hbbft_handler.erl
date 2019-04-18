@@ -22,7 +22,7 @@
          signatures_required = 0,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
-         chain :: undefined | blockchain_ledger_v1:ledger(),
+         chain :: undefined | blockchain:blockchain(),
          signed = 0 :: non_neg_integer()
         }).
 
