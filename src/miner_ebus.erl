@@ -21,6 +21,8 @@
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
 -define(MINER_MEMBER_SYNC_STATUS, "SyncStatus").
+-define(MINER_MEMBER_CONSENSUS, "Consensus").  %% query for true or false
+-define(MINER_MEMBER_CONSENSUS_ELECT, "ConsensusElect").  %% signal "Elected" or "Defeated"
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_INTERNAL, "com.helium.Miner.Error.Internal").
@@ -84,6 +86,12 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_SYNC_STATUS), _Msg, State) ->
     Status = case miner:syncing_status() of
         true -> "StartSyncing";
         false -> "StopSyncing"
+    end,
+    {reply, [string], [Status], State};
+handle_message(?MINER_OBJECT(?MINER_MEMBER_CONSENSUS), _Msg, State) ->
+    Status = case miner_consensus_mgr:in_consensus() of
+        true -> "Elected";
+        false -> "Defeated"
     end,
     {reply, [string], [Status], State};
 handle_message(Member, _Msg, State) ->

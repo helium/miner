@@ -51,10 +51,11 @@ dist(Config0) ->
 
     DKGResults = miner_ct_utils:pmap(
         fun(Miner) ->
-            ct_rpc:call(Miner, miner, initial_dkg, [InitialTransactions, Addresses])
+            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [InitialTransactions, Addresses])
         end,
         Miners
     ),
+    ct:pal("results ~p", [DKGResults]),
     ?assert(lists:all(fun(Res) -> Res == ok end, DKGResults)),
 
 
@@ -116,10 +117,10 @@ dist(Config0) ->
         Miners
     ),
 
-    ?assertEqual({0, 0}, rcv_loop(M, 10, {length(Miners), length(Miners)})),
+    ?assertEqual({0, 0}, rcv_loop(M, 20, {length(Miners), length(Miners)})),
 
     %% wait until one node has a working chain
- 
+
     case ct_rpc:call(M, blockchain_worker, blockchain, [], RPCTimeout) of
         {badrpc, Reason} -> ct:fail(Reason);
         undefined -> ok;
@@ -169,7 +170,7 @@ basic(_Config) ->
     Balance = 5000,
     GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
                      || {Addr, _} <- ConsensusMembers],
-    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
+    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
     Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
@@ -198,7 +199,7 @@ basic(_Config) ->
     % Add a Gateway
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
-   
+
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
@@ -237,7 +238,7 @@ basic(_Config) ->
     ?assertEqual(blockchain_txn_poc_request_v1, blockchain_txn:type(PocReqTxn)),
     Gateway = blockchain_txn_poc_request_v1:challenger(PocReqTxn),
     ?assertEqual(blockchain_swarm:pubkey_bin(), Gateway),
-    
+
     ok = miner_ct_utils:wait_until(fun() ->
         case sys:get_state(Statem) of
             {receiving, _} -> true;
@@ -325,7 +326,7 @@ startup(_Config) ->
     Balance = 5000,
     GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
                      || {Addr, _} <- ConsensusMembers],
-    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers]),
+    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
     Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
