@@ -305,7 +305,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync}}, #state{current_dkg = O
 
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
-            NextRestart = Height + (Interval * Delay),
+            NextRestart = Height + Interval + Delay,
             lager:info("restart? h ~p next ~p", [Height, NextRestart]),
 
             case blockchain_block:height(Block) of

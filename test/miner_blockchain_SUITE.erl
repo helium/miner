@@ -40,7 +40,7 @@ end_per_suite(Config) ->
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
     Miners = proplists:get_value(miners, Config),
-    Keys = proplists:get_value(keys, Config),
+    %% Keys = proplists:get_value(keys, Config),
     Addresses = proplists:get_value(addresses, Config),
 
     %%  #{secret := PrivKey, public := PubKey} =
@@ -52,7 +52,7 @@ init_per_testcase(_TestCase, Config0) ->
     InitGen = [begin
                    blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0)
                end
-               || {_, _, _, _, Addr, _} <- Keys],
+               || Addr <- Addresses],
     %% InitAdd = [begin
     %%                Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr, 1, 1),
     %%                SignedTx = blockchain_txn_add_gateway_v1:sign(Tx, OwnerSigFun),
