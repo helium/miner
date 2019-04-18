@@ -35,14 +35,16 @@ init_per_testcase(_TestCase, Config0) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, undefined, 0, 0) || Addr <- Addresses],
-    DKGResults = miner_ct_utils:pmap(fun(Miner) ->
-                                             ct_rpc:call(Miner, miner, initial_dkg, [InitialPaymentTransactions ++ AddGwTxns, Addresses])
-                                     end, Miners),
+    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, 0, 0) || Addr <- Addresses],
+    DKGResults = miner_ct_utils:pmap(
+                   fun(Miner) ->
+                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
+                                       [InitialPaymentTransactions ++ AddGwTxns, Addresses])
+                   end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                          end, Miners),
 
     %% ensure that blockchain is undefined for non_consensus miners
@@ -56,7 +58,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% get the genesis block from the first Consensus Miner
     ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner, in_consensus, [])
+                                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                         end, Miners)),
     Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
     {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Chain]),
@@ -133,14 +135,14 @@ single_payment_test(Config) ->
     %ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn2]),
 
     [Candidate|_] = lists:filter(fun(Miner) ->
-                                         ct_rpc:call(Miner, miner, in_consensus, [])
+                                         ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                  end, Miners),
     Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
     false = Group == undefined,
     ok = libp2p_group_relcast:handle_command(Group, SignedTxn2),
     ct_rpc:call(Candidate, sys, suspend, [Group]),
 
-    {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
+    {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 1 block
     ok = miner_ct_utils:wait_until(
@@ -167,7 +169,7 @@ single_payment_test(Config) ->
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
 
-    {ok, CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
+    {ok, CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 2 block
     ok = miner_ct_utils:wait_until(

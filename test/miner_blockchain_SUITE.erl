@@ -43,21 +43,23 @@ init_per_testcase(_TestCase, Config0) ->
     Keys = proplists:get_value(keys, Config),
     Addresses = proplists:get_value(addresses, Config),
 
-    #{secret := PrivKey, public := PubKey} =
-        libp2p_crypto:generate_keys(ecc_compact),
-    Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-    OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-
+    %%  #{secret := PrivKey, public := PubKey} =
+    %%     libp2p_crypto:generate_keys(ecc_compact),
+    %% Owner = libp2p_crypto:pubkey_to_bin(PubKey),
+    %% OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    InitAdd = [begin
-                   Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr, 1, 1),
-                   SignedTx = blockchain_txn_add_gateway_v1:sign(Tx, OwnerSigFun),
-                   blockchain_txn_add_gateway_v1:sign_request(SignedTx, GSigFun)
+    InitGen = [begin
+                   blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0)
                end
-               || {_, _, _, _, Addr, GSigFun} <- Keys],
-
-    Txns = InitialPayment ++ InitAdd,
+               || {_, _, _, _, Addr, _} <- Keys],
+    %% InitAdd = [begin
+    %%                Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr, 1, 1),
+    %%                SignedTx = blockchain_txn_add_gateway_v1:sign(Tx, OwnerSigFun),
+    %%                blockchain_txn_add_gateway_v1:sign_request(SignedTx, GSigFun)
+    %%            end
+    %%            || {_, _, _, _, Addr, GSigFun} <- Keys],
+    Txns = InitialPayment ++ InitGen,
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [Txns, Addresses])
@@ -195,8 +197,9 @@ election_test(Config) ->
                     Miner = lists:nth(rand:uniform(length(Miners)), Miners),
                     try
                         C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                        Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                         {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-                            ct:pal("not seen: ~p height ~p", [Not, Height])
+                            ct:pal("not seen: ~p height ~p ~p", [Not, Epoch, Height])
                     catch _:_ ->
                             ct:pal("not seen: ~p ", [Not]),
                             ok
