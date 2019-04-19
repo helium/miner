@@ -219,7 +219,7 @@ election_test(Config) ->
                                                              end, shuffle(Miners))
                                            %%TODO fixme back to 120s
                                            %%for slow machines
-                                  end, 40, timer:seconds(1)),
+                                  end, 90, timer:seconds(1)),
     ok.
 
 election_check([], _Miners, Owner) ->
