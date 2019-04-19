@@ -433,13 +433,8 @@ do_dkg(Addrs, Artifact, Sign, Done,
                                             Curve,
                                             Artifact,
                                             Sign,
-                                            {?MODULE, Done}]],
-            %% the opts are added in the third position of the list
-            %% The below are for in_memory_mode
-            %% [{db_opts, [{in_memory_mode, true}]},
-            %%  {write_opts, [{disable_wal, true}]}]],
-            %% The below are for in_memory, which seems the right option
-            %% [{db_opts, [{in_memory, true}]}],
+                                            {?MODULE, Done}],
+                        [{db_opts, [{in_memory, true}]}]],
 
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
