@@ -176,8 +176,18 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     %% first we need to add ourselves to the chain for the existing
     %% group to validate
     %% TODO we should also add this to the buffer of the local chain
-    blockchain_txn_manager:submit(blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay), Members),
-    blockchain_txn_manager ! timeout, % awful
+    ok = blockchain_worker:submit_txn(blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+                                      fun(Res) ->
+                                              case Res of
+                                                  ok ->
+                                                      lager:info("Election successful, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p!",
+                                                                 [Height, Members, Proof, Delay]);
+                                                  {error, Reason} ->
+                                                      lager:error("Election failed, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p, Reason: ~p",
+                                                                 [Height, Members, Proof, Delay, Reason])
+                                              end
+                                      end
+                                     ),
 
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
