@@ -56,7 +56,7 @@
     secret :: binary() | undefined,
     onion_keys :: keys() | undefined,
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
-    packet_hashes = [] :: [binary()],
+    packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
@@ -199,7 +199,7 @@ challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, Data#data{challengees=lists:zip(Path, LayerData), packet_hashes=LayerHashes}};
+                    {next_state, receiving, Data#data{challengees=lists:zip(Path, LayerData), packet_hashes=lists:zip(Path, LayerHashes)}};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
@@ -240,12 +240,16 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
             {keep_state, Data};
         true ->
             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+            GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
             %% check this is a known layer of the packet
-            case lists:member(PacketHash, PacketHashes) of
+            case lists:keyfind(PacketHash, 2, PacketHashes) of
                 false ->
                     lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
                     {keep_state, Data};
-                true ->
+                {GatewayWitness, PacketHash} ->
+                    lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                    {keep_state, Data};
+                _ ->
                     Witnesses = maps:get(PacketHash, Responses0, []),
                     case erlang:length(Witnesses) >= 5 of
                         true ->
