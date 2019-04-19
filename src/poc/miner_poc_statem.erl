@@ -180,7 +180,7 @@ targeting(EventType, EventContent, Data) ->
 challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
                                                                 onion_keys=OnionKey
                                                                }=Data) ->
-    case blockchain_poc_path:build(Target, Gateways) of
+    case blockchain_poc_path:build(Entropy, Target, Gateways) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
