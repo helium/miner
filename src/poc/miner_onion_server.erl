@@ -14,8 +14,8 @@
     start_link/1,
     send/1,
     decrypt/1,
-    send_receipt/3,
-    send_witness/2
+    send_receipt/5,
+    send_witness/4
 ]).
 
 -ifdef(EQC).
@@ -73,15 +73,15 @@ decrypt(Onion) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p) -> ok.
-send_receipt(_Data, _OnionCompactKey, _Type) ->
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer()) -> ok.
+send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_receipt(_Data, _OnionCompactKey, _Type, 3).
+    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, 3).
 
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, non_neg_integer()) -> ok.
-send_receipt(_Data, _OnionCompactKey, _Type, 0) ->
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), non_neg_integer()) -> ok.
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, 0) ->
     lager:error("failed to send receipts, max retry");
-send_receipt(Data, OnionCompactKey, Type, Retry) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
@@ -89,13 +89,13 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
         {error, _Reason} ->
             lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
             ok = wait_until_next_block(),
-            send_receipt(Data, OnionCompactKey, Type, Retry-1);
+            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry-1);
         {ok, PoCs} ->
             Results = lists:foldl(
                 fun(PoC, Acc) ->
                     Challenger = blockchain_ledger_poc_v1:challenger(PoC),
                     Address = blockchain_swarm:pubkey_bin(),
-                    Receipt0 = blockchain_poc_receipt_v1:new(Address, os:system_time(), 0, Data, Type),
+                    Receipt0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type),
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
                     EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
@@ -118,7 +118,7 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
                     ok;
                 false ->
                     ok = wait_until_next_block(),
-                    send_receipt(Data, OnionCompactKey, Type, Retry-1)
+                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry-1)
             end
     end,
     ok.
@@ -127,15 +127,15 @@ send_receipt(Data, OnionCompactKey, Type, Retry) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec  send_witness(binary(), libp2p_crypto:pubkey_bin()) -> ok.
-send_witness(_Data, _OnionCompactKey) ->
+-spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
+send_witness(_Data, _OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_witness(_Data, _OnionCompactKey, 3).
+    send_witness(_Data, _OnionCompactKey, Time, RSSI, 3).
 
--spec send_witness(binary(), libp2p_crypto:pubkey_bin(), non_neg_integer()) -> ok.
-send_witness(_Data, _OnionCompactKey, 0) ->
+-spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
+send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
     lager:error("failed to send witness, max retry");
-send_witness(Data, OnionCompactKey, Retry) ->
+send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
@@ -143,13 +143,13 @@ send_witness(Data, OnionCompactKey, Retry) ->
         {error, _Reason} ->
             lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
             ok = wait_until_next_block(),
-            send_witness(Data, OnionCompactKey, Retry-1);
+            send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
         {ok, PoCs} ->
             lists:foreach(
                 fun(PoC) ->
                     Challenger = blockchain_ledger_poc_v1:challenger(PoC),
                     Address = blockchain_swarm:pubkey_bin(),
-                    Witness0 = blockchain_poc_witness_v1:new(Address, os:system_time(), 0, Data),
+                    Witness0 = blockchain_poc_witness_v1:new(Address, Time, RSSI, Data),
                     {ok, _, SigFun} = blockchain_swarm:keys(),
                     Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
                     EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
@@ -159,7 +159,7 @@ send_witness(Data, OnionCompactKey, Retry) ->
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p (~p)", [Challenger, _Reason]),
                             ok = wait_until_next_block(),
-                            send_witness(Data, OnionCompactKey, Retry-1);
+                            send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
                         {ok, Stream} ->
                             _ = miner_poc_handler:send(Stream, EncodedWitness)
                     end
@@ -203,7 +203,7 @@ handle_cast({decrypt, <<IV:2/binary,
                         Tag:4/binary,
                         CipherText/binary>>}
             ,#state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, p2p),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, p2p, 0),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -262,14 +262,14 @@ wait_until_next_block() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type, RSSI) ->
     case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
-            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey]),
+            _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey, os:system_time(nanosecond), RSSI]),
             lager:info("could not decrypt packet received via ~p", [Type]);
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
-            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type]),
+            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI]),
             gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
                                    0:32/integer, %% broadcast packet
                                    1:8/integer, %% onion packet
@@ -302,10 +302,10 @@ handle_packet(<<?READ_RADIO_PACKET,
                 Tag:4/binary,
                 CipherText/binary>>,
             #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio, 0),
     State;
 handle_packet(<<?READ_RADIO_PACKET_EXTENDED,
-                             _RSSI:8/integer-signed,
+                             RSSI:8/integer-signed,
                              _Channel:8/integer-unsigned,
                              CRCStatus:8/integer,
                              0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
@@ -315,7 +315,7 @@ handle_packet(<<?READ_RADIO_PACKET_EXTENDED,
                              Tag:4/binary,
                              CipherText/binary>>,
               #state{ecdh_fun=ECDHFun, socket=Socket}=State) when CRCStatus == 1 ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio, RSSI),
     State;
 handle_packet(<<?READ_RADIO_PACKET, _/binary>> = Packet, #state{udp_socket=UDP}=State) ->
     %% some other packet, just forward it to gw-demo for now
