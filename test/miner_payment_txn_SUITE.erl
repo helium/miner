@@ -176,9 +176,13 @@ single_payment_test(Config) ->
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
-                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight3 + 2
+
+                                      %% the transaction should have cleared
+                                      PayerBalance3 = get_balance(Miner, PayerAddr),
+                                      PayeeBalance3 = get_balance(Miner, PayeeAddr),
+
+                                      3000 == PayerBalance3 + Fee andalso
+                                      7000 == PayeeBalance3
                               end,
                               Miners
                              )
@@ -186,14 +190,6 @@ single_payment_test(Config) ->
            60,
            timer:seconds(1)
           ),
-
-    %% the transaction should have cleared
-    PayerBalance3 = get_balance(Payer, PayerAddr),
-    PayeeBalance3 = get_balance(Payee, PayeeAddr),
-
-    3000 = PayerBalance3 + Fee,
-    7000 = PayeeBalance3,
-
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
 
