@@ -364,7 +364,16 @@ rcv_loop(Miner, I, Acc0) ->
                         fun(Txn, {Reqs, Recs}=A) ->
                             case blockchain_txn:type(Txn) of
                                 blockchain_txn_poc_receipts_v1 ->
-                                    {Reqs, Recs-1};
+                                    Path = blockchain_txn_poc_receipts_v1:path(Txn),
+                                    case lists:all(fun(PE) ->
+                                                      blockchain_poc_path_element_v1:receipt(PE) /= undefined
+                                                      andalso length(blockchain_poc_path_element_v1:witnesses(PE)) > 0
+                                              end, Path) of
+                                        true ->
+                                            {Reqs, Recs-1};
+                                        false ->
+                                            A
+                                    end;
                                 blockchain_txn_poc_request_v1 ->
                                     {Reqs-1, Recs};
                                 _ ->

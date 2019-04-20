@@ -298,19 +298,18 @@ receiving(EventType, EventContent, Data) ->
 submitting(info, submit, #data{address=Challenger,
                                responses=Responses0,
                                secret=Secret,
-                               challengees=Challengees,
                                packet_hashes=LayerHashes,
                                onion_keys= #{public := OnionCompactKey}}=Data) ->
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Path1 = lists:foldl(
-        fun({{Challengee, _LayerData}, LayerHash}, Acc) ->
+        fun({Challengee, LayerHash}, Acc) ->
             Receipt = maps:get(Challengee, Responses0, undefined),
             Witnesses = maps:get(LayerHash, Responses0, []),
             E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
             [E|Acc]
         end,
         [],
-        lists:zip(Challengees, LayerHashes)
+        LayerHashes
     ),
     Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
     {ok, _, SigFun} = blockchain_swarm:keys(),
