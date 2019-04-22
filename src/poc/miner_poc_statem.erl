@@ -44,7 +44,7 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(BLOCK_DELAY, 30).
+-define(BLOCK_DELAY, 10).
 -define(MINING_TIMEOUT, 5).
 -define(CHALLENGE_RETRY, 3).
 -define(CHALLENGE_TIMEOUT, 3).
