@@ -44,7 +44,6 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(BLOCK_DELAY, 10).
 -define(MINING_TIMEOUT, 5).
 -define(CHALLENGE_RETRY, 3).
 -define(CHALLENGE_TIMEOUT, 3).
@@ -60,7 +59,7 @@
     responses = #{},
     challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
-    delay = ?BLOCK_DELAY :: non_neg_integer(),
+    delay :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
@@ -88,7 +87,7 @@ init(Args) ->
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:pubkey_bin(),
-    Delay = maps:get(delay, Args, ?BLOCK_DELAY),
+    Delay = maps:get(delay, Args, blockchain_txn_poc_request_v1:challenge_interval()),
     Blockchain = blockchain_worker:blockchain(),
     lager:info("init with ~p", [Args]),
     {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
