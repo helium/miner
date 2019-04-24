@@ -19,7 +19,8 @@ register_all_usage() ->
                   [
                    info_usage(),
                    info_height_usage(),
-                   info_in_consensus_usage()
+                   info_in_consensus_usage(),
+                   info_name_usage()
                   ]).
 
 register_all_cmds() ->
@@ -29,7 +30,8 @@ register_all_cmds() ->
                   [
                    info_cmd(),
                    info_height_cmd(),
-                   info_in_consensus_cmd()
+                   info_in_consensus_cmd(),
+                   info_name_cmd()
                   ]).
 %%
 %% info
@@ -98,4 +100,26 @@ info_in_consensus_usage() ->
 info_in_consensus(["info", "in_consensus"], [], []) ->
     [clique_status:text(atom_to_list(miner_consensus_mgr:in_consensus()))];
 info_in_consensus([_, _, _], [], []) ->
+    usage.
+
+%%
+%% info name
+%%
+
+info_name_cmd() ->
+    [
+     [["info", "name"], [], [], fun info_name/3]
+    ].
+
+info_name_usage() ->
+    [["info", "name"],
+     ["info name \n\n",
+      "  Get name for this miner.\n\n"
+     ]
+    ].
+
+info_name(["info", "name"], [], []) ->
+    {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
+    [clique_status:text(Name)];
+info_name([_, _, _], [], []) ->
     usage.
