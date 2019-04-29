@@ -46,7 +46,7 @@
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 5).
 -define(CHALLENGE_RETRY, 3).
--define(CHALLENGE_TIMEOUT, 3).
+-define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
 
 -record(data, {
@@ -57,7 +57,7 @@
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
-    challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
+    receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     delay :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
@@ -213,7 +213,7 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0, responses=Responses}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
@@ -222,11 +222,11 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             self() ! submit,
-            {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}}
+            {next_state, submitting, Data#data{receiving_timeout=?RECEIVING_TIMEOUT}}
     end;
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
-    {keep_state, Data#data{challenge_timeout=T-1}};
+    {keep_state, Data#data{receiving_timeout=T-1}};
 receiving(cast, {witness, Witness}, #data{responses=Responses0,
                                           packet_hashes=PacketHashes,
                                           blockchain=Chain}=Data) ->
