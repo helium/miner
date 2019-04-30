@@ -132,7 +132,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_witness(_Data, _OnionCompactKey, Time, RSSI, 3).
+    send_witness(_Data, _OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
 
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
