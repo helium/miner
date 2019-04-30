@@ -87,6 +87,7 @@ init(Args) ->
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:pubkey_bin(),
+    %% this should really only be overriden for testing
     Delay = maps:get(delay, Args, blockchain_txn_poc_request_v1:challenge_interval()),
     Blockchain = blockchain_worker:blockchain(),
     lager:info("init with ~p", [Args]),
