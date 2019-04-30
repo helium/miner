@@ -44,10 +44,9 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(BLOCK_DELAY, 30).
 -define(MINING_TIMEOUT, 5).
 -define(CHALLENGE_RETRY, 3).
--define(CHALLENGE_TIMEOUT, 3).
+-define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
 
 -record(data, {
@@ -58,9 +57,9 @@
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
-    challenge_timeout = ?CHALLENGE_TIMEOUT :: non_neg_integer(),
+    receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
-    delay = ?BLOCK_DELAY :: non_neg_integer(),
+    delay :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
@@ -88,7 +87,8 @@ init(Args) ->
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:pubkey_bin(),
-    Delay = maps:get(delay, Args, ?BLOCK_DELAY),
+    %% this should really only be overriden for testing
+    Delay = maps:get(delay, Args, blockchain_txn_poc_request_v1:challenge_interval()),
     Blockchain = blockchain_worker:blockchain(),
     lager:info("init with ~p", [Args]),
     {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
@@ -214,7 +214,7 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=0, responses=Responses}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
@@ -223,11 +223,11 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeo
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             self() ! submit,
-            {next_state, submitting, Data#data{challenge_timeout=?CHALLENGE_TIMEOUT}}
+            {next_state, submitting, Data#data{receiving_timeout=?RECEIVING_TIMEOUT}}
     end;
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{challenge_timeout=T}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
-    {keep_state, Data#data{challenge_timeout=T-1}};
+    {keep_state, Data#data{receiving_timeout=T-1}};
 receiving(cast, {witness, Witness}, #data{responses=Responses0,
                                           packet_hashes=PacketHashes,
                                           blockchain=Chain}=Data) ->

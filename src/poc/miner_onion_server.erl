@@ -37,6 +37,8 @@
 -define(READ_RADIO_PACKET, 16#81).
 -define(READ_RADIO_PACKET_EXTENDED, 16#82).
 
+-define(BLOCK_RETRY_COUNT, 10).
+
 -record(state, {
     host :: string(),
     port :: integer(),
@@ -76,7 +78,7 @@ decrypt(Onion) ->
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer()) -> ok.
 send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, 3).
+    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, ?BLOCK_RETRY_COUNT).
 
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), non_neg_integer()) -> ok.
 send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, 0) ->
@@ -130,7 +132,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_witness(_Data, _OnionCompactKey, Time, RSSI, 3).
+    send_witness(_Data, _OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
 
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
