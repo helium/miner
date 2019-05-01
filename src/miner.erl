@@ -24,7 +24,8 @@
 
     start_chain/2,
     handoff_consensus/1,
-    election_epoch/0
+    election_epoch/0,
+    version/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -45,7 +46,7 @@
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     block_time = 15000 :: number(),
-    election_interval :: pos_integer() | infinity,
+    election_interval = infinity :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
     election_epoch = 1 :: pos_integer()
@@ -240,31 +241,34 @@ handoff_consensus(ConsensusGroup) ->
 election_epoch() ->
     gen_server:call(?MODULE, election_epoch).
 
+-spec version() -> integer().
+version() ->
+    1.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(Args) ->
+init(_Args) ->
     lager:info("STARTING UP MINER"),
-    BlockTime = proplists:get_value(block_time, Args),
-    %% TODO: move this into the the chain
-    Interval = proplists:get_value(election_interval, Args, 30),
     ok = blockchain_event:add_handler(self()),
-    State = #state{block_time=BlockTime,
-                   election_interval = Interval},
     case blockchain_worker:blockchain() of
         undefined ->
-            {ok, State};
+            {ok, #state{}};
         Chain ->
             {ok, Top} = blockchain:height(Chain),
             {ok, Block} = blockchain:get_block(Top, Chain),
             {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
+            Ledger = blockchain:ledger(Chain),
+            {ok, Interval} = blockchain:config(election_interval, Ledger),
+            {ok, BlockTime} = blockchain:config(block_time, Ledger),
             self() ! init,
 
-            {ok, State#state{blockchain = Chain,
-                             election_epoch = ElectionEpoch,
-                             consensus_start = EpochStart}}
+            {ok, #state{blockchain = Chain,
+                        election_epoch = ElectionEpoch,
+                        consensus_start = EpochStart,
+                        block_time=BlockTime,
+                        election_interval = Interval}}
     end.
 
 handle_call(pubkey_bin, _From, State) ->
@@ -319,12 +323,18 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
                                           [blockchain_txn_handler, self(),
                                            ConsensusGroup]}),
 
-    Ref = set_next_block_timer(Chain, State#state.block_time),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Interval} = blockchain:config(election_interval, Ledger),
+    {ok, BlockTime} = blockchain:config(block_time, Ledger),
+
+    Ref = set_next_block_timer(Chain, BlockTime),
     {reply, ok, State#state{consensus_group = ConsensusGroup,
                             blockchain = Chain,
                             consensus_start = 1,
                             election_epoch = 1,
-                            block_timer = Ref}};
+                            block_timer = Ref,
+                            block_time = BlockTime,
+                            election_interval = Interval}};
 handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
             #state{election_epoch = ElectionEpoch0,
                    consensus_start = EpochStart0} = State) ->
@@ -334,6 +344,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
+    lager:info("stamps ~p, current hash ~p", [Stamps, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
     Reply =
         case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
@@ -560,9 +571,16 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             lager:error("Error, Reason: ~p", [Reason]),
             {noreply, State}
     end;
-handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
-            State=#state{blockchain = Chain}) when Chain == undefined ->
-    {noreply, State#state{blockchain = blockchain_worker:blockchain()}};
+handle_info({blockchain_event, {add_block, _Hash, Sync, _Ledger}},
+            State) when State#state.blockchain == undefined ->
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Interval} = blockchain:config(election_interval, Ledger),
+    {ok, BlockTime} = blockchain:config(block_time, Ledger),
+
+    {noreply, State#state{blockchain = Chain,
+                          block_time = BlockTime,
+                          election_interval = Interval}};
 handle_info(init, #state{blockchain = Chain, block_time = BlockTime} = State) ->
     {ok, Height} = blockchain:height(Chain),
     lager:info("cold start blockchain at known height ~p", [Height]),

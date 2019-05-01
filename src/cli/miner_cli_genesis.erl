@@ -72,6 +72,18 @@ genesis_create_usage() ->
     ].
 
 genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
+    {ok, N} = application:get_env(blockchain, num_consensus_members),
+    {ok, Curve} = application:get_env(miner, curve),
+    create(OldGenesisFile, Addrs, N, Curve);
+genesis_create(["genesis", "create", OldGenesisFile, Addrs, N], [], []) ->
+    {ok, Curve} = application:get_env(miner, curve),
+    create(OldGenesisFile, Addrs, list_to_integer(N), Curve);
+genesis_create(["genesis", "create", OldGenesisFile, Addrs, N, Curve], [], []) ->
+    create(OldGenesisFile, Addrs, list_to_integer(N), list_to_atom(Curve));
+genesis_create(_, [], []) ->
+    usage.
+
+create(OldGenesisFile, Addrs, N, Curve) ->
     case file:consult(OldGenesisFile) of
         {ok, [Config]} ->
             OldSecurities = [blockchain_txn_security_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
@@ -85,13 +97,11 @@ genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
             OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses),
+            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses, N, Curve),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]
-    end;
-genesis_create([_, _, _], [], []) ->
-    usage.
+    end.
 
 %%
 %% genesis forge
@@ -110,14 +120,24 @@ genesis_forge_usage() ->
     ].
 
 genesis_forge(["genesis", "forge", Addrs], [], []) ->
+    {ok, N} = application:get_env(blockchain, num_consensus_members),
+    {ok, Curve} = application:get_env(miner, curve),
+    forge(Addrs, N, Curve);
+genesis_forge(["genesis", "forge", Addrs, N], [], []) ->
+    {ok, Curve} = application:get_env(miner, curve),
+    forge(Addrs, list_to_integer(N), Curve);
+genesis_forge(["genesis", "forge", Addrs, N, Curve], [], []) ->
+    forge(Addrs, list_to_integer(N), list_to_atom(Curve));
+genesis_forge(_, [], []) ->
+    usage.
+
+forge(Addrs, N, Curve) ->
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     InitialGatewayTransactions = [ blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0) || Addr <- Addresses ],
-    miner_consensus_mgr:initial_dkg(InitialPaymentTransactions ++ InitialGatewayTransactions, Addresses),
-    [clique_status:text("ok")];
-genesis_forge([_, _, _], [], []) ->
-    usage.
+    miner_consensus_mgr:initial_dkg(InitialPaymentTransactions ++ InitialGatewayTransactions, Addresses, N, Curve),
+    [clique_status:text("ok")].
 
 %%
 %% genesis load

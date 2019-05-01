@@ -8,7 +8,7 @@
 -export([
          start_link/1,
 
-         initial_dkg/2,
+         initial_dkg/4,
          maybe_start_election/3,
          start_election/3,
          maybe_start_consensus_group/1,
@@ -40,9 +40,9 @@
          initial_height = 0 :: non_neg_integer(),
          n :: undefined | pos_integer(),
          curve :: atom(),
-         batch_size :: integer(),
+         batch_size :: undefined | integer(),
          delay = 0 :: integer(),
-         restart_interval :: pos_integer(),
+         restart_interval :: undefined | pos_integer(),
          chain :: undefined | blockchain:blockchain(),
          election_running = false :: boolean()
         }).
@@ -68,8 +68,8 @@ consensus_pos() ->
 in_consensus() ->
     gen_server:call(?MODULE, in_consensus).
 
-initial_dkg(GenesisTransactions, Addrs) ->
-    gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs}, infinity).
+initial_dkg(GenesisTransactions, Addrs, N, Curve) ->
+    gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs, N, Curve}, infinity).
 
 maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
     lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
@@ -109,20 +109,23 @@ election_done(Artifact, Signatures, Members, PrivKey) ->
 
 %% two versions, one for an election, one for the genesis block
 
-init(Args) ->
+init(_Args) ->
     %% election version
 
-    BatchSize = proplists:get_value(batch_size, Args),
-    Curve = proplists:get_value(curve, Args),
-    Interval = proplists:get_value(interval, Args, 10),  %% longer in prod?
-
     ok = blockchain_event:add_handler(self()),
-    Chain = blockchain_worker:blockchain(),
-
-    {ok, #state{batch_size = BatchSize,
-                restart_interval = Interval,
-                chain = Chain,
-                curve = Curve}}.
+    case  blockchain_worker:blockchain() of
+        undefined ->
+            {ok, #state{}};
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+            {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+            {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+            {ok, #state{batch_size = BatchSize,
+                        restart_interval = Interval,
+                        chain = Chain,
+                        curve = Curve}}
+    end.
 
 %% in the call handlers, we wait for the dkg to return, and then once
 %% it does, we communicate with the miner
@@ -132,7 +135,7 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey}, _From,
-            #state{batch_size = BatchSize} = State) ->
+            State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
     lager:notice("Got a signed genesis block: ~p", [SignedGenesisBlock]),
@@ -143,9 +146,15 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     end,
 
     ok = blockchain_worker:integrate_genesis_block(SignedGenesisBlock),
-    N = blockchain_worker:num_consensus_members(),
-    F = ((N - 1) div 3),
     Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+
+    {ok, N} = blockchain:config(num_consensus_members, Ledger),
+    F = ((N - 1) div 3),
+    {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+    {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+    {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
                                       N,
@@ -160,16 +169,20 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     lager:info("started initial hbbft group: ~p~n", [Group]),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     miner:start_chain(Group, Chain),
-    {reply, ok, State#state{current_dkg = undefined}};
+    {reply, ok, State#state{current_dkg = undefined,
+                            batch_size = BatchSize,
+                            restart_interval = Interval,
+                            chain = Chain,
+                            curve = Curve}};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{batch_size = BatchSize,
                            initial_height = Height,
+                           chain = Chain,
                            delay = Delay}) ->
     lager:info("election done at ~p delay ~p", [Height, Delay]),
 
-    N = blockchain_worker:num_consensus_members(),
+    {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
     F = ((N - 1) div 3),
-    Chain = blockchain_worker:blockchain(),
 
     Proof = term_to_binary(Signatures, [compressed]),
 
@@ -184,7 +197,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                                                  [Height, Members, Proof, Delay]);
                                                   {error, Reason} ->
                                                       lager:error("Election failed, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p, Reason: ~p",
-                                                                 [Height, Members, Proof, Delay, Reason])
+                                                                  [Height, Members, Proof, Delay, Reason])
                                               end
                                       end
                                      ),
@@ -212,10 +225,10 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State = #state{batch_size = BatchSize}) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
 
-    N = blockchain_worker:num_consensus_members(),
-    F = ((N - 1) div 3),
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
+    {ok, N} = blockchain:config(num_consensus_members, Ledger),
+    F = ((N - 1) div 3),
     case blockchain_ledger_v1:consensus_members(Ledger) of
         {error, _} ->
             lager:info("not restoring consensus group: no chain"),
@@ -254,10 +267,10 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
     end;
 handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
     {reply, Group, State};
-handle_call({initial_dkg, GenesisTransactions, Addrs}, From, State0) ->
+handle_call({initial_dkg, GenesisTransactions, Addrs, N, Curve}, From, State0) ->
     State = State0#state{initial_height = 1,
                          delay = 0},
-    case do_initial_dkg(GenesisTransactions, Addrs, State) of
+    case do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) of
         {true, DKGState} ->
             lager:info("Waiting for DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
             {noreply, DKGState#state{dkg_await=From}};
@@ -334,7 +347,14 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
     case State#state.chain of
         undefined ->
             Chain = blockchain_worker:blockchain(),
-            {noreply, State#state{chain = Chain}};
+            Ledger = blockchain:ledger(Chain),
+            {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+            {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+            {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+            {noreply, State#state{batch_size = BatchSize,
+                                  restart_interval = Interval,
+                                  chain = Chain,
+                                  curve = Curve}};
         _ ->
             {noreply, State}
     end;
@@ -354,7 +374,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 initiate_election(Hash, Height, State) ->
     Chain = blockchain_worker:blockchain(),
-    N = blockchain_worker:num_consensus_members(),
+    {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
 
     Ledger = blockchain:ledger(Chain),
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N),
@@ -393,10 +413,9 @@ restart_election(#state{n = N, delay = Delay0,
                          election_done, State#state{delay = Delay}),
     State1.
 
-do_initial_dkg(GenesisTransactions, Addrs, State) ->
+do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     lager:info("do initial"),
     SortedAddrs = lists:sort(Addrs),
-    N = blockchain_worker:num_consensus_members(),
 
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
@@ -404,7 +423,8 @@ do_initial_dkg(GenesisTransactions, Addrs, State) ->
     GenesisBlockTransactions = GenesisTransactions ++
         [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
     Artifact = blockchain_block:serialize(blockchain_block:new_genesis_block(GenesisBlockTransactions)),
-    do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block}, genesis_block_done, State#state{n = N}).
+    do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block}, genesis_block_done, State#state{n = N,
+                                                                                                    curve = Curve}).
 
 do_dkg(Addrs, Artifact, Sign, Done,
        State=#state{initial_height = Height,

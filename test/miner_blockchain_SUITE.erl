@@ -15,12 +15,7 @@
          election_check/3
         ]).
 
--export([
-         consensus_test/1,
-         genesis_load_test/1,
-         growth_test/1,
-         election_test/1
-        ]).
+-compile([export_all]).
 
 %% common test callbacks
 
@@ -28,7 +23,8 @@ all() -> [
           consensus_test,
           genesis_load_test,
           growth_test,
-          election_test
+          election_test,
+          group_change_test
          ].
 
 init_per_suite(Config) ->
@@ -37,35 +33,54 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
+init_per_testcase(TestCase, Config0) ->
+    Config = miner_ct_utils:init_per_testcase(TestCase, Config0),
     Miners = proplists:get_value(miners, Config),
-    %% Keys = proplists:get_value(keys, Config),
     Addresses = proplists:get_value(addresses, Config),
 
-    %%  #{secret := PrivKey, public := PubKey} =
-    %%     libp2p_crypto:generate_keys(ecc_compact),
-    %% Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-    %% OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
+    BlockTime = proplists:get_value(block_time, Config),
+    Interval = proplists:get_value(election_interval, Config),
+    BatchSize = proplists:get_value(batch_size, Config),
+    Curve = proplists:get_value(dkg_curve, Config),
+    %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
+
+    #{secret := Priv, public := Pub} =
+        libp2p_crypto:generate_keys(ecc_compact),
+
+    Vars = #{block_time => BlockTime,
+             election_interval => Interval,
+             election_restart_interval => 10,
+             num_consensus_members => NumConsensusMembers,
+             batch_size => BatchSize,
+             vars_commit_interval => 2,
+             block_version => v1,
+             dkg_curve => Curve,
+             proposal_threshold => 0.85},
+
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+
+    ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
+           [BinPub, Priv, Vars, KeyProof,
+            term_to_binary(Vars, [{compressed, 9}])]),
+
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
+                                                             key_proof => KeyProof}) ],
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitGen = [begin
                    blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
                end
                || Addr <- Addresses],
-    %% InitAdd = [begin
-    %%                Tx = blockchain_txn_add_gateway_v1:new(Owner, Addr, 1, 1),
-    %%                SignedTx = blockchain_txn_add_gateway_v1:sign(Tx, OwnerSigFun),
-    %%                blockchain_txn_add_gateway_v1:sign_request(SignedTx, GSigFun)
-    %%            end
-    %%            || {_, _, _, _, Addr, GSigFun} <- Keys],
-    Txns = InitialPayment ++ InitGen,
+    Txns = InitialVars ++ InitialPayment ++ InitGen,
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [Txns, Addresses])
+                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
+                                       [Txns, Addresses, NumConsensusMembers, Curve])
                    end, Miners),
     ?assertEqual([ok], lists:usort(DKGResults)),
-    Config.
+    [{master_key, {Priv, Pub}} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -239,3 +254,69 @@ shuffle(List) ->
     O = lists:sort(R),
     {_, S} = lists:unzip(O),
     S.
+
+
+group_change_test(Config) ->
+    %% get all the miners
+    Miners = proplists:get_value(miners, Config),
+
+    %% check consensus miners
+    ConsensusMiners = lists:filtermap(fun(Miner) ->
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                      end, Miners),
+
+    %% check non consensus miners
+    NonConsensusMiners = lists:filtermap(fun(Miner) ->
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                         end, Miners),
+
+    ?assertNotEqual([], ConsensusMiners),
+    %% get the first consensus miner
+    FirstConsensusMiner = hd(ConsensusMiners),
+
+    ?assertEqual(4, length(ConsensusMiners)),
+
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
+    %% get the genesis block from first consensus miner
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
+
+    %% check genesis load results for non consensus miners
+    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
+                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                                              end, NonConsensusMiners),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_until(fun() ->
+                                           true == lists:all(fun(Miner) ->
+                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                                     Epoch > 2
+                                                             end, shuffle(Miners))
+                                   end, 30, timer:seconds(1)),
+    %% submit the transaction
+
+    Vars = #{num_consensus_members => 7},
+
+    {Priv, _Pub} = proplists:get_value(master_key, Config),
+
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+
+    Txn = blockchain_txn_vars_v1:new(Vars, Proof),
+    %% wait for it to take effect
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(fun() ->
+                                           CGroup = lists:filtermap(
+                                                      fun(Miner) ->
+                                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                                      end, Miners),
+                                           7 == length(CGroup)
+                                   end, 45, timer:seconds(1)),
+
+
+
+
+    ok.
