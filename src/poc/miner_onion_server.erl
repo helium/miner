@@ -256,7 +256,7 @@ handle_info(_Msg, State) ->
 -spec wait_until_next_block() -> ok.
 wait_until_next_block() ->
     receive
-        {blockchain_event, {add_block, _BlockHash, _}} ->
+        {blockchain_event, {add_block, _BlockHash, _, _}} ->
             ok
     end.
 

@@ -118,7 +118,7 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             self() ! Msg,
             {keep_state,  Data#data{blockchain=Chain}}
     end;
-requesting(info, {blockchain_event, {add_block, BlockHash, false}}, #data{address=Address}=Data) ->
+requesting(info, {blockchain_event, {add_block, BlockHash, false, _}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
             {keep_state, Data};
@@ -136,7 +136,7 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _}}, #data{address=Challenger,
+mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{address=Challenger,
                                                                   secret=Secret,
                                                                   mining_timeout=MiningTimeout}=Data0) ->
     case find_request(BlockHash, Data0) of
@@ -214,7 +214,7 @@ challenging(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
@@ -225,7 +225,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeo
             self() ! submit,
             {next_state, submitting, Data#data{receiving_timeout=?RECEIVING_TIMEOUT}}
     end;
-receiving(info, {blockchain_event, {add_block, _Hash, _}}, #data{receiving_timeout=T}=Data) ->
+receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, Data#data{receiving_timeout=T-1}};
 receiving(cast, {witness, Witness}, #data{responses=Responses0,
@@ -324,10 +324,10 @@ submitting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-waiting(info, {blockchain_event, {add_block, _BlockHash, _}}, #data{receipts_timeout=0}=Data) ->
+waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
     {next_state, requesting,  Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
-waiting(info, {blockchain_event, {add_block, BlockHash, _}}, #data{receipts_timeout=Timeout}=Data) ->
+waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
             {next_state, requesting,  Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};

@@ -407,7 +407,7 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
-handle_info({blockchain_event, {add_block, Hash, Sync}},
+handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          election_interval = Interval,
                          current_height = CurrHeight,
@@ -497,7 +497,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
                 State
         end,
     {noreply, signal_syncing_status(Sync, NewState)};
-handle_info({blockchain_event, {add_block, Hash, Sync}},
+handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{consensus_group = ConsensusGroup,
                    election_interval = Interval,
                    current_height = CurrHeight,
@@ -568,7 +568,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync}},
             lager:error("Error, Reason: ~p", [Reason]),
             {noreply, signal_syncing_status(Sync, State)}
     end;
-handle_info({blockchain_event, {add_block, _Hash, Sync}},
+handle_info({blockchain_event, {add_block, _Hash, Sync, _Ledger}},
             State=#state{blockchain = Chain}) when Chain == undefined ->
     {noreply, signal_syncing_status(Sync, State#state{blockchain = blockchain_worker:blockchain()})};
 handle_info(init, #state{blockchain = Chain, block_time = BlockTime} = State) ->

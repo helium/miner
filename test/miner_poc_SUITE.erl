@@ -354,7 +354,7 @@ rcv_loop(_Miner, 0, Acc) ->
     Acc;
 rcv_loop(Miner, I, Acc0) ->
     receive
-        {blockchain_event, {add_block, Hash, false}} ->
+        {blockchain_event, {add_block, Hash, false, _}} ->
             Acc1 = case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
                 undefined ->
                     Acc0;
@@ -385,7 +385,7 @@ rcv_loop(Miner, I, Acc0) ->
                     )
             end,
             rcv_loop(Miner, I-1, Acc1);
-        {blockchain_event, {add_block, _Hash, true}} ->
+        {blockchain_event, {add_block, _Hash, true, _}} ->
             rcv_loop(Miner, I, Acc0)
     end.
 

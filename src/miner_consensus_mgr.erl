@@ -305,7 +305,7 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({blockchain_event, {add_block, Hash, _Sync}}, #state{current_dkg = OldDKG,
+handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}}, #state{current_dkg = OldDKG,
                                                                  initial_height = Height,
                                                                  restart_interval = Interval,
                                                                  delay = Delay} = State)
@@ -330,7 +330,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync}}, #state{current_dkg = O
         _Error ->
             {noreply, State}
     end;
-handle_info({blockchain_event, {add_block, _Hash, _Sync}}, State) ->
+handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
     case State#state.chain of
         undefined ->
             Chain = blockchain_worker:blockchain(),
