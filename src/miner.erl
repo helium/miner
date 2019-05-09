@@ -367,7 +367,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                                election_epoch => ElectionEpoch,
                                epoch_start => EpochStart}),
                 lager:debug("newblock ~p", [NewBlock]),
-                {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
+                {ok, MyPubKey, SignFun, ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?

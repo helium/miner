@@ -31,11 +31,13 @@ stamp(Chain) ->
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     term_to_binary({erlang:system_time(seconds), HeadHash}).
 
-init([Members, Id, N, F, BatchSize, SK, Chain]) ->
-    init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
-init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
-    HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
-                       {?MODULE, stamp, [Chain]}, Round, Buf),
+init([Members, Id, N, F, BatchSize, SK, Chain, SwarmKey]) ->
+    init([Members, Id, N, F, BatchSize, SK, Chain, SwarmKey, 0, []]);
+init([Members, Id, N, F, BatchSize, SK, Chain, {SigFun, ECDHFun}, Round, Buf]) ->
+    %% turn all the pubkey bins back into public keys
+    PeerKeys = [ libp2p_crypto:bin_to_pubkey(M) || M <- Members ],
+    HBBFT = hbbft:set_key_params({PeerKeys, SigFun, ECDHFun}, hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
+                       {?MODULE, stamp, [Chain]}, Round, Buf)),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
     Chain1 = blockchain:ledger(Ledger, Chain),
 

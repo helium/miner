@@ -146,6 +146,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     N = blockchain_worker:num_consensus_members(),
     F = ((N - 1) div 3),
     Chain = blockchain_worker:blockchain(),
+    {ok, _MyPubKey, SigFun, ECDHFun} = blockchain_swarm:keys(),
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
                                       N,
@@ -153,6 +154,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       BatchSize,
                                       PrivKey,
                                       Chain,
+                                      {SigFun, ECDHFun},
                                       1,
                                       []]],
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus_1",
@@ -188,7 +190,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                               end
                                       end
                                      ),
-
+    {ok, _MyPubKey, SigFun, ECDHFun} = blockchain_swarm:keys(),
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
                                       N,
@@ -196,6 +198,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                       BatchSize,
                                       PrivKey,
                                       Chain,
+                                      {SigFun, ECDHFun},
                                       1, % gets set later
                                       []]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
@@ -225,13 +228,15 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                 true ->
                     lager:info("restoring consensus group"),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
+                    {ok, _MyPubKey, SigFun, ECDHFun} = blockchain_swarm:keys(),
                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                                       Pos,
                                                       N,
                                                       F,
                                                       BatchSize,
                                                       undefined,
-                                                      Chain]],
+                                                      Chain,
+                                                      {SigFun, ECDHFun}]],
                     %% while this won't reflect the actual height, it has to be deterministic
                     Name = "consensus_" ++ integer_to_list(StartHeight),
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
