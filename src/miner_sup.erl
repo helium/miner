@@ -81,7 +81,7 @@ init(_Args) ->
     end,
 
     BlockchainOpts = [
-        {key, {PublicKey, SigFun}},
+        {key, {PublicKey, SigFun, ECDHFun}},
         {seed_nodes, SeedNodes ++ SeedAddresses},
         {max_inbound_connections, MaxInboundConnections},
         {port, Port},
