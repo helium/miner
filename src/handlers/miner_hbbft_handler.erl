@@ -35,8 +35,8 @@ init([Members, Id, N, F, BatchSize, SK, Chain, SwarmKey]) ->
     init([Members, Id, N, F, BatchSize, SK, Chain, SwarmKey, 0, []]);
 init([Members, Id, N, F, BatchSize, SK, Chain, {SigFun, ECDHFun}, Round, Buf]) ->
     %% turn all the pubkey bins back into public keys
-    PeerKeys = [ libp2p_crypto:bin_to_pubkey(M) || M <- Members ],
-    HBBFT = hbbft:set_key_params({PeerKeys, SigFun, ECDHFun}, hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
+    PeerKeys = [ begin {ecc_compact, PK} = libp2p_crypto:bin_to_pubkey(M), PK end || M <- Members ],
+    HBBFT = hbbft:set_ecc_keys({PeerKeys, SigFun, fun(PK) -> ECDHFun({ecc_compact, PK}) end}, hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
                        {?MODULE, stamp, [Chain]}, Round, Buf)),
     Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
     Chain1 = blockchain:ledger(Ledger, Chain),
@@ -259,8 +259,9 @@ restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
     %% because we have non-serializable data in it (rocksdb refs)
     {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
+    ECCKeys = hbbft:get_ecc_keys(NewState#state.hbbft),
     Chain = NewState#state.chain,
-    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft), Chain), chain=Chain}}.
+    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_ecc_keys(ECCKeys, hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft)), Chain), chain=Chain}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
