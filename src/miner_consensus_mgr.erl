@@ -127,7 +127,7 @@ init(Args) ->
 %% in the call handlers, we wait for the dkg to return, and then once
 %% it does, we communicate with the miner
 handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
-    {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
+    {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
     Signature = SignFun(GenesisBlock),
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};

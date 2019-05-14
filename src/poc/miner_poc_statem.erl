@@ -312,7 +312,7 @@ submitting(info, submit, #data{address=Challenger,
         LayerHashes
     ),
     Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
-    {ok, _, SigFun} = blockchain_swarm:keys(),
+    {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
     lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
@@ -411,7 +411,7 @@ create_request(Address, BlockHash) ->
         crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
         BlockHash
     ),
-    {ok, _, SigFun} = blockchain_swarm:keys(),
+    {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
 
 %%--------------------------------------------------------------------

@@ -149,8 +149,9 @@ basic(_Config) ->
     BaseDir = "data/miner_poc_SUITE/basic",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
-        {key, {PubKey, SigFun}}
+        {key, {PubKey, SigFun, ECDHFun}}
         ,{seed_nodes, []}
         ,{port, 0}
         ,{num_consensus_members, 7}
@@ -295,8 +296,9 @@ startup(_Config) ->
     BaseDir = "data/miner_poc_SUITE/startup",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
-        {key, {PubKey, SigFun}}
+        {key, {PubKey, SigFun, ECDHFun}}
         ,{seed_nodes, []}
         ,{port, 0}
         ,{num_consensus_members, 7}
