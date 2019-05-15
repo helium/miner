@@ -277,13 +277,13 @@ handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
 handle_call({add_gateway_txn, Owner, Fee, Amount}, _From, State=#state{}) ->
-    {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Amount, Fee),
     SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
     {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call({assert_loc_txn, H3Index, Owner, Nonce, Fee}, _From, State=#state{}) ->
-    {ok, PubKey, SigFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, H3Index, Nonce, Fee),
     SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
@@ -375,7 +375,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                                election_epoch => ElectionEpoch,
                                epoch_start => EpochStart}),
                 lager:debug("newblock ~p", [NewBlock]),
-                {ok, MyPubKey, SignFun} = blockchain_swarm:keys(),
+                {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
