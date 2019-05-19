@@ -422,7 +422,6 @@ do_dkg(Addrs, Artifact, Sign, Done,
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
             lager:info("Preparing to run DKG #~p at height ~p ", [Delay, Height]),
-            miner_ebus:send_signal("ConsensusElect", "Elected"),
             Pos = miner_util:index_of(MyAddress, ConsensusAddrs),
 
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
@@ -455,7 +454,6 @@ do_dkg(Addrs, Artifact, Sign, Done,
             {true, State#state{consensus_pos = Pos,
                                current_dkg = DKGGroup}};
         false ->
-            miner_ebus:send_signal("ConsensusElect", "Defeated"),
             lager:info("not in DKG this round at height ~p", [Height]),
             {false, State#state{consensus_pos = undefined,
                                 current_dkg = undefined}}
