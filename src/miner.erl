@@ -56,6 +56,36 @@
 
 -include_lib("blockchain/include/blockchain.hrl").
 
+-ifdef(TEST).
+
+-define(tv, '$test_version').
+-define(v, '$value').
+
+-export([test_version/0, inc_tv/1]).
+
+test_version() ->
+    case ets:info(?tv) of
+        undefined ->
+            ets:new(?tv, [named_table, public]),
+            ets:insert(?tv, {?tv, 1}),
+            1;
+        _ ->
+            [{_, V}] = ets:lookup(?tv, ?tv),
+            V
+    end.
+
+inc_tv(Incr) ->
+    case ets:info(?tv) of
+        undefined ->
+            ets:new(?tv, [named_table, public]),
+            ets:insert(?tv, {?tv, 1}),
+            1;
+        _ ->
+            ets:update_counter(?tv, ?tv, Incr)
+    end.
+
+-endif.
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -449,6 +479,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
                             {true, true} ->
+                                {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
+                                blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+
                                 miner_consensus_mgr:cancel_dkg(),
                                 %% it's possible that waiting hasn't been set, I'm not entirely
                                 %% sure how to handle that at this point
@@ -479,6 +512,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
                             {true, false} ->
+                                {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
+                                blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+
                                 miner_consensus_mgr:cancel_dkg(),
                                 lager:info("leave"),
 
@@ -524,6 +560,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                             {noreply, State#state{current_height = Height}};
                         {true, true} ->
+                            {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
+                            blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+
                             lager:info("nc start group"),
                             miner_consensus_mgr:cancel_dkg(),
                             %% it's possible that waiting hasn't been set, I'm not entirely
@@ -553,6 +592,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
                         {true, false} ->
+                            {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
+                            blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+
                             lager:info("nc stay out"),
                             miner_consensus_mgr:cancel_dkg(),
                             {noreply,
