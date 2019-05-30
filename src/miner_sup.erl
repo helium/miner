@@ -113,11 +113,12 @@ init(_Args) ->
 
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
-            {RadioHost, RadioTCPPort, RadioUDPPort} ->
+            {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
                 OnionOpts = #{
-                    radio_host => RadioHost,
-                    radio_tcp_port => RadioTCPPort,
-                    radio_udp_port => RadioUDPPort,
+                    radio_udp_bind_ip => RadioBindIP,
+                    radio_udp_bind_port => RadioBindPort,
+                    radio_udp_send_ip => RadioSendIP,
+                    radio_udp_send_port => RadioSendPort,
                     ecdh_fun => ECDHFun
                 },
                 [?WORKER(miner_onion_server, [OnionOpts])];

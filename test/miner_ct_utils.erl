@@ -211,7 +211,7 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
             ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
             ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
-            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {"127.0.0.1", TCPPort, UDPPort}]),
+            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
             ct_rpc:call(Miner, application, set_env, [miner, election_interval, Interval]),
 
             {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
