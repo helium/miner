@@ -3,6 +3,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-include("pb/concentrate_pb.hrl").
+
 -export([
     all/0
 ]).
@@ -36,8 +38,8 @@ all() ->
 basic(_Config) ->
     application:ensure_all_started(lager),
 
-    {ok, LSock} = gen_tcp:listen(0, [{active, false}, binary, {packet, 2}]),
-    {ok, Port} = inet:port(LSock),
+    {ok, Sock} = gen_udp:open(0, [{active, false}, binary, {reuseaddr, true}]),
+    {ok, Port} = inet:port(Sock),
 
     #{secret := PrivateKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := PrivateKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
@@ -47,12 +49,12 @@ basic(_Config) ->
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),
 
     {ok, Server} = miner_onion_server:start_link(#{
-        radio_host => "127.0.0.1",
-        radio_tcp_port => Port,
-        radio_udp_port => 5678,
+        radio_udp_bind_ip => {127,0,0,1},
+        radio_udp_bind_port => 5678,
+        radio_udp_send_ip => {127,0,0,1},
+        radio_udp_send_port => Port,
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
-    {ok, Sock} = gen_tcp:accept(LSock),
 
     Data1 = <<1, 2, 3>>,
     Data2 = <<4, 5, 6>>,
@@ -70,10 +72,14 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    {ok, UDP} = gen_udp:open(0, [binary, {active, false}, {reuseaddr, true}]),
-
-    ok = gen_udp:send(UDP, "127.0.0.1",  5678, <<16#81, 0:32/integer-unsigned-little, 1:8/integer, Onion/binary>>),
-    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, X/binary>>} = gen_tcp:recv(Sock, 0, 5000),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
+                                                                      bandwidth='BW125kHz',
+                                                                      spreading='SF8',
+                                                                      coderate='CR4_5',
+                                                                      freq=trunc(911.3e6),
+                                                                      radio='R0'})),
+    {ok, {{127,0,0,1}, 5678, Pkt1}} = gen_udp:recv(Sock, 0, 5000),
+    #miner_TxPacket_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>} = concentrate_pb:decode_msg(Pkt1, miner_TxPacket_pb),
 
     timer:sleep(2000),
     %% check that the packet size is the same
@@ -99,23 +105,40 @@ basic(_Config) ->
     end),
 
     {ok, _Server} = miner_onion_server:start_link(#{
-        radio_host => "127.0.0.1",
-        radio_tcp_port => Port,
-        radio_udp_port => 5678,
+        radio_udp_bind_ip => {127,0,0,1},
+        radio_udp_bind_port => 5678,
+        radio_udp_send_ip => {127,0,0,1},
+        radio_udp_send_port => Port,
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey2)
     }),
-    {ok, Sock2} = gen_tcp:accept(LSock),
 
     %% check we can't decrypt the original
-    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, Onion/binary>>),
-    ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
+                                                                      bandwidth='BW125kHz',
+                                                                      spreading='SF8',
+                                                                      coderate='CR4_5',
+                                                                      freq=trunc(911.3e6),
+                                                                      radio='R0'})),
 
-    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, X/binary>>),
-    {ok, <<0:8/integer, 0:32/integer, 1:8/integer, Y/binary>>} = gen_tcp:recv(Sock2, 0, 2000),
+    ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
+
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>,
+                                                                      bandwidth='BW125kHz',
+                                                                      spreading='SF8',
+                                                                      coderate='CR4_5',
+                                                                      freq=trunc(911.3e6),
+                                                                      radio='R0'})),
+    {ok, {{127,0,0,1}, 5678, Pkt2}} = gen_udp:recv(Sock, 0, 5000),
+    #miner_TxPacket_pb{payload= <<0:32/integer, 1:8/integer, Y/binary>>} = concentrate_pb:decode_msg(Pkt2, miner_TxPacket_pb),
 
     %% check we can't decrypt the next layer
-    ok = gen_udp:send(UDP, "127.0.0.1", 5678, <<16#81, 0:32/integer, 1:8/integer, Y/binary>>),
-    ?assertEqual({error, timeout}, gen_tcp:recv(Sock2, 0, 1000)),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Y/binary>>,
+                                                                      bandwidth='BW125kHz',
+                                                                      spreading='SF8',
+                                                                      coderate='CR4_5',
+                                                                      freq=trunc(911.3e6),
+                                                                      radio='R0'})),
+    ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
 

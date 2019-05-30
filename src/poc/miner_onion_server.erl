@@ -7,6 +7,8 @@
 
 -behavior(gen_server).
 
+-include("pb/concentrate_pb.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -32,18 +34,14 @@
     handle_info/2
 ]).
 
--define(WRITE_RADIO_PACKET, 16#0).
--define(WRITE_RADIO_PACKET_ACK, 16#80).
--define(READ_RADIO_PACKET, 16#81).
 -define(READ_RADIO_PACKET_EXTENDED, 16#82).
 
 -define(BLOCK_RETRY_COUNT, 10).
 
 -record(state, {
-    host :: string(),
-    port :: integer(),
-    socket :: gen_tcp:socket() | undefined,
     udp_socket :: gen_udp:socket(),
+    udp_send_port :: pos_integer(),
+    udp_send_ip :: inet:address(),
     compact_key :: ecc_compact:compact_key(),
     ecdh_fun,
     sender :: undefined | {pid(), term()}
@@ -175,72 +173,56 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
-    UDPPort = maps:get(radio_udp_port, Args),
-    {ok, UDP} = gen_udp:open(UDPPort, [{ip, {127,0,0,1}}, binary, {active, once}, {reuseaddr, true}]),
+    UDPPort = maps:get(radio_udp_bind_port, Args),
+    UDPIP = maps:get(radio_udp_bind_ip, Args),
+    UDPSendPort = maps:get(radio_udp_send_port, Args),
+    UDPSendIP = maps:get(radio_udp_send_ip, Args),
+    {ok, UDP} = gen_udp:open(UDPPort, [{ip, UDPIP}, {port, UDPPort}, binary, {active, once}, {reuseaddr, true}]),
     State = #state{
-        host = maps:get(radio_host, Args),
-        port = maps:get(radio_tcp_port, Args),
         compact_key = blockchain_swarm:pubkey_bin(),
         udp_socket = UDP,
+        udp_send_port = UDPSendPort,
+        udp_send_ip = UDPSendIP,
         ecdh_fun = maps:get(ecdh_fun, Args)
     },
-    self() ! connect,
     lager:info("init with ~p", [Args]),
     {ok, State}.
 
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->
     {reply, {ok, CK}, State};
-handle_call(_Msg, _From, #state{socket=undefined}=State) ->
-    {reply, {error, socket_undefined}, State};
-handle_call({send, Data}, From, State=#state{socket=Socket}) ->
-    R = gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET, Data/binary>>),
-    {reply, R, State#state{sender=From}};
-handle_call(socket, _From, State=#state{socket=Socket}) ->
-    {reply, {ok, Socket}, State};
+handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
+    R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
+                     concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Data,
+                                                                  bandwidth='BW125kHz',
+                                                                  spreading='SF8',
+                                                                  coderate='CR4_5',
+                                                                  freq=trunc(911.3e6),
+                                                                  radio='R0',
+                                                                  power=0})),
+    {reply, R, State};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({decrypt, <<IV:2/binary,
                         OnionCompactKey:33/binary,
                         Tag:4/binary,
-                        CipherText/binary>>}
-            ,#state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, p2p, 0),
+                        CipherText/binary>>}, State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, p2p, 0),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(connect, #state{host=Host, port=Port}=State) ->
-    Opts = [binary, {packet, 2}, {active, once}, {nodelay, true}],
-    case gen_tcp:connect(Host, Port, Opts) of
-        {ok, Socket} ->
-            {noreply, State#state{socket=Socket}};
-        {error, _Reason} ->
-            lager:warning("fail to open socket (~p:~p) ~p", [Host, Port, _Reason]),
-             _ = reconnect(),
-            {noreply, State}
-    end;
-handle_info({tcp, Socket, <<Byte:8/integer, _/binary>>}, State)
-  when Byte == ?READ_RADIO_PACKET; Byte == ?READ_RADIO_PACKET_EXTENDED ->
-    %% the packets received from the 1310 are garbage on the rev3 boards, so just null route them for now
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
-handle_info({tcp, Socket, Packet}, State) ->
-    NewState = handle_packet(Packet, State),
+handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
+    NewState = try concentrate_pb:decode_msg(Packet, miner_RxPacket_pb) of
+                   RxPacket ->
+                       handle_packet(RxPacket, State)
+               catch
+                   What:Why ->
+                       lager:warning("Failed to handle radio packet ~p -- ~p:~p", [Packet, What, Why]),
+                       State
+               end,
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, NewState};
-handle_info({udp, Socket, _Host, _Port, Packet}, State) ->
-    NewState = handle_packet(Packet, State),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, NewState};
-handle_info({tcp_closed, _Socket}, State) ->
-    lager:warning("tcp_closed"),
-    _ = reconnect(),
-    {noreply, State};
-handle_info({tcp_error, _Socket, _Reason}, State) ->
-    lager:error("tcp_error, reason: ~p", [_Reason]),
-    _ = reconnect(),
-    {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unhandled Msg: ~p", [_Msg]),
     {noreply, State}.
@@ -264,7 +246,7 @@ wait_until_next_block() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type, RSSI) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port}, Type, RSSI) ->
     case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
             _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey, os:system_time(nanosecond), RSSI]),
@@ -272,10 +254,17 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, Type, RSSI) ->
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
             _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI]),
-            gen_tcp:send(Socket, <<?WRITE_RADIO_PACKET,
-                                   0:32/integer, %% broadcast packet
-                                   1:8/integer, %% onion packet
-                                   NextPacket/binary>>)
+            Payload = <<0:32/integer, %% broadcast packet
+                     1:8/integer, %% onion packet
+                     NextPacket/binary>>,
+            gen_udp:send(Socket, IP, Port,
+                         concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Payload,
+                                                                      bandwidth='BW125kHz',
+                                                                      spreading='SF8',
+                                                                      coderate='CR4_5',
+                                                                      freq=trunc(911.3e6),
+                                                                      radio='R0',
+                                                                      power=0}))
     end,
     ok = inet:setopts(Socket, [{active, once}]).
 
@@ -287,55 +276,26 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
             {ok, Payload, NextLayer}
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec reconnect() -> reference().
-reconnect() ->
-    lager:warning("trying to reconnect in 5s"),
-    erlang:send_after(timer:seconds(5), self(), connect).
-
-handle_packet(<<?READ_RADIO_PACKET,
-                0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
-                1:8/integer, %% onions are type 1 broadcast?
-                IV:2/binary,
-                OnionCompactKey:33/binary,
-                Tag:4/binary,
-                CipherText/binary>>,
-            #state{ecdh_fun=ECDHFun, socket=Socket}=State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio, 0),
+handle_packet(#miner_RxPacket_pb{payload =
+                                 <<0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
+                                   1:8/integer, %% onions are type 1 broadcast?
+                                   IV:2/binary,
+                                   OnionCompactKey:33/binary,
+                                   Tag:4/binary,
+                                   CipherText/binary>>,
+                                rssi=RSSI}, State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI)),
     State;
-handle_packet(<<?READ_RADIO_PACKET_EXTENDED,
-                             RSSI:8/integer-signed,
-                             _Channel:8/integer-unsigned,
-                             CRCStatus:8/integer,
-                             0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
-                             1:8/integer, %% onions are type 1 broadcast?
-                             IV:2/binary,
-                             OnionCompactKey:33/binary,
-                             Tag:4/binary,
-                             CipherText/binary>>,
-              #state{ecdh_fun=ECDHFun, socket=Socket}=State) when CRCStatus == 1 ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, Socket, radio, RSSI),
-    State;
-handle_packet(<<?READ_RADIO_PACKET, _/binary>> = Packet, #state{udp_socket=UDP}=State) ->
+handle_packet(#miner_RxPacket_pb{payload = Packet,
+                                 rssi=RSSI, if_chain=Channel, crc_check=CRC},
+              #state{udp_socket=Socket}=State) ->
     %% some other packet, just forward it to gw-demo for now
-    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
+    gen_udp:send(Socket, {127,0,0,1}, 6789, <<?READ_RADIO_PACKET_EXTENDED:8/integer, (trunc(RSSI)):8/integer-signed, Channel:8/integer-unsigned, (crc_status(CRC)):8/integer-unsigned, Packet/binary>>),
     State;
-handle_packet(<<?READ_RADIO_PACKET_EXTENDED, _/binary>> = Packet, #state{udp_socket=UDP}=State) ->
-    %% some other packet, just forward it to gw-demo for now
-    gen_udp:send(UDP, {127,0,0,1}, 6789, Packet),
-    State;
-handle_packet(<<?WRITE_RADIO_PACKET_ACK>>, State) ->
-    lager:info("received ACK from Radio"),
-    case State#state.sender of
-        undefined -> ok;
-        From ->
-            gen_server:reply(From, ok)
-    end,
-    State#state{sender=undefined};
 handle_packet(Packet, State) ->
     lager:warning("unknown packet ~p", [Packet]),
     State.
+
+crc_status(true) -> 1;
+crc_status(false) -> 0.
 
