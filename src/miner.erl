@@ -21,7 +21,6 @@
     hbbft_skip/0,
     create_block/3,
     signed_block/2,
-    syncing_status/0,
 
     start_chain/2,
     handoff_consensus/1,
@@ -46,7 +45,6 @@
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     block_time = 15000 :: number(),
-    currently_syncing = false :: boolean(),
     election_interval :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
@@ -232,10 +230,6 @@ signed_block(Signatures, BinBlock) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec syncing_status() -> boolean().
-syncing_status() ->
-    %% this should be a call so we don't loose state
-    gen_server:call(?MODULE, syncing_status, infinity).
 
 start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
@@ -290,8 +284,6 @@ handle_call({assert_loc_txn, H3Index, Owner, Nonce, Fee}, _From, State=#state{})
     {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
-handle_call(syncing_status, _From, #state{currently_syncing=Status}=State) ->
-    {reply, Status, State};
 handle_call({handoff_consensus, NewConsensusGroup}, _From,
             #state{handoff_waiting = Waiting} = State) ->
     lager:info("handing off consensus from ~p or ~p to ~p",
@@ -496,7 +488,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                 lager:error("Error, Reason: ~p", [Reason]),
                 State
         end,
-    {noreply, signal_syncing_status(Sync, NewState)};
+    {noreply, NewState};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{consensus_group = ConsensusGroup,
                    election_interval = Interval,
@@ -519,7 +511,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             lager:info("nc reg round"),
                             NextElection = next_election(Start, Interval),
                             miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
-                            {noreply, signal_syncing_status(Sync, State#state{current_height = Height})};
+                            {noreply, State#state{current_height = Height}};
                         {true, true} ->
                             lager:info("nc start group"),
                             miner_consensus_mgr:cancel_dkg(),
@@ -562,15 +554,15 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                     end;
 
                 _ ->
-                    {noreply, signal_syncing_status(Sync, State)}
+                    {noreply, State}
             end;
         {error, Reason} ->
             lager:error("Error, Reason: ~p", [Reason]),
-            {noreply, signal_syncing_status(Sync, State)}
+            {noreply, State}
     end;
 handle_info({blockchain_event, {add_block, _Hash, Sync, _Ledger}},
             State=#state{blockchain = Chain}) when Chain == undefined ->
-    {noreply, signal_syncing_status(Sync, State#state{blockchain = blockchain_worker:blockchain()})};
+    {noreply, State#state{blockchain = blockchain_worker:blockchain()}};
 handle_info(init, #state{blockchain = Chain, block_time = BlockTime} = State) ->
     {ok, Height} = blockchain:height(Chain),
     lager:info("cold start blockchain at known height ~p", [Height]),
@@ -610,22 +602,6 @@ restore(Chain, Block, Height, Interval) ->
             ok
     end,
     Group.
-
-%% TODO: rip this out.  we should update the flag at the start of
-%% add-block events and then pass the state through normally, this
-%% action should be taken via asynchronous tick to control the rate at
-%% which we talk to dbus
--spec signal_syncing_status(boolean(), #state{}) -> #state{}.
-signal_syncing_status(true, #state{currently_syncing=true}=State) ->
-    State;
-signal_syncing_status(true, #state{currently_syncing=false}=State) ->
-    miner_ebus:send_signal("SyncingStatus", "StartSyncing"),
-    State#state{currently_syncing=true};
-signal_syncing_status(false, #state{currently_syncing=true}=State) ->
-    miner_ebus:send_signal("SyncingStatus", "StopSyncing"),
-    State#state{currently_syncing=false};
-signal_syncing_status(false, #state{currently_syncing=false}=State) ->
-    State.
 
 set_next_block_timer(Chain, BlockTime) ->
     {ok, HeadBlock} = blockchain:head_block(Chain),
