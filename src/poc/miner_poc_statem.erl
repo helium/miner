@@ -515,22 +515,22 @@ target_test() ->
     meck:new(blockchain_swarm, [passthrough]),
     meck:new(blockchain, [passthrough]),
     LatLongs = [
-        {{37.782061, -122.446167}, 0.1},
-        {{37.782604, -122.447857}, 0.99},
-        {{37.782074, -122.448528}, 0.99},
-        {{37.782002, -122.44826}, 0.99},
-        {{37.78207, -122.44613}, 0.99},
-        {{37.781909, -122.445411}, 0.99},
-        {{37.783371, -122.447879}, 0.99},
-        {{37.780827, -122.44716}, 0.99}
+        {{37.782061, -122.446167}, 1.0, 1.0},
+        {{37.782604, -122.447857}, 1000.0, 1.0},
+        {{37.782074, -122.448528}, 1000.0, 1.0},
+        {{37.782002, -122.44826}, 1000.0, 1.0},
+        {{37.78207, -122.44613}, 1000.0, 1.0},
+        {{37.781909, -122.445411}, 1000.0, 1.0},
+        {{37.783371, -122.447879}, 1000.0, 1.0},
+        {{37.780827, -122.44716}, 1000.0, 1.0}
     ],
     ActiveGateways = lists:foldl(
-        fun({LatLong, Score}, Acc) ->
+        fun({LatLong, Alpha, Beta}, Acc) ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
             Index = h3:from_geo(LatLong, 9),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
-            G1 = blockchain_ledger_gateway_v1:score(Score, G0),
+            G1 = blockchain_ledger_gateway_v1:set_alpha_beta(Alpha, Beta, G0),
             maps:put(Address, G1, Acc)
 
         end,
@@ -555,7 +555,7 @@ target_test() ->
     Hash = blockchain_block:hash_block(Block),
     {Target, Gateways} = blockchain_poc_path:target(Hash, undefined, blockchain_swarm:pubkey_bin()),
 
-    [{LL, _}|_] = LatLongs,
+    [{LL, _, _}|_] = LatLongs,
     ?assertEqual(crypto:hash(sha256, erlang:term_to_binary(LL)), Target),
     ?assertEqual(ActiveGateways, Gateways),
 

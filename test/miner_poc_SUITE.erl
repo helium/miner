@@ -46,7 +46,7 @@ dist(Config0) ->
         [],
         lists:seq(1, length(Addresses))
     ),
-    IntitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0, 0.0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
+    IntitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     InitialTransactions = InitialPaymentTransactions ++ IntitialGatewayTransactions,
 
     DKGResults = miner_ct_utils:pmap(
