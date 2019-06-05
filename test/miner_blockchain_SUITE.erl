@@ -50,7 +50,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitGen = [begin
-                   blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0, 0.0)
+                   blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
                end
                || Addr <- Addresses],
     %% InitAdd = [begin

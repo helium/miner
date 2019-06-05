@@ -35,7 +35,7 @@ init_per_testcase(_TestCase, Config0) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, 0, 0) || Addr <- Addresses],
+    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, 0) || Addr <- Addresses],
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
@@ -169,7 +169,7 @@ single_payment_test(Config) ->
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
 
-    {ok, CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
+    {ok, _CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 2 block
     ok = miner_ct_utils:wait_until(
