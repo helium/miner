@@ -389,7 +389,7 @@ rcv_loop(Miner, I, Acc0) ->
                         blockchain_block:transactions(Block)
                     )
             end,
-            ct:pal("I ~p Acc1 ~p", [I, Acc1]),
+            ct:pal("counter ~p accumulated lengths ~p", [I, Acc1]),
             rcv_loop(Miner, I-1, Acc1);
         {blockchain_event, {add_block, _Hash, true, _}} ->
             rcv_loop(Miner, I, Acc0)
