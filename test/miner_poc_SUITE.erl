@@ -258,6 +258,8 @@ basic(_Config) ->
         lists:seq(1, 4)
     ),
 
+    ct:pal("Height: ~p", [blockchain:height(Chain)]),
+
      % 5 previous blocks + 4 block to pass receiving timeout + 1 block with poc receipts txn
     ok = miner_ct_utils:wait_until(fun() -> {ok, 10} =:= blockchain:height(Chain) end),
 
@@ -473,11 +475,13 @@ create_block(ConsensusMembers, Txs) ->
     {ok, HeadBlock} = blockchain:head_block(Blockchain),
     Height = blockchain_block:height(HeadBlock) + 1,
     Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
-                                    height => Height,
-                                    transactions => Txs,
-                                    signatures => [],
-                                    time => 0,
-                                    hbbft_round => 0}),
+                                       height => Height,
+                                       transactions => Txs,
+                                       signatures => [],
+                                       time => 0,
+                                       hbbft_round => 0,
+                                       election_epoch => 0,
+                                       epoch_start => 0}),
     BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
     Signatures = signatures(ConsensusMembers, BinBlock),
     Block1 = blockchain_block:set_signatures(Block0, Signatures),
