@@ -61,7 +61,6 @@ dist(Config0) ->
 
     Self = self(),
     [M|_] = Miners,
-    ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
 
     %% wait until one node has a working chain
     ok = miner_ct_utils:wait_until(
@@ -117,6 +116,7 @@ dist(Config0) ->
         Miners
     ),
 
+    ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
     ?assertEqual({0, 0}, rcv_loop(M, 20, {length(Miners), length(Miners)})),
 
     %% wait until one node has a working chain
