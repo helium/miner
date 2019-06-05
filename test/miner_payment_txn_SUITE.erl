@@ -169,7 +169,7 @@ single_payment_test(Config) ->
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
 
-    {ok, CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
+    {ok, _CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 2 block
     ok = miner_ct_utils:wait_until(
