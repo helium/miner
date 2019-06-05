@@ -112,7 +112,7 @@ dist(Config0) ->
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
-            rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+            ct_rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
         end,
         Miners
     ),
