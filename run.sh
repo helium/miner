@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 make clean && make
 
 if [ -z "$1" ]
@@ -10,6 +12,11 @@ else
     echo "Will use provided $1 genesis file and incorporate the transactions"
     command="create"
     old_genesis_file=$1
+fi
+
+if [ -z $(which parallel) ]; then
+    echo "missing GNU parallel, please install it"
+    exit 1
 fi
 
 # default to 8 dev releases
