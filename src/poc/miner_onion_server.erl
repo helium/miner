@@ -47,6 +47,9 @@
     sender :: undefined | {pid(), term()}
 }).
 
+-define(CHANNELS, [903.1e6, 903.3e6, 903.5e6, 911.1e6, 911.3e6, 911.5e6, 911.7e6, 911.9e6]).
+-define(TX_POWER, 26).
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -191,14 +194,15 @@ init(Args) ->
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
+    Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
     R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
                      concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Data,
                                                                   bandwidth='BW125kHz',
                                                                   spreading='SF8',
                                                                   coderate='CR4_5',
-                                                                  freq=trunc(911.3e6),
+                                                                  freq=Channel,
                                                                   radio='R0',
-                                                                  power=0})),
+                                                                  power=?TX_POWER})),
     {reply, R, State};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
@@ -257,14 +261,15 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
             Payload = <<0:32/integer, %% broadcast packet
                      1:8/integer, %% onion packet
                      NextPacket/binary>>,
+            Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
             gen_udp:send(Socket, IP, Port,
                          concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Payload,
                                                                       bandwidth='BW125kHz',
                                                                       spreading='SF8',
                                                                       coderate='CR4_5',
-                                                                      freq=trunc(911.3e6),
+                                                                      freq=Channel,
                                                                       radio='R0',
-                                                                      power=0}))
+                                                                      power=?TX_POWER}))
     end,
     ok = inet:setopts(Socket, [{active, once}]).
 
