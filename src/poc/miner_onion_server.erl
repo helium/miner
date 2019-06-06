@@ -48,7 +48,7 @@
 }).
 
 -define(CHANNELS, [903.1e6, 903.3e6, 903.5e6, 911.1e6, 911.3e6, 911.5e6, 911.7e6, 911.9e6]).
--define(TX_POWER, 26).
+-define(TX_POWER, 127). %% currently it seems binary between 14 or 28 dbm
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
