@@ -61,7 +61,6 @@ dist(Config0) ->
 
     Self = self(),
     [M|_] = Miners,
-    ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
 
     %% wait until one node has a working chain
     ok = miner_ct_utils:wait_until(
@@ -117,6 +116,7 @@ dist(Config0) ->
         Miners
     ),
 
+    ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
     ?assertEqual({0, 0}, rcv_loop(M, 20, {length(Miners), length(Miners)})),
 
     %% wait until one node has a working chain
@@ -359,6 +359,7 @@ rcv_loop(_Miner, 0, Acc) ->
 rcv_loop(Miner, I, Acc0) ->
     receive
         {blockchain_event, {add_block, Hash, false, _}} ->
+            ct:pal("hash ~p", [Hash]),
             Acc1 = case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
                 undefined ->
                     Acc0;
@@ -388,6 +389,7 @@ rcv_loop(Miner, I, Acc0) ->
                         blockchain_block:transactions(Block)
                     )
             end,
+            ct:pal("counter ~p accumulated lengths ~p", [I, Acc1]),
             rcv_loop(Miner, I-1, Acc1);
         {blockchain_event, {add_block, _Hash, true, _}} ->
             rcv_loop(Miner, I, Acc0)
