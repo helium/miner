@@ -2,6 +2,8 @@
 
 set -e
 
+./all-cmd.sh stop
+
 make clean && make
 
 if [ -z "$1" ]
@@ -64,7 +66,7 @@ create_genesis_block() {
 export -f create_genesis_block
 
 forge_genesis_block() {
-    echo $(./_build/dev\+miner$1/rel/miner$1/bin/miner$1 genesis forge $2)
+    echo $(./_build/dev\+miner$1/rel/miner$1/bin/miner$1 genesis forge $2 $3 $4)
 }
 export -f forge_genesis_block
 
@@ -73,7 +75,11 @@ then
     parallel -k --tagstring miner{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: $(join_by , ${peer_addrs[@]})
 elif [ "$command" == "forge" ]
 then
-    parallel -k --tagstring miner{} forge_genesis_block ::: $nodes ::: $(join_by , ${peer_addrs[@]})
+    priv_key=$(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis key)
+    echo $priv_key
+    proof=($(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis proof $priv_key | grep -v ":"))
+    echo $proof
+    parallel -k --tagstring miner{} forge_genesis_block ::: $nodes ::: ${proof[1]} ::: ${proof[0]} ::: $(join_by , ${peer_addrs[@]})
 else
     exit 1
 fi
