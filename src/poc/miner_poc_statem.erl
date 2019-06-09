@@ -137,11 +137,14 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{address=Challenger,
-                                                                  secret=Secret,
-                                                                  mining_timeout=MiningTimeout}=Data0) ->
+                                                                     secret=Secret,
+                                                                     mining_timeout=MiningTimeout,
+                                                                     blockchain=Chain}=Data0) ->
     case find_request(BlockHash, Data0) of
         ok ->
-            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>},
+            {ok, Block} = blockchain:get_block(BlockHash, Chain),
+            Height = blockchain_block:height(Block),
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height},
             lager:info("request was mined @ ~p", [BlockHash]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
@@ -164,9 +167,8 @@ mining(EventType, EventContent, Data) ->
 targeting(info, _, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
-targeting(info, {target, Entropy}, #data{blockchain=Blockchain}=Data) ->
+targeting(info, {target, Entropy, Height}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
-    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
     {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
     lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
     self() ! {challenge, Entropy, Target, Gateways, Height},
