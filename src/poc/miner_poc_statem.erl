@@ -137,11 +137,14 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{address=Challenger,
-                                                                  secret=Secret,
-                                                                  mining_timeout=MiningTimeout}=Data0) ->
+                                                                     secret=Secret,
+                                                                     mining_timeout=MiningTimeout,
+                                                                     blockchain=Chain}=Data0) ->
     case find_request(BlockHash, Data0) of
         ok ->
-            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>},
+            {ok, Block} = blockchain:get_block(BlockHash, Chain),
+            Height = blockchain_block:height(Block),
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height},
             lager:info("request was mined @ ~p", [BlockHash]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
@@ -164,11 +167,11 @@ mining(EventType, EventContent, Data) ->
 targeting(info, _, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
-targeting(info, {target, Entropy}, #data{blockchain=Blockchain}=Data) ->
+targeting(info, {target, Entropy, Height}, #data{blockchain=Blockchain}=Data) ->
     Ledger = blockchain:ledger(Blockchain),
     {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
     lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
-    self() ! {challenge, Entropy, Target, Gateways},
+    self() ! {challenge, Entropy, Target, Gateways, Height},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -177,10 +180,10 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Entropy, Target, Gateways}, #data{retry=Retry,
-                                                                onion_keys=OnionKey
-                                                               }=Data) ->
-    case blockchain_poc_path:build(Entropy, Target, Gateways) of
+challenging(info, {challenge, Entropy, Target, Gateways, Height}, #data{retry=Retry,
+                                                                        onion_keys=OnionKey
+                                                                       }=Data) ->
+    case blockchain_poc_path:build(Entropy, Target, Gateways, Height) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
@@ -530,7 +533,7 @@ target_test() ->
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
             Index = h3:from_geo(LatLong, 9),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
-            G1 = blockchain_ledger_gateway_v1:set_alpha_beta(Alpha, Beta, G0),
+            G1 = blockchain_ledger_gateway_v1:set_alpha_beta_delta(Alpha, Beta, 1, G0),
             maps:put(Address, G1, Acc)
 
         end,
@@ -539,6 +542,7 @@ target_test() ->
     ),
 
     meck:expect(blockchain_ledger_v1, active_gateways, fun(_) -> ActiveGateways end),
+    meck:expect(blockchain_ledger_v1, current_height, fun(_) -> {ok, 1} end),
     meck:expect(blockchain_worker, blockchain, fun() -> blockchain end),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
