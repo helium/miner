@@ -52,7 +52,8 @@ init(server, _Conn, _Args) ->
 
 handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
-    {noreply, State};
+    %% client should not receive data
+    {stop, normal, State};
 handle_data(server, Data, State) ->
     try blockchain_poc_response_v1:decode(Data) of
         {witness, Witness} ->
@@ -62,11 +63,14 @@ handle_data(server, Data, State) ->
     catch _:_ ->
         lager:error("got unknown data ~p", [Data])
     end,
-    {noreply, State}.
+    %% we only expect one receipt/witness from the peer at a time
+    {stop, normal, State}.
 
 handle_info(client, {send, Data}, State) ->
     lager:info("client sending data: ~p", [Data]),
-    {noreply, State, Data};
+    %% send one and done
+    {stop, normal, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:info("rcvd unknown type: ~p unknown msg: ~p", [_Type, _Msg]),
-    {noreply, State}.
+    %% unexpected input, just close
+    {stop, normal, State}.
