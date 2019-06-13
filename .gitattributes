@@ -1,0 +1,9 @@
+* text=auto
+
+*.erl text eol=lf
+*.hrl text eol=lf
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.org text eol=lf
