@@ -187,7 +187,7 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height}, #data{retry=Re
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
-            self() ! {target, Entropy},
+            self() ! {target, Entropy, Height},
             {next_state, targeting, Data#data{retry=Retry-1}};
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
@@ -206,7 +206,7 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height}, #data{retry=Re
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
-                    self() ! {target, Entropy},
+                    self() ! {target, Entropy, Height},
                     {next_state, targeting, Data#data{retry=Retry-1}}
             end
     end;
