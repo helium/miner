@@ -195,6 +195,7 @@ handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefin
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
     Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+    lager:info("Sending ~p bytes on channel ~p", [byte_size(Data), Channel]),
     R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
                      concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Data,
                                                                   bandwidth='BW125kHz',
@@ -262,6 +263,7 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
                      1:8/integer, %% onion packet
                      NextPacket/binary>>,
             Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+            lager:info("Relaying ~p bytes on channel ~p", [byte_size(Payload), Channel]),
             gen_udp:send(Socket, IP, Port,
                          concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Payload,
                                                                       bandwidth='BW125kHz',
@@ -274,11 +276,13 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
     ok = inet:setopts(Socket, [{active, once}]).
 
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    case blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
+    try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
         error ->
             error;
         {Payload, NextLayer} ->
             {ok, Payload, NextLayer}
+    catch _:_ ->
+              error
     end.
 
 handle_packet(#miner_RxPacket_pb{payload =
