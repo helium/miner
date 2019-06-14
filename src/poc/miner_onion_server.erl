@@ -195,12 +195,13 @@ handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefin
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
     Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
-    lager:info("Sending ~p bytes on channel ~p", [byte_size(Data), Channel]),
+    {Spreading, CodeRate} = tx_params(byte_size(Data)),
+    lager:info("Sending ~p bytes on channel ~p at ~p ~p", [byte_size(Data), Channel, Spreading, CodeRate]),
     R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
                      concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Data,
                                                                   bandwidth='BW125kHz',
-                                                                  spreading='SF9',
-                                                                  coderate='CR4_5',
+                                                                  spreading=Spreading,
+                                                                  coderate=CodeRate,
                                                                   freq=Channel,
                                                                   radio='R0',
                                                                   power=?TX_POWER})),
@@ -263,12 +264,13 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
                      1:8/integer, %% onion packet
                      NextPacket/binary>>,
             Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
-            lager:info("Relaying ~p bytes on channel ~p", [byte_size(Payload), Channel]),
+            {Spreading, CodeRate} = tx_params(byte_size(Payload)),
+            lager:info("Relaying ~p bytes on channel ~p at ~p ~p", [byte_size(Payload), Channel, Spreading, CodeRate]),
             gen_udp:send(Socket, IP, Port,
                          concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Payload,
                                                                       bandwidth='BW125kHz',
-                                                                      spreading='SF9',
-                                                                      coderate='CR4_5',
+                                                                      spreading=Spreading,
+                                                                      coderate=CodeRate,
                                                                       freq=Channel,
                                                                       radio='R0',
                                                                       power=?TX_POWER}))
@@ -292,7 +294,7 @@ handle_packet(#miner_RxPacket_pb{payload =
                                    OnionCompactKey:33/binary,
                                    Tag:4/binary,
                                    CipherText/binary>>,
-                                rssi=RSSI}, State) ->
+                                rssi=RSSI, crc_check=true}, State) ->
     ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI)),
     State;
 handle_packet(#miner_RxPacket_pb{payload = Packet,
@@ -308,3 +310,18 @@ handle_packet(Packet, State) ->
 crc_status(true) -> 1;
 crc_status(false) -> 0.
 
+tx_params(Len) when Len < 54 ->
+    {'SF9', 'CR4_6'};
+tx_params(Len) when Len < 83 ->
+    {'SF8', 'CR4_8'};
+tx_params(Len) when Len < 99 ->
+    {'SF8', 'CR4_7'};
+tx_params(Len) when Len < 115 ->
+    {'SF8', 'CR4_6'};
+tx_params(Len) when Len < 139 ->
+    {'SF8', 'CR4_5'};
+tx_params(Len) when Len < 160 ->
+    {'SF7', 'CR4_8'};
+tx_params(_) ->
+    %% onion packets won't be this big, but this will top out around 180 bytes
+    {'SF7', 'CR4_7'}.
