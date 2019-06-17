@@ -200,7 +200,8 @@ init(Args) ->
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
-    Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+    % Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+    Channel = 916.6e6,
     {Spreading, CodeRate} = tx_params(byte_size(Data)),
     lager:info("Sending ~p bytes on channel ~p at ~p ~p", [byte_size(Data), Channel, Spreading, CodeRate]),
     R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
@@ -269,7 +270,8 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
             Payload = <<0:32/integer, %% broadcast packet
                      1:8/integer, %% onion packet
                      NextPacket/binary>>,
-            Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+            % Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
+            Channel = 916.6e6,
             {Spreading, CodeRate} = tx_params(byte_size(Payload)),
             lager:info("Relaying ~p bytes on channel ~p at ~p ~p", [byte_size(Payload), Channel, Spreading, CodeRate]),
             gen_udp:send(Socket, IP, Port,
