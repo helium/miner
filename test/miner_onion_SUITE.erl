@@ -66,18 +66,18 @@ basic(_Config) ->
     ct:pal("constructed onion ~p", [Onion]),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI) ->
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _Stream) ->
         ?assertEqual(radio, Origin),
         ?assertEqual(Data1, Data0),
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
-                                                                      bandwidth='BW125kHz',
-                                                                      spreading='SF8',
-                                                                      coderate='CR4_5',
-                                                                      freq=trunc(911.3e6),
-                                                                      radio='R0'})),
+                                                                                             bandwidth='BW125kHz',
+                                                                                             spreading='SF8',
+                                                                                             coderate='CR4_5',
+                                                                                             freq=trunc(911.3e6),
+                                                                                             radio='R0'})),
     {ok, {{127,0,0,1}, 5678, Pkt1}} = gen_udp:recv(Sock, 0, 5000),
     #miner_TxPacket_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>} = concentrate_pb:decode_msg(Pkt1, miner_TxPacket_pb),
 
@@ -98,7 +98,7 @@ basic(_Config) ->
     Parent = self(),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI) ->
+    meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _Stream) ->
         ?assertEqual(radio, Origin),
         Passed = Data2 == Data0 andalso libp2p_crypto:pubkey_to_bin(OnionCompactKey) == OnionCompactKey0,
         Parent ! {passed, Passed}

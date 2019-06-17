@@ -57,13 +57,14 @@ handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
     {stop, normal, State};
 handle_data(server, Data, State) ->
-    ok = miner_onion_server:decrypt(Data),
-    {stop, normal, State}.
+    ok = miner_onion_server:decrypt(Data, self()),
+    {noreply, State}.
 
+handle_info(server, {send, Data}, State) ->
+    lager:info("server sending data: ~p", [Data]),
+    {stop, normal, State, Data};
 handle_info(client, {send, Data}, State) ->
     lager:info("client sending data: ~p", [Data]),
-    %% TODO if we can get the p2p receipt back over this session
-    %% we would not close the connection here
     {stop, normal, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:info("rcvd unknown type: ~p unknown msg: ~p", [_Type, _Msg]),

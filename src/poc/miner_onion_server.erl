@@ -15,8 +15,8 @@
 -export([
     start_link/1,
     send/1,
-    decrypt/1,
-    send_receipt/5,
+    decrypt/2,
+    send_receipt/6,
     send_witness/4
 ]).
 
@@ -68,23 +68,23 @@ send(Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec decrypt(binary()) -> ok.
-decrypt(Onion) ->
-    gen_server:cast(?MODULE, {decrypt, Onion}).
+-spec decrypt(binary(), pid()) -> ok.
+decrypt(Onion, Stream) ->
+    gen_server:cast(?MODULE, {decrypt, Onion, Stream}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer()) -> ok.
-send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI) ->
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok.
+send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, Stream) ->
     ok = blockchain_event:add_handler(self()),
-    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, ?BLOCK_RETRY_COUNT).
+    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
 
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), non_neg_integer()) -> ok.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, 0) ->
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok.
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _Stream, 0) ->
     lager:error("failed to send receipts, max retry");
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
@@ -92,7 +92,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
         {error, _Reason} ->
             lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
             ok = wait_until_next_block(),
-            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry-1);
+            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1);
         {ok, PoCs} ->
             Results = lists:foldl(
                 fun(PoC, Acc) ->
@@ -103,14 +103,20 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
                     Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
                     EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
 
-                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                    case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
-                        {error, _Reason} ->
-                            lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
-                            [error|Acc];
-                        {ok, Stream} ->
-                            _ = miner_poc_handler:send(Stream, EncodedReceipt),
-                            Acc
+                    case erlang:is_pid(Stream) of
+                        true ->
+                            Stream ! {send, EncodedReceipt},
+                            Acc;
+                        false ->
+                            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                                {error, _Reason} ->
+                                    lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
+                                    [error|Acc];
+                                {ok, Stream} ->
+                                    _ = miner_poc_handler:send(Stream, EncodedReceipt),
+                                    Acc
+                            end
                     end
                 end,
                 [],
@@ -121,7 +127,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry) ->
                     ok;
                 false ->
                     ok = wait_until_next_block(),
-                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Retry-1)
+                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1)
             end
     end,
     ok.
@@ -212,8 +218,8 @@ handle_call(_Msg, _From, State) ->
 handle_cast({decrypt, <<IV:2/binary,
                         OnionCompactKey:33/binary,
                         Tag:4/binary,
-                        CipherText/binary>>}, State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, p2p, 0),
+                        CipherText/binary>>, Pid}, State) ->
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, p2p, 0, Pid),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -252,14 +258,14 @@ wait_until_next_block() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port}, Type, RSSI) ->
+decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port}, Type, RSSI, Stream) ->
     case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
             _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey, os:system_time(nanosecond), RSSI]),
             lager:info("could not decrypt packet received via ~p", [Type]);
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
-            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI]),
+            _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream]),
             Payload = <<0:32/integer, %% broadcast packet
                      1:8/integer, %% onion packet
                      NextPacket/binary>>,
@@ -295,7 +301,7 @@ handle_packet(#miner_RxPacket_pb{payload =
                                    Tag:4/binary,
                                    CipherText/binary>>,
                                 rssi=RSSI, crc_check=true}, State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI)),
+    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI), undefined),
     State;
 handle_packet(#miner_RxPacket_pb{payload = Packet,
                                  rssi=RSSI, if_chain=Channel, crc_check=CRC},
