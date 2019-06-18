@@ -51,10 +51,15 @@ init(server, _Conn, _Args) ->
     {ok, #state{}}.
 
 handle_data(client, Data, State) ->
-    %% TODO this should be the p2p receipt but we can't
-    %% currently construct it as a response to miner_onion_server:decrypt
-    %% so we consider it an error for now
     lager:info("client got data: ~p", [Data]),
+    try blockchain_poc_response_v1:decode(Data) of
+        {witness, Witness} ->
+            ok = miner_poc_statem:witness(Witness);
+        {receipt, Receipt} ->
+            ok = miner_poc_statem:receipt(Receipt)
+    catch _:_ ->
+        lager:error("got unknown data ~p", [Data])
+    end,
     {stop, normal, State};
 handle_data(server, Data, State) ->
     ok = miner_onion_server:decrypt(Data, self()),
