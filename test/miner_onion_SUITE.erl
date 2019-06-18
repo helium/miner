@@ -77,7 +77,8 @@ basic(_Config) ->
                                                                                              spreading='SF8',
                                                                                              coderate='CR4_5',
                                                                                              freq=trunc(911.3e6),
-                                                                                             radio='R0'})),
+                                                                                             radio='R0',
+                                                                                             crc_check=true})),
     {ok, {{127,0,0,1}, 5678, Pkt1}} = gen_udp:recv(Sock, 0, 5000),
     #miner_TxPacket_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>} = concentrate_pb:decode_msg(Pkt1, miner_TxPacket_pb),
 
@@ -118,7 +119,8 @@ basic(_Config) ->
                                                                       spreading='SF8',
                                                                       coderate='CR4_5',
                                                                       freq=trunc(911.3e6),
-                                                                      radio='R0'})),
+                                                                      radio='R0',
+                                                                      crc_check=true})),
 
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
@@ -127,7 +129,8 @@ basic(_Config) ->
                                                                       spreading='SF8',
                                                                       coderate='CR4_5',
                                                                       freq=trunc(911.3e6),
-                                                                      radio='R0'})),
+                                                                      radio='R0',
+                                                                      crc_check=true})),
     {ok, {{127,0,0,1}, 5678, Pkt2}} = gen_udp:recv(Sock, 0, 5000),
     #miner_TxPacket_pb{payload= <<0:32/integer, 1:8/integer, Y/binary>>} = concentrate_pb:decode_msg(Pkt2, miner_TxPacket_pb),
 
@@ -137,7 +140,8 @@ basic(_Config) ->
                                                                       spreading='SF8',
                                                                       coderate='CR4_5',
                                                                       freq=trunc(911.3e6),
-                                                                      radio='R0'})),
+                                                                      radio='R0',
+                                                                      crc_check=true})),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
