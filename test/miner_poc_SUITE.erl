@@ -38,6 +38,37 @@ dist(Config0) ->
     Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
+
+    N = proplists:get_value(num_consensus_members, Config),
+    BlockTime = proplists:get_value(block_time, Config),
+    Interval = proplists:get_value(election_interval, Config),
+    BatchSize = proplists:get_value(batch_size, Config),
+    Curve = proplists:get_value(dkg_curve, Config),
+    %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
+
+    #{secret := Priv, public := Pub} =
+        libp2p_crypto:generate_keys(ecc_compact),
+
+    Vars = #{block_time => BlockTime,
+             election_interval => Interval,
+             election_restart_interval => 10,
+             num_consensus_members => N,
+             batch_size => BatchSize,
+             vars_commit_interval => 2,
+             block_version => v1,
+             dkg_curve => Curve,
+             proposal_threshold => 0.85},
+
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+
+    ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
+           [BinPub, Priv, Vars, KeyProof,
+            term_to_binary(Vars, [{compressed, 9}])]),
+
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
+                                                             key_proof => KeyProof}) ],
+
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
         fun(I, Acc) ->
@@ -47,11 +78,11 @@ dist(Config0) ->
         lists:seq(1, length(Addresses))
     ),
     IntitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
-    InitialTransactions = InitialPaymentTransactions ++ IntitialGatewayTransactions,
+    InitialTransactions = InitialVars ++ InitialPaymentTransactions ++ IntitialGatewayTransactions,
 
     DKGResults = miner_ct_utils:pmap(
         fun(Miner) ->
-            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [InitialTransactions, Addresses])
+            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [InitialTransactions, Addresses, N, Curve])
         end,
         Miners
     ),
