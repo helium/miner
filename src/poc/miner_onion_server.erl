@@ -44,7 +44,9 @@
     udp_send_ip :: inet:address(),
     compact_key :: ecc_compact:compact_key(),
     ecdh_fun,
-    sender :: undefined | {pid(), term()}
+    sender :: undefined | {pid(), term()},
+    packet_id = 0 :: non_neg_integer(),
+    pending_transmits = [] ::  [{non_neg_integer(), reference()}]
 }).
 
 -define(CHANNELS, [916.2e6, 916.4e6, 916.6e6, 916.8e6, 917.0e6, 920.2e6, 920.4e6, 920.6e6]).
@@ -193,20 +195,23 @@ init(Args) ->
 
 handle_call(compact_key, _From, State=#state{compact_key=CK}) when CK /= undefined ->
     {reply, {ok, CK}, State};
-handle_call({send, Data}, _From, State=#state{udp_socket=Socket}) ->
+handle_call({send, Data}, _From, State=#state{udp_socket=Socket, packet_id=ID}) ->
     % Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
     Channel = trunc(916.6e6),
     {Spreading, CodeRate} = tx_params(byte_size(Data)),
     lager:info("Sending ~p bytes on channel ~p at ~p ~p", [byte_size(Data), Channel, Spreading, CodeRate]),
+    Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
     R = gen_udp:send(Socket, State#state.udp_send_ip, State#state.udp_send_port,
-                     concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Data,
-                                                                  bandwidth='BW125kHz',
-                                                                  spreading=Spreading,
-                                                                  coderate=CodeRate,
-                                                                  freq=Channel,
-                                                                  radio='R0',
-                                                                  power=?TX_POWER})),
-    {reply, R, State};
+                     concentrate_pb:encode_msg(#miner_Req_pb{
+                                                  id=ID,
+                                                  kind={tx, #miner_TxReq_pb{payload=Data,
+                                                                                       bandwidth='BW125kHz',
+                                                                                       spreading=Spreading,
+                                                                                       coderate=CodeRate,
+                                                                                       freq=Channel,
+                                                                                       radio='R0',
+                                                                                       power=?TX_POWER}}})),
+    {reply, R, State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
@@ -214,13 +219,13 @@ handle_cast({decrypt, <<IV:2/binary,
                         OnionCompactKey:33/binary,
                         Tag:4/binary,
                         CipherText/binary>>}, State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, p2p, 0),
-    {noreply, State};
+    NewState = decrypt(IV, OnionCompactKey, Tag, CipherText, State, p2p, 0),
+    {noreply, NewState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
-    NewState = try concentrate_pb:decode_msg(Packet, miner_RxPacket_pb) of
+    NewState = try concentrate_pb:decode_msg(Packet, miner_Resp_pb) of
                    RxPacket ->
                        handle_packet(RxPacket, State)
                catch
@@ -230,6 +235,9 @@ handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_
                end,
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, NewState};
+handle_info({tx_timeout, ID}, State=#state{pending_transmits=Pending}) ->
+    lager:warning("TX timeout for ~p", [ID]),
+    {noreply, State#state{pending_transmits=lists:keydelete(ID, 1, Pending)}};
 handle_info(_Msg, State) ->
     lager:warning("unhandled Msg: ~p", [_Msg]),
     {noreply, State}.
@@ -253,11 +261,12 @@ wait_until_next_block() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port}, Type, RSSI) ->
-    case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
+decrypt(IV, OnionCompactKey, Tag, CipherText, State=#state{ecdh_fun=ECDHFun, udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port, packet_id=ID}, Type, RSSI) ->
+    NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
             _ = erlang:spawn(?MODULE, send_witness, [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), OnionCompactKey, os:system_time(nanosecond), RSSI]),
-            lager:info("could not decrypt packet received via ~p", [Type]);
+            lager:info("could not decrypt packet received via ~p", [Type]),
+            State;
         {ok, Data, NextPacket} ->
             lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
             _ = erlang:spawn(?MODULE, send_receipt, [Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI]),
@@ -267,17 +276,22 @@ decrypt(IV, OnionCompactKey, Tag, CipherText, #state{ecdh_fun=ECDHFun, udp_socke
             % Channel = trunc(lists:nth(rand:uniform(length(?CHANNELS)), ?CHANNELS)),
             Channel = trunc(916.6e6),
             {Spreading, CodeRate} = tx_params(byte_size(Payload)),
+            Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
             lager:info("Relaying ~p bytes on channel ~p at ~p ~p", [byte_size(Payload), Channel, Spreading, CodeRate]),
             gen_udp:send(Socket, IP, Port,
-                         concentrate_pb:encode_msg(#miner_TxPacket_pb{payload=Payload,
+                         concentrate_pb:encode_msg(#miner_Req_pb{
+                                                      id=ID,
+                                                      kind={tx, #miner_TxReq_pb{payload=Payload,
                                                                       bandwidth='BW125kHz',
                                                                       spreading=Spreading,
                                                                       coderate=CodeRate,
                                                                       freq=Channel,
                                                                       radio='R0',
-                                                                      power=?TX_POWER}))
+                                                                      power=?TX_POWER}}})),
+            State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}
     end,
-    ok = inet:setopts(Socket, [{active, once}]).
+    ok = inet:setopts(Socket, [{active, once}]),
+    NewState.
 
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
     try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
@@ -289,21 +303,32 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
               error
     end.
 
-handle_packet(#miner_RxPacket_pb{payload =
+handle_packet(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload =
                                  <<0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
                                    1:8/integer, %% onions are type 1 broadcast?
                                    IV:2/binary,
                                    OnionCompactKey:33/binary,
                                    Tag:4/binary,
                                    CipherText/binary>>,
-                                rssi=RSSI, crc_check=true}, State) ->
-    ok = decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI)),
-    State;
-handle_packet(#miner_RxPacket_pb{payload = Packet,
-                                 rssi=RSSI, if_chain=Channel, crc_check=CRC},
+                                rssi=RSSI, crc_check=true}}}, State) ->
+    decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI));
+handle_packet(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload = Packet,
+                                 rssi=RSSI, if_chain=Channel, crc_check=CRC}}},
               #state{udp_socket=Socket}=State) ->
     %% some other packet, just forward it to gw-demo for now
     gen_udp:send(Socket, {127,0,0,1}, 6789, <<?READ_RADIO_PACKET_EXTENDED:8/integer, (trunc(RSSI)):8/integer-signed, Channel:8/integer-unsigned, (crc_status(CRC)):8/integer-unsigned, Packet/binary>>),
+    State;
+handle_packet(#miner_Resp_pb{id=ID, kind={tx, #miner_TxResp_pb{success=Success}}}, State=#state{pending_transmits=Pending}) ->
+    case lists:keyfind(ID, 1, Pending) of
+        {ID, Ref} ->
+            lager:info("Packet transmission ~p completed with success ~p", [ID, Success]),
+            erlang:cancel_timer(Ref);
+        false ->
+            lager:info("Got unknown packet transmission response ~p with success ~p", [ID, Success])
+    end,
+    State#state{pending_transmits=lists:keydelete(ID, 1, Pending)};
+handle_packet(#miner_Resp_pb{id=_ID, kind={parse_err, ErrorString}}, State) ->
+    lager:warning("parse error from concentrator: ~s", [ErrorString]),
     State;
 handle_packet(Packet, State) ->
     lager:warning("unknown packet ~p", [Packet]),
