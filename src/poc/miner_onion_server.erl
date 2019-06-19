@@ -113,8 +113,8 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
                                 {error, _Reason} ->
                                     lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
                                     [error|Acc];
-                                {ok, Stream} ->
-                                    _ = miner_poc_handler:send(Stream, EncodedReceipt),
+                                {ok, NewStream} ->
+                                    _ = miner_poc_handler:send(NewStream, EncodedReceipt),
                                     Acc
                             end
                     end
