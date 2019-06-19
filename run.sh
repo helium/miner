@@ -61,7 +61,7 @@ done
 function join_by { local IFS="$1"; shift; echo "$*"; }
 
 create_genesis_block() {
-    echo $(./_build/dev\+miner$1/rel/miner$1/bin/miner$1 genesis create $2 $3)
+    echo $(./_build/dev\+miner$1/rel/miner$1/bin/miner$1 genesis create $2 $3 $4 $5)
 }
 export -f create_genesis_block
 
@@ -70,15 +70,15 @@ forge_genesis_block() {
 }
 export -f forge_genesis_block
 
+priv_key=$(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis key)
+echo $priv_key
+proof=($(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis proof $priv_key | grep -v ":"))
+echo $proof
 if [ "$command" == "create" ]
 then
-    parallel -k --tagstring miner{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: $(join_by , ${peer_addrs[@]})
+    parallel -k --tagstring miner{} create_genesis_block ::: $nodes ::: $old_genesis_file ::: ${proof[1]} ::: ${proof[0]} ::: $(join_by , ${peer_addrs[@]})
 elif [ "$command" == "forge" ]
 then
-    priv_key=$(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis key)
-    echo $priv_key
-    proof=($(./_build/dev\+miner1/rel/miner1/bin/miner1 genesis proof $priv_key | grep -v ":"))
-    echo $proof
     parallel -k --tagstring miner{} forge_genesis_block ::: $nodes ::: ${proof[1]} ::: ${proof[0]} ::: $(join_by , ${peer_addrs[@]})
 else
     exit 1
