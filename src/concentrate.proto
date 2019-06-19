@@ -33,6 +33,45 @@ enum Coderate {
     CR4_8 = 4;
 }
 
+message Req {
+    uint32 id = 1;
+    oneof kind {
+        TxReq tx = 2;
+    }
+}
+
+message Resp {
+    uint32 id = 1;
+    oneof kind {
+        TxResp tx = 2;
+        RxPacket rx_packet = 3;
+        bytes parse_err = 4;
+    }
+}
+
+message TxReq {
+    // Center frequency to transmit on.
+    uint32 freq = 1;
+    // Which radio to transmit on.
+    Radio radio = 2;
+    // TX power (in dBm).
+    int32 power = 3;
+    // Modulation bandwidth.
+    Bandwidth bandwidth = 4;
+    // Spreading factor to use with this packet.
+    Spreading spreading = 5;
+    // Error-correcting-code of the packet.
+    Coderate coderate = 6;
+    // Invert signal polarity for orthogonal downlinks.
+    bool invert_polarity = 7;
+    // Do not send a CRC in the packet.
+    bool omit_crc = 8;
+    // Enable implicit header mode.
+    bool implicit_header = 9;
+    // Arbitrary user-defined payload to transmit.
+    bytes payload = 10;
+}
+
 message RxPacket {
     // Center frequency of the channel this packet was received on.
     uint32 freq = 1;
@@ -58,25 +97,6 @@ message RxPacket {
     bytes payload = 11;
 }
 
-message TxPacket {
-    // Center frequency to transmit on.
-    uint32 freq = 1;
-    // Which radio to transmit on.
-    Radio radio = 2;
-    // TX power (in dBm).
-    int32 power = 3;
-    // Modulation bandwidth.
-    Bandwidth bandwidth = 4;
-    // Spreading factor to use with this packet.
-    Spreading spreading = 5;
-    // Error-correcting-code of the packet.
-    Coderate coderate = 6;
-    // Invert signal polarity for orthogonal downlinks.
-    bool invert_polarity = 7;
-    // Do not send a CRC in the packet.
-    bool omit_crc = 8;
-    // Enable implicit header mode.
-    bool implicit_header = 9;
-    // Arbitrary user-defined payload to transmit.
-    bytes payload = 10;
+message TxResp {
+    bool success = 1;
 }
