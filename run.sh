@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+#set -e
 
 ./all-cmd.sh stop
 
