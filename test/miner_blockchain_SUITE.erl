@@ -53,9 +53,12 @@ init_per_testcase(TestCase, Config0) ->
              election_restart_interval => 10,
              num_consensus_members => NumConsensusMembers,
              batch_size => BatchSize,
-             vars_commit_interval => 2,
+             vars_commit_delay => 2,
              block_version => v1,
              dkg_curve => Curve,
+             garbage_value => totes_garb,
+             predicate_callback_mod => miner,
+             predicate_callback_fun => test_version,
              proposal_threshold => 0.85},
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -296,13 +299,17 @@ group_change_test(Config) ->
                                    end, 30, timer:seconds(1)),
     %% submit the transaction
 
+    Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger1 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain1]),
+    ?assertEqual({ok, totes_garb}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger1])),
+
     Vars = #{num_consensus_members => 7},
 
     {Priv, _Pub} = proplists:get_value(master_key, Config),
 
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, Proof),
+    Txn = blockchain_txn_vars_v1:new(Vars, Proof, #{unsets => [garbage_value]}),
     %% wait for it to take effect
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
@@ -314,9 +321,16 @@ group_change_test(Config) ->
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
                                            7 == length(CGroup)
-                                   end, 45, timer:seconds(1)),
+                                   end, 90, timer:seconds(1)),
 
+    Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
+    ?assertEqual({error, not_found}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger2])),
 
-
+    %% check that the epoch delay is at least 2
+    Epoch = ct_rpc:call(hd(Miners), miner, election_epoch, []),
+    ct:pal("post change miner ~p Epoch ~p", [hd(Miners), Epoch]),
+    %% probably need to parameterize this via the delay
+    ?assert(5 =< Epoch),
 
     ok.
