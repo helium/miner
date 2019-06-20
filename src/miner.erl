@@ -613,7 +613,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             lager:error("Error, Reason: ~p", [Reason]),
             {noreply, State}
     end;
-handle_info({blockchain_event, {add_block, _Hash, Sync, _Ledger}},
+handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),

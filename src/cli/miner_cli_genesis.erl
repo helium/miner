@@ -46,12 +46,12 @@ register_all_cmds() ->
 genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
-      "  genesis create <old_genesis_file> <addrs>  - Create genesis block keeping old ledger transactions.\n",
-      "  genesis forge <pubkey> <key_proof> <addrs> - Create genesis block from scratch just with the addresses.\n",
-      "  genesis load <genesis_file>                - Load genesis block from file.\n"
-      "  genesis export <path>                      - Write genesis block to a file.\n"
-      "  genesis key                                - create a keypair for use as a master key\n"
-      "  genesis proof <privkey>                    - create a key proof for adding a master key to the genesis block\n"
+      "  genesis create <old_genesis_file> <pubkey> <proof> <addrs>  - Create genesis block keeping old ledger transactions.\n",
+      "  genesis forge <pubkey> <key_proof> <addrs>                  - Create genesis block from scratch just with the addresses.\n",
+      "  genesis load <genesis_file>                                 - Load genesis block from file.\n"
+      "  genesis export <path>                                       - Write genesis block to a file.\n"
+      "  genesis key                                                 - create a keypair for use as a master key\n"
+      "  genesis proof <privkey>                                     - create a key proof for adding a master key to the genesis block\n"
      ]
     ].
 
@@ -67,31 +67,37 @@ genesis_cmd() ->
 
 genesis_create_cmd() ->
     [
-     [["genesis", "create", '*', '*'], [], [], fun genesis_create/3]
+     [["genesis", "create", '*', '*', '*', '*'], [], [], fun genesis_create/3]
     ].
 
 genesis_create_usage() ->
     [["genesis", "create"],
-     ["genesis create <old_genesis_file> <addrs> \n\n",
+     ["genesis create <old_genesis_file> <pubkey> <proof> <addrs> \n\n",
       "  create a new genesis block.\n\n"
      ]
     ].
 
-genesis_create(["genesis", "create", OldGenesisFile, Addrs], [], []) ->
+genesis_create(["genesis", "create", OldGenesisFile, Pubkey, Proof, Addrs], [], []) ->
     {ok, N} = application:get_env(blockchain, num_consensus_members),
     {ok, Curve} = application:get_env(miner, curve),
-    create(OldGenesisFile, Addrs, N, Curve);
-genesis_create(["genesis", "create", OldGenesisFile, Addrs, N], [], []) ->
+    create(OldGenesisFile, Pubkey, Proof, Addrs, N, Curve);
+genesis_create(["genesis", "create", OldGenesisFile, Pubkey, Proof, Addrs, N], [], []) ->
     {ok, Curve} = application:get_env(miner, curve),
-    create(OldGenesisFile, Addrs, list_to_integer(N), Curve);
-genesis_create(["genesis", "create", OldGenesisFile, Addrs, N, Curve], [], []) ->
-    create(OldGenesisFile, Addrs, list_to_integer(N), list_to_atom(Curve));
+    create(OldGenesisFile, Pubkey, Proof, Addrs, list_to_integer(N), Curve);
+genesis_create(["genesis", "create", OldGenesisFile, Pubkey, Proof, Addrs, N, Curve], [], []) ->
+    create(OldGenesisFile, Pubkey, Proof, Addrs, list_to_integer(N), list_to_atom(Curve));
 genesis_create(_, [], []) ->
     usage.
 
-create(OldGenesisFile, Addrs, N, Curve) ->
+create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
     case file:consult(OldGenesisFile) of
         {ok, [Config]} ->
+            BinPub = libp2p_crypto:b58_to_bin(PubKeyB58),
+            Proof = base58:base58_to_binary(ProofB58),
+
+            VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, #{master_key => BinPub,
+                                                                     key_proof => Proof}),
+
             OldSecurities = [blockchain_txn_security_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
                                                                      proplists:get_value(token, X)) || X <- proplists:get_value(securities, Config)],
             OldAccounts = [blockchain_txn_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
@@ -103,7 +109,7 @@ create(OldGenesisFile, Addrs, N, Curve) ->
             OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions, Addresses, N, Curve),
+            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions ++ [VarTxn], Addresses, N, Curve),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]
