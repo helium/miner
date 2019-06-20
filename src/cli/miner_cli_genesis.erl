@@ -152,12 +152,15 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
 
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    %% Give security tokens to 2 members
+    InitialSecurityTransactions = [ blockchain_txn_security_coinbase_v1:new(Addr, 5000000) || Addr <- lists:sublist(Addresses, 2)],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
                                   || Addr <- Addresses ],
     miner_consensus_mgr:initial_dkg([VarTxn] ++
                                         InitialPaymentTransactions ++
-                                        InitialGatewayTransactions,
+                                        InitialGatewayTransactions ++
+                                        InitialSecurityTransactions,
                                     Addresses, N, Curve),
     [clique_status:text("ok")].
 
@@ -289,7 +292,13 @@ make_vars() ->
       vars_commit_delay => 2,
       block_version => v1,
       dkg_curve => Curve,
-      garbage_value => totes_garb,
       predicate_callback_mod => miner,
-      predicate_callback_fun => test_version,
-      proposal_threshold => 0.85}.
+      predicate_callback_fun => version,
+      proposal_threshold => 0.85,
+      monthly_reward => 50000 * 1000000,
+      securities_percent => 0.35,
+      dc_percent => 0,
+      poc_challengees_percent => 0.19 + 0.16,
+      poc_challengers_percent => 0.09 + 0.06,
+      poc_witnesses_percent => 0.02 + 0.03,
+      consensus_percent => 0.10}.
