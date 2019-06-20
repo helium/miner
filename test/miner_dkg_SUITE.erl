@@ -38,10 +38,13 @@ initial_dkg_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    N = proplists:get_value(num_consensus_members, Config),
+    Curve = proplists:get_value(dkg_curve, Config),
+
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialPaymentTransactions, Addresses])
+                                       [InitialPaymentTransactions, Addresses, N, Curve])
                    end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
     {comment, DKGResults}.

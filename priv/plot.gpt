@@ -1,6 +1,12 @@
 set xdata time
 set timefmt "%s"
-set xrange [time(0) - 24*60*60:]
+
+if (!exists("interval")) interval=12
+
+set xrange [time(0) - interval*60*60:time(0)]
+set yrange [0:200]
+
+
 #set term x11 1 noraise
 set term qt noraise
 
@@ -8,7 +14,7 @@ plot "/tmp/miner-chain-stats" using 1:2 with lines title "interval", \
      "/tmp/miner-chain-stats" using 1:3 with lines title "txns", \
      "/tmp/miner-chain-stats" using 1:4 with lines title "avg interval", \
      "/tmp/miner-chain-stats" using 1:5 with lines title "median interval", \
-     "/tmp/miner-chain-stats" using 1:6 with lines title "avg txns", 
+     "/tmp/miner-chain-stats" using 1:6 with lines title "avg txns"
 
 pause 15
 reread

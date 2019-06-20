@@ -161,7 +161,13 @@ init_per_testcase(TestCase, Config) ->
 
     %% Miner configuration, can be input from os env
     TotalMiners = get_config("T", 8),
-    NumConsensusMembers = get_config("N", 7),
+    NumConsensusMembers =
+        case TestCase of
+            group_change_test ->
+                4;
+            _ ->
+                get_config("N", 7)
+        end,
     SeedNodes = [],
     Port = get_config("PORT", 0),
     Curve = 'SS512',
@@ -202,17 +208,13 @@ init_per_testcase(TestCase, Config) ->
             Key = {PubKey, ECDH, SigFun},
             BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
             ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, num_consensus_members, NumConsensusMembers]),
             ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
             ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
             ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
 
             %% set miner configuration
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
-            ct_rpc:call(Miner, application, set_env, [miner, block_time, BlockTime]),
-            ct_rpc:call(Miner, application, set_env, [miner, batch_size, BatchSize]),
             ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
-            ct_rpc:call(Miner, application, set_env, [miner, election_interval, Interval]),
 
             {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
@@ -260,6 +262,10 @@ init_per_testcase(TestCase, Config) ->
         {keys, Keys},
         {ports, MinersAndPorts},
         {addresses, Addresses},
+        {block_time, BlockTime},
+        {batch_size, BatchSize},
+        {dkg_curve, Curve},
+        {election_interval, Interval},
         {num_consensus_members, NumConsensusMembers}
         | Config
     ].

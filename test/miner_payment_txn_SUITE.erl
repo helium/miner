@@ -36,10 +36,42 @@ init_per_testcase(_TestCase, Config0) ->
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, 0) || Addr <- Addresses],
+
+    N = proplists:get_value(num_consensus_members, Config),
+    BlockTime = proplists:get_value(block_time, Config),
+    Interval = proplists:get_value(election_interval, Config),
+    BatchSize = proplists:get_value(batch_size, Config),
+    Curve = proplists:get_value(dkg_curve, Config),
+    %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
+
+    #{secret := Priv, public := Pub} =
+        libp2p_crypto:generate_keys(ecc_compact),
+
+    Vars = #{block_time => BlockTime,
+             election_interval => Interval,
+             election_restart_interval => 10,
+             num_consensus_members => N,
+             batch_size => BatchSize,
+             vars_commit_interval => 2,
+             block_version => v1,
+             dkg_curve => Curve,
+             proposal_threshold => 0.85},
+
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+
+    ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
+           [BinPub, Priv, Vars, KeyProof,
+            term_to_binary(Vars, [{compressed, 9}])]),
+
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
+                                                             key_proof => KeyProof}) ],
+
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialPaymentTransactions ++ AddGwTxns, Addresses])
+                                       [InitialVars ++ InitialPaymentTransactions ++ AddGwTxns, Addresses,
+                                        N, Curve])
                    end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
@@ -169,9 +201,6 @@ single_payment_test(Config) ->
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
 
-    {ok, _CurrentHeight3} = ct_rpc:call(Payer, blockchain, height, [Chain]),
-
-    %% XXX: wait till the blockchain grows by 2 block
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true =:= lists:all(
