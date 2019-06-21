@@ -50,7 +50,7 @@
 }).
 
 -define(CHANNELS, [916.2e6, 916.4e6, 916.6e6, 916.8e6, 917.0e6, 920.2e6, 920.4e6, 920.6e6]).
--define(TX_POWER, 23). %% 23 db
+-define(TX_POWER, 28). %% 28 db, for testing only
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
