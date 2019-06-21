@@ -55,7 +55,9 @@ init_per_testcase(_TestCase, Config0) ->
              vars_commit_interval => 2,
              block_version => v1,
              dkg_curve => Curve,
-             proposal_threshold => 0.85},
+             proposal_threshold => 0.85,
+             election_selection_pct => 60,
+             election_replacement_factor => 4},
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
     KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
