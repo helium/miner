@@ -72,13 +72,13 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
                                                                                              bandwidth='BW125kHz',
                                                                                              spreading='SF8',
                                                                                              coderate='CR4_5',
                                                                                              freq=trunc(911.3e6),
                                                                                              radio='R0',
-                                                                                             crc_check=true})),
+                                                                                             crc_check=true}}})),
     {ok, {{127,0,0,1}, 5678, Pkt1}} = gen_udp:recv(Sock, 0, 5000),
     #miner_Req_pb{kind={tx, #miner_TxReq_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>}}} = concentrate_pb:decode_msg(Pkt1, miner_Req_pb),
 
@@ -114,13 +114,13 @@ basic(_Config) ->
     }),
 
     %% check we can't decrypt the original
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
                                                                       bandwidth='BW125kHz',
                                                                       spreading='SF8',
                                                                       coderate='CR4_5',
                                                                       freq=trunc(911.3e6),
                                                                       radio='R0',
-                                                                      crc_check=true})),
+                                                                      crc_check=true}}})),
 
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
