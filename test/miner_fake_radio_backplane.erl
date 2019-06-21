@@ -33,9 +33,9 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPSock, udp_ports=Ports}) ->
-    #miner_TxPacket_pb{payload=Payload} = concentrate_pb:decode_msg(InPacket, miner_TxPacket_pb),
+    #miner_Req_pb{kind={tx, #miner_TxReq_pb{payload=Payload}}} = concentrate_pb:decode_msg(InPacket, miner_Req_pb),
     lists:foreach(fun(Port) ->
-                          gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, concentrate_pb:encode_msg(#miner_RxPacket_pb{payload=Payload, crc_check=true}))
+                          gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload=Payload, crc_check=true}}}))
                   end, Ports -- [SrcPort]),
     {noreply, State};
 handle_info(Msg, State) ->
