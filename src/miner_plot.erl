@@ -90,10 +90,10 @@ handle_info(timeout, _) ->
                      stats = Stats,
                      height = CurrHeight,
                      fd = File}};
-handle_info({blockchain_event, {add_block, Hash, _}}, #state{chain = Chain,
-                                                             height = CurrHeight,
-                                                             fd = File,
-                                                             stats = Stats} = State) ->
+handle_info({blockchain_event, {add_block, Hash, _, _}}, #state{chain = Chain,
+                                                                height = CurrHeight,
+                                                                fd = File,
+                                                                stats = Stats} = State) ->
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
