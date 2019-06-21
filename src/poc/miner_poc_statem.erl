@@ -164,7 +164,7 @@ mining(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-targeting(info, _, #data{retry=0}=Data) ->
+targeting(info, {target, _, _}, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Entropy, Height}, #data{blockchain=Blockchain}=Data) ->
@@ -485,6 +485,9 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+handle_event(info, {blockchain_event, {add_block, _, _, _}}, Data) ->
+    %% suppress the warning here
+    {keep_state, Data};
 handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
