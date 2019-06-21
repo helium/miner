@@ -318,8 +318,8 @@ handle_packet(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload =
                                    CipherText/binary>>,
                                 rssi=RSSI, crc_check=true}}}, State) ->
     decrypt(IV, OnionCompactKey, Tag, CipherText, State, radio, trunc(RSSI), undefined);
-handle_packet(#miner_RxPacket_pb{payload = Packet,
-                                 rssi=RSSI, if_chain=Channel, crc_check=CRC},
+handle_packet(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload = Packet,
+                                 rssi=RSSI, if_chain=Channel, crc_check=CRC}}},
               #state{udp_socket=Socket}=State) ->
     %% some other packet, just forward it to gw-demo for now
     gen_udp:send(Socket, {127,0,0,1}, 6789, <<?READ_RADIO_PACKET_EXTENDED:8/integer, (trunc(RSSI)):8/integer-signed, Channel:8/integer-unsigned, (crc_status(CRC)):8/integer-unsigned, Packet/binary>>),
