@@ -59,7 +59,9 @@ init_per_testcase(TestCase, Config0) ->
              garbage_value => totes_garb,
              predicate_callback_mod => miner,
              predicate_callback_fun => test_version,
-             proposal_threshold => 0.85},
+             proposal_threshold => 0.85,
+             election_selection_pct => 60,
+             election_replacement_factor => 4},
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
     KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
