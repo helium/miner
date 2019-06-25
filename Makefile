@@ -20,7 +20,7 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) do dialyzer,xref && $(REBAR) as test do eunit,ct --verbose
+	$(REBAR) do dialyzer,xref && $(REBAR) do eunit,ct
 
 release:
 	$(REBAR) as prod release -n miner
