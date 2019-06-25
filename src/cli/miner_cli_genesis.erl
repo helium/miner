@@ -286,7 +286,7 @@ make_vars() ->
 
     #{block_time => BlockTime,
       election_interval => Interval,
-      election_restart_interval => 10,
+      election_restart_interval => 5,
       num_consensus_members => N,
       batch_size => BatchSize,
       vars_commit_delay => 2,
