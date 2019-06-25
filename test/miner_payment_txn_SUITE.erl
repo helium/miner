@@ -49,7 +49,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     Vars = #{block_time => BlockTime,
              election_interval => Interval,
-             election_restart_interval => 10,
+             election_restart_interval => floor(Interval/2),
              num_consensus_members => N,
              batch_size => BatchSize,
              vars_commit_interval => 2,
