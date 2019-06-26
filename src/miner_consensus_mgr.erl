@@ -376,7 +376,8 @@ initiate_election(Hash, Height, State) ->
     Chain = blockchain_worker:blockchain(),
     {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
 
-    ConsensusAddrs = blockchain_election:new_group(Chain, Hash, Height, N),
+    Ledger = blockchain:ledger(Chain),
+    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N),
     Artifact = term_to_binary(ConsensusAddrs),
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
@@ -395,10 +396,11 @@ restart_election(#state{n = N, delay = Delay0,
                         restart_interval = Interval} = State, Hash, Height) ->
 
     Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
     Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
 
-    ConsensusAddrs = blockchain_election:new_group(Chain, Hash, Height + Delay, N),
+    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N),
     case length(ConsensusAddrs) == N of
         true ->
             ok;

@@ -50,7 +50,7 @@ init_per_testcase(TestCase, Config0) ->
 
     Vars = #{block_time => BlockTime,
              election_interval => Interval,
-             election_restart_interval => floor(Interval/2),
+             election_restart_interval => 10,
              num_consensus_members => NumConsensusMembers,
              batch_size => BatchSize,
              vars_commit_delay => 2,
@@ -60,12 +60,6 @@ init_per_testcase(TestCase, Config0) ->
              predicate_callback_mod => miner,
              predicate_callback_fun => test_version,
              proposal_threshold => 0.85,
-             monthly_reward => 50000 * 1000000,
-             securities_percent => 0.35,
-             poc_challengees_percent => 0.19 + 0.16,
-             poc_challengers_percent => 0.09 + 0.06,
-             poc_witnesses_percent => 0.02 + 0.03,
-             consensus_percent => 0.10,
              election_selection_pct => 60,
              election_replacement_factor => 4},
 
@@ -231,7 +225,7 @@ election_test(Config) ->
                             ok
                     end,
                     Loop(N - 1)
-            after timer:seconds(45) ->
+            after timer:seconds(30) ->
                     error(timeout)
             end
     end(120),
@@ -243,7 +237,9 @@ election_test(Config) ->
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 3
                                                              end, shuffle(Miners))
-                                  end, 120, timer:seconds(1)),
+                                           %%TODO fixme back to 120s
+                                           %%for slow machines
+                                  end, 90, timer:seconds(1)),
     ok.
 
 election_check([], _Miners, Owner) ->

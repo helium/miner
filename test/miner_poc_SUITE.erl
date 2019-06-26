@@ -51,7 +51,7 @@ dist(Config0) ->
 
     Vars = #{block_time => BlockTime,
              election_interval => Interval,
-             election_restart_interval => floor(Interval / 2),
+             election_restart_interval => 10,
              num_consensus_members => N,
              batch_size => BatchSize,
              vars_commit_interval => 2,
@@ -150,7 +150,7 @@ dist(Config0) ->
     ),
 
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
-    ?assertEqual({0, 0}, rcv_loop(M, 30, {length(Miners), length(Miners)})),
+    ?assertEqual({0, 0}, rcv_loop(M, 20, {length(Miners), length(Miners)})),
 
     %% wait until one node has a working chain
 
