@@ -123,8 +123,8 @@ single_payment_test(Config) ->
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere
-    5000 = get_balance(Payer, PayerAddr),
-    5000 = get_balance(Payee, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
@@ -145,8 +145,8 @@ single_payment_test(Config) ->
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
-                                      4000 == get_balance(Miner, PayerAddr) + Fee andalso
-                                      6000 == get_balance(Miner, PayeeAddr)
+                                      4000 == miner_ct_utils:get_balance(Miner, PayerAddr) + Fee andalso
+                                      6000 == miner_ct_utils:get_balance(Miner, PayeeAddr)
                               end,
                               Miners
                              )
@@ -155,8 +155,8 @@ single_payment_test(Config) ->
            timer:seconds(1)
           ),
 
-    PayerBalance = get_balance(Payer, PayerAddr),
-    PayeeBalance = get_balance(Payee, PayeeAddr),
+    PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
+    PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
     4000 = PayerBalance + Fee,
     6000 = PayeeBalance,
@@ -195,8 +195,8 @@ single_payment_test(Config) ->
           ),
 
     %% the transaction should not have cleared
-    PayerBalance2 = get_balance(Payer, PayerAddr),
-    PayeeBalance2 = get_balance(Payee, PayeeAddr),
+    PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    PayeeBalance2 = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
     4000 = PayerBalance2 + Fee,
     6000 = PayeeBalance2,
@@ -209,8 +209,8 @@ single_payment_test(Config) ->
                               fun(Miner) ->
 
                                       %% the transaction should have cleared
-                                      PayerBalance3 = get_balance(Miner, PayerAddr),
-                                      PayeeBalance3 = get_balance(Miner, PayeeAddr),
+                                      PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
+                                      PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
 
                                       3000 == PayerBalance3 + Fee andalso
                                       7000 == PayeeBalance3
@@ -232,8 +232,8 @@ self_payment_test(Config) ->
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere
-    5000 = get_balance(Payer, PayerAddr),
-    5000 = get_balance(Payee, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
@@ -271,8 +271,8 @@ self_payment_test(Config) ->
            timer:seconds(1)
           ),
 
-    PayerBalance = get_balance(Payer, PayerAddr),
-    PayeeBalance = get_balance(Payee, PayeeAddr),
+    PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
+    PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
     %% No change in balances since the payment should have failed, fee=0 anyway
     5000 = PayerBalance + Fee,
@@ -280,11 +280,3 @@ self_payment_test(Config) ->
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
-
-
-%% Helper functions
-get_balance(Miner, Addr) ->
-    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
-    ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
