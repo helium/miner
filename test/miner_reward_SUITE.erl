@@ -155,26 +155,45 @@ basic_test(Config) ->
     Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
 
-    %% Wait for an election (should happen at block 3 ideally)
+    %% Wait for an election (should happen at block 6 ideally)
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true =:= lists:all(
                               fun(Miner) ->
                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                       {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 5
+                                      Height >= CurrentHeight + 6
                               end,
                               Miners
                              )
            end,
            60,
-           timer:seconds(5)
+           timer:seconds(1)
           ),
 
+    %% Check that the election txn is in the same block as the rewards txn
+    NewChain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    ok = lists:foreach(fun(Miner) ->
+                          {ok, ElectionRewardBlock} = ct_rpc:call(Payer, blockchain, get_block, [6, NewChain]),
+                          Txns = blockchain_block:transactions(ElectionRewardBlock),
+                          ?assertEqual(length(Txns), 2),
+                          [First, Second] = Txns,
+                          ?assertEqual(blockchain_txn:type(First), blockchain_txn_consensus_group_v1),
+                          ?assertEqual(blockchain_txn:type(Second), blockchain_txn_rewards_v1),
+                          Rewards = blockchain_txn_rewards_v1:rewards(Second),
+                          ?assertEqual(length(Rewards), length(ConsensusMiners)),
+                          lists:foreach(fun(R) ->
+                                                ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
+                                                ?assertEqual(blockchain_txn_reward_v1:amount(R), 496032)
+                                        end,
+                                        Rewards)
+                  end,
+                  Miners),
+
+    %% Check that the rewards have been paid out
     ok = lists:foreach(fun(Miner) ->
                                Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                                Bal = miner_ct_utils:get_balance(Miner, Addr),
-                               ct:pal("Miner: ~p, Bal: ~p", [Miner, Bal]),
 
                                case {Addr == PayerAddr,
                                      Addr == PayeeAddr,
