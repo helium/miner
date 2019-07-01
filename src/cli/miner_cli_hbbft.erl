@@ -105,7 +105,8 @@ hbbft_queue_cmd() ->
     [
      [["hbbft", "queue"], [], [
                               {inbound, [{shortname, "i"}, {longname, "inbound"}, {datatype, {enum, [true, false]}}]},
-                              {outbound, [{shortname, "o"}, {longname, "outbound"}, {datatype, integer}]}
+                              {outbound, [{shortname, "o"}, {longname, "outbound"}, {datatype, integer}]},
+                              {verbose, [{shortname, "v"}, {longname, "verbose"}]}
                              ], fun hbbft_queue/3]
     ].
 
@@ -117,6 +118,8 @@ hbbft_queue_usage() ->
       "  Show the queued inbound messages\n"
       "  -o --outbound <peer ID> \n"
       "  Show the queued outbound messages for <peer ID>\n"
+      " -v --verbose\n"
+      "  Show extra information\n"
      ]
     ].
 
@@ -128,7 +131,9 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                 undefined ->
                     Workers = maps:get(worker_info, miner:relcast_info(consensus_group), #{}),
                     %% just print a summary of the queue
-                    [clique_status:table([[{destination, "inbound"},
+                    [clique_status:table([[{destination, "inbound"} ] ++
+                                           [{address, ""} || lists:keymember(verbose, 1, Flags)] ++
+                                           [{name, ""},
                                            {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
                                            {connected, "true"},
                                            {blocked, "false"},
@@ -137,7 +142,9 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                                            {last_take, "none"},
                                            {last_ack, 0}
                                           ]] ++
-                                         [[{destination, integer_to_list(K)},
+                                         [[{destination, integer_to_list(K)}] ++
+                                           [{address, maps:get(address, maps:get(K, Workers))} || lists:keymember(verbose, 1, Flags)] ++
+                                           [{name, element(2, erl_angry_purple_tiger:animal_name(maps:get(address, maps:get(K, Workers))))},
                                            {count, integer_to_list(length(V))},
                                            {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
                                            {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
