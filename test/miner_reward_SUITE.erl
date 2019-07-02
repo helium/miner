@@ -172,23 +172,23 @@ basic_test(Config) ->
           ),
 
     %% Check that the election txn is in the same block as the rewards txn
-    NewChain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
     ok = lists:foreach(fun(Miner) ->
-                          {ok, ElectionRewardBlock} = ct_rpc:call(Payer, blockchain, get_block, [6, NewChain]),
-                          Txns = blockchain_block:transactions(ElectionRewardBlock),
-                          ?assertEqual(length(Txns), 2),
-                          [First, Second] = Txns,
-                          ?assertEqual(blockchain_txn:type(First), blockchain_txn_consensus_group_v1),
-                          ?assertEqual(blockchain_txn:type(Second), blockchain_txn_rewards_v1),
-                          Rewards = blockchain_txn_rewards_v1:rewards(Second),
-                          ?assertEqual(length(Rewards), length(ConsensusMiners)),
-                          lists:foreach(fun(R) ->
-                                                ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
-                                                ?assertEqual(blockchain_txn_reward_v1:amount(R), 496032)
-                                        end,
-                                        Rewards)
-                  end,
-                  Miners),
+                               Chain0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                               {ok, ElectionRewardBlock} = ct_rpc:call(Miner, blockchain, get_block, [6, Chain0]),
+                               Txns = ct_rpc:call(Miner, blockchain_block, transactions, [ElectionRewardBlock]),
+                               ?assertEqual(length(Txns), 2),
+                               [First, Second] = Txns,
+                               ?assertEqual(blockchain_txn:type(First), blockchain_txn_consensus_group_v1),
+                               ?assertEqual(blockchain_txn:type(Second), blockchain_txn_rewards_v1),
+                               Rewards = blockchain_txn_rewards_v1:rewards(Second),
+                               ?assertEqual(length(Rewards), length(ConsensusMiners)),
+                               lists:foreach(fun(R) ->
+                                                     ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
+                                                     ?assertEqual(blockchain_txn_reward_v1:amount(R), 496032)
+                                             end,
+                                             Rewards)
+                       end,
+                       Miners),
 
     %% Check that the rewards have been paid out
     ok = lists:foreach(fun(Miner) ->
