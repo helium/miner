@@ -296,8 +296,17 @@ handle_call({start_election, _Hash, _Current, _Height}, _From, State) ->
     {reply, already_running, State};
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
-handle_call(in_consensus, _From, #state{consensus_pos = Pos} = State) ->
-    {reply, is_integer(Pos), State};
+handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
+    %% there are three aspects to this:
+    %%   1) are we in the consensus group as viewed by the chain
+    %%   2) are we running an actual hbbft handler group in miner
+    %%   3) does that miner group have a valid key to the larger group
+    %% 2 and especially 3 are hard to do and harder to trust, so just
+    %% do 1 for now
+    Ledger = blockchain:ledger(Chain),
+    {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
+    MyAddr = blockchain_swarm:pubkey_bin(),
+    {reply, lists:member(MyAddr, ConsensusGroup), State};
 handle_call(cancel_dkg, _From, #state{election_running = false} = State) ->
     {reply, ok, State};
 handle_call(cancel_dkg, _From, #state{current_dkg = DKG} = State) ->
@@ -318,10 +327,11 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}}, #state{current_dkg = OldDKG,
-                                                                 initial_height = Height,
-                                                                 restart_interval = Interval,
-                                                                 delay = Delay} = State)
+handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
+            #state{current_dkg = OldDKG,
+                   initial_height = Height,
+                   restart_interval = Interval,
+                   delay = Delay} = State)
   when State#state.chain /= undefined andalso
        State#state.election_running == true andalso
        Height =/= 0 ->
