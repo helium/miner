@@ -45,7 +45,6 @@
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
-    block_time = 15000 :: number(),
     election_interval = infinity :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
@@ -291,13 +290,11 @@ init(_Args) ->
             {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
             Ledger = blockchain:ledger(Chain),
             {ok, Interval} = blockchain:config(election_interval, Ledger),
-            {ok, BlockTime} = blockchain:config(block_time, Ledger),
             self() ! init,
 
             {ok, #state{blockchain = Chain,
                         election_epoch = ElectionEpoch,
                         consensus_start = EpochStart,
-                        block_time=BlockTime,
                         election_interval = Interval}}
     end.
 
@@ -355,15 +352,13 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
 
     Ledger = blockchain:ledger(Chain),
     {ok, Interval} = blockchain:config(election_interval, Ledger),
-    {ok, BlockTime} = blockchain:config(block_time, Ledger),
 
-    Ref = set_next_block_timer(Chain, BlockTime),
+    Ref = set_next_block_timer(Chain),
     {reply, ok, State#state{consensus_group = ConsensusGroup,
                             blockchain = Chain,
                             consensus_start = 1,
                             election_epoch = 1,
                             block_timer = Ref,
-                            block_time = BlockTime,
                             election_interval = Interval}};
 handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
             #state{election_epoch = ElectionEpoch0,
@@ -446,13 +441,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                          current_height = CurrHeight,
                          consensus_start = Start,
                          blockchain = Chain,
-                         block_time = BlockTime,
                          handoff_waiting = Waiting,
                          election_epoch = Epoch}) when ConsensusGroup /= undefined andalso
                                                        Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     lager:info("add block @ ~p ~p ~p", [ConsensusGroup, Start, Epoch]),
+    Ledger = blockchain:ledger(Chain),
 
     NewState =
         case blockchain:get_block(Hash, Chain) of
@@ -474,13 +469,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                   ConsensusGroup, {next_round, NextRound,
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
-                                State#state{block_timer = set_next_block_timer(Chain, BlockTime),
+                                State#state{block_timer = set_next_block_timer(Chain),
                                             current_height = Height};
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
                             {true, true} ->
                                 {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
                                 blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+                                {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
                                 %% it's possible that waiting hasn't been set, I'm not entirely
@@ -504,7 +500,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                              {pending, Buf, NextRound, Block, Sync}}
                                     end,
                                 stop_group(ConsensusGroup),
-                                State#state{block_timer = set_next_block_timer(Chain, BlockTime),
+                                State#state{block_timer = set_next_block_timer(Chain),
+                                            election_interval = Interval,
                                             handoff_waiting = Waiting1,
                                             consensus_group = NewGroup,
                                             election_epoch = State#state.election_epoch + 1,
@@ -514,6 +511,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {true, false} ->
                                 {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
                                 blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+                                {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
                                 lager:info("leave"),
@@ -524,6 +522,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             handoff_waiting = undefined,
                                             consensus_group = undefined,
                                             election_epoch = State#state.election_epoch + 1,
+                                            election_interval = Interval,
                                             consensus_start = Height,
                                             current_height = Height}
                             end;
@@ -545,6 +544,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                    election_epoch = Epoch,
                    blockchain = Chain} = State) when ConsensusGroup == undefined andalso
                                                      Chain /= undefined ->
+    Ledger = blockchain:ledger(Chain),
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             Height = blockchain_block:height(Block),
@@ -562,6 +562,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         {true, true} ->
                             {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
                             blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+                            {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                             lager:info("nc start group"),
                             miner_consensus_mgr:cancel_dkg(),
@@ -584,16 +585,18 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                 end,
                             lager:info("nc got here"),
                             {noreply,
-                             State#state{block_timer = set_next_block_timer(Chain, State#state.block_time),
+                             State#state{block_timer = set_next_block_timer(Chain),
                                          handoff_waiting = Waiting1,
                                          consensus_group = NewGroup,
                                          election_epoch = State#state.election_epoch + 1,
+                                         election_interval = Interval,
                                          current_height = Height,
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
                         {true, false} ->
                             {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
                             blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
+                            {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                             lager:info("nc stay out"),
                             miner_consensus_mgr:cancel_dkg(),
@@ -602,6 +605,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          handoff_waiting = undefined,
                                          consensus_group = undefined,
                                          election_epoch = State#state.election_epoch + 1,
+                                         election_interval = Interval,
                                          current_height = Height,
                                          consensus_start = Height}}
                     end;
@@ -618,12 +622,10 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, Interval} = blockchain:config(election_interval, Ledger),
-    {ok, BlockTime} = blockchain:config(block_time, Ledger),
 
     {noreply, State#state{blockchain = Chain,
-                          block_time = BlockTime,
                           election_interval = Interval}};
-handle_info(init, #state{blockchain = Chain, block_time = BlockTime} = State) ->
+handle_info(init, #state{blockchain = Chain} = State) ->
     {ok, Height} = blockchain:height(Chain),
     lager:info("cold start blockchain at known height ~p", [Height]),
     {ok, Block} = blockchain:get_block(Height, Chain),
@@ -631,7 +633,7 @@ handle_info(init, #state{blockchain = Chain, block_time = BlockTime} = State) ->
     Ref =
         case is_pid(Group) of
             true ->
-                set_next_block_timer(Chain, BlockTime);
+                set_next_block_timer(Chain);
             _ ->
                 undefined
         end,
@@ -663,7 +665,8 @@ restore(Chain, Block, Height, Interval) ->
     end,
     Group.
 
-set_next_block_timer(Chain, BlockTime) ->
+set_next_block_timer(Chain) ->
+    {ok, BlockTime} = blockchain:config(block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
     LastBlockTimestamp = blockchain_block:time(HeadBlock),
     NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
