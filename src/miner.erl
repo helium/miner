@@ -393,7 +393,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                             [ConsensusGroupTxn] = lists:filter(fun(T) ->
                                                                        blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
                                                                end, ValidTransactions),
-                            {Epoch, NewHeight, ConsensusGroupTxn ++ [RewardsTxn]};
+                            {Epoch, NewHeight, [ConsensusGroupTxn, RewardsTxn]};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
                     end,
