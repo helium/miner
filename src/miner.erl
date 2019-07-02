@@ -385,18 +385,23 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                     blockchain_txn:validate(SortedTransactions, Chain),
                 %% is there some cheaper way to do this?  maybe it's
                 %% cheap enough?
-                {ElectionEpoch, EpochStart} =
+                {ElectionEpoch, EpochStart, TxnsToInsert} =
                     case blockchain_election:has_new_group(ValidTransactions) of
                         {true, _} ->
-                            {ElectionEpoch0 + 1, NewHeight};
+                            Epoch = ElectionEpoch0 + 1,
+                            RewardsTxn = blockchain_txn_rewards_v1:new(blockchain_txn_rewards_v1:calculate_rewards(NewHeight, Chain), Epoch),
+                            [ConsensusGroupTxn] = lists:filter(fun(T) ->
+                                                                       blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                                                               end, ValidTransactions),
+                            {Epoch, NewHeight, [ConsensusGroupTxn, RewardsTxn]};
                         _ ->
-                            {ElectionEpoch0, EpochStart0}
+                            {ElectionEpoch0, EpochStart0, ValidTransactions}
                     end,
                 lager:info("new block time is ~p", [BlockTime]),
                 NewBlock = blockchain_block_v1:new(
                              #{prev_hash => CurrentBlockHash,
                                height => NewHeight,
-                               transactions => ValidTransactions,
+                               transactions => TxnsToInsert,
                                signatures => [],
                                hbbft_round => HBBFTRound,
                                time => BlockTime,
@@ -408,10 +413,10 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
                 lager:info("Worker:~p, Created Block: ~p, Txns: ~p",
-                           [self(), NewBlock, ValidTransactions]),
+                           [self(), NewBlock, TxnsToInsert]),
                 %% return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
-                 Signature, ValidTransactions ++ InvalidTransactions};
+                 Signature, TxnsToInsert ++ InvalidTransactions};
             [_OtherBlockHash] ->
                 {error, stale_hash};
             List ->

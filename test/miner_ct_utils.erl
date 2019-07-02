@@ -1,19 +1,20 @@
 -module(miner_ct_utils).
 
--export([pmap/2
-         ,wait_until/1
-         ,wait_until/3
-         ,wait_until_disconnected/2
-         ,start_node/3
-         ,partition_cluster/2
-         ,heal_cluster/2
-         ,connect/1
-         ,count/2
-         ,randname/1
-         ,get_config/2
-         ,random_n/2
-         ,init_per_testcase/2
-         ,end_per_testcase/2
+-export([pmap/2,
+         wait_until/1,
+         wait_until/3,
+         wait_until_disconnected/2,
+         start_node/3,
+         partition_cluster/2,
+         heal_cluster/2,
+         connect/1,
+         count/2,
+         randname/1,
+         get_config/2,
+         random_n/2,
+         init_per_testcase/2,
+         end_per_testcase/2,
+         get_balance/2
         ]).
 
 pmap(F, L) ->
@@ -274,3 +275,9 @@ end_per_testcase(_TestCase, Config) ->
     Miners = proplists:get_value(miners, Config),
     miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
     {comment, done}.
+
+get_balance(Miner, Addr) ->
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
+    {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
+    ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).

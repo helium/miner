@@ -296,6 +296,8 @@ handle_call({start_election, _Hash, _Current, _Height}, _From, State) ->
     {reply, already_running, State};
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
+handle_call(in_consensus, _From, #state{chain=undefined, consensus_pos=Pos}=State) ->
+    {reply, is_integer(Pos), State};
 handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     %% there are three aspects to this:
     %%   1) are we in the consensus group as viewed by the chain
