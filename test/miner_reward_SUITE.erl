@@ -53,7 +53,7 @@ init_per_testcase(_TestCase, Config0) ->
              block_version => v1,
              dkg_curve => Curve,
              predicate_callback_mod => miner,
-             predicate_callback_fun => version,
+             predicate_callback_fun => test_version,
              proposal_threshold => 0.85,
              monthly_reward => 50000 * 1000000,
              securities_percent => 0.35,
