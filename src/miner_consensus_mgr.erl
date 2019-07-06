@@ -164,7 +164,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       Chain,
                                       1,
                                       []]],
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), "consensus_1",
+    Name = consensus_group_name(1, Members),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name,
                                          libp2p_group_relcast, GroupArg),
     lager:info("started initial hbbft group: ~p~n", [Group]),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
@@ -212,7 +213,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                       1, % gets set later
                                       []]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
-    Name = "consensus_" ++ integer_to_list(max(0, Height)),
+    Name = consensus_group_name(max(0, Height), Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
@@ -246,7 +247,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                       undefined,
                                                       Chain]],
                     %% while this won't reflect the actual height, it has to be deterministic
-                    Name = "consensus_" ++ integer_to_list(StartHeight),
+                    Name = consensus_group_name(StartHeight, ConsensusAddrs),
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
@@ -490,3 +491,6 @@ do_dkg(Addrs, Artifact, Sign, Done,
             {false, State#state{consensus_pos = undefined,
                                 current_dkg = undefined}}
     end.
+
+consensus_group_name(Height, Members) ->
+    lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
