@@ -547,6 +547,7 @@ target_test() ->
 
     meck:expect(blockchain_ledger_v1, active_gateways, fun(_) -> ActiveGateways end),
     meck:expect(blockchain_ledger_v1, current_height, fun(_) -> {ok, 1} end),
+    meck:expect(blockchain_ledger_v1, gateway_score, fun(_, _) -> {ok, 0.5} end),
     meck:expect(blockchain_worker, blockchain, fun() -> blockchain end),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
