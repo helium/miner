@@ -385,12 +385,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-initiate_election(Hash, Height, State) ->
+initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     Chain = blockchain_worker:blockchain(),
     {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
 
     Ledger = blockchain:ledger(Chain),
-    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N),
+    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
@@ -413,7 +413,7 @@ restart_election(#state{n = N, delay = Delay0,
     Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
 
-    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N),
+    ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     case length(ConsensusAddrs) == N of
         true ->
             ok;
