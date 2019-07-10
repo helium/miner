@@ -405,10 +405,9 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 %%% should weaken it a little each restart, so that a group with many
 %%% downed members (that are still less than F) can't stall a restart
 %%% forever.
-restart_election(#state{n = N, delay = Delay0,
+restart_election(#state{n = N, delay = Delay0, chain=Chain,
                         restart_interval = Interval} = State, Hash, Height) ->
 
-    Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
@@ -443,6 +442,7 @@ do_dkg(Addrs, Artifact, Sign, Done,
        State=#state{initial_height = Height,
                     n = N,
                     delay = Delay,
+                    chain = Chain,
                     curve = Curve}) ->
 
     lager:info("N: ~p", [N]),
@@ -456,6 +456,14 @@ do_dkg(Addrs, Artifact, Sign, Done,
         true ->
             lager:info("Preparing to run DKG #~p at height ~p ", [Delay, Height]),
             Pos = miner_util:index_of(MyAddress, ConsensusAddrs),
+
+            Swarm = blockchain_swarm:swarm(),
+
+            lists:foreach(fun(Member) ->
+                                  spawn(fun() ->
+                                                libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [length(Addrs), Chain])
+                                        end)
+                          end, ConsensusAddrs -- [MyAddress]),
 
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             Pos,
