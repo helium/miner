@@ -63,7 +63,9 @@ init_per_testcase(_TestCase, Config0) ->
              poc_witnesses_percent => 0.02 + 0.03,
              consensus_percent => 0.10,
              election_selection_pct => 60,
-             election_replacement_factor => 4},
+             election_replacement_factor => 4,
+             election_replacement_slope => 20
+            },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
     KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
