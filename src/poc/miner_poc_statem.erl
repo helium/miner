@@ -136,7 +136,7 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{address=Challenger,
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{address=Challenger,
                                                                      secret=Secret,
                                                                      mining_timeout=MiningTimeout,
                                                                      blockchain=Chain}=Data0) ->
@@ -144,7 +144,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{address=Cha
         ok ->
             {ok, Block} = blockchain:get_block(BlockHash, Chain),
             Height = blockchain_block:height(Block),
-            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height},
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger},
             lager:info("request was mined @ ~p", [BlockHash]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
             {next_state, targeting, Data1};
@@ -164,14 +164,13 @@ mining(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-targeting(info, {target, _, _}, #data{retry=0}=Data) ->
+targeting(info, {target, _, _, _}, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
-targeting(info, {target, Entropy, Height}, #data{blockchain=Blockchain}=Data) ->
-    Ledger = blockchain:ledger(Blockchain),
+targeting(info, {target, Entropy, Height, Ledger}, Data) ->
     {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
     lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
-    self() ! {challenge, Entropy, Target, Gateways, Height},
+    self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
     {next_state, challenging, Data#data{challengees=[]}};
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -180,14 +179,14 @@ targeting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-challenging(info, {challenge, Entropy, Target, Gateways, Height}, #data{retry=Retry,
+challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
                                                                         onion_keys=OnionKey
                                                                        }=Data) ->
     case blockchain_poc_path:build(Entropy, Target, Gateways, Height) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
-            self() ! {target, Entropy, Height},
+            self() ! {target, Entropy, Height, Ledger},
             {next_state, targeting, Data#data{retry=Retry-1}};
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
@@ -206,7 +205,7 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height}, #data{retry=Re
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
-                    self() ! {target, Entropy, Height},
+                    self() ! {target, Entropy, Height, Ledger},
                     {next_state, targeting, Data#data{retry=Retry-1}}
             end
     end;
