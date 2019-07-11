@@ -459,6 +459,8 @@ do_dkg(Addrs, Artifact, Sign, Done,
 
             Swarm = blockchain_swarm:swarm(),
 
+            %% To ensure the DKG can actually complete, attempt to fastforward all the
+            %% DKG peers so they all know they're in the newly proposed consensus group
             lists:foreach(fun(Member) ->
                                   spawn(fun() ->
                                                 libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [length(Addrs), Chain])
