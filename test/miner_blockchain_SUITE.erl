@@ -59,7 +59,7 @@ init_per_testcase(TestCase, Config0) ->
              garbage_value => totes_garb,
              predicate_callback_mod => miner,
              predicate_callback_fun => test_version,
-             proposal_threshold => 0.85,
+             predicate_threshold => 0.85,
              monthly_reward => 50000 * 1000000,
              securities_percent => 0.35,
              dc_percent => 0,
@@ -85,8 +85,8 @@ init_per_testcase(TestCase, Config0) ->
            [BinPub, Priv, Vars, KeyProof,
             term_to_binary(Vars, [{compressed, 9}])]),
 
-    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
-                                                             key_proof => KeyProof}) ],
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, 1, #{master_key => BinPub,
+                                                                key_proof => KeyProof}) ],
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitGen = [begin
@@ -326,19 +326,42 @@ group_change_test(Config) ->
 
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, Proof, #{unsets => [garbage_value]}),
+    Txn = blockchain_txn_vars_v1:new(Vars, Proof, 2, #{version_predicate => 2,
+                                                       unsets => [garbage_value]}),
     %% wait for it to take effect
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(fun() ->
+                                           true == lists:all(fun(Miner) ->
+                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                                     Epoch > 5
+                                                             end, shuffle(Miners))
+                                   end, 60, timer:seconds(1)),
+
+    %% make sure we still haven't executed it
+    CGroup1 = lists:filtermap(
+                fun(Miner) ->
+                        true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                end, Miners),
+    ?assertEqual(4, length(CGroup1)),
+
+    %% alter the "version" for all of them.
+    lists:foreach(
+      fun(Miner) ->
+              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
+      end, Miners),
+
+    %% wait for the change to take effect
+    ok = miner_ct_utils:wait_until(fun() ->
                                            CGroup = lists:filtermap(
                                                       fun(Miner) ->
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
                                            7 == length(CGroup)
-                                   end, 90, timer:seconds(1)),
+                                   end, 120, timer:seconds(1)),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
@@ -348,6 +371,6 @@ group_change_test(Config) ->
     Epoch = ct_rpc:call(hd(Miners), miner, election_epoch, []),
     ct:pal("post change miner ~p Epoch ~p", [hd(Miners), Epoch]),
     %% probably need to parameterize this via the delay
-    ?assert(5 =< Epoch),
+    ?assert(9 =< Epoch),
 
     ok.
