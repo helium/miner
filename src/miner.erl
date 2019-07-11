@@ -375,7 +375,8 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
         case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
             [CurrentBlockHash] ->
                 SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
-                NewHeight = blockchain_block:height(CurrentBlock) + 1,
+                CurrentBlockHeight = blockchain_block:height(CurrentBlock),
+                NewHeight = CurrentBlockHeight + 1,
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
                 LastBlockTimestamp = blockchain_block:time(CurrentBlock),
@@ -389,7 +390,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                     case blockchain_election:has_new_group(ValidTransactions) of
                         {true, _} ->
                             Epoch = ElectionEpoch0 + 1,
-                            RewardsTxn = blockchain_txn_rewards_v1:new(blockchain_txn_rewards_v1:calculate_rewards(NewHeight, Chain), Epoch),
+                            RewardsTxn = blockchain_txn_rewards_v1:new(blockchain_txn_rewards_v1:calculate_rewards(CurrentBlockHeight, Chain), CurrentBlockHeight),
                             [ConsensusGroupTxn] = lists:filter(fun(T) ->
                                                                        blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
                                                                end, ValidTransactions),
