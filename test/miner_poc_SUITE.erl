@@ -68,7 +68,9 @@ dist(Config0) ->
              poc_witnesses_percent => 0.02 + 0.03,
              consensus_percent => 0.10,
              election_selection_pct => 60,
-             election_replacement_factor => 4},
+             election_replacement_factor => 4,
+             election_replacement_slope => 20
+            },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
     KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
@@ -171,11 +173,11 @@ dist(Config0) ->
             {ok, Height} = ct_rpc:call(M, blockchain_ledger_v1, current_height, [Ledger]),
             ActiveGateways = ct_rpc:call(M, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
             lists:foreach(
-                fun(G) ->
-                        {_, _, Score} = blockchain_ledger_gateway_v1:score(G, Height),
+                fun({A, G}) ->
+                        {_, _, Score} = blockchain_ledger_gateway_v1:score(A, G, Height),
                     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Score])
                 end,
-                maps:values(ActiveGateways)
+                maps:to_list(ActiveGateways)
             )
     end,
 
