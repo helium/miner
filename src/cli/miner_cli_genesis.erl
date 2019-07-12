@@ -108,8 +108,7 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
                                                              proplists:get_value(nonce, X)) || X <- proplists:get_value(gateways, Config)],
             OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
-            InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ InitialPaymentTransactions ++ [VarTxn], Addresses, N, Curve),
+            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ [VarTxn], Addresses, N, Curve),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]
