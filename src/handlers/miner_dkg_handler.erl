@@ -22,7 +22,7 @@
          privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
          members = [] :: [libp2p_crypto:address()],
          artifact :: binary(),
-         signatures = [] :: [{libp2p_crypto:address(), binary()}],
+         signatures = #{} :: #{non_neg_integer() => {libp2p_crypto:pubkey_bin(), binary()}},
          signatures_required :: pos_integer(),
          sigmod :: atom(),
          sigfun :: atom(),
@@ -64,7 +64,7 @@ handle_command(status, State) ->
                         id => State#state.id,
                         members => State#state.members,
                         signatures_required => State#state.signatures_required,
-                        signatures => length(State#state.signatures),
+                        signatures => maps:size(State#state.signatures),
                         sent_conf => State#state.sent_conf
                        }, Map),
     {reply, Map1, ignore};
@@ -87,21 +87,22 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
     %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
         {conf, InSigs} ->
-            Sigs1 = lists:usort(lists:append(InSigs, Sigs)),
-            NewState = State#state{signatures = Sigs1},
+            %% Sigs1 = lists:usort(lists:append(InSigs, Sigs)),
+            lager:info("InSigs: ~p", [InSigs]),
+            NewState = State#state{signatures = maps:from_list(InSigs)},
             case enough_signatures(conf, NewState) of
                 {ok, GoodSignatures} ->
                     case State#state.sent_conf of
                         false ->
                             %% relies on implicit self-send to hit the
                             %% other clause here in some cases
-                            {State#state{sent_conf=true, signatures=GoodSignatures},
+                            {State#state{sent_conf=true, signatures=maps:from_list(GoodSignatures)},
                              [{multicast, term_to_binary({conf, GoodSignatures})}]};
                         true when State#state.done_called == false ->
                             %% this needs to be a call so we know the callback succeeded so we
                             %% can terminate
                             lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
-                            ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
+                            ok = DoneMod:DoneFun(State#state.artifact, maps:values(maps:from_list(GoodSignatures)),
                                                  Members, State#state.privkey),
                             %% stop the handler
                             {State#state{done_called = true}, [{stop, 60000}]};
@@ -112,7 +113,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State, []}
             end;
         {signature, Address, Signature} ->
-            NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
+            NewState = State#state{signatures=maps:put(Index, {Address, Signature}, State#state.signatures)},
             case enough_signatures(sig, NewState) of
                 {ok, Signatures} when State#state.sent_conf == false ->
                     {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
@@ -170,7 +171,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                         end,
                     {State#state{dkg=NewDKG, privkey=PrivateKey,
                                  signatures_required=Threshold, timer=undefined,
-                                 signatures=[{Address, Signature}|State#state.signatures]},
+                                 signatures=maps:put(Index, {Address, Signature}, State#state.signatures)},
                      [{multicast, term_to_binary({signature, Address, Signature})}]}
             end
     end.
@@ -224,25 +225,34 @@ fixup_msgs(Msgs) ->
                       {callback, term_to_binary(NextMsg)}
               end, Msgs).
 
-enough_signatures(sig, #state{signatures=Sigs, t = T}) when length(Sigs) < (T + 1) ->
-    false;
-enough_signatures(conf, #state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
-    false;
-enough_signatures(_, #state{artifact=Artifact, members=Members, signatures=Signatures,
-                            signatures_required=Threshold}) ->
-    %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
-    case blockchain_block_v1:verify_signatures(Artifact, Members, Signatures, Threshold) of
-        {true, ValidSignatures} ->
-            case length(ValidSignatures) >= Threshold of
-                true ->
-                    {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
-                false ->
-                    false
-            end;
+enough_signatures(_, #state{artifact=Artifact,
+                            members=Members,
+                            signatures=Signatures,
+                            signatures_required=Threshold,
+                            t=T}) ->
+    NumSignatures = maps:size(Signatures),
+    case NumSignatures < (T + 1) of
+        true -> false;
         false ->
-            false
+            case NumSignatures < Threshold of
+                true -> false;
+                false ->
+                    %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
+                    %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
+                    case blockchain_block_v1:verify_signatures(Artifact, Members, maps:values(Signatures), Threshold) of
+                        {true, ValidSignatures} ->
+                            case length(ValidSignatures) >= Threshold of
+                                true ->
+                                    {ok, lists:sublist(lists:sort(maps:to_list(Signatures)), Threshold)};
+                                false ->
+                                    false
+                            end;
+                        false ->
+                            false
+                    end
+            end
     end.
+
 
 %% ==================================================================
 %% Internal functions
