@@ -37,14 +37,19 @@ end_per_testcase(_TestCase, Config) ->
 initial_dkg_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
-    InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    #{secret := Priv, public := Pub} = libp2p_crypto:generate_keys(ecc_compact),
     N = proplists:get_value(num_consensus_members, Config),
+    Vars = #{num_consensus_members => N},
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub, key_proof => KeyProof})],
+    InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Curve = proplists:get_value(dkg_curve, Config),
 
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialPaymentTransactions, Addresses, N, Curve])
+                                       [InitialPaymentTransactions ++ InitialVars, Addresses, N, Curve])
                    end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
     {comment, DKGResults}.

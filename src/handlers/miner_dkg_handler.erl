@@ -22,7 +22,7 @@
          privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
          members = [] :: [libp2p_crypto:address()],
          artifact :: binary(),
-         signatures = #{} :: #{non_neg_integer() => {libp2p_crypto:pubkey_bin(), binary()}},
+         signatures = #{} :: #{non_neg_integer() => binary()}, %% {index_of_consensus_member => signature}
          signatures_required :: pos_integer(),
          sigmod :: atom(),
          sigfun :: atom(),
@@ -32,6 +32,8 @@
          sent_conf = false :: boolean(),
          timer :: undefined | pid()
         }).
+
+-type state() :: #state{}.
 
 init([Members, Id, N, F, T, Curve,
       ThingToSign,
@@ -84,26 +86,33 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                            sigmod = SigMod, sigfun = SigFun,
                                            donemod = DoneMod, donefun = DoneFun}) ->
     Msg = binary_to_term(BinMsg),
-    %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
         {conf, InSigs} ->
-            %% Sigs1 = lists:usort(lists:append(InSigs, Sigs)),
-            lager:info("InSigs: ~p", [InSigs]),
-            NewState = State#state{signatures = maps:from_list(InSigs)},
+            %% XXX: Doubtful about the maps:merge here
+            NewState = State#state{signatures = maps:merge(InSigs, Sigs)},
             case enough_signatures(conf, NewState) of
                 {ok, GoodSignatures} ->
                     case State#state.sent_conf of
                         false ->
                             %% relies on implicit self-send to hit the
                             %% other clause here in some cases
-                            {State#state{sent_conf=true, signatures=maps:from_list(GoodSignatures)},
+                            {State#state{sent_conf=true, signatures=GoodSignatures},
                              [{multicast, term_to_binary({conf, GoodSignatures})}]};
                         true when State#state.done_called == false ->
-                            %% this needs to be a call so we know the callback succeeded so we
-                            %% can terminate
-                            lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
-                            ok = DoneMod:DoneFun(State#state.artifact, maps:values(maps:from_list(GoodSignatures)),
-                                                 Members, State#state.privkey),
+                            %% this needs to be a call so we know the callback succeeded so we can terminate
+                            lager:info("good len ~p sigs ~p", [maps:size(GoodSignatures), GoodSignatures]),
+
+                            DoneSigs = lists:foldl(fun({I, BinSig}, Acc) ->
+                                                           [{lists:nth(I, Members), BinSig} | Acc]
+                                                   end,
+                                                   [],
+                                                   maps:to_list(GoodSignatures)),
+                            lager:info("DoneSigs: ~p", [DoneSigs]),
+
+                            ok = DoneMod:DoneFun(State#state.artifact,
+                                                 DoneSigs,
+                                                 Members,
+                                                 State#state.privkey),
                             %% stop the handler
                             {State#state{done_called = true}, [{stop, 60000}]};
                         _ ->
@@ -113,7 +122,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State, []}
             end;
         {signature, Address, Signature} ->
-            NewState = State#state{signatures=maps:put(Index, {Address, Signature}, State#state.signatures)},
+            NewState = State#state{signatures=maps:put(miner_util:index_of(Address, Members), Signature, State#state.signatures)},
             case enough_signatures(sig, NewState) of
                 {ok, Signatures} when State#state.sent_conf == false ->
                     {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
@@ -171,7 +180,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                         end,
                     {State#state{dkg=NewDKG, privkey=PrivateKey,
                                  signatures_required=Threshold, timer=undefined,
-                                 signatures=maps:put(Index, {Address, Signature}, State#state.signatures)},
+                                 signatures=maps:put(Index, Signature, State#state.signatures)},
                      [{multicast, term_to_binary({signature, Address, Signature})}]}
             end
     end.
@@ -225,6 +234,7 @@ fixup_msgs(Msgs) ->
                       {callback, term_to_binary(NextMsg)}
               end, Msgs).
 
+-spec enough_signatures(sig | conf, state()) -> false | {ok, map()}.
 enough_signatures(_, #state{artifact=Artifact,
                             members=Members,
                             signatures=Signatures,
@@ -239,11 +249,16 @@ enough_signatures(_, #state{artifact=Artifact,
                 false ->
                     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
                     %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
-                    case blockchain_block_v1:verify_signatures(Artifact, Members, maps:values(Signatures), Threshold) of
+                    SignatureList = lists:foldl(fun({I, BinSig}, Acc) ->
+                                                        [{lists:nth(I, Members), BinSig} | Acc]
+                                                end,
+                                                [],
+                                                maps:to_list(Signatures)),
+                    case blockchain_block_v1:verify_signatures(Artifact, Members, SignatureList, Threshold) of
                         {true, ValidSignatures} ->
                             case length(ValidSignatures) >= Threshold of
                                 true ->
-                                    {ok, lists:sublist(lists:sort(maps:to_list(Signatures)), Threshold)};
+                                    {ok, maps:from_list(lists:sublist(lists:usort(maps:to_list(Signatures)), Threshold))};
                                 false ->
                                     false
                             end;
