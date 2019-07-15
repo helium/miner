@@ -251,6 +251,10 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
+                    {ok, HeadBlock} = blockchain:head_block(Chain),
+                    Round = blockchain_block:hbbft_round(HeadBlock),
+                    libp2p_group_relcast:handle_input(
+                                  Group, {next_round, Round + 1, [], false}),
                     %% this isn't super safe?  must make sure that a prior group wasn't running
                     Height =
                         case StartHeight >= State#state.initial_height of
