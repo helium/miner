@@ -78,7 +78,8 @@ dist(Config0) ->
              max_staleness => 100000,
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
-             h3_exclusion_ring_distance => 2
+             h3_exclusion_ring_distance => 2,
+             poc_challenge_interval => 30
             },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -205,11 +206,11 @@ basic(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
-        {key, {PubKey, SigFun, ECDHFun}}
-        ,{seed_nodes, []}
-        ,{port, 0}
-        ,{num_consensus_members, 7}
-        ,{base_dir, BaseDir}
+        {key, {PubKey, SigFun, ECDHFun}},
+        {seed_nodes, []},
+        {port, 0},
+        {num_consensus_members, 7},
+        {base_dir, BaseDir}
     ],
     {ok, _Sup} = blockchain_sup:start_link(Opts),
     ?assert(erlang:is_pid(blockchain_swarm:swarm())),
@@ -354,11 +355,11 @@ startup(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
-        {key, {PubKey, SigFun, ECDHFun}}
-        ,{seed_nodes, []}
-        ,{port, 0}
-        ,{num_consensus_members, 7}
-        ,{base_dir, BaseDir}
+        {key, {PubKey, SigFun, ECDHFun}},
+        {seed_nodes, []},
+        {port, 0},
+        {num_consensus_members, 7},
+        {base_dir, BaseDir}
     ],
     {ok, _Sup} = blockchain_sup:start_link(Opts),
     ?assert(erlang:is_pid(blockchain_swarm:swarm())),

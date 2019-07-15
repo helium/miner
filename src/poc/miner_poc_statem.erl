@@ -59,7 +59,7 @@
     responses = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
-    delay :: non_neg_integer(),
+    poc_interval :: non_neg_integer() | undefined,
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
@@ -87,11 +87,11 @@ init(Args) ->
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:pubkey_bin(),
-    %% this should really only be overriden for testing
-    Delay = maps:get(delay, Args, blockchain_txn_poc_request_v1:challenge_interval()),
     Blockchain = blockchain_worker:blockchain(),
+    %% this should really only be overriden for testing
+    Delay = maps:get(delay, Args, undefined),
     lager:info("init with ~p", [Args]),
-    {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
+    {ok, requesting, #data{blockchain=Blockchain, address=Address, poc_interval=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -109,6 +109,17 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+requesting(info, Msg, #data{blockchain=undefined, poc_interval=undefined}=Data) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
+            {keep_state,  Data};
+        Chain ->
+            self() ! Msg,
+            Ledger = blockchain:ledger(Chain),
+            POCInterval = blockchain_poc:challenge_interval(Ledger),
+            {keep_state, Data#data{blockchain=Chain, poc_interval=POCInterval}}
+    end;
 requesting(info, Msg, #data{blockchain=undefined}=Data) ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -116,7 +127,7 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             {keep_state,  Data};
         Chain ->
             self() ! Msg,
-            {keep_state,  Data#data{blockchain=Chain}}
+            {keep_state, Data#data{blockchain=Chain}}
     end;
 requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
@@ -137,9 +148,9 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{address=Challenger,
-                                                                     secret=Secret,
-                                                                     mining_timeout=MiningTimeout,
-                                                                     blockchain=Chain}=Data0) ->
+                                                                                secret=Secret,
+                                                                                mining_timeout=MiningTimeout,
+                                                                                blockchain=Chain}=Data0) ->
     case find_request(BlockHash, Data0) of
         ok ->
             {ok, Block} = blockchain:get_block(BlockHash, Chain),
@@ -373,7 +384,7 @@ validate_witness(Witness, Ledger) ->
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
                                address=Address,
-                               delay=Delay}) ->
+                               poc_interval=POCInterval}) ->
     Ledger = blockchain:ledger(Blockchain),
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, Error} ->
@@ -392,7 +403,7 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                             true;
                         LastChallenge ->
                             lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
-                            (Height - LastChallenge) > Delay
+                            (Height - LastChallenge) > POCInterval
                     end
             end
     end.
