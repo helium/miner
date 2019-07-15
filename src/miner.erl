@@ -374,7 +374,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
     Reply =
         case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
             [CurrentBlockHash] ->
-                SortedTransactions = lists:usort(fun blockchain_txn:sort/2, Txns),
+                SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
                 CurrentBlockHeight = blockchain_block:height(CurrentBlock),
                 NewHeight = CurrentBlockHeight + 1,
                 %% populate this from the last block, unless the last block was the genesis
