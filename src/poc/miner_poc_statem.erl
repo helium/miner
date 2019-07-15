@@ -182,7 +182,7 @@ targeting(EventType, EventContent, Data) ->
 challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
                                                                         onion_keys=OnionKey
                                                                        }=Data) ->
-    case blockchain_poc_path:build(Entropy, Target, Gateways, Height) of
+    case blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
@@ -550,6 +550,21 @@ target_test() ->
     meck:expect(blockchain_worker, blockchain, fun() -> blockchain end),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> <<"unknown">> end),
     meck:expect(blockchain, ledger, fun(_) -> ledger end),
+    meck:expect(blockchain,
+                config,
+                fun(min_score, _) ->
+                        {ok, 0.2};
+                   (h3_path_res, _) ->
+                        {ok, 8};
+                   (h3_ring_size, _) ->
+                        {ok, 2};
+                   (alpha_decay, _) ->
+                        {ok, 0.007};
+                   (beta_decay, _) ->
+                        {ok, 0.0005};
+                   (max_staleness, _) ->
+                        {ok, 100000}
+                end),
 
     Block = blockchain_block_v1:new(#{prev_hash => <<>>,
                                       height => 2,
