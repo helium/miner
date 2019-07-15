@@ -180,7 +180,7 @@ dist(Config0) ->
             ActiveGateways = ct_rpc:call(M, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
             lists:foreach(
                 fun({A, G}) ->
-                        {_, _, Score} = blockchain_ledger_gateway_v1:score(A, G, Height, Ledger),
+                        {_, _, Score} = ct_rpc:call(M, blockchain_ledger_gateway_v1, score, [A, G, Height, Ledger]),
                     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Score])
                 end,
                 maps:to_list(ActiveGateways)
