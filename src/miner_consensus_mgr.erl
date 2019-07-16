@@ -72,7 +72,7 @@ initial_dkg(GenesisTransactions, Addrs, N, Curve) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs, N, Curve}, infinity).
 
 maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
-    lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
+    lager:debug("not starting election ~p", [{_Hash, Height, NextElection}]),
     ok;
 maybe_start_election(Hash, _, NextElection) ->
     start_election(Hash, NextElection, NextElection).
@@ -219,9 +219,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                          libp2p_group_relcast, GroupArg),
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     ok = miner:handoff_consensus(Group),
-    {reply, ok, State#state{current_dkg = undefined,
-                            delay = 0,
-                            election_running = false}};
+    {reply, ok, State#state{current_dkg = undefined}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State = #state{batch_size = BatchSize}) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
@@ -346,15 +344,15 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
             NextRestart = Height + Interval + Delay,
-            lager:info("restart? h ~p next ~p", [Height, NextRestart]),
-
             case blockchain_block:height(Block) of
                 NewHeight when NewHeight >= NextRestart ->
+                    lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
                     catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
                     %% restart the dkg
                     State1 = restart_election(State, Hash, Height),
                     {noreply, State1};
-                _Error ->
+                NewHeight ->
+                    lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
                     {noreply, State}
                 end;
         _Error ->
@@ -434,7 +432,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     SortedAddrs = lists:sort(Addrs),
 
     ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
-    lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
+    lager:info("ConsensusAddrs: ~p", [animalize(ConsensusAddrs)]),
     %% in the consensus group, run the dkg
     GenesisBlockTransactions = GenesisTransactions ++
         [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
@@ -453,7 +451,7 @@ do_dkg(Addrs, Artifact, Sign, Done,
     F = ((N-1) div 3),
     lager:info("F: ~p", [F]),
     ConsensusAddrs = lists:sublist(Addrs, 1, N),
-    lager:info("ConsensusAddrs: ~p", [ConsensusAddrs]),
+    lager:info("ConsensusAddrs: ~p", [animalize(ConsensusAddrs)]),
     MyAddress = blockchain_swarm:pubkey_bin(),
     lager:info("MyAddress: ~p", [MyAddress]),
     case lists:member(MyAddress, ConsensusAddrs) of
@@ -501,10 +499,17 @@ do_dkg(Addrs, Artifact, Sign, Done,
             {true, State#state{consensus_pos = Pos,
                                current_dkg = DKGGroup}};
         false ->
-            lager:info("not in DKG this round at height ~p", [Height]),
+            lager:info("not in DKG this round at height ~p ~p", [Height, Delay]),
             {false, State#state{consensus_pos = undefined,
                                 current_dkg = undefined}}
     end.
 
 consensus_group_name(Height, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
+
+animalize(L) ->
+    lists:map(fun(X) ->
+                      {ok, N} = erl_angry_purple_tiger:animal_name(X),
+                      N
+              end,
+              L).
