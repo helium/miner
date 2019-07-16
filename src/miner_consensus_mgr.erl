@@ -72,7 +72,7 @@ initial_dkg(GenesisTransactions, Addrs, N, Curve) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs, N, Curve}, infinity).
 
 maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
-    lager:info("not starting election ~p", [{_Hash, Height, NextElection}]),
+    lager:debug("not starting election ~p", [{_Hash, Height, NextElection}]),
     ok;
 maybe_start_election(Hash, _, NextElection) ->
     start_election(Hash, NextElection, NextElection).
@@ -340,8 +340,6 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
             NextRestart = Height + Interval + Delay,
-            lager:info("restart? h ~p next ~p", [Height, NextRestart]),
-
             case blockchain_block:height(Block) of
                 NewHeight when NewHeight >= NextRestart ->
                     lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
