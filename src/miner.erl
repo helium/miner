@@ -390,13 +390,15 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                     case blockchain_election:has_new_group(ValidTransactions) of
                         {true, _} ->
                             Epoch = ElectionEpoch0 + 1,
-                            {ok, Rewards} = blockchain_txn_rewards_v1:calculate_rewards(CurrentBlockHeight, Chain),
+                            Start = EpochStart0 + 1,
+                            End = CurrentBlockHeight,
+                            {ok, Rewards} = blockchain_txn_rewards_v1:calculate_rewards(Start, End, Chain),
                             lager:info("Rewards: ~p~n", [Rewards]),
-                            RewardsTxn = blockchain_txn_rewards_v1:new(Rewards, CurrentBlockHeight),
+                            RewardsTxn = blockchain_txn_rewards_v1:new(Start, End, Rewards),
                             [ConsensusGroupTxn] = lists:filter(fun(T) ->
                                                                        blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
                                                                end, ValidTransactions),
-                            {Epoch, NewHeight, [ConsensusGroupTxn, RewardsTxn]};
+                            {Epoch, NewHeight, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
                     end,
