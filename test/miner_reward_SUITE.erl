@@ -186,13 +186,13 @@ basic_test(Config) ->
                                Txns = ct_rpc:call(Miner, blockchain_block, transactions, [ElectionRewardBlock]),
                                ?assertEqual(length(Txns), 2),
                                [First, Second] = Txns,
-                               ?assertEqual(blockchain_txn:type(First), blockchain_txn_consensus_group_v1),
-                               ?assertEqual(blockchain_txn:type(Second), blockchain_txn_rewards_v1),
-                               Rewards = blockchain_txn_rewards_v1:rewards(Second),
+                               ?assertEqual(blockchain_txn:type(Second), blockchain_txn_consensus_group_v1),
+                               ?assertEqual(blockchain_txn:type(First), blockchain_txn_rewards_v1),
+                               Rewards = blockchain_txn_rewards_v1:rewards(First),
                                ?assertEqual(length(Rewards), length(ConsensusMiners)),
                                lists:foreach(fun(R) ->
                                                      ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
-                                                     ?assertEqual(blockchain_txn_reward_v1:amount(R), 496032)
+                                                     ?assertEqual(blockchain_txn_reward_v1:amount(R), 83)
                                              end,
                                              Rewards)
                        end,
@@ -208,17 +208,17 @@ basic_test(Config) ->
                                      lists:member(Miner, ConsensusMiners),
                                      lists:member(Miner, NonConsensusMiners)} of
                                    {true, _, true, _} ->
-                                       500032 = Bal;
+                                       ?assertEqual(4083, Bal);
                                    {true, _, _, true} ->
-                                       4000 = Bal;
+                                       ?assertEqual(4000, Bal);
                                    {_, true, true, _} ->
-                                       502032 = Bal;
+                                       ?assertEqual(6083, Bal);
                                    {_, true, _, true} ->
-                                       6000 = Bal;
+                                       ?assertEqual(6000, Bal);
                                    {_, _, true, _} ->
-                                       501032 = Bal;
+                                       ?assertEqual(5083, Bal);
                                    _ ->
-                                       5000 = Bal
+                                       ?assertEqual(5000, Bal)
                                end
 
                        end,
