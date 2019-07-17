@@ -127,11 +127,11 @@ handle_command(Txn, State=#state{chain=Chain}) ->
                             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
                     end;
                 Error ->
-                    lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                    lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
                     {reply, Error, ignore}
             end;
         Error ->
-            lager:error("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+            lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
             {reply, Error, ignore}
     end.
 
