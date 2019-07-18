@@ -38,7 +38,7 @@ init([Members, Id, N, F, T, Curve,
       {SigMod, SigFun},
       {DoneMod, DoneFun}]) ->
     {G1, G2} = generate(Curve, Members),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}]),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}, {elections, false}]),
     lager:info("DKG~p started", [Id]),
     {ok, #state{n = N,
                 id = Id,
@@ -69,12 +69,14 @@ handle_command(status, State) ->
                        }, Map),
     {reply, Map1, ignore};
 handle_command(timeout, State) ->
-    case dkg_hybriddkg:handle_msg(State#state.dkg, State#state.id, timeout) of
-        {_DKG, ok} ->
-            {reply, ok, [], State#state{timer=undefined}};
-        {NewDKG, {send, Msgs}} ->
-            {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG, timer=undefined}}
-    end.
+    %% elections are disabled
+    %case dkg_hybriddkg:handle_msg(State#state.dkg, State#state.id, timeout) of
+        %{_DKG, ok} ->
+            %{reply, ok, [], State#state{timer=undefined}};
+        %{NewDKG, {send, Msgs}} ->
+            %{reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG, timer=undefined}}
+    %end.
+    {reply, ok, State}.
 
 handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                            curve = Curve,
@@ -136,24 +138,27 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                         OldTimer ->
                             OldTimer  ! cancel
                     end,
-                    Parent = self(),
-                    Pid = spawn(fun() ->
-                                        receive
-                                            cancel -> ok
-                                        after 300000 ->
-                                                  libp2p_group_relcast_server:handle_input(Parent, timeout)
-                                        end
-                                end),
-                    {State#state{dkg=NewDKG, timer=Pid}, []};
+                    %% elections are disabled, so we don't need a timeout here
+                    %Parent = self(),
+                    %Pid = spawn(fun() ->
+                                        %receive
+                                            %cancel -> ok
+                                        %after 300000 ->
+                                                  %libp2p_group_relcast_server:handle_input(Parent, timeout)
+                                        %end
+                                %end),
+                    %% if you re-enable the above, store the Pid as timer in the state
+                    {State#state{dkg=NewDKG}, []};
                 {NewDKG, {result, {Shard, VK, VKs}}} ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve),
                                                    Shard, State#state.id - 1),
-                    case State#state.timer of
-                        undefined -> ok;
-                        OldTimer ->
-                            OldTimer ! cancel
-                    end,
+                    %% not needed since elections are disabled
+                    %case State#state.timer of
+                        %undefined -> ok;
+                        %OldTimer ->
+                            %OldTimer ! cancel
+                    %end,
                     %% We need to accumulate `Threshold` count ECDSA signatures over
                     %% the provided artifact.  The artifact is (just once) going to be
                     %% a genesis block, the other times it will be the evidence an
