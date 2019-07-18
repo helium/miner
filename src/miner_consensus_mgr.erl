@@ -508,7 +508,8 @@ consensus_group_name(Height, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
 
 animalize(L) ->
-    lists:map(fun(X) ->
+    lists:map(fun(X0) ->
+                      X = libp2p_crypto:bin_to_b58(X0),
                       {ok, N} = erl_angry_purple_tiger:animal_name(X),
                       N
               end,
