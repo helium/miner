@@ -1,6 +1,6 @@
 -module(miner_ct_utils).
 
--export([pmap/2,
+-export([pmap/2, pmap/3,
          wait_until/1,
          wait_until/3,
          wait_until_disconnected/2,
@@ -18,6 +18,9 @@
         ]).
 
 pmap(F, L) ->
+    pmap(F, L, timer:seconds(90)).
+
+pmap(F, L, Timeout) ->
     Parent = self(),
     lists:foldl(
       fun(X, N) ->
@@ -26,7 +29,14 @@ pmap(F, L) ->
                          end),
               N+1
       end, 0, L),
-    L2 = [receive {pmap, N, R} -> {N,R} end || _ <- L],
+    Ref = erlang:send_after(Timeout, self(), boom),
+    L2 = [receive
+              {pmap, N, R} ->
+                  {N,R};
+              boom ->
+                  error(timeout_expired)
+          end || _ <- L],
+    erlang:cancel_timer(Ref),
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
 

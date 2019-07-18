@@ -44,7 +44,8 @@ initial_dkg_test(Config) ->
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialPaymentTransactions, Addresses, N, Curve])
+                                       [InitialPaymentTransactions, Addresses, N, Curve],
+                                       timer:seconds(60))
                    end, Miners),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+    ?assertEqual([ok], lists:usort(DKGResults)),
     {comment, DKGResults}.
