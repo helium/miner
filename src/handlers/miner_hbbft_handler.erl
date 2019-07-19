@@ -346,7 +346,7 @@ map_ids(Sigs, Members0) ->
     Members = lists:zip(Members0, lists:seq(1, length(Members0))),
     lists:map(fun({Addr, _Sig}) ->
                       %% find member index
-                      {_, ID} = list:keyfind(Addr, 1, Members),
+                      {_, ID} = lists:keyfind(Addr, 1, Members),
                       ID
               end,
               Sigs).
