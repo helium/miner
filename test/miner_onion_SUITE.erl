@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
 -include("pb/concentrate_pb.hrl").
 
 -export([
@@ -72,15 +73,21 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
-                                                                                             bandwidth='BW125kHz',
-                                                                                             spreading='SF8',
-                                                                                             coderate='CR4_5',
-                                                                                             freq=trunc(911.3e6),
-                                                                                             radio='R0',
-                                                                                             crc_check=true}}})),
-    {ok, {{127,0,0,1}, 5678, Pkt1}} = gen_udp:recv(Sock, 0, 5000),
-    #miner_Req_pb{kind={tx, #miner_TxReq_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>}}} = concentrate_pb:decode_msg(Pkt1, miner_Req_pb),
+    Rx0 = #helium_LongFiRxPacket_pb{
+        crc_check=true,
+        spreading= 'SF8',
+        payload= <<0:32/integer, 1:8/integer, Onion/binary>>
+    },
+    Resp0 = #helium_LongFiResp_pb{id=0, kind={rx, Rx0}},
+    Packet0 = helium_longfi_pb:encode_msg(Resp0, helium_LongFiResp_pb),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet0),
+    {ok, {{127,0,0,1}, 5678, Packet1}} = gen_udp:recv(Sock, 0, 5000),
+
+    Got0 = helium_longfi_pb:decode_msg(Packet1, helium_LongFiReq_pb),
+    {_, Got0Uplink} = Got0#helium_LongFiReq_pb.kind,
+    Got0Payload = Got0Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    ?assertMatch(<<0:32/integer, 1:8/integer, _/binary>>, Got0Payload),
+    <<0:32/integer, 1:8/integer, X/binary>> = Got0Payload,
 
     timer:sleep(2000),
     %% check that the packet size is the same
@@ -105,7 +112,7 @@ basic(_Config) ->
         Parent ! {passed, Passed}
     end),
 
-    {ok, _Server} = miner_onion_server:start_link(#{
+    {ok, Server1} = miner_onion_server:start_link(#{
         radio_udp_bind_ip => {127,0,0,1},
         radio_udp_bind_port => 5678,
         radio_udp_send_ip => {127,0,0,1},
@@ -114,34 +121,42 @@ basic(_Config) ->
     }),
 
     %% check we can't decrypt the original
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Onion/binary>>,
-                                                                      bandwidth='BW125kHz',
-                                                                      spreading='SF8',
-                                                                      coderate='CR4_5',
-                                                                      freq=trunc(911.3e6),
-                                                                      radio='R0',
-                                                                      crc_check=true}}})),
-
+    Rx2 = #helium_LongFiRxPacket_pb{
+        crc_check=true,
+        spreading= 'SF8',
+        payload= <<0:32/integer, 1:8/integer, Onion/binary>>
+    },
+    Resp2 = #helium_LongFiResp_pb{id=0, kind={rx, Rx2}},
+    Packet2 = helium_longfi_pb:encode_msg(Resp2, helium_LongFiResp_pb),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet2),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, X/binary>>,
-                                                                      bandwidth='BW125kHz',
-                                                                      spreading='SF8',
-                                                                      coderate='CR4_5',
-                                                                      freq=trunc(911.3e6),
-                                                                      radio='R0',
-                                                                      crc_check=true}}})),
-    {ok, {{127,0,0,1}, 5678, Pkt2}} = gen_udp:recv(Sock, 0, 5000),
-    #miner_Req_pb{kind={tx, #miner_TxReq_pb{payload= <<0:32/integer, 1:8/integer, Y/binary>>}}} = concentrate_pb:decode_msg(Pkt2, miner_Req_pb),
+    Rx3 = #helium_LongFiRxPacket_pb{
+        crc_check=true,
+        spreading= 'SF8',
+        payload= <<0:32/integer, 1:8/integer, X/binary>>
+    },
+    Resp3 = #helium_LongFiResp_pb{id=0, kind={rx, Rx3}},
+    Packet3 = helium_longfi_pb:encode_msg(Resp3, helium_LongFiResp_pb),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet3),
+    {ok, {{127,0,0,1}, 5678, Packet4}} = gen_udp:recv(Sock, 0, 5000),
+
+
+    Got1 = helium_longfi_pb:decode_msg(Packet4, helium_LongFiReq_pb),
+    {_, Got1Uplink} = Got1#helium_LongFiReq_pb.kind,
+    Got1Payload = Got1Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    ?assertMatch(<<0:32/integer, 1:8/integer, _/binary>>, Got1Payload),
+    <<0:32/integer, 1:8/integer, Y/binary>> = Got1Payload,
 
     %% check we can't decrypt the next layer
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload= <<0:32/integer, 1:8/integer, Y/binary>>,
-                                                                      bandwidth='BW125kHz',
-                                                                      spreading='SF8',
-                                                                      coderate='CR4_5',
-                                                                      freq=trunc(911.3e6),
-                                                                      radio='R0',
-                                                                      crc_check=true}}})),
+    Rx5 = #helium_LongFiRxPacket_pb{
+        crc_check=true,
+        spreading= 'SF8',
+        payload= <<0:32/integer, 1:8/integer, Y/binary>>
+    },
+    Resp5 = #helium_LongFiResp_pb{id=0, kind={rx, Rx5}},
+    Packet5 = helium_longfi_pb:encode_msg(Resp5, helium_LongFiResp_pb),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet5),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
@@ -157,4 +172,5 @@ basic(_Config) ->
     meck:unload(miner_onion_server),
     ?assert(meck:validate(blockchain_swarm)),
     meck:unload(blockchain_swarm),
+    gen_server:stop(Server1),
     ok.
