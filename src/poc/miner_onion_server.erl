@@ -8,7 +8,6 @@
 -behavior(gen_server).
 
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
--include("pb/concentrate_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
