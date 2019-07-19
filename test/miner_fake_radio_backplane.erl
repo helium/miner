@@ -33,10 +33,16 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPSock, udp_ports=Ports}) ->
-    #miner_Req_pb{kind={tx, #miner_TxReq_pb{payload=Payload}}} = concentrate_pb:decode_msg(InPacket, miner_Req_pb),
-    lists:foreach(fun(Port) ->
-                          gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, concentrate_pb:encode_msg(#miner_Resp_pb{kind={rx_packet, #miner_RxPacket_pb{payload=Payload, crc_check=true}}}))
-                  end, Ports -- [SrcPort]),
+    Decoded = helium_longfi_pb:decode_msg(InPacket, helium_LongFiReq_pb),
+    {_, Uplink} = Decoded#helium_LongFiReq_pb.kind,
+    Payload = Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    lists:foreach(
+        fun(Port) ->
+            Resp = #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{payload=Payload, crc_check=true}}},
+            gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, helium_longfi_pb:encode_msg(Resp))
+        end,
+        Ports -- [SrcPort]
+    ),
     {noreply, State};
 handle_info(Msg, State) ->
     ct:pal("unhandled info ~p", [Msg]),
