@@ -239,8 +239,8 @@ handle_cast(_Msg, State) ->
 handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
     NewState =
         try helium_longfi_pb:decode_msg(Packet, helium_LongFiResp_pb) of
-            Packet ->
-                handle_packet(Packet, State)
+            Resp ->
+                handle_packet(Resp, State)
         catch
             What:Why ->
                 lager:warning("Failed to handle radio packet ~p -- ~p:~p", [Packet, What, Why]),
