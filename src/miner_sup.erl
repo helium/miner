@@ -67,16 +67,60 @@ init(_Args) ->
         undefined ->
             SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
             ok = filelib:ensure_dir(SwarmKey),
-            {PublicKey, ECDHFun, SigFun} =
+            {PublicKey, ECDHFun, SigFun, OnboardingKey} =
                 case libp2p_crypto:load_keys(SwarmKey) of
                     {ok, #{secret := PrivKey0, public := PubKey}} ->
-                        {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)};
+                        {PubKey,
+                         libp2p_crypto:mk_ecdh_fun(PrivKey0),
+                         libp2p_crypto:mk_sig_fun(PrivKey0),
+                         undefined};
                     {error, enoent} ->
                         KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
                         ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
-                        {PubKey, libp2p_crypto:mk_ecdh_fun(PrivKey0), libp2p_crypto:mk_sig_fun(PrivKey0)}
-                end;
-        {PublicKey, ECDHFun, SigFun} ->
+                        {PubKey,
+                         libp2p_crypto:mk_ecdh_fun(PrivKey0),
+                         libp2p_crypto:mk_sig_fun(PrivKey0),
+                         undefined}
+                end,
+            ECCWorker = [];
+        {ecc, Props} when is_list(Props) ->
+            KeySlot = proplists:get_value(key_slot, Props, 0),
+            OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
+            %% Create a temporary ecc link to get the public key and
+            %% onboarding keys for the given slots as well as the
+            {ok, ECCPid} = ecc508:start_link(),
+            %% Define a helper funtion to retry automatic keyslot key
+            %% generation and locking the first time we encounter an
+            %% empty keyslot.
+            GetPublicKey = fun GetPublicKey() ->
+                                   case ecc508:genkey(ECCPid, public, KeySlot) of
+                                       {ok, PubKey} -> {ok, {ecc_compact, PubKey}};
+                                       {error, _} ->
+                                           {ok, _} = ecc508:genkey(ECCPid, private, KeySlot),
+                                           ecc508:lock(ECCPid, {slot, KeySlot}),
+                                           GetPublicKey()
+                                   end
+                           end,
+            ecc508:wake(ECCPid),
+            %% Get (or generate) the public and onboarding keys
+            {ok, PublicKey} = GetPublicKey(),
+            {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
+            %% The signing and ecdh functions will use an actual
+            %% worker against a named process.
+            SigFun = fun(Bin) ->
+                             {ok, Sig} = miner_ecc_worker:sign(Bin),
+                             Sig
+                     end,
+            ECDHFun = fun(PubKey) ->
+                              {ok, Bin} = miner_ecc_worker:ecdh(PubKey),
+                              Bin
+                      end,
+            %% Stop ephemeral ecc pid and let the named worker take
+            %% over
+            ecc508:stop(ECCPid),
+            ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot])];
+        {PublicKey, ECDHFun, SigFun, OnboardingKey} ->
+            ECCWorker = [],
             ok
     end,
 
@@ -100,7 +144,8 @@ init(_Args) ->
         [
          {block_time, BlockTime},
          {radio_device, RadioDevice},
-         {election_interval, application:get_env(miner, election_interval, 30)}
+         {election_interval, application:get_env(miner, election_interval, 30)},
+         {onboarding_key, OnboardingKey}
         ],
 
     ElectOpts =
@@ -132,9 +177,14 @@ init(_Args) ->
             _ -> []
         end,
 
-    ChildSpecs =  [
-        ?SUP(blockchain_sup, [BlockchainOpts]),
-        ?WORKER(miner, [MinerOpts]),
-        ?WORKER(miner_consensus_mgr, [ElectOpts])
-    ] ++ EbusServer ++ OnionServer ++ [?WORKER(miner_poc_statem, [POCOpts])],
+    ChildSpecs =
+        ECCWorker++
+        [
+         ?SUP(blockchain_sup, [BlockchainOpts]),
+         ?WORKER(miner, [MinerOpts]),
+         ?WORKER(miner_consensus_mgr, [ElectOpts])
+        ] ++
+        EbusServer ++
+        OnionServer ++
+        [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.

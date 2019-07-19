@@ -13,6 +13,7 @@
 -export([
     start_link/1,
     pubkey_bin/0,
+    onboarding_key_bin/0,
     add_gateway_txn/3,
     assert_loc_txn/5,
     relcast_info/1,
@@ -49,7 +50,8 @@
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
     election_epoch = 1 :: pos_integer(),
-    blockchain_ref = make_ref() :: reference()
+    blockchain_ref = make_ref() :: reference(),
+    onboarding_key=undefined :: undefined | public_key:public_key()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -101,6 +103,14 @@ start_link(Args) ->
 -spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
 pubkey_bin() ->
     gen_server:call(?MODULE, pubkey_bin).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec onboarding_key_bin() -> libp2p_crypto:pubkey_bin().
+onboarding_key_bin() ->
+    gen_server:call(?MODULE, onboarding_key_bin).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -282,7 +292,7 @@ version() ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(_Args) ->
+init(Args) ->
     lager:info("STARTING UP MINER"),
     ok = blockchain_event:add_handler(self()),
     BlockchainRef = erlang:monitor(process, blockchain_worker),
@@ -301,12 +311,19 @@ init(_Args) ->
                         election_epoch = ElectionEpoch,
                         consensus_start = EpochStart,
                         election_interval = Interval,
-                        blockchain_ref = BlockchainRef}}
+                        blockchain_ref = BlockchainRef,
+                        onboarding_key = proplists:get_value(onboarding_key, Args, undefined)}}
     end.
 
 handle_call(pubkey_bin, _From, State) ->
     Swarm = blockchain_swarm:swarm(),
     {reply, libp2p_swarm:pubkey_bin(Swarm), State};
+handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=undefined}) ->
+    %% Return an empty binary if no onboarding key is present
+    {reply, <<>>, State};
+handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=PubKey}) ->
+
+    {reply, libp2p_crypto:pubkey_to_bin({ecc_compact, PubKey}), State};
 handle_call({add_gateway_txn, Owner, Fee, Amount}, _From, State=#state{}) ->
     {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
