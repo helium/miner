@@ -20,6 +20,7 @@
          deferred = [],
          signatures = [],
          signatures_required = 0,
+         sig_phase = sig :: sig | gossip | done,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
          chain :: undefined | blockchain:blockchain(),
@@ -73,8 +74,11 @@ handle_command({status, Ref, Worker}, State) ->
                        undefined -> undefined;
                        A -> blockchain_util:bin_to_hex(crypto:hash(sha256, A))
                    end,
-    Worker ! {Ref, maps:merge(#{signatures_required => State#state.signatures_required,
-                                signatures => length(State#state.signatures),
+    Sigs = map_ids(State#state.signatures, State#state.members),
+    Worker ! {Ref, maps:merge(#{signatures_required =>
+                                    State#state.signatures_required - length(Sigs),
+                                signatures => Sigs,
+                                sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_util:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
                                }, Map)},
@@ -102,9 +106,9 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=sig}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=sig}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -140,22 +144,38 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
     %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
     Round = hbbft:round(HBBFT),
     case Msg of
+        {signatures, R, _Signatures} when R > Round ->
+            defer;
+        {signatures, R, _Signatures} when R < Round ->
+            ignore;
+        {signatures, _R, Signatures} ->
+            Sigs = dedup_signatures(Signatures, State),
+            NewState = State#state{signatures = Sigs},
+            case enough_signatures(NewState) of
+                {ok, done, Signatures} when Round > NewState#state.signed ->
+                    %% no point in doing this more than once
+                    ok = miner:signed_block(Signatures, State#state.artifact),
+                    {NewState#state{signed = Round, sig_phase = done}, []};
+                _ ->
+                    {NewState, []}
+            end;
         {signature, R, Address, Signature} ->
             case R == Round andalso lists:member(Address, State#state.members) andalso
                  %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
                  (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
                 true ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
-                    NewState1 =
-                        case enough_signatures(NewState) of
-                            {ok, Signatures} when Round > NewState#state.signed ->
-                                %% no point in doing this more than once
-                                ok = miner:signed_block(Signatures, State#state.artifact),
-                                NewState#state{signed = Round};
-                            _ ->
-                                NewState
-                        end,
-                    {NewState1, []};
+                    case enough_signatures(NewState) of
+                        {ok, done, Signatures} when Round > NewState#state.signed ->
+                            %% no point in doing this more than once
+                            ok = miner:signed_block(Signatures, State#state.artifact),
+                            {NewState#state{signed = Round, sig_phase = done}, []};
+                        {ok, gossip, Signatures} ->
+                            {NewState#state{sig_phase = gossip, signatures = Signatures},
+                             [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                        _ ->
+                            {NewState, []}
+                    end;
                 false when R > Round ->
                     defer;
                 false when R < Round ->
@@ -235,22 +255,30 @@ deserialize(#{sk := SKSer,
     SK = tpke_privkey:deserialize(binary_to_term(SKSer)),
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
-    DeserList = lists:map(fun(hbbft) ->
-                                  HBBFT;
-                             (sk) ->
-                                  SK;
-                             (chain) ->
+    DeserList =
+        lists:map(
+          fun(hbbft) ->
+                  HBBFT;
+             (sk) ->
+                  SK;
+             (chain) ->
+                  undefined;
+             (K)->
+                  case StateMap of
+                      #{K := V} ->
+                          case V of
+                              undefined ->
                                   undefined;
-                             (K)->
-                                  #{K := V} = StateMap,
-                                  case V of
-                                      undefined ->
-                                          undefined;
-                                      _ ->
-                                          binary_to_term(V)
-                                  end
-                          end,
-                          Fields),
+                              _ ->
+                                  binary_to_term(V)
+                          end;
+                      _ when K == sig_phase ->
+                          sig;
+                      _ ->
+                          undefined
+                  end
+          end,
+          Fields),
     list_to_tuple([state | DeserList]).
 
 restore(OldState, NewState) ->
@@ -268,11 +296,21 @@ fixup_msgs(Msgs) ->
                       {multicast, term_to_binary(NextMsg)}
               end, Msgs).
 
+dedup_signatures(InSigs0, #state{signatures = Sigs0}) ->
+    Sigs = lists:keysort(1, Sigs0),
+    InSigs = lists:keysort(1, InSigs0),
+    %% favor existing sigs, in case they differ, but don't revalidate
+    %% at this point
+    lists:keymerge(1, Sigs, InSigs).
+
 enough_signatures(#state{artifact=undefined}) ->
     false;
-enough_signatures(#state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
+enough_signatures(#state{sig_phase = sig, signatures = Sigs, f = F}) when length(Sigs) < F + 1 ->
     false;
-enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatures, signatures_required=Threshold}) ->
+enough_signatures(#state{sig_phase = done, signatures = Signatures}) ->
+    {ok, done, Signatures};
+enough_signatures(#state{sig_phase = Phase, artifact=Artifact, members=Members,
+                         signatures=Signatures, signatures_required=Threshold}) ->
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
                                             Members,
@@ -282,11 +320,16 @@ enough_signatures(#state{artifact=Artifact, members=Members, signatures=Signatur
             %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets
             %% depending on message order. Given that the underlying artifact they're signing is the same though,
             %% it should be ok as long as we disregard the signatures for testing equality but check them for validity
-            case length(ValidSignatures) >= Threshold of
-                true ->
-                    {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
-                false ->
-                    false
+            case Phase of
+                gossip ->
+                    case length(ValidSignatures) >= Threshold of
+                        true ->
+                            {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+                        false ->
+                            false
+                    end;
+                sig ->
+                    {ok, gossip, lists:sort(ValidSignatures)}
             end;
         false ->
             false
@@ -298,6 +341,15 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
                          libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))
                  end, Signatures),
     State#state{signatures=FilteredSignatures}.
+
+map_ids(Sigs, Members0) ->
+    Members = lists:zip(Members0, lists:seq(1, length(Members0))),
+    lists:map(fun({Addr, _Sig}) ->
+                      %% find member index
+                      {_, ID} = list:keyfind(Addr, 1, Members),
+                      ID
+              end,
+              Sigs).
 
 filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
