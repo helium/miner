@@ -366,18 +366,20 @@ handle_packet(Packet, State) ->
 crc_status(true) -> 1;
 crc_status(false) -> 0.
 
-tx_params(Len) when Len < 54 ->
-    {'SF9', 'CR4_6'};
-tx_params(Len) when Len < 83 ->
-    {'SF8', 'CR4_8'};
-tx_params(Len) when Len < 99 ->
-    {'SF8', 'CR4_7'};
-tx_params(Len) when Len < 115 ->
-    {'SF8', 'CR4_6'};
-tx_params(Len) when Len < 139 ->
-    {'SF8', 'CR4_5'};
-tx_params(Len) when Len < 160 ->
-    {'SF7', 'CR4_8'};
 tx_params(_) ->
+    {'SF10', 'CR4_8'}.
+%tx_params(Len) when Len < 54 ->
+    %{'SF9', 'CR4_6'};
+%tx_params(Len) when Len < 83 ->
+    %{'SF8', 'CR4_8'};
+%tx_params(Len) when Len < 99 ->
+    %{'SF8', 'CR4_7'};
+%tx_params(Len) when Len < 115 ->
+    %{'SF8', 'CR4_6'};
+%tx_params(Len) when Len < 139 ->
+    %{'SF8', 'CR4_5'};
+%tx_params(Len) when Len < 160 ->
+    %{'SF7', 'CR4_8'};
+%tx_params(_) ->
     %% onion packets won't be this big, but this will top out around 180 bytes
-    {'SF7', 'CR4_7'}.
+    %{'SF7', 'CR4_7'}.
