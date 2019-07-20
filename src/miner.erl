@@ -48,7 +48,8 @@
     election_interval = infinity :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting :: undefined | pid() | {pending, [binary()], pos_integer(), blockchain_block:block(), boolean()},
-    election_epoch = 1 :: pos_integer()
+    election_epoch = 1 :: pos_integer(),
+    blockchain_ref = make_ref() :: reference()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -281,6 +282,7 @@ version() ->
 init(_Args) ->
     lager:info("STARTING UP MINER"),
     ok = blockchain_event:add_handler(self()),
+    BlockchainRef = erlang:monitor(process, blockchain_worker),
     case blockchain_worker:blockchain() of
         undefined ->
             {ok, #state{}};
@@ -295,7 +297,8 @@ init(_Args) ->
             {ok, #state{blockchain = Chain,
                         election_epoch = ElectionEpoch,
                         consensus_start = EpochStart,
-                        election_interval = Interval}}
+                        election_interval = Interval,
+                        blockchain_ref = BlockchainRef}}
     end.
 
 handle_call(pubkey_bin, _From, State) ->
@@ -439,6 +442,9 @@ handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
+handle_info({'DOWN', Ref, process, _, Reason}, State = #state{blockchain_ref=Ref}) ->
+    lager:warning("Blockchain worker exited with reason ~p", [Reason]),
+    {stop, Reason, State};
 handle_info(block_timeout, State) when State#state.consensus_group == undefined ->
     {noreply, State};
 handle_info(block_timeout, State) ->
