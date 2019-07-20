@@ -25,7 +25,7 @@ fi
 nodes=$(seq 8)
 
 # remove existing artifacts
-rm -rf _build/dev*
+rm -rf _build/dev+miner*
 
 # build 8 dev releases
 make devrel

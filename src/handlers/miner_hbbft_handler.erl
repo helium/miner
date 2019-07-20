@@ -296,12 +296,10 @@ fixup_msgs(Msgs) ->
                       {multicast, term_to_binary(NextMsg)}
               end, Msgs).
 
-dedup_signatures(InSigs0, #state{signatures = Sigs0}) ->
-    Sigs = lists:keysort(1, Sigs0),
-    InSigs = lists:keysort(1, InSigs0),
+dedup_signatures(InSigs, #state{signatures = Sigs}) ->
     %% favor existing sigs, in case they differ, but don't revalidate
     %% at this point
-    lists:keymerge(1, Sigs, InSigs).
+    lists:usort(Sigs ++ InSigs).
 
 enough_signatures(#state{artifact=undefined}) ->
     false;
@@ -344,12 +342,13 @@ filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members
 
 map_ids(Sigs, Members0) ->
     Members = lists:zip(Members0, lists:seq(1, length(Members0))),
-    lists:map(fun({Addr, _Sig}) ->
-                      %% find member index
-                      {_, ID} = lists:keyfind(Addr, 1, Members),
-                      ID
-              end,
-              Sigs).
+    IDs = lists:map(fun({Addr, _Sig}) ->
+                            %% find member index
+                            {_, ID} = lists:keyfind(Addr, 1, Members),
+                            ID
+                    end,
+                    Sigs),
+    lists:usort(IDs).
 
 filter_txn_buf(HBBFT, Chain) ->
     Buf = hbbft:buf(HBBFT),
