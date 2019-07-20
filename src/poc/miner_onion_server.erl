@@ -22,7 +22,7 @@
 
 -ifdef(TEST).
 -define(TX_RAND_SLEEP, 1).
--define(TX_COUNT, 3).
+-define(TX_COUNT, 1).
 -else.
 -define(TX_RAND_SLEEP, 15000).
 -define(TX_COUNT, 3).
