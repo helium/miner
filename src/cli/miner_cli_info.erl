@@ -20,7 +20,8 @@ register_all_usage() ->
                    info_usage(),
                    info_height_usage(),
                    info_in_consensus_usage(),
-                   info_name_usage()
+                   info_name_usage(),
+                   info_block_age_usage()
                   ]).
 
 register_all_cmds() ->
@@ -31,7 +32,8 @@ register_all_cmds() ->
                    info_cmd(),
                    info_height_cmd(),
                    info_in_consensus_cmd(),
-                   info_name_cmd()
+                   info_name_cmd(),
+                   info_block_age_cmd()
                   ]).
 %%
 %% info
@@ -123,3 +125,28 @@ info_name(["info", "name"], [], []) ->
     [clique_status:text(Name)];
 info_name([_, _, _], [], []) ->
     usage.
+
+%%
+%% info block_age
+%%
+
+info_block_age_cmd() ->
+    [
+     [["info", "block_age"], [], [], fun info_block_age/3]
+    ].
+
+info_block_age_usage() ->
+    [["info", "block_age"],
+     ["info block_age \n\n",
+      "  Get age of the latest block in the chain, in seconds.\n\n"
+     ]
+    ].
+
+info_block_age(["info", "block_age"], [], []) ->
+    Chain = blockchain_worker:blockchain(),
+    {ok, Block} = blockchain:head_block(Chain),
+    Age = erlang:system_time(seconds) - blockchain_block:time(Block),
+    [clique_status:text(integer_to_list(Age))];
+info_block_age([_, _, _], [], []) ->
+    usage.
+
