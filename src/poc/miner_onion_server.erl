@@ -239,7 +239,7 @@ handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_
     NewState =
         try helium_longfi_pb:decode_msg(Packet, helium_LongFiResp_pb) of
             Resp ->
-                handle_packet(Resp, State)
+                handle_packet(Resp, Packet, State)
         catch
             What:Why ->
                 lager:warning("Failed to handle radio packet ~p -- ~p:~p", [Packet, What, Why]),
@@ -338,11 +338,11 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-handle_packet(#helium_LongFiResp_pb{id=ID, kind=Kind}, State) ->
-    handle_packet(ID, Kind, State).
+handle_packet(#helium_LongFiResp_pb{id=ID, kind=Kind}, _Packet, State) ->
+    handle_packet(ID, Kind, _Packet, State).
 
 % This is aan onion packet cause oui/device_id = 0
-handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_id=0, rssi=RSSI, payload=Payload}}, State) ->
+handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_id=0, rssi=RSSI, payload=Payload}}, _Packet, State) ->
     <<0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
       1:8/integer, %% onions are type 1 broadcast?
       IV:2/binary,
@@ -350,11 +350,34 @@ handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_
       Tag:4/binary,
       CipherText/binary>> = Payload,
     decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
-handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{}}, State) ->
-    % TODO: Send this to router
+handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{oui=OUI}}, Packet, State) ->
+    erlang:spawn(fun() ->
+        Chain = blockchain_worker:blockchain(),
+        Ledger = blockchain:ledger(Chain),
+        case blockchain_ledger_v1:find_routing(OUI, Ledger) of
+            {error, _Reason} ->
+                ok;
+            {ok, Routing} ->
+                Addresses = blockchain_ledger_routing_v1:addresses(Routing),
+                Swarm = blockchain_swarm:swarm(),
+                lists:foreach(
+                    fun(Address) ->
+                        Result = libp2p_swarm:dial_framed_stream(Swarm,
+                                                                 Address,
+                                                                 router_handler:version(),
+                                                                 router_handler,
+                                                                 [Packet]),
+                        case Result of
+                            {ok, _} -> lager:info("sent packet ~p to ~p", [Packet, Address]);
+                            {error, _Reason} -> lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+                        end
+                    end,
+                    Addresses
+                )
+        end
+    end),
     State;
-handle_packet(ID, {tx_status, #helium_LongFiTxStatus_pb{success=Success}}, #state{pending_transmits=Pending}=State) ->
-    % TODO: Make this a map
+handle_packet(ID, {tx_status, #helium_LongFiTxStatus_pb{success=Success}}, _Packet, #state{pending_transmits=Pending}=State) ->
     case lists:keyfind(ID, 1, Pending) of
         {ID, Ref} ->
             lager:info("packet transmission ~p completed with success ~p", [ID, Success]),
@@ -363,10 +386,10 @@ handle_packet(ID, {tx_status, #helium_LongFiTxStatus_pb{success=Success}}, #stat
             lager:info("got unknown packet transmission response ~p with success ~p", [ID, Success])
     end,
     State#state{pending_transmits=lists:keydelete(ID, 1, Pending)};
-handle_packet(_ID, {parse_err, Error}, State) ->
+handle_packet(_ID, {parse_err, Error}, _Packet, State) ->
     lager:warning("parse error (ID= ~p): ~p", [_ID, Error]),
     State;
-handle_packet(_ID, {_Kind, _Packet}, State) ->
+handle_packet(_ID, {_Kind, _Packet}, _Packet, State) ->
     lager:warning("unknown (ID= ~p) (kind= ~p) packet ~p", [_ID, _Kind, _Packet]),
     State.
 
