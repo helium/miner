@@ -17,7 +17,8 @@
     send/1,
     decrypt/2,
     send_receipt/6,
-    send_witness/4
+    send_witness/4,
+    send_to_router/2
 ]).
 
 -ifdef(TEST).
@@ -189,6 +190,40 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     end,
     ok.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec send_to_router(binary(), binary()) -> ok.
+send_to_router(OUI, Packet) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("ingnored packet chain is undefined");
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            case blockchain_ledger_v1:find_routing(OUI, Ledger) of
+                {error, _Reason} ->
+                    ok;
+                {ok, Routing} ->
+                    Addresses = blockchain_ledger_routing_v1:addresses(Routing),
+                    Swarm = blockchain_swarm:swarm(),
+                    lists:foreach(
+                        fun(Address) ->
+                            Result = libp2p_swarm:dial_framed_stream(Swarm,
+                                                                        Address,
+                                                                        router_handler:version(),
+                                                                        router_handler,
+                                                                        [Packet]),
+                            case Result of
+                                {ok, _} -> lager:info("sent packet ~p to ~p", [Packet, Address]);
+                                {error, _Reason} -> lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+                            end
+                        end,
+                        Addresses
+                    )
+            end
+    end.
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -236,9 +271,11 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
+    lager:debug("got packet ~p", [Packet]),
     NewState =
         try helium_longfi_pb:decode_msg(Packet, helium_LongFiResp_pb) of
             Resp ->
+                lager:debug("decoded packet ~p", [Resp]),
                 handle_packet(Resp, Packet, State)
         catch
             What:Why ->
@@ -351,31 +388,7 @@ handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_
       CipherText/binary>> = Payload,
     decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
 handle_packet(_ID, {rx, #helium_LongFiRxPacket_pb{oui=OUI}}, Packet, State) ->
-    erlang:spawn(fun() ->
-        Chain = blockchain_worker:blockchain(),
-        Ledger = blockchain:ledger(Chain),
-        case blockchain_ledger_v1:find_routing(OUI, Ledger) of
-            {error, _Reason} ->
-                ok;
-            {ok, Routing} ->
-                Addresses = blockchain_ledger_routing_v1:addresses(Routing),
-                Swarm = blockchain_swarm:swarm(),
-                lists:foreach(
-                    fun(Address) ->
-                        Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                                                 Address,
-                                                                 router_handler:version(),
-                                                                 router_handler,
-                                                                 [Packet]),
-                        case Result of
-                            {ok, _} -> lager:info("sent packet ~p to ~p", [Packet, Address]);
-                            {error, _Reason} -> lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
-                        end
-                    end,
-                    Addresses
-                )
-        end
-    end),
+    erlang:spawn(?MODULE, send_to_router, [OUI, Packet]),
     State;
 handle_packet(ID, {tx_status, #helium_LongFiTxStatus_pb{success=Success}}, _Packet, #state{pending_transmits=Pending}=State) ->
     case lists:keyfind(ID, 1, Pending) of
@@ -412,18 +425,3 @@ tx_params(Len) when Len < 160 ->
     {'SF7', 'CR4_8'};
 tx_params(_) ->
     {'SF10', 'CR4_8'}.
-%tx_params(Len) when Len < 54 ->
-    %{'SF9', 'CR4_6'};
-%tx_params(Len) when Len < 83 ->
-    %{'SF8', 'CR4_8'};
-%tx_params(Len) when Len < 99 ->
-    %{'SF8', 'CR4_7'};
-%tx_params(Len) when Len < 115 ->
-    %{'SF8', 'CR4_6'};
-%tx_params(Len) when Len < 139 ->
-    %{'SF8', 'CR4_5'};
-%tx_params(Len) when Len < 160 ->
-    %{'SF7', 'CR4_8'};
-%tx_params(_) ->
-    %% onion packets won't be this big, but this will top out around 180 bytes
-    %{'SF7', 'CR4_7'}.
