@@ -15,7 +15,7 @@
   2},
  {<<"dkg">>,
   {git,"https://github.com/helium/erlang-dkg.git",
-       {ref,"20358bd51af158054406be3761ff3ebce11e7a04"}},
+       {ref,"2df838a83b4c10f99ba7b4ebbdbb0bcbfc70060c"}},
   0},
  {<<"e2qc">>,
   {git,"https://github.com/project-fifo/e2qc",

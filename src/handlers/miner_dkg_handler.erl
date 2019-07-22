@@ -35,9 +35,11 @@
 init([Members, Id, N, F, T, Curve,
       ThingToSign,
       {SigMod, SigFun},
-      {DoneMod, DoneFun}]) ->
+      {DoneMod, DoneFun}, Round]) ->
     {G1, G2} = generate(Curve, Members),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, 0, [{callback, true}, {elections, false}]),
+    %% get the fun used to sign things with our swarm key
+    {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, Round, [{callback, true}, {elections, false}, {signfun, ReadySigFun}, {verifyfun, mk_verification_fun(Members)}]),
     lager:info("DKG~p started", [Id]),
     {ok, #state{n = N,
                 id = Id,
@@ -156,8 +158,8 @@ callback_message(Actor, Message, _State) ->
             term_to_binary({Id, {send, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
         {Id, {echo, {Session, SerializedCommitment, Shares}}} ->
             term_to_binary({Id, {echo, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
-        {Id, {ready, {Session, SerializedCommitment, Shares}}} ->
-            term_to_binary({Id, {ready, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}})
+        {Id, {ready, {Session, SerializedCommitment, Shares, Proof}}} ->
+            term_to_binary({Id, {ready, {Session, SerializedCommitment, lists:nth(Actor, Shares), Proof}}})
     end.
 
 %% helper functions
@@ -175,10 +177,12 @@ serialize(State) ->
 
 deserialize(BinState) ->
     State = binary_to_term(BinState),
+    %% get the fun used to sign things with our swarm key
+    {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
     Group = erlang_pbc:group_new(State#state.curve),
     G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
     G2 = erlang_pbc:binary_to_element(Group, State#state.g2),
-    DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1),
+    DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1, ReadySigFun, mk_verification_fun(State#state.members)),
     PrivKey = case State#state.privkey of
         undefined ->
             undefined;
@@ -231,3 +235,13 @@ generate(Curve, Members) ->
              false -> erlang_pbc:element_from_hash(erlang_pbc:element_new('G2', Group), crypto:strong_rand_bytes(32))
          end,
     {G1, G2}.
+
+mk_verification_fun(Members) ->
+    fun(PeerID, Msg, Signature) ->
+            PeerAddr = lists:nth(PeerID, Members),
+            PeerKey = libp2p_crypto:bin_to_pubkey(PeerAddr),
+            Res = libp2p_crypto:verify(Msg, Signature, PeerKey),
+            lager:info("verified signature from ~p over ~p: ~p", [PeerID, Msg, Res]),
+            Res
+    end.
+

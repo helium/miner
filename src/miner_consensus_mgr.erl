@@ -451,6 +451,13 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
                                         end)
                           end, ConsensusAddrs -- [MyAddress]),
 
+            %% make a simple hash of the consensus members
+            DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
+            DKGCount = "-" ++ integer_to_list(Height),
+            DKGDelay = "-" ++ integer_to_list(Delay),
+            %% This DKG group name should be unique for the lifetime of a chain
+            DKGGroupName = "dkg-"++DKGHash++DKGCount++DKGDelay,
+
             GroupArg = [miner_dkg_handler, [ConsensusAddrs,
                                             Pos,
                                             N,
@@ -459,7 +466,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
                                             Curve,
                                             Artifact,
                                             Sign,
-                                            {?MODULE, Done}]],
+                                            {?MODULE, Done}, list_to_binary(DKGGroupName)]],
             %% the opts are added in the third position of the list
             %% The below are for in_memory_mode
             %% [{db_opts, [{in_memory_mode, true}]},
@@ -467,12 +474,8 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
             %% The below are for in_memory, which seems the right option
             %% [{db_opts, [{in_memory, true}]}],
 
-            %% make a simple hash of the consensus members
-            DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
-            DKGCount = "-" ++ integer_to_list(Height),
-            DKGDelay = "-" ++ integer_to_list(Delay),
             {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                                    "dkg-"++DKGHash++DKGCount++DKGDelay,
+                                                    DKGGroupName,
                                                     libp2p_group_relcast,
                                                     GroupArg),
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
