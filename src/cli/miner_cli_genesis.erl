@@ -95,8 +95,8 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
             BinPub = libp2p_crypto:b58_to_bin(PubKeyB58),
             Proof = base58:base58_to_binary(ProofB58),
 
-            VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, #{master_key => BinPub,
-                                                                     key_proof => Proof}),
+            VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, 1, #{master_key => BinPub,
+                                                                        key_proof => Proof}),
 
             OldSecurities = [blockchain_txn_security_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
                                                                      proplists:get_value(token, X)) || X <- proplists:get_value(securities, Config)],
@@ -146,8 +146,8 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
     BinPub = libp2p_crypto:b58_to_bin(PubKeyB58),
     Proof = base58:base58_to_binary(ProofB58),
 
-    VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, #{master_key => BinPub,
-                                                             key_proof => Proof}),
+    VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, 1, #{master_key => BinPub,
+                                                                key_proof => Proof}),
 
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
@@ -288,7 +288,7 @@ make_vars() ->
       election_restart_interval => 5,
       num_consensus_members => N,
       batch_size => BatchSize,
-      vars_commit_delay => 2,
+      vars_commit_delay => 120,
       block_version => v1,
       dkg_curve => Curve,
       predicate_callback_mod => miner,
