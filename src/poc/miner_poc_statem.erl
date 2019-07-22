@@ -118,13 +118,13 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             self() ! Msg,
             {keep_state,  Data#data{blockchain=Chain}}
     end;
-requesting(info, {blockchain_event, {add_block, BlockHash, false, _}}, #data{address=Address}=Data) ->
+requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
             {keep_state, Data};
         true ->
             lager:info("request allowed @ ~p", [BlockHash]),
-            {Txn, Keys, Secret} = create_request(Address, BlockHash),
+            {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
             {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, responses=#{}}}
@@ -401,17 +401,19 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_request(libp2p_crypto:pubkey_bin(), binary()) ->
+-spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->
     {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
-create_request(Address, BlockHash) ->
+create_request(Address, BlockHash, Ledger) ->
     Keys = libp2p_crypto:generate_keys(ecc_compact),
     Secret = libp2p_crypto:keys_to_bin(Keys),
     #{public := OnionCompactKey} = Keys,
+    Version = blockchain_txn_poc_request_v1:get_version(Ledger),
     Tx = blockchain_txn_poc_request_v1:new(
         Address,
         crypto:hash(sha256, Secret),
         crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
-        BlockHash
+        BlockHash,
+        Version
     ),
     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.

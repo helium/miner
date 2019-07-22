@@ -396,8 +396,11 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                             Start = EpochStart0 + 1,
                             End = CurrentBlockHeight,
                             {ok, Rewards} = blockchain_txn_rewards_v1:calculate_rewards(Start, End, Chain),
-                            lager:info("Rewards: ~p~n", [Rewards]),
+                            lager:debug("Rewards: ~p~n", [Rewards]),
                             RewardsTxn = blockchain_txn_rewards_v1:new(Start, End, Rewards),
+                            %% to cut down on the size of group txn blocks, which we'll
+                            %% need to fetch and store all of to validate snapshots, we
+                            %% discard all other txns for this block
                             [ConsensusGroupTxn] = lists:filter(fun(T) ->
                                                                        blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
                                                                end, ValidTransactions),
@@ -490,8 +493,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
                             {true, true} ->
-                                {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
-                                blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
                                 {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
@@ -525,8 +526,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
                             {true, false} ->
-                                {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
-                                blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
                                 {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
@@ -576,8 +575,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                             {noreply, State#state{current_height = Height}};
                         {true, true} ->
-                            {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
-                            blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
                             {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                             lager:info("nc start group"),
@@ -610,8 +607,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
                         {true, false} ->
-                            {BlockEpoch, _Start} = blockchain_block_v1:election_info(Block),
-                            blockchain_ledger_v1:process_epoch(BlockEpoch, blockchain:ledger(Chain)),
                             {ok, Interval} = blockchain:config(election_interval, Ledger),
 
                             lager:info("nc stay out"),
