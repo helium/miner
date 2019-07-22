@@ -309,5 +309,8 @@ make_vars() ->
       h3_path_res => 8,
       alpha_decay => 0.007,
       beta_decay => 0.0005,
-      max_staleness => 100000
+      max_staleness => 100000,
+      h3_neighbor_res => 12,
+      h3_max_grid_distance => 13,
+      h3_exclusion_ring_distance => 2
      }.
