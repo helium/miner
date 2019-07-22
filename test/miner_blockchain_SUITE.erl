@@ -53,7 +53,7 @@ init_per_testcase(TestCase, Config0) ->
              election_restart_interval => 10,
              num_consensus_members => NumConsensusMembers,
              batch_size => BatchSize,
-             vars_commit_delay => 2,
+             vars_commit_delay => 10,
              block_version => v1,
              dkg_curve => Curve,
              garbage_value => totes_garb,
@@ -252,9 +252,7 @@ election_test(Config) ->
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 3
                                                              end, shuffle(Miners))
-                                           %%TODO fixme back to 120s
-                                           %%for slow machines
-                                  end, 90, timer:seconds(1)),
+                                   end, 90, timer:seconds(1)),
     ok.
 
 election_check([], _Miners, Owner) ->
@@ -311,7 +309,7 @@ group_change_test(Config) ->
                                            true == lists:all(fun(Miner) ->
                                                                      Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 2
+                                                                     Epoch > 1
                                                              end, shuffle(Miners))
                                    end, 30, timer:seconds(1)),
     %% submit the transaction
