@@ -305,13 +305,12 @@ make_vars() ->
       election_replacement_factor => 4,
       election_replacement_slope => 20,
       min_score => 0.2,
-      h3_ring_size => 2,
-      h3_path_res => 8,
       alpha_decay => 0.007,
       beta_decay => 0.0005,
       max_staleness => 100000,
       poc_challenge_interval => 30,
+      min_assert_h3_res => 12,
       h3_neighbor_res => 12,
       h3_max_grid_distance => 13,
-      h3_exclusion_ring_distance => 2
+      h3_exclusion_ring_dist => 2
      }.

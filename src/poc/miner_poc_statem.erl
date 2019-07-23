@@ -109,15 +109,6 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-requesting(info, Msg, #data{blockchain=undefined, poc_interval=undefined}=Data) ->
-    case blockchain_worker:blockchain() of
-        undefined ->
-            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
-            {keep_state,  Data};
-        Chain ->
-            self() ! Msg,
-            {keep_state, Data#data{blockchain=Chain}}
-    end;
 requesting(info, Msg, #data{blockchain=undefined}=Data) ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -177,10 +168,15 @@ targeting(info, {target, _, _, _}, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}};
 targeting(info, {target, Entropy, Height, Ledger}, Data) ->
-    {Target, Gateways} = blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()),
-    lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
-    self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
-    {next_state, challenging, Data#data{challengees=[]}};
+    case blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()) of
+        {Target, Gateways} ->
+            lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
+            self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
+            {next_state, challenging, Data#data{challengees=[]}};
+        no_target ->
+            lager:warning("no target found"),
+            keep_state_and_data
+    end;
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 

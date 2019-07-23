@@ -72,7 +72,7 @@ handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
     ArtifactHash = case State#state.artifact of
                        undefined -> undefined;
-                       A -> blockchain_util:bin_to_hex(crypto:hash(sha256, A))
+                       A -> blockchain_utils:bin_to_hex(crypto:hash(sha256, A))
                    end,
     Sigs = map_ids(State#state.signatures, State#state.members),
     Worker ! {Ref, maps:merge(#{signatures_required =>
@@ -80,7 +80,7 @@ handle_command({status, Ref, Worker}, State) ->
                                 signatures => Sigs,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
-                                public_key_hash => blockchain_util:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
+                                public_key_hash => blockchain_utils:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
                                }, Map)},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->

@@ -71,15 +71,14 @@ init_per_testcase(TestCase, Config0) ->
              election_replacement_factor => 4,
              election_replacement_slope => 20,
              min_score => 0.2,
-             h3_ring_size => 2,
-             h3_path_res => 8,
              alpha_decay => 0.007,
              beta_decay => 0.0005,
              max_staleness => 100000,
+             min_assert_h3_res => 12,
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
-             h3_exclusion_ring_distance => 2,
-             poc_challenge_interval => 30
+             h3_exclusion_ring_dist => 2,
+             poc_challenge_interval => 10
             },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -93,10 +92,14 @@ init_per_testcase(TestCase, Config0) ->
                                                                 key_proof => KeyProof}) ],
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    InitGen = [begin
-                   blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
-               end
-               || Addr <- Addresses],
+    Locations = lists:foldl(
+        fun(I, Acc) ->
+            [h3:from_geo({37.780586, -122.469470 + I/1000000}, 13)|Acc]
+        end,
+        [],
+        lists:seq(1, length(Addresses))
+    ),
+    InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     Txns = InitialVars ++ InitialPayment ++ InitGen,
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
@@ -183,7 +186,7 @@ growth_test(Config) ->
                                                                      ct:pal("miner ~p height ~p", [Miner, Height]),
                                                                      Height >= 5
                                                              end, Miners)
-                                   end, 120, timer:seconds(1)),
+                                   end, 30, timer:seconds(1)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
                                   C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -335,13 +338,18 @@ group_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 5
+    HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true == lists:all(fun(Miner) ->
+                                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                             Ht > (Height + 20)
                                                              end, shuffle(Miners))
-                                   end, 60, timer:seconds(1)),
+                                   end, 40, timer:seconds(1)),
 
     %% make sure we still haven't executed it
     CGroup1 = lists:filtermap(
@@ -353,7 +361,8 @@ group_change_test(Config) ->
     %% alter the "version" for all of them.
     lists:foreach(
       fun(Miner) ->
-              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
+              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]), %% make sure we're exercising the summing
+              ct:pal("test version ~p ~p", [Miner, ct_rpc:call(Miner, miner, test_version, [], 1000)])
       end, Miners),
 
     %% wait for the change to take effect
@@ -363,16 +372,17 @@ group_change_test(Config) ->
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
                                            7 == length(CGroup)
-                                   end, 120, timer:seconds(1)),
+                                   end, 60, timer:seconds(1)),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
     ?assertEqual({error, not_found}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger2])),
 
-    %% check that the epoch delay is at least 2
-    Epoch = ct_rpc:call(hd(Miners), miner, election_epoch, []),
-    ct:pal("post change miner ~p Epoch ~p", [hd(Miners), Epoch]),
-    %% probably need to parameterize this via the delay
-    ?assert(9 =< Epoch),
+    HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, Height2} = ct_rpc:call(hd(Miners), blockchain, height, [HChain2]),
+
+    ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
+    %% TODO: probably need to parameterize this via the delay
+    ?assert(Height2 > Height + 20 + 10),
 
     ok.

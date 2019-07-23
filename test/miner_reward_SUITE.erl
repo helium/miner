@@ -66,14 +66,13 @@ init_per_testcase(_TestCase, Config0) ->
              election_replacement_factor => 4,
              election_replacement_slope => 20,
              min_score => 0.2,
-             h3_ring_size => 2,
-             h3_path_res => 8,
              alpha_decay => 0.007,
              beta_decay => 0.0005,
              max_staleness => 100000,
+             min_assert_h3_res => 12,
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
-             h3_exclusion_ring_distance => 2,
+             h3_exclusion_ring_dist => 2,
              poc_challenge_interval => 30
             },
 
@@ -84,8 +83,8 @@ init_per_testcase(_TestCase, Config0) ->
            [BinPub, Priv, Vars, KeyProof,
             term_to_binary(Vars, [{compressed, 9}])]),
 
-    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
-                                                             key_proof => KeyProof}) ],
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, 1, #{master_key => BinPub,
+                                                                key_proof => KeyProof}) ],
 
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
