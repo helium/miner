@@ -70,6 +70,7 @@ test_version() ->
             1;
         _ ->
             [{_, V}] = ets:lookup(?tv, ?tv),
+            lager:info("tv got ~p", [V]),
             V
     end.
 
@@ -78,8 +79,8 @@ inc_tv(Incr) ->
     case ets:info(?tv) of
         undefined ->
             ets:new(?tv, [named_table, public]),
-            ets:insert(?tv, {?tv, 1}),
-            1;
+            ets:insert(?tv, {?tv, 1 + Incr}),
+            1 + Incr;
         _ ->
             ets:update_counter(?tv, ?tv, Incr)
     end.

@@ -78,7 +78,7 @@ init_per_testcase(TestCase, Config0) ->
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
              h3_exclusion_ring_dist => 2,
-             poc_challenge_interval => 5
+             poc_challenge_interval => 10
             },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -349,7 +349,7 @@ group_change_test(Config) ->
                                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                                              Ht > (Height + 20)
                                                              end, shuffle(Miners))
-                                   end, 60, timer:seconds(1)),
+                                   end, 40, timer:seconds(1)),
 
     %% make sure we still haven't executed it
     CGroup1 = lists:filtermap(
@@ -361,7 +361,8 @@ group_change_test(Config) ->
     %% alter the "version" for all of them.
     lists:foreach(
       fun(Miner) ->
-              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4) + 1]) %% make sure we're exercising the summing
+              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]), %% make sure we're exercising the summing
+              ct:pal("test version ~p ~p", [Miner, ct_rpc:call(Miner, miner, test_version, [], 1000)])
       end, Miners),
 
     %% wait for the change to take effect
@@ -371,7 +372,7 @@ group_change_test(Config) ->
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
                                            7 == length(CGroup)
-                                   end, 120, timer:seconds(1)),
+                                   end, 60, timer:seconds(1)),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),

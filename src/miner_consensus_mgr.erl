@@ -402,15 +402,14 @@ restart_election(#state{delay = Delay0,
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     case length(ConsensusAddrs) == N of
         true ->
-            ok;
+            Artifact = term_to_binary(ConsensusAddrs),
+            {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+                                 election_done, N, Curve, State#state{delay = Delay}),
+            State1;
         false ->
-            error({too_short, N, ConsensusAddrs})
-    end,
-    Artifact = term_to_binary(ConsensusAddrs),
-
-    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
-                         election_done, N, Curve, State#state{delay = Delay}),
-    State1.
+            lager:warning("issue generating new group.  skipping restart"),
+            State
+    end.
 
 do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     lager:info("do initial"),
