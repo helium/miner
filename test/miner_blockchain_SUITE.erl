@@ -378,10 +378,11 @@ group_change_test(Config) ->
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
     ?assertEqual({error, not_found}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger2])),
 
-    %% check that the epoch delay is at least 2
-    Epoch = ct_rpc:call(hd(Miners), miner, election_epoch, []),
-    ct:pal("post change miner ~p Epoch ~p", [hd(Miners), Epoch]),
-    %% probably need to parameterize this via the delay
-    ?assert(9 =< Epoch),
+    HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, Height2} = ct_rpc:call(hd(Miners), blockchain, height, [HChain2]),
+
+    ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
+    %% TODO: probably need to parameterize this via the delay
+    ?assert(Height2 > Height + 20 + 10),
 
     ok.
