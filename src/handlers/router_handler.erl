@@ -51,6 +51,7 @@ version() ->
 init(server, _Conn, _Args) ->
     {ok, #state{}};
 init(client, _Conn, [Packet]=_Args) ->
+    lager:info("init client with ~p", [_Args]),
     {ok, #state{}, Packet}.
 
 handle_data(_Type, _Bin, State) ->

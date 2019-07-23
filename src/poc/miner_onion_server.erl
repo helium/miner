@@ -203,12 +203,14 @@ send_to_router(OUI, Packet) ->
             Ledger = blockchain:ledger(Chain),
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
+                    lager:warning("ingnored could not find OUI ~p in ledger", [OUI]),
                     ok;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
                     Swarm = blockchain_swarm:swarm(),
                     lists:foreach(
-                        fun(Address) ->
+                        fun(BinAddress) ->
+                            Address = erlang:binary_to_list(BinAddress),
                             Result = libp2p_swarm:dial_framed_stream(Swarm,
                                                                         Address,
                                                                         router_handler:version(),
