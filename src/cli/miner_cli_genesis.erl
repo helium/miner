@@ -106,7 +106,9 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
                                                              libp2p_crypto:b58_to_bin(proplists:get_value(owner_address, X)),
                                                              proplists:get_value(location, X),
                                                              proplists:get_value(nonce, X)) || X <- proplists:get_value(gateways, Config)],
-            OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities,
+            OldDCs = [ blockchain_txn_dc_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
+                                                         proplists:get_value(dc_balance, X)) || X <- proplists:get_values(dcs, Config)],
+            OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities ++ OldDCs,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ [VarTxn], Addresses, N, Curve),
             [clique_status:text("ok")];
@@ -150,16 +152,19 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
                                                                 key_proof => Proof}),
 
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 500000000) || Addr <- Addresses],
     %% Give security tokens to 2 members
     InitialSecurityTransactions = [ blockchain_txn_security_coinbase_v1:new(Addr, 5000000) || Addr <- lists:sublist(Addresses, 2)],
+    %% Give DCs to 2 members
+    InitialDCs = [ blockchain_txn_dc_coinbase_v1:new(Addr, 10000000) || Addr <- lists:sublist(Addresses, 2)],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
                                   || Addr <- Addresses ],
     miner_consensus_mgr:initial_dkg([VarTxn] ++
                                         InitialPaymentTransactions ++
                                         InitialGatewayTransactions ++
-                                        InitialSecurityTransactions,
+                                        InitialSecurityTransactions ++
+                                        InitialDCs,
                                     Addresses, N, Curve),
     [clique_status:text("ok")].
 
