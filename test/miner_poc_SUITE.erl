@@ -76,6 +76,7 @@ dist(Config0) ->
              alpha_decay => 0.007,
              beta_decay => 0.0005,
              max_staleness => 100000,
+             min_assert_h3_res => 12,
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
              h3_exclusion_ring_distance => 2,
@@ -485,7 +486,7 @@ build_asserts(LatLongs, {PrivKey, PubKey}) ->
             GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-            Index = h3:from_geo(LatLong, 9),
+            Index = h3:from_geo(LatLong, 12),
 
             AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1, 0),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
