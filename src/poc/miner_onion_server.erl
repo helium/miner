@@ -207,6 +207,7 @@ send_to_router(OUI, Packet) ->
                     ok;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
+                    lager:debug("found addresses ~p", [Addresses]),
                     Swarm = blockchain_swarm:swarm(),
                     lists:foreach(
                         fun(BinAddress) ->
