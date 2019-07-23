@@ -78,7 +78,7 @@ dist(Config0) ->
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
              h3_exclusion_ring_dist => 2,
-             poc_challenge_interval => 5
+             poc_challenge_interval => 20
             },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -170,7 +170,7 @@ dist(Config0) ->
     ),
 
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
-    ?assertEqual({0, 0}, rcv_loop(M, 20, {length(Miners), length(Miners)})),
+    ?assertEqual({0, 0}, rcv_loop(M, 35, {length(Miners), length(Miners)})),
 
     %% wait until one node has a working chain
 
