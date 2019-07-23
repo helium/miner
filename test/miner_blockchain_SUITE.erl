@@ -92,10 +92,14 @@ init_per_testcase(TestCase, Config0) ->
                                                                 key_proof => KeyProof}) ],
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    InitGen = [begin
-                   blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
-               end
-               || Addr <- Addresses],
+    Locations = lists:foldl(
+        fun(I, Acc) ->
+            [h3:from_geo({37.780586, -122.469470 + I/1000000}, 13)|Acc]
+        end,
+        [],
+        lists:seq(1, length(Addresses))
+    ),
+    InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     Txns = InitialVars ++ InitialPayment ++ InitGen,
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
@@ -334,11 +338,16 @@ group_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 5
+    HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true == lists:all(fun(Miner) ->
+                                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                             Ht > (Height + 20)
                                                              end, shuffle(Miners))
                                    end, 60, timer:seconds(1)),
 
