@@ -553,7 +553,7 @@ target_test() ->
         fun({LatLong, Alpha, Beta}, Acc) ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
-            Index = h3:from_geo(LatLong, 9),
+            Index = h3:from_geo(LatLong, 12),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
             G1 = blockchain_ledger_gateway_v1:set_alpha_beta_delta(Alpha, Beta, 1, G0),
             maps:put(Address, G1, Acc)
@@ -573,10 +573,12 @@ target_test() ->
                 config,
                 fun(min_score, _) ->
                         {ok, 0.2};
-                   (h3_path_res, _) ->
-                        {ok, 8};
-                   (h3_ring_size, _) ->
+                   (h3_exclusion_ring_dist, _) ->
                         {ok, 2};
+                   (h3_max_grid_distance, _) ->
+                        {ok, 13};
+                   (h3_neighbor_res, _) ->
+                        {ok, 12};
                    (alpha_decay, _) ->
                         {ok, 0.007};
                    (beta_decay, _) ->
