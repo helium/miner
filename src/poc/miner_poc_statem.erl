@@ -59,7 +59,7 @@
     responses = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
-    delay :: non_neg_integer(),
+    poc_interval :: non_neg_integer() | undefined,
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
@@ -87,11 +87,11 @@ init(Args) ->
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
     Address = blockchain_swarm:pubkey_bin(),
-    %% this should really only be overriden for testing
-    Delay = maps:get(delay, Args, blockchain_txn_poc_request_v1:challenge_interval()),
     Blockchain = blockchain_worker:blockchain(),
+    %% this should really only be overriden for testing
+    Delay = maps:get(delay, Args, undefined),
     lager:info("init with ~p", [Args]),
-    {ok, requesting, #data{blockchain=Blockchain, address=Address, delay=Delay}}.
+    {ok, requesting, #data{blockchain=Blockchain, address=Address, poc_interval=Delay}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -109,6 +109,15 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+requesting(info, Msg, #data{blockchain=undefined, poc_interval=undefined}=Data) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
+            {keep_state,  Data};
+        Chain ->
+            self() ! Msg,
+            {keep_state, Data#data{blockchain=Chain}}
+    end;
 requesting(info, Msg, #data{blockchain=undefined}=Data) ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -116,7 +125,7 @@ requesting(info, Msg, #data{blockchain=undefined}=Data) ->
             {keep_state,  Data};
         Chain ->
             self() ! Msg,
-            {keep_state,  Data#data{blockchain=Chain}}
+            {keep_state, Data#data{blockchain=Chain}}
     end;
 requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
@@ -137,9 +146,9 @@ requesting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{address=Challenger,
-                                                                     secret=Secret,
-                                                                     mining_timeout=MiningTimeout,
-                                                                     blockchain=Chain}=Data0) ->
+                                                                                secret=Secret,
+                                                                                mining_timeout=MiningTimeout,
+                                                                                blockchain=Chain}=Data0) ->
     case find_request(BlockHash, Data0) of
         ok ->
             {ok, Block} = blockchain:get_block(BlockHash, Chain),
@@ -373,8 +382,16 @@ validate_witness(Witness, Ledger) ->
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
                                address=Address,
-                               delay=Delay}) ->
+                               poc_interval=POCInterval0}) ->
     Ledger = blockchain:ledger(Blockchain),
+    POCInterval =
+        case POCInterval0 of
+            undefined ->
+                blockchain_utils:challenge_interval(Ledger);
+            _ ->
+                POCInterval0
+        end,
+
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, Error} ->
             lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
@@ -392,7 +409,7 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                             true;
                         LastChallenge ->
                             lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
-                            (Height - LastChallenge) > Delay
+                            (Height - LastChallenge) > POCInterval
                     end
             end
     end.
@@ -536,7 +553,7 @@ target_test() ->
         fun({LatLong, Alpha, Beta}, Acc) ->
             Owner = <<"test">>,
             Address = crypto:hash(sha256, erlang:term_to_binary(LatLong)),
-            Index = h3:from_geo(LatLong, 9),
+            Index = h3:from_geo(LatLong, 12),
             G0 = blockchain_ledger_gateway_v1:new(Owner, Index),
             G1 = blockchain_ledger_gateway_v1:set_alpha_beta_delta(Alpha, Beta, 1, G0),
             maps:put(Address, G1, Acc)
@@ -556,10 +573,12 @@ target_test() ->
                 config,
                 fun(min_score, _) ->
                         {ok, 0.2};
-                   (h3_path_res, _) ->
-                        {ok, 8};
-                   (h3_ring_size, _) ->
+                   (h3_exclusion_ring_dist, _) ->
                         {ok, 2};
+                   (h3_max_grid_distance, _) ->
+                        {ok, 13};
+                   (h3_neighbor_res, _) ->
+                        {ok, 12};
                    (alpha_decay, _) ->
                         {ok, 0.007};
                    (beta_decay, _) ->
