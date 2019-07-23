@@ -89,8 +89,8 @@ dist(Config0) ->
            [BinPub, Priv, Vars, KeyProof,
             term_to_binary(Vars, [{compressed, 9}])]),
 
-    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
-                                                             key_proof => KeyProof}) ],
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, 1, #{master_key => BinPub,
+                                                                key_proof => KeyProof}) ],
 
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(

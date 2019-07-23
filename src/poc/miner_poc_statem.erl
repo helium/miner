@@ -116,9 +116,7 @@ requesting(info, Msg, #data{blockchain=undefined, poc_interval=undefined}=Data) 
             {keep_state,  Data};
         Chain ->
             self() ! Msg,
-            Ledger = blockchain:ledger(Chain),
-            POCInterval = blockchain_poc:challenge_interval(Ledger),
-            {keep_state, Data#data{blockchain=Chain, poc_interval=POCInterval}}
+            {keep_state, Data#data{blockchain=Chain}}
     end;
 requesting(info, Msg, #data{blockchain=undefined}=Data) ->
     case blockchain_worker:blockchain() of
@@ -384,8 +382,16 @@ validate_witness(Witness, Ledger) ->
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
                                address=Address,
-                               poc_interval=POCInterval}) ->
+                               poc_interval=POCInterval0}) ->
     Ledger = blockchain:ledger(Blockchain),
+    POCInterval =
+        case POCInterval0 of
+            undefined ->
+                blockchain_utils:challenge_interval(Ledger);
+            _ ->
+                POCInterval0
+        end,
+
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, Error} ->
             lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
