@@ -78,8 +78,8 @@ init_per_testcase(TestCase, Config0) ->
              max_staleness => 100000,
              h3_neighbor_res => 12,
              h3_max_grid_distance => 13,
-             h3_exclusion_ring_distance => 2,
-             poc_challenge_interval => 30
+             h3_exclusion_ring_dist => 2,
+             poc_challenge_interval => 5
             },
 
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
@@ -183,7 +183,7 @@ growth_test(Config) ->
                                                                      ct:pal("miner ~p height ~p", [Miner, Height]),
                                                                      Height >= 5
                                                              end, Miners)
-                                   end, 120, timer:seconds(1)),
+                                   end, 30, timer:seconds(1)),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
                                   C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -353,7 +353,7 @@ group_change_test(Config) ->
     %% alter the "version" for all of them.
     lists:foreach(
       fun(Miner) ->
-              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
+              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4) + 1]) %% make sure we're exercising the summing
       end, Miners),
 
     %% wait for the change to take effect

@@ -392,6 +392,8 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                 POCInterval0
         end,
 
+    lager:info("interval ~p", [POCInterval]),
+
     case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
         {error, Error} ->
             lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),

@@ -59,7 +59,6 @@
 -ifdef(TEST).
 
 -define(tv, '$test_version').
--define(v, '$value').
 
 -export([test_version/0, inc_tv/1]).
 
@@ -75,6 +74,7 @@ test_version() ->
     end.
 
 inc_tv(Incr) ->
+    lager:info("increment: ~p", [Incr]),
     case ets:info(?tv) of
         undefined ->
             ets:new(?tv, [named_table, public]),
