@@ -305,7 +305,10 @@ handle_call(cancel_dkg, _From, #state{current_dkg = DKG} = State) ->
     lager:info("cancelling DKG at ~p ~p", [State#state.initial_height,
                                            State#state.delay]),
     spawn(fun() ->
-                  catch libp2p_group_relcast:handle_command(DKG, {stop, 0})
+                  %% give the dkg some time to shut down so that
+                  %% laggards get a chance to complete
+                  Timeout = application:get_env(miner, dgk_stop_timeout, timer:minutes(3)),
+                  catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout})
           end),
     {reply, ok, State#state{current_dkg = undefined,
                             delay = 0,

@@ -517,6 +517,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             {Waiting, undefined};
                                         undefined ->
                                             {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
+                                             {pending, Buf, NextRound, Block, Sync}};
+                                        %% we didn't manage to complete the previous DKG
+                                        %% or this one yet.
+                                        {pending, _, _, _, _} ->
+                                            {undefined,
                                              {pending, Buf, NextRound, Block, Sync}}
                                     end,
                                 stop_group(ConsensusGroup),
@@ -597,6 +602,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         {Waiting, undefined};
                                     undefined ->
                                         {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
+                                         {pending, [], NextRound, Block, Sync}};
+                                    %% we didn't manage to complete the previous DKG
+                                    %% or this one yet.
+                                    {pending, _, _, _, _} ->
+                                        {undefined,
                                          {pending, [], NextRound, Block, Sync}}
                                 end,
                             lager:info("nc got here"),
