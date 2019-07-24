@@ -201,14 +201,26 @@ send_to_router(OUI, Packet) ->
             lager:warning("ingnored packet chain is undefined");
         Chain ->
             Ledger = blockchain:ledger(Chain),
+            Swarm = blockchain_swarm:swarm(),
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
-                    lager:warning("ingnored could not find OUI ~p in ledger", [OUI]),
-                    ok;
+                    case application:get_env(miner, default_router, undefined) of
+                        undefined ->
+                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
+                        Address ->
+                            Result = libp2p_swarm:dial_framed_stream(Swarm,
+                                                                     Address,
+                                                                     router_handler:version(),
+                                                                     router_handler,
+                                                                     [Packet]),
+                            case Result of
+                                {ok, _} -> lager:info("(default router) sent packet ~p to ~p", [Packet, Address]);
+                                {error, _Reason} -> lager:error("(default router) failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+                            end
+                    end;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
                     lager:debug("found addresses ~p", [Addresses]),
-                    Swarm = blockchain_swarm:swarm(),
                     lists:foreach(
                         fun(BinAddress) ->
                             Address = erlang:binary_to_list(BinAddress),
