@@ -29,7 +29,7 @@ cover:
 	$(REBAR) cover
 
 devrelease:
-	$(REBAR) as dev release -n miner-dev
+	$(REBAR) as dev release
 
 devrel:
 	$(REBAR) as dev, miner1 release -n miner1
