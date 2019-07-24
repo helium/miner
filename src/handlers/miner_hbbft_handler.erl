@@ -20,7 +20,7 @@
          deferred = [],
          signatures = [],
          signatures_required = 0,
-         sig_phase = sig :: sig | gossip | done,
+         sig_phase = unsent :: unsent | sig | gossip | done,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
          chain :: undefined | blockchain:blockchain(),
@@ -81,15 +81,15 @@ handle_command({status, Ref, Worker}, State) ->
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_utils:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
-                               }, Map)},
+                               }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->
     case hbbft:next_round(State#state.hbbft) of
         {NextHBBFT, ok} ->
             Worker ! {Ref, ok},
-            {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}};
+            {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
         {NextHBBFT, {send, NextMsgs}} ->
-            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined}}
+            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT, chain=Chain}) ->
@@ -106,9 +106,9 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
             case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=sig}};
+                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=sig}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -215,7 +215,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
-                            {filter_signatures(State#state{hbbft=NewerHBBFT, artifact=Artifact}), fixup_msgs(Msgs)};
+                            {filter_signatures(State#state{hbbft=NewerHBBFT, sig_phase=sig, artifact=Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
