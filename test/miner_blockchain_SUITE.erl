@@ -24,7 +24,8 @@ all() -> [
           genesis_load_test,
           growth_test,
           election_test,
-          group_change_test
+          group_change_test,
+          master_key_test
          ].
 
 init_per_suite(Config) ->
@@ -53,7 +54,7 @@ init_per_testcase(TestCase, Config0) ->
              election_restart_interval => 10,
              num_consensus_members => NumConsensusMembers,
              batch_size => BatchSize,
-             vars_commit_delay => 10,
+             vars_commit_delay => 5,
              block_version => v1,
              dkg_curve => Curve,
              garbage_value => totes_garb,
@@ -384,5 +385,168 @@ group_change_test(Config) ->
     ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
     %% TODO: probably need to parameterize this via the delay
     ?assert(Height2 > Height + 20 + 10),
+
+    ok.
+
+master_key_test(Config) ->
+    %% get all the miners
+    Miners = proplists:get_value(miners, Config),
+
+    %% check consensus miners
+    ConsensusMiners = lists:filtermap(fun(Miner) ->
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                      end, Miners),
+
+    %% check non consensus miners
+    NonConsensusMiners = lists:filtermap(fun(Miner) ->
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                         end, Miners),
+
+    ?assertNotEqual([], ConsensusMiners),
+    %% get the first consensus miner
+    FirstConsensusMiner = hd(ConsensusMiners),
+
+    ?assertEqual(7, length(ConsensusMiners)),
+
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
+    %% get the genesis block from first consensus miner
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
+
+    %% check genesis load results for non consensus miners
+    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
+                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                                              end, NonConsensusMiners),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_until(fun() ->
+                                           true == lists:all(fun(Miner) ->
+                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                                     Epoch > 1
+                                                             end, shuffle(Miners))
+                                   end, 30, timer:seconds(1)),
+
+
+    %% baseline: chain vars are working
+
+    Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {Priv, _Pub} = proplists:get_value(master_key, Config),
+
+    Vars = #{garbage_value => totes_goats_garb},
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+    ConsensusTxn = blockchain_txn_vars_v1:new(Vars, Proof, 2, #{}),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+    %% bad master key
+
+    #{secret := Priv2, public := Pub2} =
+        libp2p_crypto:generate_keys(ecc_compact),
+
+    BinPub2 = libp2p_crypto:pubkey_to_bin(Pub2),
+
+    Vars2 = #{garbage_value => goats_are_not_garb},
+    Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Vars2),
+    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Vars2),
+    KeyProof2Corrupted = <<KeyProof2/binary, "asdasdasdas">>,
+    ConsensusTxn2 = blockchain_txn_vars_v1:new(Vars2, Proof2, 3, #{master_key => BinPub2,
+                                                                   key_proof => KeyProof2Corrupted}),
+    {ok, Start2} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn2])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                             Ht > (Start2 + 15) andalso
+                                 {ok, totes_goats_garb} ==
+                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+    %% good master key
+
+    ConsensusTxn3 = blockchain_txn_vars_v1:new(Vars2, Proof2, 4, #{master_key => BinPub2,
+                                                                   key_proof => KeyProof2}),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn3])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
+                             ct:pal("val ~p", [Val]),
+                             {ok, goats_are_not_garb} == Val
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+
+    %% make sure old master key is no longer working
+
+    Vars4 = #{garbage_value => goats_are_too_garb},
+    Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Vars4),
+    ConsensusTxn4 = blockchain_txn_vars_v1:new(Vars4, Proof4, 5, #{}),
+    {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn4])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                             Ht > (Start4 + 15) andalso
+                                 {ok, goats_are_not_garb} ==
+                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+    %% double check that new master key works
+
+    Vars5 = #{garbage_value => goats_always_win},
+    Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Vars5),
+    ConsensusTxn5 = blockchain_txn_vars_v1:new(Vars5, Proof5, 6, #{}),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn5])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
+                             ct:pal("val ~p", [Val]),
+                             {ok, goats_always_win} == Val
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
 
     ok.
