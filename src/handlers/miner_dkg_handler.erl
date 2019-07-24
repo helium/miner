@@ -240,8 +240,6 @@ mk_verification_fun(Members) ->
     fun(PeerID, Msg, Signature) ->
             PeerAddr = lists:nth(PeerID, Members),
             PeerKey = libp2p_crypto:bin_to_pubkey(PeerAddr),
-            Res = libp2p_crypto:verify(Msg, Signature, PeerKey),
-            lager:info("verified signature from ~p over ~p: ~p", [PeerID, Msg, Res]),
-            Res
+            libp2p_crypto:verify(Msg, Signature, PeerKey)
     end.
 
