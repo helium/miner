@@ -1,10 +1,14 @@
 # Miner
 
-Miner is designed to run on a Linux host, with a LongFi compatible multi-channel radio receiver. Miner performs all the various functions of a mining node on the Helium blockchain, including distributed key generation, block propogation, the HoneybadgerBFT consensus protocol, and Proof-of-Coverage challenges required to earn mining rewards.
+Miner performs all the various functions of a mining node on the Helium blockchain, including distributed key generation, block propogation and validation, the HoneybadgerBFT consensus protocol. 
+
+Miner is designed to run on a Linux host, with a LongFi compatible multi-channel radio receiver. 
+
+NOTE: In order to participate in Proof-of-Coverage challenges and transfer wireless data packets it is necessary to also install [Concentrate](https://github.com/helium/concentrate).
 
 # Install
 
-Welcome to Helium!
+Welcome to Helium! 👋
 
 ## System Requirements
 
@@ -25,6 +29,8 @@ Edit the swapfile configuration as root `sudo nano /etc/dphys-swapfile` and chan
 Save the file, then start the swap again:
 
 ```sudo dphys-swapfile swapon```
+
+Next, enable SPI and I2C by running `sudo raspi-config` and selecting `Interfacing Options`, and enabling I2C and SPI from within the menu system.
 
 ## Install from Source
 
@@ -67,7 +73,7 @@ Once this completes, you're ready to run the Miner.
 
 ## Usage
 
-Congrats! You've installed the Miner. Now it's time to make some things happen.
+Congrats! You've installed the Miner 🚀 Now it's time to make some things happen.
 
 ### Starting Up
 
