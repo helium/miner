@@ -3,7 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"c96ed5a4d1534b84b0c16f8cf10275789edfdb5a"}},
+       {ref,"e2611e5abbb5f4c078a0e221d5c5b08cf2b1b271"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
@@ -72,7 +72,7 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.6.7">>},1},
  {<<"libp2p">>,
   {git,"https://github.com/helium/erlang-libp2p.git",
-       {ref,"6ac646cca98e0a590c9ff9736fcc056e5187a519"}},
+       {ref,"3803c5be16163edb3b775e0cf43e856a7bbcc09a"}},
   1},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},1},
  {<<"multiaddr">>,{pkg,<<"multiaddr">>,<<"1.1.3">>},2},
@@ -95,7 +95,7 @@
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
  {<<"splicer">>,
   {git,"https://github.com/helium/erlang-splicer.git",
-       {ref,"455217947dc2adcf1868806c7bb3925660b05be8"}},
+       {ref,"e1f47056786c76bf028b460e2a8cf70d7c31e7a6"}},
   2}]}.
 [
 {pkg_hash,[
