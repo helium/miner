@@ -96,7 +96,7 @@ genesis_block_done(GenesisBlock, Signatures, Members, PrivKey) ->
 -spec election_done(binary(), [{libp2p_crypto:pubkey_bin(), binary()}],
                     [libp2p_crypto:address()], tpke_privkey:privkey()) -> ok.
 election_done(Artifact, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {election_done, Artifact, Signatures, Members, PrivKey}).
+    gen_server:call(?MODULE, {election_done, Artifact, Signatures, Members, PrivKey}, infinity).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -201,7 +201,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                          Name,
                                          libp2p_group_relcast, GroupArg),
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
-    ok = miner:handoff_consensus(Group),
+    ok = miner:handoff_consensus(Group, Height + Delay),
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
