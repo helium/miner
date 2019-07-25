@@ -168,7 +168,7 @@ basic(Config) ->
 
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterP2P}]),
     Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterP2P], 1, 0]),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),
 
@@ -201,8 +201,9 @@ basic(Config) ->
     ct:pal("SENT ~p", [{Resp, Packet}]),
     receive 
         {simple_http_stream_test, Got} ->
-            ?assertEqual(Packet, Got),
-            ?assertEqual(Resp, helium_longfi_pb:decode_msg(Got, helium_LongFiResp_pb)),
+            {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
+            Resp2 = Resp#helium_LongFiResp_pb{miner_name=erlang:list_to_binary(MinerName)},
+            ?assertMatch(Resp2, helium_longfi_pb:decode_msg(Got, helium_LongFiResp_pb)),
             ok;
         _Other ->
             ct:pal("wrong data ~p", [_Other]),
