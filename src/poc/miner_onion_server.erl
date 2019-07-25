@@ -208,15 +208,7 @@ send_to_router(OUI, Packet) ->
                         undefined ->
                             lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
                         Address ->
-                            Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                                                     Address,
-                                                                     router_handler:version(),
-                                                                     router_handler,
-                                                                     [Packet]),
-                            case Result of
-                                {ok, _} -> lager:info("(default router) sent packet ~p to ~p", [Packet, Address]);
-                                {error, _Reason} -> lager:error("(default router) failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
-                            end
+                            send_to_router(Swarm, Address, Packet)
                     end;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
@@ -224,20 +216,27 @@ send_to_router(OUI, Packet) ->
                     lists:foreach(
                         fun(BinAddress) ->
                             Address = erlang:binary_to_list(BinAddress),
-                            Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                                                        Address,
-                                                                        router_handler:version(),
-                                                                        router_handler,
-                                                                        [Packet]),
-                            case Result of
-                                {ok, _} -> lager:info("sent packet ~p to ~p", [Packet, Address]);
-                                {error, _Reason} -> lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
-                            end
+                            send_to_router(Swarm, Address, Packet)
                         end,
                         Addresses
                     )
             end
     end.
+
+send_to_router(Swarm, Address, Packet) ->
+    Result = libp2p_swarm:dial_framed_stream(Swarm,
+                                             Address,
+                                             router_handler:version(),
+                                             router_handler,
+                                             []),
+    case Result of
+        {ok, Stream} ->
+            Stream ! {send, Packet},
+            lager:info("sent packet ~p to ~p", [Packet, Address]);
+        {error, _Reason} ->
+            lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+    end.
+
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions

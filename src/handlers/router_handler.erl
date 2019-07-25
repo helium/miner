@@ -49,15 +49,18 @@ version() ->
 %% libp2p_framed_stream Function Definitions
 %% ------------------------------------------------------------------
 init(server, _Conn, _Args) ->
+    lager:info("init server with ~p", [_Args]),
     {ok, #state{}};
-init(client, _Conn, [Packet]=_Args) ->
+init(client, _Conn, _Args) ->
     lager:info("init client with ~p", [_Args]),
-    {ok, #state{}, Packet}.
+    {ok, #state{}}.
 
 handle_data(_Type, _Bin, State) ->
     lager:warning("~p got data ~p", [_Type, _Bin]),
     {noreply, State}.
 
+handle_info(_Type, {send, Data}, State) ->
+    {stop, normal, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:warning("~p got info ~p", [_Type, _Msg]),
     {noreply, State}.

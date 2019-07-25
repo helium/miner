@@ -91,7 +91,7 @@ init_per_testcase(_TestCase, Config0) ->
                                        [InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns, Addresses,
                                         N, Curve])
                    end, Miners),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+    ?assertEqual([ok], lists:usort(DKGResults)),
 
     NonConsensusMiners = lists:filtermap(fun(Miner) ->
                                                  false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
