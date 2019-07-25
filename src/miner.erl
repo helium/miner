@@ -277,7 +277,7 @@ election_epoch() ->
 
 -spec version() -> integer().
 version() ->
-    1.
+    2.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
