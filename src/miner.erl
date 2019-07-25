@@ -681,9 +681,7 @@ restore(Chain, Block, Height, Interval) ->
         %% it's possible that we've already processed the block that would
         %% have started the election, so try this on restore
         Ht when Ht > Election ->
-            {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
-            EHash = blockchain_block:hash_block(ElectionBlock),
-            miner_consensus_mgr:start_election(EHash, Height, Election);
+            miner_consensus_mgr:start_election(ignored, Height, Election);
         _ ->
             ok
     end,

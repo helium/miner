@@ -269,7 +269,7 @@ handle_call({start_election, _Hash, _Current, Height}, _From, State)
   when Height =< State#state.initial_height ->
     lager:info("election already ran at ~p bc initial ~p", [Height, State#state.initial_height]),
     {reply, already_ran, State};
-handle_call({start_election, Hash, CurrentHeight, StartHeight}, _From,
+handle_call({start_election, Hash0, CurrentHeight, StartHeight}, _From,
             #state{current_dkg = undefined, chain = Chain} = State0) ->
     lager:info("election started at ~p curr ~p", [StartHeight, CurrentHeight]),
     Diff = CurrentHeight - StartHeight,
@@ -279,6 +279,19 @@ handle_call({start_election, Hash, CurrentHeight, StartHeight}, _From,
     Delay = (Diff div Interval) * Interval,
     State = State0#state{initial_height = StartHeight,
                          delay = Delay},
+    %% this is a crappy workaround for not wanting to duplicate the
+    %% delay calculation logic in the miner as well. in other cases
+    %% the hash is always correct, but we can do the work more easily
+    %% here in the restart case. this will go away when the restart
+    %% logic is refactored into this module.
+    Hash =
+        case Hash0 of
+            ignored ->
+                Election = StartHeight + Delay,
+                {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
+                blockchain_block:hash_block(ElectionBlock);
+            _ -> Hash0
+        end,
     State1 = initiate_election(Hash, StartHeight, State),
     {reply, State1#state.current_dkg /= undefined, State1};
 handle_call({start_election, _Hash, _Current, _Height}, _From, State) ->
