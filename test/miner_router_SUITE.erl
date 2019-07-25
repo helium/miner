@@ -33,6 +33,7 @@ init_per_testcase(_TestCase, Config0) ->
     Miners = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    InitialDCTransactions = [ blockchain_txn_dc_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, undefined, 0) || Addr <- Addresses],
 
     N = proplists:get_value(num_consensus_members, Config),
@@ -81,13 +82,13 @@ init_per_testcase(_TestCase, Config0) ->
            [BinPub, Priv, Vars, KeyProof,
             term_to_binary(Vars, [{compressed, 9}])]),
 
-    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, #{master_key => BinPub,
-                                                             key_proof => KeyProof}) ],
+    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, 1, #{master_key => BinPub,
+                                                                key_proof => KeyProof}) ],
 
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialVars ++ InitialPaymentTransactions ++ AddGwTxns, Addresses,
+                                       [InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns, Addresses,
                                         N, Curve])
                    end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
@@ -166,7 +167,7 @@ basic(Config) ->
     {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
 
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterP2P}]),
-    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterP2P], 0]),
+    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterP2P], 1, 0]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),
