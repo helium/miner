@@ -256,7 +256,7 @@ init(Args) ->
         udp_send_port = UDPSendPort,
         udp_send_ip = UDPSendIP,
         ecdh_fun = maps:get(ecdh_fun, Args),
-        miner_name = erlang:list_to_binary(Name)
+        miner_name = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global])
     },
     lager:info("init with ~p", [Args]),
     {ok, State}.

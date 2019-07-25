@@ -202,7 +202,7 @@ basic(Config) ->
     receive 
         {simple_http_stream_test, Got} ->
             {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
-            Resp2 = Resp#helium_LongFiResp_pb{miner_name=erlang:list_to_binary(MinerName)},
+            Resp2 = Resp#helium_LongFiResp_pb{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
             ?assertMatch(Resp2, helium_longfi_pb:decode_msg(Got, helium_LongFiResp_pb)),
             ok;
         _Other ->
