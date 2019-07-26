@@ -36,9 +36,11 @@ handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPS
     Decoded = helium_longfi_pb:decode_msg(InPacket, helium_LongFiReq_pb),
     {_, Uplink} = Decoded#helium_LongFiReq_pb.kind,
     Payload = Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    OUI = Uplink#helium_LongFiTxUplinkPacket_pb.oui,
+    DeviceID = Uplink#helium_LongFiTxUplinkPacket_pb.device_id,
     lists:foreach(
         fun(Port) ->
-            Resp = #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{payload=Payload, crc_check=true}}},
+            Resp = #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{payload=Payload, crc_check=true, oui=OUI, device_id=DeviceID}}},
             gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, helium_longfi_pb:encode_msg(Resp))
         end,
         Ports -- [SrcPort]
