@@ -250,13 +250,14 @@ init(Args) ->
     UDPSendIP = maps:get(radio_udp_send_ip, Args),
     {ok, UDP} = gen_udp:open(UDPPort, [{ip, UDPIP}, {port, UDPPort}, binary, {active, once}, {reuseaddr, true}]),
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
+    MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
     State = #state{
         compact_key = blockchain_swarm:pubkey_bin(),
         udp_socket = UDP,
         udp_send_port = UDPSendPort,
         udp_send_ip = UDPSendIP,
         ecdh_fun = maps:get(ecdh_fun, Args),
-        miner_name = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global])
+        miner_name = unicode:characters_to_binary(MinerName, utf8)
     },
     lager:info("init with ~p", [Args]),
     {ok, State}.
