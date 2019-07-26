@@ -269,9 +269,12 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
     {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data)),
     Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
     UpLink = #helium_LongFiTxUplinkPacket_pb{
-        spreading=Spreading,
-        payload=Data
-    },
+                oui = 0,
+                device_id = 1,
+                disable_fragmentation=application:get_env(miner, disable_poc_fragmentation, true),
+                spreading=Spreading,
+                payload=Data
+               },
     Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
     lager:info("sending ~p", [Req]),
     Packet = helium_longfi_pb:encode_msg(Req),
@@ -359,13 +362,13 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             ),
 
             Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
-            Payload = <<0:32/integer, %% broadcast packet
-                     1:8/integer, %% onion packet
-                     NextPacket/binary>>,
-            {Spreading, _CodeRate} = tx_params(erlang:byte_size(Payload)),
+            {Spreading, _CodeRate} = tx_params(erlang:byte_size(NextPacket)),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
-                spreading=Spreading,
-                payload=Payload
+                        oui=0,
+                        device_id=1,
+                        disable_fragmentation=application:get_env(miner, disable_poc_fragmentation, true),
+                        spreading=Spreading,
+                        payload=NextPacket
             },
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
             lager:info("sending ~p", [Req]),
@@ -395,10 +398,8 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
 %% @end
 %%--------------------------------------------------------------------
 % This is aan onion packet cause oui/device_id = 0
-handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_id=0, rssi=RSSI, payload=Payload}}}, State) ->
-    <<0:32/integer-unsigned-little, %% all onion packets start with all 0s because broadcast
-      1:8/integer, %% onions are type 1 broadcast?
-      IV:2/binary,
+handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
+    <<IV:2/binary,
       OnionCompactKey:33/binary,
       Tag:4/binary,
       CipherText/binary>> = Payload,

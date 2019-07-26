@@ -73,9 +73,11 @@ basic(_Config) ->
     end),
 
     Rx0 = #helium_LongFiRxPacket_pb{
+        oui=0,
+        device_id=1,
         crc_check=true,
         spreading= 'SF8',
-        payload= <<0:32/integer, 1:8/integer, Onion/binary>>
+        payload= Onion
     },
     Resp0 = #helium_LongFiResp_pb{id=0, kind={rx, Rx0}},
     Packet0 = helium_longfi_pb:encode_msg(Resp0, helium_LongFiResp_pb),
@@ -84,9 +86,7 @@ basic(_Config) ->
 
     Got0 = helium_longfi_pb:decode_msg(Packet1, helium_LongFiReq_pb),
     {_, Got0Uplink} = Got0#helium_LongFiReq_pb.kind,
-    Got0Payload = Got0Uplink#helium_LongFiTxUplinkPacket_pb.payload,
-    ?assertMatch(<<0:32/integer, 1:8/integer, _/binary>>, Got0Payload),
-    <<0:32/integer, 1:8/integer, X/binary>> = Got0Payload,
+    X = Got0Uplink#helium_LongFiTxUplinkPacket_pb.payload,
 
     timer:sleep(2000),
     %% check that the packet size is the same
@@ -121,9 +121,11 @@ basic(_Config) ->
 
     %% check we can't decrypt the original
     Rx2 = #helium_LongFiRxPacket_pb{
+        oui=0,
+        device_id=1,
         crc_check=true,
         spreading= 'SF8',
-        payload= <<0:32/integer, 1:8/integer, Onion/binary>>
+        payload= Onion
     },
     Resp2 = #helium_LongFiResp_pb{id=0, kind={rx, Rx2}},
     Packet2 = helium_longfi_pb:encode_msg(Resp2, helium_LongFiResp_pb),
@@ -131,9 +133,11 @@ basic(_Config) ->
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
     Rx3 = #helium_LongFiRxPacket_pb{
+        oui = 0,
+        device_id=1,
         crc_check=true,
         spreading= 'SF8',
-        payload= <<0:32/integer, 1:8/integer, X/binary>>
+        payload= X
     },
     Resp3 = #helium_LongFiResp_pb{id=0, kind={rx, Rx3}},
     Packet3 = helium_longfi_pb:encode_msg(Resp3, helium_LongFiResp_pb),
@@ -143,15 +147,15 @@ basic(_Config) ->
 
     Got1 = helium_longfi_pb:decode_msg(Packet4, helium_LongFiReq_pb),
     {_, Got1Uplink} = Got1#helium_LongFiReq_pb.kind,
-    Got1Payload = Got1Uplink#helium_LongFiTxUplinkPacket_pb.payload,
-    ?assertMatch(<<0:32/integer, 1:8/integer, _/binary>>, Got1Payload),
-    <<0:32/integer, 1:8/integer, Y/binary>> = Got1Payload,
+    Y = Got1Uplink#helium_LongFiTxUplinkPacket_pb.payload,
 
     %% check we can't decrypt the next layer
     Rx5 = #helium_LongFiRxPacket_pb{
+        oui=0,
+        device_id=1,
         crc_check=true,
         spreading= 'SF8',
-        payload= <<0:32/integer, 1:8/integer, Y/binary>>
+        payload= Y
     },
     Resp5 = #helium_LongFiResp_pb{id=0, kind={rx, Rx5}},
     Packet5 = helium_longfi_pb:encode_msg(Resp5, helium_LongFiResp_pb),

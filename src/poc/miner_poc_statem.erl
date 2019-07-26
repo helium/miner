@@ -582,7 +582,9 @@ target_test() ->
                    (correct_min_score, _) ->
                         {ok, true};
                    (max_staleness, _) ->
-                        {ok, 100000}
+                        {ok, 100000};
+                   (correct_min_score, _) ->
+                        {ok, true}
                 end),
 
     Block = blockchain_block_v1:new(#{prev_hash => <<>>,
