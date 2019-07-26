@@ -50,8 +50,8 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ONBOARDING_KEY), _Msg, State=#state{}
     {reply, [string], [libp2p_crypto:bin_to_b58(PubKeyBin)], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) ->
     case ebus_message:args(Msg) of
-        {ok, [OwnerB58, Fee, Amount]} ->
-            case (catch miner:add_gateway_txn(OwnerB58, Fee, Amount)) of
+        {ok, [OwnerB58, Fee, Amount, Payer]} ->
+            case (catch miner:add_gateway_txn(OwnerB58, Fee, Amount, Payer)) of
                 {ok, TxnBin} ->
                     {reply, [{array, byte}], [TxnBin], State};
                 {'EXIT', Why} ->
@@ -67,9 +67,9 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
     end;
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state{}) ->
     case ebus_message:args(Msg) of
-        {ok, [H3String, OwnerB58, Nonce, Amount, Fee]} ->
+        {ok, [H3String, OwnerB58, Nonce, Amount, Fee, Payer]} ->
             lager:info("Requesting assert for ~p", [H3String]),
-            case (catch miner:assert_loc_txn(H3String, OwnerB58, Nonce, Amount, Fee)) of
+            case (catch miner:assert_loc_txn(H3String, OwnerB58, Nonce, Amount, Fee, Payer)) of
                 {ok, TxnBin} ->
                     {reply, [{array, byte}], [TxnBin], State};
                 {'EXIT', Why} ->
