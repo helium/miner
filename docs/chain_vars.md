@@ -12,7 +12,7 @@ chain variables include but are not limited to:
 - block interval 
 - election interval
 - election restart interval
-- proposal threshold
+- predicate threshold
 - chain variable master key
 
 in short, anything and everything that could make the roll up of blocks into the blockchain non-deterministic if it's different on different nodes needs to be a chain variable, and all checks of these variables must be threaded through the chain variable mechanism with a block height to replay remains deterministic.

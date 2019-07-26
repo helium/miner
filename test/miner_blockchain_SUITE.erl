@@ -59,7 +59,7 @@ init_per_testcase(TestCase, Config0) ->
              ?var_gw_inactivity_thresh => 20,
              ?block_version => v1,
              ?dkg_curve => Curve,
-             ?garbage_value => totes_garb,
+             garbage_value => totes_garb,
              ?predicate_callback_mod => miner,
              ?predicate_callback_fun => test_version,
              ?predicate_threshold => 0.85,

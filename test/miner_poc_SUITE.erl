@@ -61,7 +61,7 @@ dist(Config0) ->
              ?dkg_curve => Curve,
              ?predicate_callback_mod => miner,
              ?predicate_callback_fun => test_version,
-             ?proposal_threshold => 0.85,
+             ?predicate_threshold => 0.85,
              ?monthly_reward => 50000 * 1000000,
              ?securities_percent => 0.35,
              ?dc_percent => 0,
@@ -78,7 +78,7 @@ dist(Config0) ->
              ?max_staleness => 100000,
              ?min_assert_h3_res => 12,
              ?h3_neighbor_res => 12,
-             ?h3_max_grid_distance => 13,
+             ?h3_max_grid_dist => 13,
              ?h3_exclusion_ring_dist => 2,
              ?poc_challenge_interval => 20
             },
