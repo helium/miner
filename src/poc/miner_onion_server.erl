@@ -398,13 +398,13 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
 %% @end
 %%--------------------------------------------------------------------
 % This is aan onion packet cause oui/device_id = 0
-handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{crc_check=true, oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
+handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
     <<IV:2/binary,
       OnionCompactKey:33/binary,
       Tag:4/binary,
       CipherText/binary>> = Payload,
     decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
-handle_packet(Resp, #state{miner_name=Name}=State) ->
+handle_packet(Resp = #helium_LongFiResp_pb{kind={rx, _}}, #state{miner_name=Name}=State) ->
     erlang:spawn(?MODULE, send_to_router, [Name, Resp]),
     State;
 handle_packet(#helium_LongFiResp_pb{id=ID, kind={tx_status, #helium_LongFiTxStatus_pb{success=Success}}}, #state{pending_transmits=Pending}=State) ->
