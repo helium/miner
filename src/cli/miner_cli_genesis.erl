@@ -8,6 +8,8 @@
 
 -export([register_cli/0]).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 register_cli() ->
     register_all_usage(),
     register_all_cmds().
@@ -289,16 +291,18 @@ make_vars() ->
     {ok, N} = application:get_env(blockchain, num_consensus_members),
 
     #{block_time => BlockTime,
-      election_interval => Interval,
-      election_restart_interval => 10,
-      num_consensus_members => N,
+      ?election_interval => Interval,
+      ?election_restart_interval => 10,
+      ?num_consensus_members => N,
       batch_size => BatchSize,
-      vars_commit_delay => 20,
+      ?vars_commit_delay => 20,
+      %% poc challenge interval * 20
+      ?var_gw_inactivity_thresh => 600,
       block_version => v1,
       dkg_curve => Curve,
       predicate_callback_mod => miner,
       predicate_callback_fun => version,
-      predicate_threshold => 0.95,
+      ?predicate_threshold => 0.95,
       monthly_reward => 50000 * 1000000,
       securities_percent => 0.35,
       dc_percent => 0,
@@ -306,9 +310,9 @@ make_vars() ->
       poc_challengers_percent => 0.09 + 0.06,
       poc_witnesses_percent => 0.02 + 0.03,
       consensus_percent => 0.10,
-      election_selection_pct => 60,
-      election_replacement_factor => 4,
-      election_replacement_slope => 20,
+      ?election_selection_pct => 60,
+      ?election_replacement_factor => 4,
+      ?election_replacement_slope => 20,
       min_score => 0.2,
       alpha_decay => 0.007,
       beta_decay => 0.0005,

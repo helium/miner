@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
          init_per_suite/1,
@@ -54,7 +55,8 @@ init_per_testcase(TestCase, Config0) ->
              election_restart_interval => 10,
              num_consensus_members => NumConsensusMembers,
              batch_size => BatchSize,
-             vars_commit_delay => 5,
+             ?vars_commit_delay => 5,
+             ?var_gw_inactivity_thresh => 20,
              block_version => v1,
              dkg_curve => Curve,
              garbage_value => totes_garb,

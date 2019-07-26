@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
     all/0
@@ -54,7 +55,8 @@ dist(Config0) ->
              election_restart_interval => 10,
              num_consensus_members => N,
              batch_size => BatchSize,
-             vars_commit_delay => 2,
+             ?vars_commit_delay => 2,
+             ?var_gw_inactivity_thresh => 20,
              block_version => v1,
              dkg_curve => Curve,
              predicate_callback_mod => miner,
