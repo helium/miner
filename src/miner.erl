@@ -7,6 +7,8 @@
 
 -behavior(gen_server).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -295,7 +297,7 @@ init(_Args) ->
             {ok, Block} = blockchain:get_block(Top, Chain),
             {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
             Ledger = blockchain:ledger(Chain),
-            {ok, Interval} = blockchain:config(election_interval, Ledger),
+            {ok, Interval} = blockchain:config(?election_interval, Ledger),
             self() ! init,
 
             {ok, #state{blockchain = Chain,
@@ -364,7 +366,7 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
                                            ConsensusGroup]}),
 
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(election_interval, Ledger),
+    {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
     Ref = set_next_block_timer(Chain),
     {reply, ok, State#state{consensus_group = ConsensusGroup,
@@ -503,7 +505,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
                             {true, true, ElectionHeight} ->
-                                {ok, Interval} = blockchain:config(election_interval, Ledger),
+                                {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
                                 lager:info("stay in ~p", [Waiting]),
@@ -534,7 +536,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
                             {true, false, _} ->
-                                {ok, Interval} = blockchain:config(election_interval, Ledger),
+                                {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                                 miner_consensus_mgr:cancel_dkg(),
                                 lager:info("leave"),
@@ -583,7 +585,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                             {noreply, State#state{current_height = Height}};
                         {true, true, ElectionHeight} ->
-                            {ok, Interval} = blockchain:config(election_interval, Ledger),
+                            {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                             lager:info("nc start group"),
                             miner_consensus_mgr:cancel_dkg(),
@@ -615,7 +617,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
                         {true, false, _} ->
-                            {ok, Interval} = blockchain:config(election_interval, Ledger),
+                            {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                             lager:info("nc stay out"),
                             miner_consensus_mgr:cancel_dkg(),
@@ -640,7 +642,7 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(election_interval, Ledger),
+    {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
     {noreply, State#state{blockchain = Chain,
                           election_interval = Interval}};
@@ -683,7 +685,7 @@ restore(Chain, Block, Height, Interval) ->
     Group.
 
 set_next_block_timer(Chain) ->
-    {ok, BlockTime} = blockchain:config(block_time, blockchain:ledger(Chain)),
+    {ok, BlockTime} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
     LastBlockTimestamp = blockchain_block:time(HeadBlock),
     NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
