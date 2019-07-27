@@ -73,7 +73,7 @@ init_per_testcase(_TestCase, Config0) ->
              ?max_staleness => 100000,
              ?min_assert_h3_res => 12,
              ?h3_neighbor_res => 12,
-             ?h3_max_grid_dist => 13,
+             ?h3_max_grid_distance => 13,
              ?h3_exclusion_ring_dist => 2,
              ?poc_challenge_interval => 30
             },
