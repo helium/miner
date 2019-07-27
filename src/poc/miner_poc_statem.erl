@@ -571,7 +571,7 @@ target_test() ->
                         {ok, 0.2};
                    (h3_exclusion_ring_dist, _) ->
                         {ok, 2};
-                   (h3_max_grid_dist, _) ->
+                   (h3_max_grid_distance, _) ->
                         {ok, 13};
                    (h3_neighbor_res, _) ->
                         {ok, 12};
