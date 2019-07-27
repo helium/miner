@@ -98,7 +98,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                             ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
                                                  Members, State#state.privkey),
                             %% stop the handler
-                            {State#state{done_called = true}, [{stop, 60000}]};
+                            {State#state{done_called = true, signatures = GoodSignatures}, [{stop, 60000}]};
                         _ ->
                             {State, []}
                     end;
@@ -191,6 +191,15 @@ deserialize(BinState) ->
     end,
     State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey}.
 
+restore(#state{done_called = true, % if this is true on restore, we might not have started
+                                   % this correctly yet
+               donemod = DoneMod, donefun = DoneFun,
+               artifact = Artifact, signatures = Sigs,
+               members = Members, privkey = PrivKey
+              } = OldState, _NewState) ->
+    lager:info("restored dkg was completed, attempting to restart hbbft group"),
+    ok = DoneMod:DoneFun(Artifact, Sigs, Members, PrivKey),
+    {ok, OldState};
 restore(OldState, _NewState) ->
     {ok, OldState}.
 
