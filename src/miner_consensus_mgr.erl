@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include_lib("blockchain/include/blockchain.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% API
 -export([
@@ -137,9 +138,9 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
 
-    {ok, N} = blockchain:config(num_consensus_members, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     F = ((N - 1) div 3),
-    {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
 
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
@@ -164,7 +165,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                            delay = Delay}) ->
     lager:info("election done at ~p delay ~p", [Height, Delay]),
 
-    {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
+    {ok, N} = blockchain:config(?num_consensus_members, blockchain:ledger(Chain)),
     F = ((N - 1) div 3),
 
     Proof = term_to_binary(Signatures, [compressed]),
@@ -184,7 +185,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                               end
                                       end
                                      ),
-    {ok, BatchSize} = blockchain:config(batch_size, blockchain:ledger(Chain)),
+    {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(Chain)),
 
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
@@ -209,7 +210,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
 
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, N} = blockchain:config(num_consensus_members, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     F = ((N - 1) div 3),
     case blockchain_ledger_v1:consensus_members(Ledger) of
         {error, _} ->
@@ -220,7 +221,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                 true ->
                     lager:info("restoring consensus group"),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
-                    {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+                    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                                       Pos,
                                                       N,
@@ -274,7 +275,7 @@ handle_call({start_election, Hash0, CurrentHeight, StartHeight}, _From,
     lager:info("election started at ~p curr ~p", [StartHeight, CurrentHeight]),
     Diff = CurrentHeight - StartHeight,
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
 
     Delay = (Diff div Interval) * Interval,
     State = State0#state{initial_height = StartHeight,
@@ -344,7 +345,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
        Height =/= 0 ->
 
     Ledger = blockchain:ledger(State#state.chain),
-    {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
             NextRestart = Height + Interval + Delay,
@@ -387,8 +388,8 @@ code_change(_OldVsn, State, _Extra) ->
 initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, N} = blockchain:config(num_consensus_members, Ledger),
-    {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),
@@ -408,12 +409,12 @@ restart_election(#state{delay = Delay0,
                         chain=Chain} = State, Hash, Height) ->
 
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(election_restart_interval, Ledger),
+    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
 
     Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
-    {ok, N} = blockchain:config(num_consensus_members, Ledger),
-    {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     case length(ConsensusAddrs) == N of
