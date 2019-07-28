@@ -579,8 +579,6 @@ target_test() ->
                         {ok, 0.007};
                    (beta_decay, _) ->
                         {ok, 0.0005};
-                   (correct_min_score, _) ->
-                        {ok, true};
                    (max_staleness, _) ->
                         {ok, 100000};
                    (correct_min_score, _) ->
