@@ -56,7 +56,7 @@ init_per_testcase(TestCase, Config0) ->
              ?num_consensus_members => NumConsensusMembers,
              ?batch_size => BatchSize,
              ?vars_commit_delay => 5,
-             ?var_gw_inactivity_thresh => 20,
+             ?var_gw_inactivity_threshold => 20,
              ?block_version => v1,
              ?dkg_curve => Curve,
              garbage_value => totes_garb,

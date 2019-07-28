@@ -56,7 +56,7 @@ dist(Config0) ->
              ?num_consensus_members => N,
              ?batch_size => BatchSize,
              ?vars_commit_delay => 2,
-             ?var_gw_inactivity_thresh => 20,
+             ?var_gw_inactivity_threshold => 20,
              ?block_version => v1,
              ?dkg_curve => Curve,
              ?predicate_callback_mod => miner,
