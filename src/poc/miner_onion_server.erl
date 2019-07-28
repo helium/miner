@@ -23,9 +23,11 @@
 
 -ifdef(TEST).
 -define(TX_RAND_SLEEP, 1).
+-define(TX_MIN_SLEEP, 0).
 -define(TX_COUNT, 1).
 -else.
--define(TX_RAND_SLEEP, 15000).
+-define(TX_RAND_SLEEP, 10000).
+-define(TX_MIN_SLEEP, 0).
 -define(TX_COUNT, 3).
 -endif.
 
@@ -280,7 +282,7 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
     Packet = helium_longfi_pb:encode_msg(Req),
     spawn(fun() ->
                   %% sleep from 3-13 seconds before sending
-                  timer:sleep(rand:uniform(10000) + 3000),
+                  timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
                   gen_udp:send(Socket, IP, Port, Packet)
           end),
     {reply, ok, State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|Pendings]}};
@@ -379,7 +381,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Packet = helium_longfi_pb:encode_msg(Req),
             spawn(fun() ->
                           %% sleep from 3-13 seconds before sending
-                          timer:sleep(rand:uniform(10000) + 3000),
+                          timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
                           _ = gen_udp:send(Socket, IP, Port, Packet)
                   end),
             State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}
