@@ -26,7 +26,7 @@
     signed_block/2,
 
     start_chain/2,
-    handoff_consensus/2,
+    handoff_consensus/2, handoff_consensus/3,
     election_epoch/0,
     version/0
 ]).
@@ -286,7 +286,11 @@ start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
 
 handoff_consensus(ConsensusGroup, ElectionHeight) ->
-    gen_server:call(?MODULE, {handoff_consensus, ConsensusGroup, ElectionHeight}, infinity).
+    handoff_consensus(ConsensusGroup, ElectionHeight, false).
+
+handoff_consensus(ConsensusGroup, ElectionHeight, Rescue) ->
+    gen_server:call(?MODULE, {handoff_consensus, ConsensusGroup,
+                              ElectionHeight, Rescue}, infinity).
 
 election_epoch() ->
     gen_server:call(?MODULE, election_epoch).
@@ -344,7 +348,7 @@ handle_call({assert_loc_txn, H3Index, Owner, Payer, Nonce, StakingFee, Fee}, _Fr
     {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
-handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight}, _From,
+handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _From,
             #state{handoff_waiting = Waiting} = State) ->
     lager:info("handing off consensus from ~p or ~p to ~p",
                [State#state.consensus_group,
@@ -369,6 +373,14 @@ handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight}, _From,
                                       blockchain_block:transactions(Block),
                                       Sync}),
                 start_txn_handler(NewConsensusGroup),
+                {NewConsensusGroup, #{}};
+            _ when Rescue == true ->
+                lager:info("rescue true, forcing new group"),
+                stop_group(State#state.consensus_group),
+                libp2p_group_relcast:handle_input(
+                  NewConsensusGroup, {next_round, ElectionHeight, [], false}),
+                start_txn_handler(NewConsensusGroup),
+                self() ! block_timeout,
                 {NewConsensusGroup, #{}};
             _ ->
                 lager:info("no existing group at election ~p", [ElectionHeight]),

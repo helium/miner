@@ -18,6 +18,7 @@
          %% internal
          genesis_block_done/4,
          election_done/4,
+         rescue_done/4,
          sign_genesis_block/2,
 
          %% info
@@ -99,15 +100,14 @@ genesis_block_done(GenesisBlock, Signatures, Members, PrivKey) ->
 election_done(Artifact, Signatures, Members, PrivKey) ->
     gen_server:call(?MODULE, {election_done, Artifact, Signatures, Members, PrivKey}, infinity).
 
+rescue_done(Artifact, Signatures, Members, PrivKey) ->
+    gen_server:call(?MODULE, {rescue_done, Artifact, Signatures, Members, PrivKey}, infinity).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-%% two versions, one for an election, one for the genesis block
-
 init(_Args) ->
-    %% election version
-
     ok = blockchain_event:add_handler(self()),
     case  blockchain_worker:blockchain() of
         undefined ->
@@ -204,6 +204,34 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     ok = miner:handoff_consensus(Group, Height + Delay),
     {reply, ok, State#state{current_dkg = undefined}};
+handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
+            State = #state{chain = Chain}) ->
+    {ok, Height} = blockchain:height(Chain),
+    lager:info("rescue election done at ~p", [Height]),
+
+    {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
+    F = ((N - 1) div 3),
+    {ok, BatchSize} = blockchain:config(batch_size, blockchain:ledger(Chain)),
+
+    GroupArg = [miner_hbbft_handler, [Members,
+                                      State#state.consensus_pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      PrivKey,
+                                      Chain,
+                                      1, % gets set later
+                                      []]], % gets filled later
+    %% while this won't reflect the actual height, it has to be deterministic
+    Name = consensus_group_name(max(0, Height), Members),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                         Name,
+                                         libp2p_group_relcast, GroupArg),
+    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
+    %% adjust the height upwards, the rescue will be from one block
+    %% above the present one.
+    ok = miner:handoff_consensus(Group, Height + 1, true),
+    {reply, ok, State#state{current_dkg = undefined}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
@@ -248,7 +276,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                         end,
                     {reply, Group, State#state{consensus_pos = Pos,
                                                initial_height = Height}};
-                false ->
+                 false ->
                     lager:info("not restoring consensus group: not a member"),
                     {reply, undefined, State}
             end
@@ -321,7 +349,7 @@ handle_call(cancel_dkg, _From, #state{current_dkg = DKG} = State) ->
     spawn(fun() ->
                   %% give the dkg some time to shut down so that
                   %% laggards get a chance to complete
-                  Timeout = application:get_env(miner, dgk_stop_timeout, timer:minutes(3)),
+                  Timeout = application:get_env(miner, dkg_stop_timeout, timer:minutes(3)),
                   catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout})
           end),
     {reply, ok, State#state{current_dkg = undefined,
@@ -341,27 +369,46 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                    initial_height = Height,
                    delay = Delay} = State)
   when State#state.chain /= undefined andalso
-       State#state.election_running == true andalso
-       Height =/= 0 ->
+       Height =/= 1 ->
 
     Ledger = blockchain:ledger(State#state.chain),
     {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
-            NextRestart = Height + Interval + Delay,
-            case blockchain_block:height(Block) of
-                NewHeight when NewHeight >= NextRestart ->
-                    lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
-                    catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
-                    %% restart the dkg
-                    State1 = restart_election(State, Hash, Height),
-                    {noreply, State1};
-                NewHeight ->
-                    lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
+            case blockchain_block_v1:is_rescue_block(Block) of
+                true ->
+                    [Txn] =
+                        lists:filter(
+                          fun(T) ->
+                                  blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                          end, blockchain_block:transactions(Block)),
+                    Members = blockchain_txn_consensus_group_v1:members(Txn),
+                    MyAddress = blockchain_swarm:pubkey_bin(),
+                    %% check if we're in the group
+                    case lists:member(MyAddress, Members) of
+                        true ->
+                            lager:info("Preparing to run rescue DKG: ~p", [Members]),
+                            State1 = rescue_dkg(Members, term_to_binary(Members), State),
+                            {noreply, State1};
+                        false ->
+                            {noreply, State}
+                    end;
+                false when State#state.election_running ->
+                    NextRestart = Height + Interval + Delay,
+                    case blockchain_block:height(Block) of
+                        NewHeight when NewHeight >= NextRestart ->
+                            lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
+                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
+                            %% restart the dkg
+                            State1 = restart_election(State, Hash, Height),
+                            {noreply, State1};
+                        NewHeight ->
+                            lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
+                            {noreply, State}
+                    end;
+                _Error ->
                     {noreply, State}
-                end;
-        _Error ->
-            {noreply, State}
+            end
     end;
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
     case State#state.chain of
@@ -400,11 +447,6 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 
     State1.
 
-%%% TODO: Eventually we'll want to keep some of the existing consensus
-%%% members in the group.  However, once we have that constraint, we
-%%% should weaken it a little each restart, so that a group with many
-%%% downed members (that are still less than F) can't stall a restart
-%%% forever.
 restart_election(#state{delay = Delay0,
                         chain=Chain} = State, Hash, Height) ->
 
@@ -427,6 +469,17 @@ restart_election(#state{delay = Delay0,
             lager:warning("issue generating new group.  skipping restart"),
             State
     end.
+
+rescue_dkg(Members, Artifact, State) ->
+    Ledger = blockchain:ledger(State#state.chain),
+    {ok, Curve} = blockchain:config(dkg_curve, Ledger),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+
+    {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_genesis_block},
+                         rescue_done, length(Members), Curve,
+                         State#state{initial_height = Height,
+                                     election_running = true}),
+    State1.
 
 do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     lager:info("do initial"),
