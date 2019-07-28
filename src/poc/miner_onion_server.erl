@@ -267,7 +267,7 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port,
                                         packet_id=ID, pending_transmits=Pendings }=State) ->
     {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data)),
-    Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
+    Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
     UpLink = #helium_LongFiTxUplinkPacket_pb{
                 oui = 0,
                 device_id = 1,
@@ -278,8 +278,12 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
     Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
     lager:info("sending ~p", [Req]),
     Packet = helium_longfi_pb:encode_msg(Req),
-    R = gen_udp:send(Socket, IP, Port, Packet),
-    {reply, R, State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|Pendings]}};
+    spawn(fun() ->
+                  %% sleep from 3-13 seconds before sending
+                  timer:sleep(rand:uniform(10000) + 3000),
+                  gen_udp:send(Socket, IP, Port, Packet)
+          end),
+    {reply, ok, State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|Pendings]}};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
@@ -361,7 +365,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  Stream]
             ),
 
-            Ref = erlang:send_after(5000, self(), {tx_timeout, ID}),
+            Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(NextPacket)),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
                         oui=0,
@@ -373,7 +377,11 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
             lager:info("sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
-            _ = gen_udp:send(Socket, IP, Port, Packet),
+            spawn(fun() ->
+                          %% sleep from 3-13 seconds before sending
+                          timer:sleep(rand:uniform(10000) + 3000),
+                          _ = gen_udp:send(Socket, IP, Port, Packet)
+                  end),
             State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}
     end,
     ok = inet:setopts(Socket, [{active, once}]),
@@ -428,17 +436,19 @@ handle_packet(#helium_LongFiResp_pb{id=_ID, kind=_Kind}, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec tx_params(integer()) -> {atom(), atom()}.
-%tx_params(Len) when Len < 54 ->
-    %{'SF9', 'CR4_6'};
-%tx_params(Len) when Len < 83 ->
-    %{'SF8', 'CR4_8'};
-%tx_params(Len) when Len < 99 ->
-    %{'SF8', 'CR4_7'};
-%tx_params(Len) when Len < 115 ->
-    %{'SF8', 'CR4_6'};
-%tx_params(Len) when Len < 139 ->
-    %{'SF8', 'CR4_5'};
-%tx_params(Len) when Len < 160 ->
-    %{'SF7', 'CR4_8'};
+tx_params(Len) when Len < 54 ->
+    {'SF9', 'CR4_6'};
+tx_params(Len) when Len < 83 ->
+    {'SF8', 'CR4_8'};
+tx_params(Len) when Len < 99 ->
+    {'SF8', 'CR4_7'};
+tx_params(Len) when Len < 115 ->
+    {'SF8', 'CR4_6'};
+tx_params(Len) when Len < 139 ->
+    {'SF8', 'CR4_5'};
+tx_params(Len) when Len < 160 ->
+    {'SF7', 'CR4_8'};
 tx_params(_) ->
-    {'SF10', 'CR4_8'}.
+    %% onion packets won't be this big, but this will top out around 180 bytes
+    {'SF7', 'CR4_7'}.
+    %{'SF10', 'CR4_8'}.
