@@ -100,16 +100,36 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
             VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, 1, #{master_key => BinPub,
                                                                         key_proof => Proof}),
 
-            OldSecurities = [blockchain_txn_security_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
-                                                                     proplists:get_value(token, X)) || X <- proplists:get_value(securities, Config)],
-            OldAccounts = [blockchain_txn_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
-                                                          proplists:get_value(balance, X)) || X <- proplists:get_value(accounts, Config)],
-            OldGateways = [blockchain_txn_gen_gateway_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(gateway_address, X)),
-                                                             libp2p_crypto:b58_to_bin(proplists:get_value(owner_address, X)),
-                                                             proplists:get_value(location, X),
-                                                             proplists:get_value(nonce, X)) || X <- proplists:get_value(gateways, Config)],
-            OldDCs = [ blockchain_txn_dc_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
-                                                         proplists:get_value(dc_balance, X)) || X <- proplists:get_value(dcs, Config)],
+            OldSecurities = case proplists:get_value(securities, Config) of
+                                undefined -> [];
+                                Securities ->
+                                    [blockchain_txn_security_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
+                                                                             proplists:get_value(token, X)) || X <- Securities]
+                            end,
+
+            OldAccounts = case proplists:get_value(accounts, Config) of
+                              undefined -> [];
+                              Accounts ->
+                                  [blockchain_txn_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
+                                                                  proplists:get_value(balance, X)) || X <- Accounts]
+                          end,
+
+            OldGateways = case proplists:get_value(gateways, Config) of
+                              undefined -> [];
+                              Gateways ->
+                                  [blockchain_txn_gen_gateway_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(gateway_address, X)),
+                                                                     libp2p_crypto:b58_to_bin(proplists:get_value(owner_address, X)),
+                                                                     proplists:get_value(location, X),
+                                                                     proplists:get_value(nonce, X)) || X <- Gateways]
+                          end,
+
+            OldDCs = case proplists:get_value(dcs, Config) of
+                         undefined -> [];
+                         DCs ->
+                             [ blockchain_txn_dc_coinbase_v1:new(libp2p_crypto:b58_to_bin(proplists:get_value(address, X)),
+                                                                 proplists:get_value(dc_balance, X)) || X <- DCs]
+                     end,
+
             OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities ++ OldDCs,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
             miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ [VarTxn], Addresses, N, Curve),
@@ -319,6 +339,6 @@ make_vars() ->
       ?poc_challenge_interval => 30,
       ?min_assert_h3_res => 12,
       ?h3_neighbor_res => 12,
-      ?h3_max_grid_distance => 13,
-      ?h3_exclusion_ring_dist => 2
+      ?h3_max_grid_distance => 140,
+      ?h3_exclusion_ring_dist => 6
      }.
