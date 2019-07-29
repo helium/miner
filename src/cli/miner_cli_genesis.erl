@@ -329,7 +329,7 @@ make_vars() ->
       ?poc_challengers_percent => 0.09 + 0.06,
       ?poc_witnesses_percent => 0.02 + 0.03,
       ?consensus_percent => 0.10,
-      ?election_selection_pct => 60,
+      ?election_selection_pct => 75,
       ?election_replacement_factor => 4,
       ?election_replacement_slope => 20,
       ?min_score => 0.15,
