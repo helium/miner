@@ -268,7 +268,8 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port,
                                         packet_id=ID, pending_transmits=Pendings }=State) ->
-    {Fragmentation, Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), application:get_env(miner, poc_fragmentation, false)),
+    Fragmentation = application:get_env(miner, poc_fragmentation, false),
+    {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
     Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
     UpLink = #helium_LongFiTxUplinkPacket_pb{
                 oui = 0,
@@ -368,7 +369,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             ),
 
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-            {Fragmentation, Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), application:get_env(miner, poc_fragmentation, false)),
+            Fragmentation = application:get_env(miner, poc_fragmentation, false),
+            {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
                         oui=0,
                         device_id=1,
@@ -437,21 +439,21 @@ handle_packet(#helium_LongFiResp_pb{id=_ID, kind=_Kind}, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec tx_params(integer(), Fragment :: boolean()) -> {boolean(), atom(), atom()}.
+-spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
 tx_params(_, true) ->
-    {true, application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
+    {application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
 tx_params(Len, false) when Len < 54 ->
-    {false, 'SF9', 'CR4_6'};
+    {'SF9', 'CR4_6'};
 tx_params(Len, false) when Len < 83 ->
-    {false, 'SF8', 'CR4_8'};
+    {'SF8', 'CR4_8'};
 tx_params(Len, false) when Len < 99 ->
-    {false, 'SF8', 'CR4_7'};
+    {'SF8', 'CR4_7'};
 tx_params(Len, false) when Len < 115 ->
-    {false, 'SF8', 'CR4_6'};
+    {'SF8', 'CR4_6'};
 tx_params(Len, false) when Len < 139 ->
-    {false, 'SF8', 'CR4_5'};
+    {'SF8', 'CR4_5'};
 tx_params(Len, false) when Len < 160 ->
-    {false, 'SF7', 'CR4_8'};
+    {'SF7', 'CR4_8'};
 tx_params(_, false) ->
     %% onion packets won't be this big, but this will top out around 180 bytes
-    {false, 'SF7', 'CR4_7'}.
+    {'SF7', 'CR4_7'}.
