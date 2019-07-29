@@ -268,12 +268,13 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port,
                                         packet_id=ID, pending_transmits=Pendings }=State) ->
-    {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data)),
+    Fragmentation = application:get_env(miner, poc_fragmentation, false),
+    {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
     Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
     UpLink = #helium_LongFiTxUplinkPacket_pb{
                 oui = 0,
                 device_id = 1,
-                disable_fragmentation=application:get_env(miner, disable_poc_fragmentation, true),
+                disable_fragmentation=Fragmentation == false,
                 spreading=Spreading,
                 payload=Data
                },
@@ -368,11 +369,12 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             ),
 
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-            {Spreading, _CodeRate} = tx_params(erlang:byte_size(NextPacket)),
+            Fragmentation = application:get_env(miner, poc_fragmentation, false),
+            {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
                         oui=0,
                         device_id=1,
-                        disable_fragmentation=application:get_env(miner, disable_poc_fragmentation, true),
+                        disable_fragmentation=Fragmentation == false,
                         spreading=Spreading,
                         payload=NextPacket
             },
@@ -437,20 +439,21 @@ handle_packet(#helium_LongFiResp_pb{id=_ID, kind=_Kind}, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec tx_params(integer()) -> {atom(), atom()}.
-tx_params(Len) when Len < 54 ->
+-spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
+tx_params(_, true) ->
+    {application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
+tx_params(Len, false) when Len < 54 ->
     {'SF9', 'CR4_6'};
-tx_params(Len) when Len < 83 ->
+tx_params(Len, false) when Len < 83 ->
     {'SF8', 'CR4_8'};
-tx_params(Len) when Len < 99 ->
+tx_params(Len, false) when Len < 99 ->
     {'SF8', 'CR4_7'};
-tx_params(Len) when Len < 115 ->
+tx_params(Len, false) when Len < 115 ->
     {'SF8', 'CR4_6'};
-tx_params(Len) when Len < 139 ->
+tx_params(Len, false) when Len < 139 ->
     {'SF8', 'CR4_5'};
-tx_params(Len) when Len < 160 ->
+tx_params(Len, false) when Len < 160 ->
     {'SF7', 'CR4_8'};
-tx_params(_) ->
+tx_params(_, false) ->
     %% onion packets won't be this big, but this will top out around 180 bytes
     {'SF7', 'CR4_7'}.
-    %{'SF10', 'CR4_8'}.
