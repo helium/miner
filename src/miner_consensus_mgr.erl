@@ -37,7 +37,7 @@
          current_dkg :: undefined | pid(),
          dkg_await :: undefined | {reference(), term()},
          consensus_pos :: undefined | pos_integer(),
-         initial_height = 0 :: non_neg_integer(),
+         initial_height = 1 :: non_neg_integer(),
          delay = 0 :: integer(),
          chain :: undefined | blockchain:blockchain(),
          election_running = false :: boolean()
