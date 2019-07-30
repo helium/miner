@@ -70,7 +70,8 @@ handle_info(timeout, _) ->
              {ok, B} = blockchain:get_block(H, Chain),
              Time = blockchain_block:time(B),
              Txns = blockchain_block:transactions(B),
-             {Time, Txns}
+             {Epoch, _} = blockchain_block_v1:election_info(B),
+             {Time, Txns, Epoch, H}
          end
          || H <- lists:seq(1, CurrHeight)],
     %% calculate a moving average over the history of the blockchain
@@ -100,8 +101,9 @@ handle_info({blockchain_event, {add_block, Hash, _, _}}, #state{chain = Chain,
                 Height when Height > CurrHeight ->
                     Time = blockchain_block:time(Block),
                     Txns = blockchain_block:transactions(Block),
-                    {Iolist, Stats1} = process_line({Time, Txns}, Stats),
-                    lager:info("writing:~n ~s to dat file", [Iolist]),
+                    {Epoch, _} = blockchain_block_v1:election_info(Block),
+                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height}, Stats),
+                    lager:debug("writing:~n ~s to dat file", [Iolist]),
                     file:write(File, Iolist),
                     {noreply, State#state{height = Height,
                                           stats = Stats1}};
@@ -151,7 +153,6 @@ truncate(New, List, Limit) ->
             end
     end.
 
-
 avg_interval([_H]) ->
     ?minutes(2);
 avg_interval([H|T]) ->
@@ -175,10 +176,10 @@ get_intervals(Prev, [H|T], Acc) ->
     Int = H - Prev,
     get_intervals(H, T, [Int | Acc]).
 
-process_line({0, _Txns}, Acc) ->
+process_line({0, _Txns, _Epoch, _Height}, Acc) ->
     {[], Acc};
-process_line({Time, Txns}, #stats{times = Times0,
-                                  tlens = TLens1}) ->
+process_line({Time, Txns, Epoch, Height}, #stats{times = Times0,
+                                                  tlens = TLens1}) ->
     TLen = length(Txns),
     TLens0 = TLens1 ++ [TLen],
     Times = truncate(Time, Times0, 120), % minutes
@@ -198,5 +199,19 @@ process_line({Time, Txns}, #stats{times = Times0,
       integer_to_list(TLen), "\t",
       integer_to_list(AvgInterval), "\t",
       integer_to_list(MedInterval), "\t",
-      integer_to_list(AvgTxns), "\n"],
+      integer_to_list(AvgTxns), "\t",
+      integer_to_list(Height), "\t",
+      float_to_list(Height / Epoch), "\t",
+      extract_delay(Txns),      "\n"],
      #stats{times = Times, tlens = TLens}}.
+
+extract_delay(Txns) ->
+    case lists:filter(fun(T) ->
+                              %% TODO: ideally move to versionless types?
+                              blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                      end, Txns) of
+        [Txn] ->
+            integer_to_list(blockchain_txn_consensus_group_v1:delay(Txn));
+        _ ->
+            ""
+    end.

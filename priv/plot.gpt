@@ -2,10 +2,13 @@ set xdata time
 set timefmt "%s"
 
 if (!exists("interval")) interval=12
+if (!exists("y2height")) y2height=100
+if (!exists("yheight")) yheight=200
 
 set xrange [time(0) - interval*60*60:time(0)]
-set yrange [0:200]
-
+set yrange [0:yheight]
+set y2range [0:y2height]
+set y2tics
 
 #set term x11 1 noraise
 set term qt noraise
@@ -14,7 +17,9 @@ plot "/tmp/miner-chain-stats" using 1:2 with lines title "interval", \
      "/tmp/miner-chain-stats" using 1:3 with lines title "txns", \
      "/tmp/miner-chain-stats" using 1:4 with lines title "avg interval", \
      "/tmp/miner-chain-stats" using 1:5 with lines title "median interval", \
-     "/tmp/miner-chain-stats" using 1:6 with lines title "avg txns"
+     "/tmp/miner-chain-stats" using 1:6 with lines title "avg txns", \
+     "/tmp/miner-chain-stats" using 1:8 with lines lw 2 axes x1y2 title "avg election interval", \
+     "/tmp/miner-chain-stats" using 1:9 with linespoints lw 2 pt 7 ps 2 axes x1y2 title "election delay"
 
 pause 15
 reread
