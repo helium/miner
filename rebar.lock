@@ -27,7 +27,7 @@
   0},
  {<<"ecc508">>,
   {git,"https://github.com/helium/ecc508.git",
-       {ref,"5b6059342f8357362b20c61b0080a9ea13b76a6f"}},
+       {ref,"bf8d708b4335b1783a2a72aec5b8103e2459fca5"}},
   0},
  {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.0.4">>},2},
  {<<"enacl">>,{pkg,<<"enacl">>,<<"0.17.2">>},2},

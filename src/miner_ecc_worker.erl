@@ -36,12 +36,12 @@ init([KeySlot]) ->
 handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
     ecc508:wake(Pid),
     Reply = ecc508:sign(Pid, State#state.key_slot, Binary),
-    ecc508:idle(Pid),
+    ecc508:sleep(Pid),
     {reply, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
     ecc508:wake(Pid),
     Reply = ecc508:ecdh(Pid, State#state.key_slot, PubKey),
-    ecc508:idle(Pid),
+    ecc508:sleep(Pid),
     {reply, Reply, State};
 
 handle_call(_Msg, _From, State) ->
