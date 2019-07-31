@@ -39,10 +39,14 @@ init([KeySlot]) ->
 handle_call({sign, Binary}, _From, State) ->
     {Pid, State1} = wake(State),
     Reply = ecc508:sign(Pid, State#state.key_slot, Binary),
+    Pause = application:get_env(miner, ecc_delay, 2),
+    timer:sleep(Pause),
     {reply, Reply, idle_timeout(State1)};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
     {Pid, State1} = wake(State),
     Reply = ecc508:ecdh(Pid, State#state.key_slot, PubKey),
+    Pause = application:get_env(miner, ecc_delay, 2),
+    timer:sleep(Pause),
     {reply, Reply, idle_timeout(State1)};
 
 handle_call(_Msg, _From, State) ->
