@@ -84,7 +84,7 @@ init(_Args) ->
                 end,
             ECCWorker = [];
         {ecc, Props} when is_list(Props) ->
-            KeySlot = proplists:get_value(key_slot, Props, 0),
+            KeySlot0 = proplists:get_value(key_slot, Props, 0),
             OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
             %% Create a temporary ecc link to get the public key and
             %% onboarding keys for the given slots as well as the
@@ -92,18 +92,31 @@ init(_Args) ->
             %% Define a helper funtion to retry automatic keyslot key
             %% generation and locking the first time we encounter an
             %% empty keyslot.
-            GetPublicKey = fun GetPublicKey() ->
-                                   case ecc508:genkey(ECCPid, public, KeySlot) of
-                                       {ok, PubKey} -> {ok, {ecc_compact, PubKey}};
+            GetPublicKey = fun GetPublicKey(KS) ->
+                                   case ecc508:genkey(ECCPid, public, KS) of
+                                       {ok, PubKey} ->
+                                           case ecc_compact:is_compact(PubKey) of
+                                               {true, _} ->
+                                                   {ok, {ecc_compact, PubKey}, KS};
+                                               false ->
+                                                   %% initial hotspots had a bug where they
+                                                   %% did not generate a compact key here.
+                                                   %% This code is fallback to use a secondary
+                                                   %% slot to handle this case.
+                                                   GetPublicKey(KS+1)
+                                           end;
                                        {error, _} ->
-                                           {ok, _} = ecc508:genkey(ECCPid, private, KeySlot),
-                                           ecc508:lock(ECCPid, {slot, KeySlot}),
-                                           GetPublicKey()
+                                           %% key is not present, generate one and lock it
+                                           %% XXX this is really not the best thing to do here
+                                           %% but deadlines rule everything around us
+                                           ok = gen_compact_key(ECCPid, KS),
+                                           ecc508:lock(ECCPid, {slot, KS}),
+                                           GetPublicKey(KS)
                                    end
                            end,
             ecc508:wake(ECCPid),
             %% Get (or generate) the public and onboarding keys
-            {ok, PublicKey} = GetPublicKey(),
+            {ok, PublicKey, KeySlot} = GetPublicKey(KeySlot0),
             {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
             %% The signing and ecdh functions will use an actual
             %% worker against a named process.
@@ -188,3 +201,20 @@ init(_Args) ->
         OnionServer ++
         [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.
+
+
+gen_compact_key(Pid, Slot) ->
+    gen_compact_key(Pid, Slot, 100).
+
+gen_compact_key(_Pid, _Slot, 0) ->
+    {error, compact_key_create_failed};
+gen_compact_key(Pid, Slot, N) when N > 0 ->
+    case  ecc508:genkey(Pid, private, Slot) of
+        {ok, PubKey} ->
+            case ecc_compact:is_compact(PubKey) of
+                {true, _} -> ok;
+                false -> gen_compact_key(Pid, Slot, N - 1)
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
