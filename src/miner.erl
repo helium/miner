@@ -341,7 +341,9 @@ handle_call({assert_loc_txn, H3Index, Owner, Payer, Nonce, StakingFee, Fee}, _Fr
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, Payer, H3Index, Nonce, StakingFee, Fee),
     SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
-    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
+    GatewaySign = blockchain_txn_assert_location_v1:gateway_signature(SignedTxn),
+    ReducedTxn = blockchain_txn_assert_location_v1:new(PubKeyBin, GatewaySign, H3Index),
+    {reply, {ok, blockchain_txn:serialize(ReducedTxn)}, State};
 handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight}, _From,
