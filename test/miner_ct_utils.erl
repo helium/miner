@@ -1,5 +1,8 @@
 -module(miner_ct_utils).
 
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 -export([pmap/2, pmap/3,
          wait_until/1,
          wait_until/3,
@@ -14,7 +17,8 @@
          random_n/2,
          init_per_testcase/2,
          end_per_testcase/2,
-         get_balance/2
+         get_balance/2,
+         make_vars/1, make_vars/2
         ]).
 
 pmap(F, L) ->
@@ -291,3 +295,65 @@ get_balance(Miner, Addr) ->
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
     ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
+
+make_vars(Keys) ->
+    make_vars(Keys, #{}).
+
+make_vars(Keys, Map) ->
+    Vars1 = #{?block_time => 1,
+              ?election_interval => 30,
+              ?election_restart_interval => 10,
+              ?num_consensus_members => 7,
+              ?batch_size => 2500,
+              ?vars_commit_delay => 5,
+              ?var_gw_inactivity_threshold => 20,
+              ?block_version => v1,
+              ?dkg_curve => 'SS512',
+              ?poc_path_limit => 7,
+              ?predicate_callback_mod => miner,
+              ?predicate_callback_fun => test_version,
+              ?predicate_threshold => 0.85,
+              ?monthly_reward => 50000 * 1000000,
+              ?securities_percent => 0.35,
+              ?dc_percent => 0,
+              ?poc_challengees_percent => 0.19 + 0.16,
+              ?poc_challengers_percent => 0.09 + 0.06,
+              ?poc_witnesses_percent => 0.02 + 0.03,
+              ?consensus_percent => 0.10,
+              ?election_selection_pct => 60,
+              ?election_replacement_factor => 4,
+              ?election_replacement_slope => 20,
+              ?min_score => 0.2,
+              ?alpha_decay => 0.007,
+              ?beta_decay => 0.0005,
+              ?max_staleness => 100000,
+              ?min_assert_h3_res => 12,
+              ?h3_neighbor_res => 12,
+              ?h3_max_grid_distance => 13,
+              ?h3_exclusion_ring_dist => 2,
+              ?poc_challenge_interval => 10
+             },
+    Vars = maps:merge(Vars1, Map),
+
+    Size = maps:size(Vars),
+    VarKeys = maps:keys(Vars),
+    {One, Two} = lists:split(Size div 2, VarKeys),
+    MOne = maps:with(One, Vars),
+    MTwo = maps:with(Two, Vars),
+    ?assert(maps:size(MOne) =< 32),
+    ?assert(maps:size(MTwo) =< 32),
+
+    #{secret := Priv, public := Pub} = Keys,
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+
+    KeyProof1 = blockchain_txn_vars_v1:create_proof(Priv, MOne),
+    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv, MTwo),
+
+    %% ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
+    %%        [BinPub, Priv, Vars, KeyProof,
+    %%         term_to_binary(Vars, [{compressed, 9}])]),
+
+    [ blockchain_txn_vars_v1:new(MOne, <<>>, 1, #{master_key => BinPub,
+                                                  key_proof => KeyProof1}),
+      blockchain_txn_vars_v1:new(MTwo, <<>>, 2, #{master_key => BinPub,
+                                                  key_proof => KeyProof2}) ].
