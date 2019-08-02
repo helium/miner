@@ -4,6 +4,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 
 -export([
     init_per_testcase/2,
@@ -43,47 +45,13 @@ init_per_testcase(_TestCase, Config0) ->
     Curve = proplists:get_value(dkg_curve, Config),
     %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
 
-    #{secret := Priv, public := Pub} =
-        libp2p_crypto:generate_keys(ecc_compact),
+    Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    Vars = #{block_time => BlockTime,
-             election_interval => Interval,
-             election_restart_interval => 10,
-             num_consensus_members => N,
-             batch_size => BatchSize,
-             vars_commit_delay => 2,
-             block_version => v1,
-             dkg_curve => Curve,
-             predicate_callback_mod => miner,
-             predicate_callback_fun => test_version,
-             proposal_threshold => 0.85,
-             monthly_reward => 0,
-             securities_percent => 0,
-             dc_percent => 0,
-             poc_challengees_percent => 0,
-             poc_challengers_percent => 0,
-             poc_witnesses_percent => 0,
-             consensus_percent => 0,
-             election_selection_pct => 60,
-             election_replacement_factor => 4,
-             election_replacement_slope => 20,
-             min_score => 0.2,
-             h3_ring_size => 2,
-             h3_path_res => 8,
-             alpha_decay => 0.007,
-             beta_decay => 0.0005,
-             max_staleness => 100000
-            },
-
-    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
-    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
-
-    ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
-           [BinPub, Priv, Vars, KeyProof,
-            term_to_binary(Vars, [{compressed, 9}])]),
-
-    InitialVars = [ blockchain_txn_vars_v1:new(Vars, <<>>, 1, #{master_key => BinPub,
-                                                                key_proof => KeyProof}) ],
+    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
+                                                   ?election_interval => Interval,
+                                                   ?num_consensus_members => N,
+                                                   ?batch_size => BatchSize,
+                                                   ?dkg_curve => Curve}),
 
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
