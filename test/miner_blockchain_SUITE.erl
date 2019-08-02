@@ -296,7 +296,7 @@ group_change_test(Config) ->
 
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, Proof, 2, #{version_predicate => 2,
+    Txn = blockchain_txn_vars_v1:new(Vars, Proof, 3, #{version_predicate => 2,
                                                        unsets => [garbage_value]}),
     %% wait for it to take effect
 
@@ -399,7 +399,7 @@ master_key_test(Config) ->
 
     Vars = #{garbage_value => totes_goats_garb},
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
-    ConsensusTxn = blockchain_txn_vars_v1:new(Vars, Proof, 2, #{}),
+    ConsensusTxn = blockchain_txn_vars_v1:new(Vars, Proof, 3, #{}),
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn])
          || Miner <- Miners],
@@ -425,7 +425,7 @@ master_key_test(Config) ->
     Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Vars2),
     KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Vars2),
     KeyProof2Corrupted = <<KeyProof2/binary, "asdasdasdas">>,
-    ConsensusTxn2 = blockchain_txn_vars_v1:new(Vars2, Proof2, 3, #{master_key => BinPub2,
+    ConsensusTxn2 = blockchain_txn_vars_v1:new(Vars2, Proof2, 4, #{master_key => BinPub2,
                                                                    key_proof => KeyProof2Corrupted}),
     {ok, Start2} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
 
@@ -448,7 +448,7 @@ master_key_test(Config) ->
 
     %% good master key
 
-    ConsensusTxn3 = blockchain_txn_vars_v1:new(Vars2, Proof2, 4, #{master_key => BinPub2,
+    ConsensusTxn3 = blockchain_txn_vars_v1:new(Vars2, Proof2, 5, #{master_key => BinPub2,
                                                                    key_proof => KeyProof2}),
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn3])
@@ -471,7 +471,7 @@ master_key_test(Config) ->
 
     Vars4 = #{garbage_value => goats_are_too_garb},
     Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Vars4),
-    ConsensusTxn4 = blockchain_txn_vars_v1:new(Vars4, Proof4, 5, #{}),
+    ConsensusTxn4 = blockchain_txn_vars_v1:new(Vars4, Proof4, 6, #{}),
     {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn4])
@@ -495,7 +495,7 @@ master_key_test(Config) ->
 
     Vars5 = #{garbage_value => goats_always_win},
     Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Vars5),
-    ConsensusTxn5 = blockchain_txn_vars_v1:new(Vars5, Proof5, 6, #{}),
+    ConsensusTxn5 = blockchain_txn_vars_v1:new(Vars5, Proof5, 7, #{}),
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn5])
          || Miner <- Miners],
