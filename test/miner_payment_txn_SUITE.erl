@@ -40,7 +40,6 @@ init_per_testcase(_TestCase, Config0) ->
 
     N = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
-    Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
     %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
@@ -48,7 +47,8 @@ init_per_testcase(_TestCase, Config0) ->
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   ?election_interval => Interval,
+                                                   %% rule out rewards
+                                                   ?election_interval => infinity,
                                                    ?num_consensus_members => N,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
@@ -173,7 +173,7 @@ single_payment_test(Config) ->
                               Miners -- [Candidate]
                              )
            end,
-           60,
+           20,
            timer:seconds(1)
           ),
 
@@ -195,13 +195,14 @@ single_payment_test(Config) ->
                                       PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
                                       PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
 
+                                      ct:pal("payer ~p payee ~p", [PayerBalance3, PayeeBalance3]),
                                       3000 == PayerBalance3 + Fee andalso
                                       7000 == PayeeBalance3
                               end,
                               Miners
                              )
            end,
-           60,
+           20,
            timer:seconds(1)
           ),
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
