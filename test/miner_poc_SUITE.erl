@@ -53,7 +53,8 @@ dist(Config0) ->
                                                    ?election_interval => Interval,
                                                    ?num_consensus_members => N,
                                                    ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+                                                   ?dkg_curve => Curve,
+                                                   ?poc_challenge_interval => 20}),
 
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
@@ -128,7 +129,13 @@ dist(Config0) ->
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
-            ct_rpc:call(Miner, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], 5000) of
+                    true ->
+                        ok;
+                    false ->
+                        ct_rpc:call(Miner, blockchain_worker,
+                                    integrate_genesis_block, [GenesisBlock], 5000)
+                end
         end,
         Miners
     ),
