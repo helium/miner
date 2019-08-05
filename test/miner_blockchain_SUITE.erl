@@ -397,10 +397,11 @@ master_key_test(Config) ->
     {Priv, _Pub} = proplists:get_value(master_key, Config),
 
     Vars = #{garbage_value => totes_goats_garb},
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
-    ConsensusTxn = blockchain_txn_vars_v1:new(Vars, Proof, 3, #{}),
+    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn1_0),
+    Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn])
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(
@@ -421,14 +422,16 @@ master_key_test(Config) ->
     BinPub2 = libp2p_crypto:pubkey_to_bin(Pub2),
 
     Vars2 = #{garbage_value => goats_are_not_garb},
-    Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Vars2),
-    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Vars2),
-    KeyProof2Corrupted = <<KeyProof2/binary, "asdasdasdas">>,
-    ConsensusTxn2 = blockchain_txn_vars_v1:new(Vars2, Proof2, 4, #{master_key => BinPub2,
-                                                                   key_proof => KeyProof2Corrupted}),
+    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3, #{master_key => BinPub2}),
+    Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Txn2_0),
+    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Txn2_0),
+    KeyProof2Corrupted = <<Proof2/binary, "asdasdasdas">>,
+    Txn2_1 = blockchain_txn_vars_v1:proof(Txn2_0, Proof2),
+    Txn2_2c = blockchain_txn_vars_v1:key_proof(Txn2_1, KeyProof2Corrupted),
+
     {ok, Start2} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn2])
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2c])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(
@@ -447,10 +450,8 @@ master_key_test(Config) ->
 
     %% good master key
 
-    ConsensusTxn3 = blockchain_txn_vars_v1:new(Vars2, Proof2, 5, #{master_key => BinPub2,
-                                                                   key_proof => KeyProof2}),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn3])
+    Txn2_2 = blockchain_txn_vars_v1:key_proof(Txn2_1, KeyProof2),
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(
@@ -469,11 +470,13 @@ master_key_test(Config) ->
     %% make sure old master key is no longer working
 
     Vars4 = #{garbage_value => goats_are_too_garb},
-    Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Vars4),
-    ConsensusTxn4 = blockchain_txn_vars_v1:new(Vars4, Proof4, 6, #{}),
+    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 4),
+    Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Txn4_0),
+    Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
+
     {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn4])
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(
@@ -493,10 +496,11 @@ master_key_test(Config) ->
     %% double check that new master key works
 
     Vars5 = #{garbage_value => goats_always_win},
-    Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Vars5),
-    ConsensusTxn5 = blockchain_txn_vars_v1:new(Vars5, Proof5, 7, #{}),
+    Txn5_0 = blockchain_txn_vars_v1:new(Vars5, 4),
+    Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Txn5_0),
+    Txn5_1 = blockchain_txn_vars_v1:proof(Txn5_0, Proof5),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [ConsensusTxn5])
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
          || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(

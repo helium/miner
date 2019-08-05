@@ -303,7 +303,8 @@ make_vars(Keys) ->
     make_vars(Keys, #{}).
 
 make_vars(Keys, Map) ->
-    Vars1 = #{?block_time => 1,
+    Vars1 = #{?chain_vars_version => 2,
+              ?block_time => 1,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
@@ -312,7 +313,6 @@ make_vars(Keys, Map) ->
               ?var_gw_inactivity_threshold => 20,
               ?block_version => v1,
               ?dkg_curve => 'SS512',
-              ?poc_path_limit => 7,
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.85,
@@ -334,29 +334,17 @@ make_vars(Keys, Map) ->
               ?h3_neighbor_res => 12,
               ?h3_max_grid_distance => 13,
               ?h3_exclusion_ring_dist => 2,
-              ?poc_challenge_interval => 10
+              ?poc_challenge_interval => 10,
+              ?poc_path_limit => 7
              },
     Vars = maps:merge(Vars1, Map),
-
-    Size = maps:size(Vars),
-    VarKeys = maps:keys(Vars),
-    {One, Two} = lists:split(Size div 2, VarKeys),
-    MOne = maps:with(One, Vars),
-    MTwo = maps:with(Two, Vars),
-    ?assert(maps:size(MOne) =< 32),
-    ?assert(maps:size(MTwo) =< 32),
 
     #{secret := Priv, public := Pub} = Keys,
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
 
-    KeyProof1 = blockchain_txn_vars_v1:create_proof(Priv, MOne),
-    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv, MTwo),
+    Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
 
-    %% ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
-    %%        [BinPub, Priv, Vars, KeyProof,
-    %%         term_to_binary(Vars, [{compressed, 9}])]),
+    ct:pal("XXX ~p ~n ~p", [Proof, Txn]),
 
-    [ blockchain_txn_vars_v1:new(MOne, <<>>, 1, #{master_key => BinPub,
-                                                  key_proof => KeyProof1}),
-      blockchain_txn_vars_v1:new(MTwo, <<>>, 2, #{master_key => BinPub,
-                                                  key_proof => KeyProof2}) ].
+    [blockchain_txn_vars_v1:key_proof(Txn, Proof)].
