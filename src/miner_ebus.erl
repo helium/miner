@@ -85,7 +85,11 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
 handle_message(?MINER_OBJECT(?MINER_MEMBER_IS_CONNECTED)=Member, _, State=#state{}) ->
-    {reply, [bool], miner:is_connected(), State};
+    Reply = case miner:is_connected() of
+                ok -> ok;
+                {error, Error} -> Error
+            end,
+    {reply, [{array, byte}], atom_to_binary(Reply, latin1), State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.

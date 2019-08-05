@@ -170,7 +170,7 @@ info_connected_usage() ->
     ].
 
 info_connected(["info", "connected"], [], []) ->
-    Result = iolib:format("~p", miner:is_connected()),
+    Result = iolib:format("~p", [miner:is_connected()]),
     [clique_status:text(Result)];
 info_connected([_, _, _], [], []) ->
     usage.
