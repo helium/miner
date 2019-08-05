@@ -54,7 +54,7 @@
                                                        blockchain_block:block(), boolean()}},
     election_epoch = 1 :: pos_integer(),
     blockchain_ref = make_ref() :: reference(),
-    onboarding_key=undefined :: undefined | public_key:public_key()
+    onboarding_key = undefined :: undefined | libp2p_crypto:pubkey()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -329,7 +329,7 @@ handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=undefined}) -
     %% Return an empty binary if no onboarding key is present
     {reply, <<>>, State};
 handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=PubKey}) ->
-    {reply, libp2p_crypto:pubkey_to_bin({ecc_compact, PubKey}), State};
+    {reply, libp2p_crypto:pubkey_to_bin(PubKey), State};
 handle_call({add_gateway_txn, Owner, Payer, Fee, StakingFee}, _From, State=#state{}) ->
     {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),

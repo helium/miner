@@ -73,14 +73,14 @@ init(_Args) ->
                         {PubKey,
                          libp2p_crypto:mk_ecdh_fun(PrivKey0),
                          libp2p_crypto:mk_sig_fun(PrivKey0),
-                         undefined};
+                         PubKey};
                     {error, enoent} ->
                         KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
                         ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
                         {PubKey,
                          libp2p_crypto:mk_ecdh_fun(PrivKey0),
                          libp2p_crypto:mk_sig_fun(PrivKey0),
-                         undefined}
+                         PubKey}
                 end,
             ECCWorker = [];
         {ecc, Props} when is_list(Props) ->
@@ -117,7 +117,9 @@ init(_Args) ->
             ecc508:wake(ECCPid),
             %% Get (or generate) the public and onboarding keys
             {ok, PublicKey, KeySlot} = GetPublicKey(KeySlot0),
-            {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
+            {ok, OnboardingRawKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
+            %% gateway_mfr ensures that the onboarding keys is a compact key
+            OnboardingKey = {ecc_compact, OnboardingRawKey},
             %% The signing and ecdh functions will use an actual
             %% worker against a named process.
             SigFun = fun(Bin) ->
