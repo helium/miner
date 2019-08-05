@@ -317,11 +317,10 @@ group_change_test(Config) ->
                                    end, 40, timer:seconds(1)),
 
     %% make sure we still haven't executed it
-    CGroup1 = lists:filtermap(
-                fun(Miner) ->
-                        true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                end, Miners),
-    ?assertEqual(4, length(CGroup1)),
+    C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    L = ct_rpc:call(hd(Miners), blockchain, ledger, [C]),
+    {ok, Members} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, consensus_members, [L]),
+    ?assertEqual(4, length(Members)),
 
     %% alter the "version" for all of them.
     lists:foreach(
@@ -444,7 +443,7 @@ master_key_test(Config) ->
                                  {ok, totes_goats_garb} ==
                                  ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
                      end, shuffle(Miners))
-           end, 40, timer:seconds(1)),
+           end, 60, timer:seconds(1)),
 
     %% good master key
 
