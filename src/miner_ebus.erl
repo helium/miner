@@ -21,6 +21,7 @@
 -define(MINER_MEMBER_ONBOARDING_KEY, "OnboardingKey").
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
+-define(MINER_MEMBER_IS_CONNECTED, "IsConnected").
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_INTERNAL, "com.helium.Miner.Error.Internal").
@@ -83,6 +84,8 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             lager:warning("Invalid assert_loc args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
+handle_message(?MINER_OBJECT(?MINER_MEMBER_IS_CONNECTED)=Member, _, State=#state{}) ->
+    {reply, [bool], miner:is_connected(), State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.

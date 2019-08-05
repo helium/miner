@@ -18,6 +18,7 @@
     onboarding_key_bin/0,
     add_gateway_txn/4,
     assert_loc_txn/6,
+    is_connected/0,
     relcast_info/1,
     relcast_queue/1,
     hbbft_status/0,
@@ -114,6 +115,21 @@ pubkey_bin() ->
 -spec onboarding_key_bin() -> libp2p_crypto:pubkey_bin().
 onboarding_key_bin() ->
     gen_server:call(?MODULE, onboarding_key_bin).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec is_connected() -> boolean().
+is_connected() ->
+    case (catch libp2p_swarm:sessions(blockchain_swarm:swarm())) of
+        {'EXIT', Why} ->
+            lager:warning("Error requesting swarm sessions: ~p", [Why]),
+            false;
+        Sessions ->
+            length(Sessions) > 10
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

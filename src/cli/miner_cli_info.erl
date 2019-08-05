@@ -21,7 +21,8 @@ register_all_usage() ->
                    info_height_usage(),
                    info_in_consensus_usage(),
                    info_name_usage(),
-                   info_block_age_usage()
+                   info_block_age_usage(),
+                   info_connected_usage()
                   ]).
 
 register_all_cmds() ->
@@ -33,7 +34,8 @@ register_all_cmds() ->
                    info_height_cmd(),
                    info_in_consensus_cmd(),
                    info_name_cmd(),
-                   info_block_age_cmd()
+                   info_block_age_cmd(),
+                   info_connected_cmd()
                   ]).
 %%
 %% info
@@ -44,6 +46,9 @@ info_usage() ->
      ["miner info commands\n\n",
       "  info height - Get height of the blockchain for this miner.\n",
       "  info in_consensus - Show if this miner is in the consensus_group.\n"
+      "  name - Shows the name of this miner.\n"
+      "  block_age - Get age of the latest block in the chain, in seconds.\n"
+      "  connected - Shows whether the miner is connected to other hotspots.\n"
      ]
     ].
 
@@ -150,3 +155,24 @@ info_block_age(["info", "block_age"], [], []) ->
 info_block_age([_, _, _], [], []) ->
     usage.
 
+%%
+%% info connected
+%%
+
+info_connected_cmd() ->
+    [
+     [["info", "connected"], [], [], fun info_connected/3]
+    ].
+
+info_connected_usage() ->
+    [["info", "connected"],
+     ["info connected \n\n",
+      "  Returns true if this miner is connected to other miners, false otherwise.\n\n"
+     ]
+    ].
+
+info_connected(["info", "connected"], [], []) ->
+    Result = miner:is_connected(),
+    [clique_status:text(atom_to_list(Result))];
+info_connected([_, _, _], [], []) ->
+    usage.
