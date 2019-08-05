@@ -48,12 +48,15 @@ wait_until(Fun) ->
     wait_until(Fun, 40, 100).
 wait_until(Fun, Retry, Delay) when Retry > 0 ->
     Res = Fun(),
-    case Res of
+    try Res of
         true ->
             ok;
         _ when Retry == 1 ->
             {fail, Res};
         _ ->
+            timer:sleep(Delay),
+            wait_until(Fun, Retry-1, Delay)
+    catch _:_ ->
             timer:sleep(Delay),
             wait_until(Fun, Retry-1, Delay)
     end.
