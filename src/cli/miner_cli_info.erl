@@ -48,7 +48,7 @@ info_usage() ->
       "  info in_consensus - Show if this miner is in the consensus_group.\n"
       "  name - Shows the name of this miner.\n"
       "  block_age - Get age of the latest block in the chain, in seconds.\n"
-      "  connected - Shows whether the miner is connected to other hotspots.\n"
+      "  connected - Shows the connected state of this miner.\n"
      ]
     ].
 
@@ -148,9 +148,7 @@ info_block_age_usage() ->
     ].
 
 info_block_age(["info", "block_age"], [], []) ->
-    Chain = blockchain_worker:blockchain(),
-    {ok, Block} = blockchain:head_block(Chain),
-    Age = erlang:system_time(seconds) - blockchain_block:time(Block),
+    Age = miner:block_age(),
     [clique_status:text(integer_to_list(Age))];
 info_block_age([_, _, _], [], []) ->
     usage.
@@ -167,12 +165,12 @@ info_connected_cmd() ->
 info_connected_usage() ->
     [["info", "connected"],
      ["info connected \n\n",
-      "  Returns true if this miner is connected to other miners, false otherwise.\n\n"
+      "  Returns ok if this miner is connected to, connectable and synced with other miners.\n\n"
      ]
     ].
 
 info_connected(["info", "connected"], [], []) ->
-    Result = miner:is_connected(),
-    [clique_status:text(atom_to_list(Result))];
+    Result = iolib:format("~p", miner:is_connected()),
+    [clique_status:text(Result)];
 info_connected([_, _, _], [], []) ->
     usage.

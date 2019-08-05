@@ -19,6 +19,7 @@
     add_gateway_txn/4,
     assert_loc_txn/6,
     is_connected/0,
+    block_age/0,
     relcast_info/1,
     relcast_queue/1,
     hbbft_status/0,
@@ -121,15 +122,40 @@ onboarding_key_bin() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec is_connected() -> boolean().
+block_age() ->
+    Chain = blockchain_worker:blockchain(),
+    {ok, Block} = blockchain:head_block(Chain),
+    erlang:system_time(seconds) - blockchain_block:time(Block).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec is_connected() -> ok | {error, not_connected} | {error, not_dialable} | {error, not_synced}.
 is_connected() ->
-    case (catch libp2p_swarm:sessions(blockchain_swarm:swarm())) of
-        {'EXIT', Why} ->
-            lager:warning("Error requesting swarm sessions: ~p", [Why]),
-            false;
-        Sessions ->
-            length(Sessions) > 10
-    end.
+    Swarm = blockchain_swarm:swarm(),
+    CheckSessions = fun() ->
+                            length(libp2p_swarm:sessions(Swarm)) > 5
+                    end,
+    CheckPublicAddr = fun() ->
+                          lists:any(fun(Addr) ->
+                                            libp2p_transport_tcp:is_public(Addr)
+                                    end, libp2p_swarm:listen_addrs(Swarm))
+                  end,
+    CheckSync = fun() ->
+                        ?MODULE:block_age() < 300
+                end,
+    lists:foldl(fun({Fun, Err}, ok) ->
+                        case Fun() of
+                            true -> ok;
+                            false -> {error, Err}
+                        end;
+                   (_Fun, {error, Error}) ->
+                        {error, Error}
+                end, ok, [{CheckSessions, not_connected},
+                          {CheckPublicAddr, not_dialable},
+                          {CheckSync, not_synced}]).
 
 %%--------------------------------------------------------------------
 %% @doc
