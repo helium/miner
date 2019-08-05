@@ -309,12 +309,12 @@ group_change_test(Config) ->
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true == lists:all(fun(Miner) ->
-                                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
+                                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
                                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                                              Ht > (Height + 20)
                                                              end, shuffle(Miners))
-                                   end, 40, timer:seconds(1)),
+                                   end, 80, timer:seconds(1)),
 
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
