@@ -181,8 +181,8 @@ single_payment_test(Config) ->
     PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance2 = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
-    4000 = PayerBalance2 + Fee,
-    6000 = PayeeBalance2,
+    ?assertEqual(4000, PayerBalance2 + Fee),
+    ?assertEqual(6000, PayeeBalance2),
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
 
