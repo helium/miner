@@ -58,7 +58,7 @@ sudo apt-get install -f
 
 Install various other dependencies:
 
-```sudo apt-get install libdbus-1-dev autoconf automake libtool flex libgmp-dev cmake libsodium-dev libssl-dev```
+```sudo apt-get install libdbus-1-dev autoconf automake libtool flex libgmp-dev cmake libsodium-dev libssl-dev bison libsnappy-dev```
 
 ### Compile the Miner
 
@@ -81,11 +81,11 @@ You can run the Miner in the background, or via an interactive console.
 
 To run in the background:
 
-```_build/prod/miner/bin/miner start```
+```_build/prod/rel/miner/bin/miner start```
 
 To run via the interactive console:
 
-```_build/prod/miner/bin/miner console```
+```_build/prod/rel/miner/bin/miner console```
 
 If you run in console mode, you'll need to open another terminal to execute any other commands.
 
@@ -95,7 +95,7 @@ The Helium blockchain uses an Erlang implementation of [libp2p](https://libp2p.i
 
 The first order of business once the Miner is running is to see if you're connected to any peers, whether your NAT type has been correctly identified, and that you have some listen addresses:
 
-```_build/prod/miner/bin/miner peer book -s```
+```_build/prod/rel/miner/bin/miner peer book -s```
 
 You will see an output roughly like the following:
 
