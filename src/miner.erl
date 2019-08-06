@@ -18,7 +18,7 @@
     onboarding_key_bin/0,
     add_gateway_txn/4,
     assert_loc_txn/6,
-    is_connected/0,
+    p2p_status/0,
     block_age/0,
     relcast_info/1,
     relcast_queue/1,
@@ -132,8 +132,8 @@ block_age() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec is_connected() -> ok | {error, not_connected} | {error, not_dialable} | {error, not_synced}.
-is_connected() ->
+-spec p2p_status() -> [{Check::term(), Result::boolean()}].
+p2p_status() ->
     Swarm = blockchain_swarm:swarm(),
     CheckSessions = fun() ->
                             length(libp2p_swarm:sessions(Swarm)) > 5
@@ -147,16 +147,11 @@ is_connected() ->
     CheckSync = fun() ->
                         ?MODULE:block_age() < 300
                 end,
-    lists:foldl(fun({Fun, Err}, ok) ->
-                        case Fun() of
-                            true -> ok;
-                            false -> {error, Err}
-                        end;
-                   (_Fun, {error, Error}) ->
-                        {error, Error}
-                end, ok, [{CheckSessions, not_connected},
-                          {CheckPublicAddr, not_dialable},
-                          {CheckSync, not_synced}]).
+    lists:foldr(fun({Fun, Name}, Acc) ->
+                        [{Name, Fun()} | Acc]
+                end, [], [{CheckSessions, connected},
+                          {CheckPublicAddr, dialable},
+                          {CheckSync, synced}]).
 
 %%--------------------------------------------------------------------
 %% @doc
