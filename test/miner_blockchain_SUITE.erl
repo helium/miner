@@ -26,7 +26,8 @@ all() -> [
           growth_test,
           election_test,
           group_change_test,
-          master_key_test
+          master_key_test,
+          version_change_test
          ].
 
 init_per_suite(Config) ->
@@ -49,12 +50,25 @@ init_per_testcase(TestCase, Config0) ->
     #{secret := Priv, public := Pub} = Keys =
         libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{garbage_value => totes_garb,
-                                                   ?block_time => BlockTime,
-                                                   ?election_interval => Interval,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+    Extras =
+        case TestCase of
+            version_change_test ->
+                %% force legacy startup
+                #{?chain_vars_version => 1};
+            _ ->
+                #{}
+        end,
+
+    Vars = #{garbage_value => totes_garb,
+             ?block_time => BlockTime,
+             ?election_interval => Interval,
+             ?num_consensus_members => NumConsensusMembers,
+             ?batch_size => BatchSize,
+             ?dkg_curve => Curve},
+    FinalVars = maps:merge(Vars, Extras),
+    ct:pal("final vars ~p", [FinalVars]),
+
+    InitialVars = miner_ct_utils:make_vars(Keys, FinalVars),
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
@@ -517,4 +531,142 @@ master_key_test(Config) ->
            end, 40, timer:seconds(1)),
 
 
+    ok.
+
+
+
+version_change_test(Config) ->
+    %% get all the miners
+    Miners = proplists:get_value(miners, Config),
+
+    %% check consensus miners
+    ConsensusMiners = lists:filtermap(fun(Miner) ->
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                      end, Miners),
+
+    %% check non consensus miners
+    NonConsensusMiners = lists:filtermap(fun(Miner) ->
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                         end, Miners),
+
+    ?assertNotEqual([], ConsensusMiners),
+    %% get the first consensus miner
+    FirstConsensusMiner = hd(ConsensusMiners),
+
+    ?assertEqual(7, length(ConsensusMiners)),
+
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
+    %% get the genesis block from first consensus miner
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
+
+    %% check genesis load results for non consensus miners
+    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
+                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                                              end, NonConsensusMiners),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_until(fun() ->
+                                           true == lists:all(fun(Miner) ->
+                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                                     Epoch > 1
+                                                             end, shuffle(Miners))
+                                   end, 30, timer:seconds(1)),
+
+
+    %% baseline: old-style chain vars are working
+
+    Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {Priv, _Pub} = proplists:get_value(master_key, Config),
+
+    Vars = #{garbage_value => totes_goats_garb},
+    Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars),
+    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
+    Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+    %% switch chain version
+
+    Vars2 = #{?chain_vars_version => 2},
+    Proof2 = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars2),
+    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3),
+    Txn2_1 = blockchain_txn_vars_v1:proof(Txn2_0, Proof2),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_1])
+         || Miner <- Miners],
+
+    %% make sure that it has taken effect
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, 2} ==
+                                 ct_rpc:call(Miner, blockchain, config, [?chain_vars_version,
+                                                                         Ledger])
+                     end, shuffle(Miners))
+           end, 60, timer:seconds(1)),
+
+    %% try a new-style txn change
+
+    Vars3 = #{garbage_value => goats_are_not_garb},
+    Txn3_0 = blockchain_txn_vars_v1:new(Vars3, 4),
+    Proof3 = blockchain_txn_vars_v1:create_proof(Priv, Txn3_0),
+    Txn3_1 = blockchain_txn_vars_v1:proof(Txn3_0, Proof3),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
+                             ct:pal("val ~p", [Val]),
+                             {ok, goats_are_not_garb} == Val
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
+
+    %% make sure old style is now closed off.
+
+    Vars4 = #{garbage_value => goats_are_too_garb},
+    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 5),
+    Proof4 = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars4),
+    Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
+
+    {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                             Ht > (Start4 + 15) andalso
+                                 {ok, goats_are_not_garb} ==
+                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
     ok.
