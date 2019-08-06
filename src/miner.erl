@@ -144,14 +144,10 @@ p2p_status() ->
                                                     libp2p_transport_tcp:is_public(Addr)
                                         end, libp2p_swarm:listen_addrs(Swarm))
                       end,
-    CheckSync = fun() ->
-                        ?MODULE:block_age() < 300
-                end,
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
                 end, [], [{CheckSessions, connected},
-                          {CheckPublicAddr, dialable},
-                          {CheckSync, synced}]).
+                          {CheckPublicAddr, dialable}]).
 
 %%--------------------------------------------------------------------
 %% @doc
