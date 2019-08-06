@@ -139,10 +139,11 @@ is_connected() ->
                             length(libp2p_swarm:sessions(Swarm)) > 5
                     end,
     CheckPublicAddr = fun() ->
-                          lists:any(fun(Addr) ->
-                                            libp2p_transport_tcp:is_public(Addr)
-                                    end, libp2p_swarm:listen_addrs(Swarm))
-                  end,
+                              lists:any(fun(Addr) ->
+                                                libp2p_relay:is_p2p_circuit(Addr) orelse
+                                                    libp2p_transport_tcp:is_public(Addr)
+                                        end, libp2p_swarm:listen_addrs(Swarm))
+                      end,
     CheckSync = fun() ->
                         ?MODULE:block_age() < 300
                 end,
