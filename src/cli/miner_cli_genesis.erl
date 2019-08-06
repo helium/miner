@@ -97,8 +97,8 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
             BinPub = libp2p_crypto:b58_to_bin(PubKeyB58),
             Proof = base58:base58_to_binary(ProofB58),
 
-            VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, 1, #{master_key => BinPub,
-                                                                        key_proof => Proof}),
+            VarTxn = blockchain_txn_vars_v1:new(make_vars(), 1, #{master_key => BinPub}),
+            VarTxn1 = blockchain_txn_vars_v1:key_proof(VarTxn, Proof),
 
             OldSecurities = case proplists:get_value(securities, Config) of
                                 undefined -> [];
@@ -132,7 +132,7 @@ create(OldGenesisFile, PubKeyB58, ProofB58, Addrs, N, Curve) ->
 
             OldGenesisTransactions = OldAccounts ++ OldGateways ++ OldSecurities ++ OldDCs,
             Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
-            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ [VarTxn], Addresses, N, Curve),
+            miner_consensus_mgr:initial_dkg(OldGenesisTransactions ++ [VarTxn1], Addresses, N, Curve),
             [clique_status:text("ok")];
         {error, Reason} ->
             [clique_status:text(io_lib:format("~p", [Reason]))]
@@ -170,8 +170,8 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
     BinPub = libp2p_crypto:b58_to_bin(PubKeyB58),
     Proof = base58:base58_to_binary(ProofB58),
 
-    VarTxn = blockchain_txn_vars_v1:new(make_vars(), <<>>, 1, #{master_key => BinPub,
-                                                                key_proof => Proof}),
+    VarTxn = blockchain_txn_vars_v1:new(make_vars(), 1, #{master_key => BinPub}),
+    VarTxn1 = blockchain_txn_vars_v1:key_proof(VarTxn, Proof),
 
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 500000000) || Addr <- Addresses],
@@ -182,7 +182,7 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
     InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
                                   || Addr <- Addresses ],
-    miner_consensus_mgr:initial_dkg([VarTxn] ++
+    miner_consensus_mgr:initial_dkg([VarTxn1] ++
                                         InitialPaymentTransactions ++
                                         InitialGatewayTransactions ++
                                         InitialSecurityTransactions ++
@@ -296,9 +296,13 @@ genesis_proof(["genesis", "proof", PrivKeyB58], [], []) ->
     PrivKeyBin = base58:base58_to_binary(PrivKeyB58),
     #{secret := Priv, public := Pub} = libp2p_crypto:keys_from_bin(PrivKeyBin),
     Vars = make_vars(),
-    KeyProof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
+
+    BinPub = libp2p_crypto:pubkey_to_bin(Pub),
+    Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+
     [clique_status:text(io_lib:format("Proof:~n~s~nPubKey:~n~s",
-                                      [base58:binary_to_base58(KeyProof),
+                                      [base58:binary_to_base58(Proof),
                                        libp2p_crypto:pubkey_to_b58(Pub)]))];
 genesis_proof(_, [], []) ->
     usage.

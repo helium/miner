@@ -303,7 +303,8 @@ make_vars(Keys) ->
     make_vars(Keys, #{}).
 
 make_vars(Keys, Map) ->
-    Vars1 = #{?block_time => 1,
+    Vars1 = #{?chain_vars_version => 2,
+              ?block_time => 1,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
@@ -341,11 +342,7 @@ make_vars(Keys, Map) ->
     #{secret := Priv, public := Pub} = Keys,
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, 2, #{master_key => BinPub}),
+    Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
 
-    Bootstrap = #{?chain_vars_version => 2},
-    BootstrapProof = blockchain_txn_vars_v1:legacy_create_proof(Priv, Bootstrap),
-    BootstrapTxn = blockchain_txn_vars_v1:new(Bootstrap, 1, #{master_key => BinPub,
-                                                              key_proof => BootstrapProof}),
-    [BootstrapTxn, blockchain_txn_vars_v1:key_proof(Txn, Proof)].
+    [blockchain_txn_vars_v1:key_proof(Txn, Proof)].
