@@ -239,9 +239,149 @@ election_test(Config) ->
                                            true == lists:all(fun(Miner) ->
                                                                      Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 3
+                                                                     Epoch >= 3
                                                              end, shuffle(Miners))
                                    end, 90, timer:seconds(1)),
+    %% now to test rescue blocks.  first: kill the chain
+
+    [begin
+         %%ct_slave:stop(Miner)
+          ct_rpc:call(Miner, application, stop, [miner], 300),
+          ct_rpc:call(Miner, application, stop, [blockchain], 300)
+     end
+     || Miner <- lists:sublist(Miners, 1, 4)],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             case ct_rpc:call(Miner, application, which_applications, [], 300) of
+                                 {badrpc, _} ->
+                                     false;
+                                 Apps ->
+                                     not lists:keymember(miner, 1, Apps)
+                             end
+                     end, lists:sublist(Miners, 1, 4))
+           end, 40, 500),
+
+
+    Data = string:trim(os:cmd("pwd")),
+    Dirs = filelib:wildcard(Data ++ "/data_*{1,2,3,4}*"),
+
+    [begin
+         ct:pal("rm dir ~s", [Dir]),
+         os:cmd("rm -r " ++ Dir ++ "/blockchain_swarm/groups/*")
+     end
+     || Dir <- Dirs],
+
+    %% [ct_slave:start(Miner, Args) || Miner <- lists:sublist(Miners, 1, 4)],
+    [begin
+         %%ct_slave:stop(Miner)
+          ct_rpc:call(Miner, application, start, [blockchain], 300),
+          ct_rpc:call(Miner, application, start, [miner], 300)
+     end
+     || Miner <- lists:sublist(Miners, 1, 4)],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], 300) of
+                                 {badrpc, _} ->
+                                     false;
+                                 _Else ->
+                                     ct:pal("else ~p", [_Else]),
+                                     true
+                             end
+                     end, Miners)
+           end, 40, 500),
+
+    %% second: make sure we're not making blocks anymore
+    HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
+
+    {fail, false} =
+        miner_ct_utils:wait_until(
+          fun() ->
+                  true == lists:all(fun(Miner) ->
+                                            try
+                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                                ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                                %% height might go up
+                                                %% one, but it
+                                                %% shouldn't go up 5
+                                                Ht > (Height + 5)
+                                            catch _:_ ->
+                                                    false
+                                            end
+                                    end, shuffle(Miners))
+          end, 10, timer:seconds(1)),
+
+    %% third: mint and submit the rescue txn, shrinking the group at
+    %% the same time.
+
+    Addresses = proplists:get_value(addresses, Config),
+    NewGroup = lists:sublist(Addresses, 3, 4),
+
+    HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, HeadBlock} = ct_rpc:call(hd(Miners), blockchain, head_block, [HChain2]),
+    NewHeight = blockchain_block:height(HeadBlock) + 1,
+    Hash = blockchain_block:hash_block(HeadBlock),
+
+    Vars = #{num_consensus_members => 4},
+
+    {Priv, _Pub} = proplists:get_value(master_key, Config),
+
+    Txn = blockchain_txn_vars_v1:new(Vars, 3),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
+
+    {ElectionEpoch, _EpochStart} = blockchain_block_v1:election_info(HeadBlock),
+
+    GrpTxn = blockchain_txn_consensus_group_v1:new(NewGroup, <<>>, Height, 0),
+
+    ct:pal("new height is ~p", [NewHeight]),
+
+    RescueBlock = blockchain_block_v1:rescue(
+                    #{prev_hash => Hash,
+                      height => NewHeight,
+                      transactions => [VarsTxn, GrpTxn],
+                      hbbft_round => NewHeight,
+                      time => erlang:system_time(seconds),
+                      election_epoch => ElectionEpoch + 1,
+                      epoch_start => NewHeight + 1}),
+
+    EncodedBlock = blockchain_block:serialize(
+                     blockchain_block_v1:set_signatures(RescueBlock, [])),
+
+    RescueSigFun = libp2p_crypto:mk_sig_fun(Priv),
+
+    RescueSig = RescueSigFun(EncodedBlock),
+
+    SignedBlock = blockchain_block_v1:set_signatures(RescueBlock, [], RescueSig),
+
+    %% now that we have a signed block, cause one of the nodes to
+    %% absorb it (and gossip it around)
+    FirstNode = hd(Miners),
+    Chain = ct_rpc:call(FirstNode, blockchain_worker, blockchain, []),
+    ct:pal("FirstNode Chain: ~p", [Chain]),
+    Swarm = ct_rpc:call(FirstNode, blockchain_swarm, swarm, []),
+    ct:pal("FirstNode Swarm: ~p", [Swarm]),
+    N = length(Miners),
+    ct:pal("N: ~p", [N]),
+     _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, N, self()]),
+
+    %% fourth: confirm that blocks and elections are proceeding
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true == lists:all(fun(Miner) ->
+                                             Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                             Epoch >= 5
+                                     end, shuffle(Miners))
+           end, 40, timer:seconds(1)),
+
     ok.
 
 election_check([], _Miners, Owner) ->
@@ -331,8 +471,8 @@ group_change_test(Config) ->
                                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
                                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                                              Ht > (Height + 20)
-                                                             end, shuffle(Miners))
-                                   end, 80, timer:seconds(1)),
+                                     end, shuffle(Miners))
+           end, 80, timer:seconds(1)),
 
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
