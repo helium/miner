@@ -294,13 +294,14 @@ group_change_test(Config) ->
 
     {Priv, _Pub} = proplists:get_value(master_key, Config),
 
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, Proof, 3, #{version_predicate => 2,
-                                                       unsets => [garbage_value]}),
+    Txn = blockchain_txn_vars_v1:new(Vars, 2, #{version_predicate => 2,
+                                                unsets => [garbage_value]}),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    Txn1 = blockchain_txn_vars_v1:proof(Txn, Proof),
     %% wait for it to take effect
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
          || Miner <- Miners],
 
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -397,7 +398,7 @@ master_key_test(Config) ->
     {Priv, _Pub} = proplists:get_value(master_key, Config),
 
     Vars = #{garbage_value => totes_goats_garb},
-    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 3),
+    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn1_0),
     Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
 
@@ -422,7 +423,7 @@ master_key_test(Config) ->
     BinPub2 = libp2p_crypto:pubkey_to_bin(Pub2),
 
     Vars2 = #{garbage_value => goats_are_not_garb},
-    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 4, #{master_key => BinPub2}),
+    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3, #{master_key => BinPub2}),
     Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Txn2_0),
     KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Txn2_0),
     KeyProof2Corrupted = <<Proof2/binary, "asdasdasdas">>,
@@ -470,7 +471,7 @@ master_key_test(Config) ->
     %% make sure old master key is no longer working
 
     Vars4 = #{garbage_value => goats_are_too_garb},
-    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 5),
+    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 4),
     Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Txn4_0),
     Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
 
@@ -496,7 +497,7 @@ master_key_test(Config) ->
     %% double check that new master key works
 
     Vars5 = #{garbage_value => goats_always_win},
-    Txn5_0 = blockchain_txn_vars_v1:new(Vars5, 5),
+    Txn5_0 = blockchain_txn_vars_v1:new(Vars5, 4),
     Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Txn5_0),
     Txn5_1 = blockchain_txn_vars_v1:proof(Txn5_0, Proof5),
 
