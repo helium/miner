@@ -18,7 +18,7 @@
          init_per_testcase/2,
          end_per_testcase/2,
          get_balance/2,
-         make_vars/1, make_vars/2
+         make_vars/1, make_vars/2, make_vars/3
         ]).
 
 pmap(F, L) ->
@@ -303,7 +303,11 @@ make_vars(Keys) ->
     make_vars(Keys, #{}).
 
 make_vars(Keys, Map) ->
-    Vars1 = #{?block_time => 1,
+    make_vars(Keys, Map, modern).
+
+make_vars(Keys, Map, Mode) ->
+    Vars1 = #{?chain_vars_version => 2,
+              ?block_time => 1,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
@@ -312,7 +316,6 @@ make_vars(Keys, Map) ->
               ?var_gw_inactivity_threshold => 20,
               ?block_version => v1,
               ?dkg_curve => 'SS512',
-              ?poc_path_limit => 7,
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.85,
@@ -334,29 +337,30 @@ make_vars(Keys, Map) ->
               ?h3_neighbor_res => 12,
               ?h3_max_grid_distance => 13,
               ?h3_exclusion_ring_dist => 2,
-              ?poc_challenge_interval => 10
+              ?poc_challenge_interval => 10%% ,
+              %% ?poc_path_limit => 7
              },
-    Vars = maps:merge(Vars1, Map),
-
-    Size = maps:size(Vars),
-    VarKeys = maps:keys(Vars),
-    {One, Two} = lists:split(Size div 2, VarKeys),
-    MOne = maps:with(One, Vars),
-    MTwo = maps:with(Two, Vars),
-    ?assert(maps:size(MOne) =< 32),
-    ?assert(maps:size(MTwo) =< 32),
 
     #{secret := Priv, public := Pub} = Keys,
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
 
-    KeyProof1 = blockchain_txn_vars_v1:create_proof(Priv, MOne),
-    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv, MTwo),
+    Vars = maps:merge(Vars1, Map),
+        case Mode of
+            modern ->
+                Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
+                Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+                [blockchain_txn_vars_v1:key_proof(Txn, Proof)];
+            %% in legacy mode, we have to do without some stuff
+            %% because everything will break if there are too many vars
+            legacy ->
+                %% ideally figure out a few more that are safe to
+                %% remove or bring back the splitting code
+                LegVars = maps:without([poc_path_limit, ?chain_vars_version, ?block_version],
+                                       Vars),
+                Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, LegVars),
+                Txn = blockchain_txn_vars_v1:new(LegVars, 1, #{master_key => BinPub,
+                                                            key_proof => Proof}),
 
-    %% ct:pal("master key ~p~n priv ~p~n vars ~p~n keyproof ~p~n artifact ~p",
-    %%        [BinPub, Priv, Vars, KeyProof,
-    %%         term_to_binary(Vars, [{compressed, 9}])]),
+                [Txn]
 
-    [ blockchain_txn_vars_v1:new(MOne, <<>>, 1, #{master_key => BinPub,
-                                                  key_proof => KeyProof1}),
-      blockchain_txn_vars_v1:new(MTwo, <<>>, 2, #{master_key => BinPub,
-                                                  key_proof => KeyProof2}) ].
+        end.

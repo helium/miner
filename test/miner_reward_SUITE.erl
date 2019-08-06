@@ -38,7 +38,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     N = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
-    Interval = 3,
+    Interval = 5,
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
 
@@ -137,7 +137,7 @@ basic_test(Config) ->
                               fun(Miner) ->
                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                       {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 6
+                                      Height >= CurrentHeight + 10
                               end,
                               Miners
                              )
@@ -149,19 +149,27 @@ basic_test(Config) ->
     %% Check that the election txn is in the same block as the rewards txn
     ok = lists:foreach(fun(Miner) ->
                                Chain0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                               {ok, ElectionRewardBlock} = ct_rpc:call(Miner, blockchain, get_block, [6, Chain0]),
-                               Txns = ct_rpc:call(Miner, blockchain_block, transactions, [ElectionRewardBlock]),
-                               ?assertEqual(length(Txns), 2),
-                               [First, Second] = Txns,
-                               ?assertEqual(blockchain_txn:type(Second), blockchain_txn_consensus_group_v1),
-                               ?assertEqual(blockchain_txn:type(First), blockchain_txn_rewards_v1),
-                               Rewards = blockchain_txn_rewards_v1:rewards(First),
-                               ?assertEqual(length(Rewards), length(ConsensusMiners)),
-                               lists:foreach(fun(R) ->
-                                                     ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
-                                                     ?assertEqual(blockchain_txn_reward_v1:amount(R), 83)
-                                             end,
-                                             Rewards)
+                               lists:any(
+                                 fun(H) ->
+                                         try
+                                             {ok, ElectionRewardBlock} = ct_rpc:call(Miner, blockchain, get_block, [H, Chain0]),
+                                             Txns = ct_rpc:call(Miner, blockchain_block, transactions, [ElectionRewardBlock]),
+                                             ?assertEqual(length(Txns), 2),
+                                             [First, Second] = Txns,
+                                             ?assertEqual(blockchain_txn:type(Second), blockchain_txn_consensus_group_v1),
+                                             ?assertEqual(blockchain_txn:type(First), blockchain_txn_rewards_v1),
+                                             Rewards = blockchain_txn_rewards_v1:rewards(First),
+                                             ?assertEqual(length(Rewards), length(ConsensusMiners)),
+                                             lists:foreach(fun(R) ->
+                                                                   ?assertEqual(blockchain_txn_reward_v1:type(R), consensus),
+                                                                   ?assertEqual(blockchain_txn_reward_v1:amount(R), 83)
+                                                           end,
+                                                           Rewards),
+                                             true
+                                         catch _:_ ->
+                                                 false
+                                         end
+                                 end, lists:seq(4, 10))
                        end,
                        Miners),
 
@@ -175,15 +183,15 @@ basic_test(Config) ->
                                      lists:member(Miner, ConsensusMiners),
                                      lists:member(Miner, NonConsensusMiners)} of
                                    {true, _, true, _} ->
-                                       ?assertEqual(4083, Bal);
+                                       ?assertEqual(4138, Bal);
                                    {true, _, _, true} ->
                                        ?assertEqual(4000, Bal);
                                    {_, true, true, _} ->
-                                       ?assertEqual(6083, Bal);
+                                       ?assertEqual(6138, Bal);
                                    {_, true, _, true} ->
                                        ?assertEqual(6000, Bal);
                                    {_, _, true, _} ->
-                                       ?assertEqual(5083, Bal);
+                                       ?assertEqual(5138, Bal);
                                    _ ->
                                        ?assertEqual(5000, Bal)
                                end
