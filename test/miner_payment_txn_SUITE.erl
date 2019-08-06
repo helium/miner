@@ -48,7 +48,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    %% rule out rewards
-                                                   ?election_interval => 99,
+                                                   ?election_interval => infinity,
                                                    ?num_consensus_members => N,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
