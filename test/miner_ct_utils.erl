@@ -18,7 +18,7 @@
          init_per_testcase/2,
          end_per_testcase/2,
          get_balance/2,
-         make_vars/1, make_vars/2
+         make_vars/1, make_vars/2, make_vars/3
         ]).
 
 pmap(F, L) ->
@@ -303,6 +303,9 @@ make_vars(Keys) ->
     make_vars(Keys, #{}).
 
 make_vars(Keys, Map) ->
+    make_vars(Keys, Map, modern).
+
+make_vars(Keys, Map, Mode) ->
     Vars1 = #{?chain_vars_version => 2,
               ?block_time => 1,
               ?election_interval => 30,
@@ -337,12 +340,27 @@ make_vars(Keys, Map) ->
               ?poc_challenge_interval => 10%% ,
               %% ?poc_path_limit => 7
              },
-    Vars = maps:merge(Vars1, Map),
 
     #{secret := Priv, public := Pub} = Keys,
     BinPub = libp2p_crypto:pubkey_to_bin(Pub),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    Vars = maps:merge(Vars1, Map),
+        case Mode of
+            modern ->
+                Txn = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => BinPub}),
+                Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+                [blockchain_txn_vars_v1:key_proof(Txn, Proof)];
+            %% in legacy mode, we have to do without some stuff
+            %% because everything will break if there are too many vars
+            legacy ->
+                %% ideally figure out a few more that are safe to
+                %% remove or bring back the splitting code
+                LegVars = maps:without([poc_path_limit, ?chain_vars_version, ?block_version],
+                                       Vars),
+                Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, LegVars),
+                Txn = blockchain_txn_vars_v1:new(LegVars, 1, #{master_key => BinPub,
+                                                            key_proof => Proof}),
 
-    [blockchain_txn_vars_v1:key_proof(Txn, Proof)].
+                [Txn]
+
+        end.

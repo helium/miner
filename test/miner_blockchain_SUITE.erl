@@ -52,9 +52,6 @@ init_per_testcase(TestCase, Config0) ->
 
     Extras =
         case TestCase of
-            version_change_test ->
-                %% force legacy startup
-                #{?chain_vars_version => 1};
             _ ->
                 #{}
         end,
@@ -68,7 +65,13 @@ init_per_testcase(TestCase, Config0) ->
     FinalVars = maps:merge(Vars, Extras),
     ct:pal("final vars ~p", [FinalVars]),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, FinalVars),
+    InitialVars =
+        case TestCase of
+            version_change_test ->
+                miner_ct_utils:make_vars(Keys, FinalVars, legacy);
+            _ ->
+                miner_ct_utils:make_vars(Keys, FinalVars)
+        end,
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
