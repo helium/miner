@@ -333,9 +333,9 @@ election_test(Config) ->
 
     {Priv, _Pub} = proplists:get_value(master_key, Config),
 
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Vars),
-
-    VarsTxn = blockchain_txn_vars_v1:new(Vars, Proof, 3, #{}),
+    Txn = blockchain_txn_vars_v1:new(Vars, 3),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
 
     {ElectionEpoch, _EpochStart} = blockchain_block_v1:election_info(HeadBlock),
 
