@@ -3,11 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-<<<<<<< HEAD
        {ref,"898acb718cbec21be43982143c4925d3edf4ff76"}},
-=======
-       {ref,"0321f0d27aee0b9269467d5ed10639dea3bb9787"}},
->>>>>>> f48ea1d... Bump core for refactor
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
