@@ -509,7 +509,7 @@ master_key_test(Config) ->
                                  {ok, goats_are_not_garb} ==
                                  ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
                      end, shuffle(Miners))
-           end, 40, timer:seconds(1)),
+           end, 80, timer:seconds(1)),
 
     %% double check that new master key works
 
