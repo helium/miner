@@ -84,7 +84,7 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             lager:warning("Invalid assert_loc args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
-handle_message(?MINER_OBJECT(?MINER_MEMBER_IS_CONNECTED)=Member, _, State=#state{}) ->
+handle_message(?MINER_OBJECT(?MINER_MEMBER_IS_CONNECTED), _, State=#state{}) ->
     Reply = case miner:is_connected() of
                 ok -> ok;
                 {error, Error} -> Error
