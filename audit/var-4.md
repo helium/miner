@@ -1,14 +1,16 @@
-# Chain Variable Transaction 3
+# Chain Variable Transaction 4
 
 ## Changes
 
 This transaction changes the `monthly_reward` variable to 500000000000000 from 5000000000000.
 
-Additionally, the `chain_vars_version` is set to 2 to reflect a refactor of both the encoding of the variable update and improving the verification of chain var updates.
+Additionally, the `chain_vars_version` is set to 2.
 
 ## Rationale
 
-In the genesis block, there an error was made.  The initial `monthly_reward` was set to 50000000000.  Because of this, tokens are mined at a rate that is one hundred times too slow.
+The increase of the monthly reward to 5,000,000 per month is a strategic one, concerning potential purchasers who might be uncomfortable buying tiny fractions of the headline token amount.
+
+The chain vars version bump addresses some verifications shortcomings in the initial implementation of chain vars that would allow previous transactions to be replayed.  This new version prevents that and a related attack on the chain, and this change activates it.
 
 ## Version threshold
 
@@ -22,11 +24,11 @@ None
      {blockchain_var_v1_pb,"monthly_reward","int",
          <<"500000000000000">>}],
     0,
-    <<48,68,2,32,17,100,106,113,165,178,37,220,116,219,253,
-      173,218,37,72,209,247,151,55,240,102,115,228,128,223,
-      214,233,209,96,220,140,196,2,32,111,81,109,42,20,196,
-      189,29,181,133,155,196,205,41,13,184,104,113,10,211,185,
-      86,238,124,68,53,106,194,57,113,13,4>>,
+    <<48,70,2,33,0,150,209,97,188,21,114,247,76,119,124,54,47,
+      166,32,33,107,219,134,154,201,155,46,104,8,238,122,159,
+      133,22,206,168,229,2,33,0,205,146,25,194,191,110,207,
+      216,18,118,148,158,22,16,145,198,38,75,185,21,64,226,
+      187,150,59,160,144,162,168,164,120,159>>,
     <<>>,<<>>,[],[],4}
 ```
 
