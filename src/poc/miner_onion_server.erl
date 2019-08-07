@@ -233,19 +233,26 @@ send_to_router(Name, #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{o
     end.
 
 send_to_router(Swarm, Address, Packet) ->
-    Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                             Address,
-                                             router_handler:version(),
-                                             router_handler,
-                                             []),
-    case Result of
-        {ok, Stream} ->
+    RegName = erlang:list_to_atom(Address),
+    case erlang:whereis(RegName) of
+        Stream when is_pid(Stream) ->
             Stream ! {send, Packet},
             lager:info("sent packet ~p to ~p", [Packet, Address]);
-        {error, _Reason} ->
-            lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+        undefined ->
+            Result = libp2p_swarm:dial_framed_stream(Swarm,
+                                                     Address,
+                                                     router_handler:version(),
+                                                     router_handler,
+                                                     []),
+            case Result of
+                {ok, Stream} ->
+                    Stream ! {send, Packet},
+                    catch erlang:register(RegName, Stream),
+                    lager:info("sent packet ~p to ~p", [Packet, Address]);
+                {error, _Reason} ->
+                    lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
+            end
     end.
-
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
