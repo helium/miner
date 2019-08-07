@@ -60,7 +60,7 @@ handle_data(_Type, _Bin, State) ->
     {noreply, State}.
 
 handle_info(_Type, {send, Data}, State) ->
-    {stop, normal, State, Data};
+    {noreply, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:warning("~p got info ~p", [_Type, _Msg]),
     {noreply, State}.
