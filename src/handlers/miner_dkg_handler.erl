@@ -242,18 +242,55 @@ callback_message(Actor, Message, _State) ->
 
 %% helper functions
 serialize(State) ->
-    SerializedDKG = dkg_hybriddkg:serialize(State#state.dkg),
-    G1 = erlang_pbc:element_to_binary(State#state.g1),
-    G2 = erlang_pbc:element_to_binary(State#state.g2),
-    PrivKey = case State#state.privkey of
-                  undefined ->
-                      undefined;
-                  Other ->
-                      tpke_privkey:serialize(Other)
-              end,
-    term_to_binary(State#state{dkg=SerializedDKG, g1=G1, g2=G2, privkey=PrivKey}, [compressed]).
+    #state{dkg = DKG0,
+           g1 = G1_0, g2 = G2_0,
+           privkey = PrivKey0,
+           n = N,
+           f = F,
+           t = T,
+           id = ID,
+           curve = Curve,
+           members = Members,
+           artifact = Artifact,
+           signatures = Sigs,
+           signatures_required = SigsRequired,
+           sigmod = SigMod,
+           sigfun = SigFun,
+           donemod = DoneMod,
+           donefun = DoneFun,
+           done_called = DoneCalled,
+           sent_conf = SentConf} = State,
+    SerializedDKG = dkg_hybriddkg:serialize(DKG0),
+    G1 = erlang_pbc:element_to_binary(G1_0),
+    G2 = erlang_pbc:element_to_binary(G2_0),
+    PreSer0 = #{g1 => G1, g2 => G2},
+    PreSer =
+        case PrivKey0 of
+            undefined ->
+                PreSer0;
+            Other ->
+                maps:put(privkey, tpke_privkey:serialize(Other), PreSer0)
+        end,
+    M0 = #{dkg => SerializedDKG,
+           n => N,
+           f => F,
+           t => T,
+           id => ID,
+           curve => Curve,
+           members => Members,
+           artifact => Artifact,
+           signatures => Sigs,
+           signatures_required => SigsRequired,
+           sigmod => SigMod,
+           sigfun => SigFun,
+           donemod => DoneMod,
+           donefun => DoneFun,
+           done_called => DoneCalled,
+           sent_conf => SentConf},
+    M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
+    maps:merge(PreSer, M).
 
-deserialize(BinState) ->
+deserialize(BinState) when is_binary(BinState) ->
     State = binary_to_term(BinState),
     %% get the fun used to sign things with our swarm key
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
@@ -265,9 +302,67 @@ deserialize(BinState) ->
         undefined ->
             undefined;
         Other ->
-            tpke_privkey:deserialize(Other)
+            term_to_binary(tpke_privkey:deserialize(Other))
     end,
-    State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey}.
+    State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey};
+deserialize(MapState0) when is_map(MapState0) ->
+    MapState = maps:map(fun(g1, B) ->
+                                B;
+                           (g2, B) ->
+                                B;
+                           (_K, undefined) ->
+                                undefined;
+                           (_K, B) ->
+                                binary_to_term(B)
+                        end, MapState0),
+    #{n := N,
+      f := F,
+      t := T,
+      id := ID,
+      dkg := DKG0,
+      curve := Curve,
+      g1 := G1_0,
+      g2 := G2_0,
+      members := Members,
+      artifact := Artifact,
+      signatures := Sigs,
+      signatures_required := SigsRequired,
+      sigmod := SigMod,
+      sigfun := SigFun,
+      donemod := DoneMod,
+      donefun := DoneFun,
+      done_called := DoneCalled,
+      sent_conf := SentConf} = MapState,
+    {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
+    Group = erlang_pbc:group_new(Curve),
+    G1 = erlang_pbc:binary_to_element(Group, G1_0),
+    G2 = erlang_pbc:binary_to_element(Group, G2_0),
+    DKG = dkg_hybriddkg:deserialize(DKG0, G1, ReadySigFun,
+                                    mk_verification_fun(Members)),
+    PrivKey = case maps:get(privkey, MapState, undefined) of
+        undefined ->
+            undefined;
+        Other ->
+            tpke_privkey:deserialize(binary_to_term(Other))
+    end,
+    #state{dkg = DKG,
+           g1 = G1, g2 = G2,
+           privkey = PrivKey,
+           n = N,
+           f = F,
+           t = T,
+           id = ID,
+           curve = Curve,
+           members = Members,
+           artifact = Artifact,
+           signatures = Sigs,
+           signatures_required = SigsRequired,
+           sigmod = SigMod,
+           sigfun = SigFun,
+           donemod = DoneMod,
+           donefun = DoneFun,
+           done_called = DoneCalled,
+           sent_conf = SentConf}.
 
 restore(OldState, _NewState) ->
     {ok, OldState}.
