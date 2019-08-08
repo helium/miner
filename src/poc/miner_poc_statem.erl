@@ -128,8 +128,11 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #dat
         false ->
             {keep_state, Data};
         true ->
-            lager:info("request allowed @ ~p", [BlockHash]),
             {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
+            #{public := PubKey} = Keys,
+            <<ID:10/binary, _/binary>> = libp2p_crypto:pubkey_to_bin(PubKey),
+            lager:md([{poc_id, ID}]),
+            lager:info("request allowed @ ~p", [BlockHash]),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
             {next_state, mining, Data#data{secret=Secret, onion_keys=Keys, responses=#{}}}
