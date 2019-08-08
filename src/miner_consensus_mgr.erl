@@ -371,10 +371,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
     Now = erlang:system_time(seconds),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            lager:debug("got block at ~p sync ~p T ~p", [BlockHeight, Sync, (Now - blockchain_block:time(Block))]),
             case Sync andalso (Now - blockchain_block:time(Block) > 3600) of
                 %% not sync, or recent sync
                 false ->
-                    BlockHeight = blockchain_block:height(Block),
                     lager:info("processing block height ~p", [BlockHeight]),
                     State1 = case maps:find(BlockHeight, CancelDKGs) of
                                  error ->
@@ -398,7 +399,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         end,
 
                     State2 =
-                        case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
+                        %% here we only want to start a new election if: 1) it's valid to do so; 2)
+                        %% we haven't done so already, and 3) it's the correct block to do so. The
+                        %% reasoning for (3) is that we only set height/delay appropriately at that
+                        %% height, and in the restore section.  If we're skipping the initial start
+                        %% or restore for some reason, we cannot safely start here.
+                        case ElectionRunning andalso
+                            (not maps:is_key({Height, Delay}, DKGs)) andalso
+                            BlockHeight == Height+Delay of
                             true ->
                                 %% start the election running here
                                 lager:info("starting new election at ~p+~p", [Height, Delay]),
@@ -521,85 +529,74 @@ handle_info(timeout, State) ->
             lager:info("not restoring consensus group: no chain"),
             {noreply, State};
         {ok, ConsensusAddrs} ->
-            case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
+            %% check if we're a consensus group member and do restore actions
+            #{election_height := ElectionHeight,
+              start_height := EpochStart,
+              election_delay := ElectionDelay} =
+                blockchain_election:election_info(Ledger, Chain),
+            NextElection = next_election(EpochStart, ElectionInterval),
+            RestoreState =
+                case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
+                    true ->
+                        lager:info("in group, trying to restore"),
+                        {ok, Block} = blockchain:head_block(Chain),
+                        BlockHeight = blockchain_block:height(Block),
+                        Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
+                        Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
+                        {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+                        %% we intentionally don't use create here, because
+                        %% this is a restore.
+                        GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                          Pos,
+                                                          N,
+                                                          F,
+                                                          BatchSize,
+                                                          undefined,
+                                                          Chain]],
+                        %% while this won't reflect the actual height, it has to be deterministic
+                        lager:info("restoring consensus group ~p", [Name]),
+                        {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                             Name,
+                                                             libp2p_group_relcast, GroupArg),
+                        Round = blockchain_block:hbbft_round(HeadBlock),
+                        case wait_for_group(Group) of
+                            started ->
+                                activate_hbbft(Group, undefined, Round),
+                                State#state{active_group = Group};
+                            {error, cannot_start} ->
+                                lager:info("didn't restore consensus group, missing"),
+                                ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
+                                case BlockHeight < (ElectionHeight+ElectionDelay+10) of
+                                    true ->
+                                        restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, Round, State);
+                                    _ ->
+                                        State
+                                end;
+                            {error, Reason} ->
+                                lager:info("didn't restore consensus group: ~p", [Reason]),
+                                ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
+                                State
+                        end;
+                    false ->
+                        State
+                end,
+            %% need to check if an election should already have been started
+            case NextElection =< StartHeight of
                 true ->
-                    #{election_height := ElectionHeight,
-                      election_delay := ElectionDelay} =
-                        blockchain_election:election_info(Ledger, Chain),
-                    lager:info("in group, trying to restore"),
-                    {ok, Block} = blockchain:head_block(Chain),
-                    BlockHeight = blockchain_block:height(Block),
-                    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
-                    Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
-                    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
-                    %% we intentionally don't use create here, because
-                    %% this is a restore.
-                    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-                                                      Pos,
-                                                      N,
-                                                      F,
-                                                      BatchSize,
-                                                      undefined,
-                                                      Chain]],
-                    %% while this won't reflect the actual height, it has to be deterministic
-                    lager:info("restoring consensus group ~p", [Name]),
-                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                                         Name,
-                                                         libp2p_group_relcast, GroupArg),
-                    Round = blockchain_block:hbbft_round(HeadBlock),
-                    case wait_for_group(Group) of
-                        started ->
-                            activate_hbbft(Group, undefined, Round),
-                            %% we already completed our election
-                            {noreply, State#state{active_group = Group}};
-                        {error, cannot_start} ->
-                            %% TODO: rip this out in a few versions
-                            FallbackName = consensus_group_name(ElectionHeight, fallback, ConsensusAddrs),
-                            {ok, FallbackGroup} =
-                                libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                                       FallbackName,
-                                                       libp2p_group_relcast, GroupArg),
-                            case wait_for_group(FallbackGroup) of
-                                started ->
-                                    lager:info("restored fallback group"),
-                                    activate_hbbft(FallbackGroup, undefined, Round),
-                                    {noreply, State#state{active_group = FallbackGroup}};
-                                {error, cannot_start} ->
-                                    lager:info("didn't restore consensus group, missing"),
-                                    ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                                    State1 = case BlockHeight < (ElectionHeight+ElectionDelay+10) of
-                                                 true ->
-                                                     restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, Round, State);
-                                                 _ ->
-                                                     State
-                                             end,
-                                    {noreply, State1}
-                            end;
-                        {error, Reason} ->
-                            lager:info("didn't restore consensus group: ~p", [Reason]),
-                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                            {noreply, State}
-                    end;
-                false ->
-                    %% still need to check if we're in the election
-                    %% group here
-                    {_, EpochStart} = blockchain_block_v1:election_info(HeadBlock),
-                    case next_election(EpochStart, ElectionInterval) of
-                        ElectionHeight when ElectionHeight =< StartHeight ->
-                            Diff = StartHeight - ElectionHeight,
-                            Delay = max(0, (Diff div RestartInterval) * RestartInterval),
-                            State1 = State#state{initial_height = ElectionHeight,
-                                                 delay = Delay},
+                    Diff = StartHeight - NextElection,
+                    Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+                    lager:info("try to start or restore the election group next ~p start ~p delay ~p",
+                               [NextElection, StartHeight, Delay]),
+                    State1 = RestoreState#state{initial_height = NextElection,
+                                                delay = Delay},
 
-                            Election = ElectionHeight + Delay,
-                            {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
-                            Hash = blockchain_block:hash_block(ElectionBlock),
-                            State2 = initiate_election(Hash, StartHeight, State1),
-                            lager:info("not restoring consensus group: not a member"),
-                            {noreply, State2};
-                        _ ->
-                            {noreply, State}
-                    end
+                    Election = NextElection + Delay,
+                    {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
+                    Hash = blockchain_block:hash_block(ElectionBlock),
+                    State2 = initiate_election(Hash, NextElection, State1),
+                    {noreply, State2};
+                _ ->
+                    {noreply, RestoreState}
             end
     end;
 handle_info(_Info, State) ->
@@ -719,6 +716,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
                                                                DKGGroup},
                                  current_dkgs = DKGs1};
                 {error, not_done} ->
+                    lager:info("no privkey, can't try to restore HBBFT"),
                     State1
             end;
         {error, _} ->

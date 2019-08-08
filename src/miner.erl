@@ -273,7 +273,12 @@ relcast_queue(Group) ->
                       blockchain_txn:txns()} |
                      {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
-    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
+    try
+        gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity)
+    catch exit:{noproc, _} ->
+            %% if the miner noprocs, we're likely shutting down
+            {error, no_miner}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
