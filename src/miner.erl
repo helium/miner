@@ -132,7 +132,7 @@ block_age() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec p2p_status() -> [{Check::term(), Result::string()}].
+-spec p2p_status() -> [{Check::string(), Result::string()}].
 p2p_status() ->
     Swarm = blockchain_swarm:swarm(),
     CheckSessions = fun() ->
@@ -160,9 +160,9 @@ p2p_status() ->
                    end,
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
-                end, [], [{CheckSessions, connected},
-                          {CheckPublicAddr, dialable},
-                          {CheckNatType, nat_type}]).
+                end, [], [{CheckSessions, "connected"},
+                          {CheckPublicAddr, "dialable"},
+                          {CheckNatType, "nat_type"}]).
 
 %%--------------------------------------------------------------------
 %% @doc
