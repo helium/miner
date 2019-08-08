@@ -158,11 +158,17 @@ p2p_status() ->
                                {error, _} -> "unknown"
                            end
                    end,
+    CheckHeight = fun() ->
+                          Chain = blockchain_worker:blockchain(),
+                          {ok, Height} = blockchain:height(Chain),
+                          integer_to_list(Height)
+                  end,
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
                 end, [], [{CheckSessions, "connected"},
                           {CheckPublicAddr, "dialable"},
-                          {CheckNatType, "nat_type"}]).
+                          {CheckNatType, "nat_type"},
+                          {CheckHeight, "height"}]).
 
 %%--------------------------------------------------------------------
 %% @doc
