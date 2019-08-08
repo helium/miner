@@ -280,7 +280,7 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
     {reply, {ok, CK}, State};
 handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port,
                                         packet_id=ID, pending_transmits=Pendings }=State) ->
-    Fragmentation = application:get_env(miner, poc_fragmentation, false),
+    Fragmentation = application:get_env(miner, poc_fragmentation, true),
     {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
     Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
     UpLink = #helium_LongFiTxUplinkPacket_pb{
@@ -381,7 +381,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             ),
 
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-            Fragmentation = application:get_env(miner, poc_fragmentation, false),
+            Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
                         oui=0,
