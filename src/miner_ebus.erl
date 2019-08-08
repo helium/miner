@@ -88,7 +88,7 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_P2P_STATUS), _, State=#state{}) ->
     Status = lists:map(fun({Name, Result}) ->
                                {atom_to_list(Name), Result}
                        end, miner:p2p_status()),
-    {reply, [{array, {struct, [string, boolean]}}], Status, State};
+    {reply, [{array, {struct, [string, string]}}], Status, State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.

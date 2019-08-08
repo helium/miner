@@ -132,22 +132,37 @@ block_age() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec p2p_status() -> [{Check::term(), Result::boolean()}].
+-spec p2p_status() -> [{Check::term(), Result::string()}].
 p2p_status() ->
     Swarm = blockchain_swarm:swarm(),
     CheckSessions = fun() ->
-                            length(libp2p_swarm:sessions(Swarm)) > 5
+                            case length(libp2p_swarm:sessions(Swarm)) > 5 of
+                                true -> "yes";
+                                false  -> "no"
+                            end
                     end,
     CheckPublicAddr = fun() ->
-                              lists:any(fun(Addr) ->
-                                                libp2p_relay:is_p2p_circuit(Addr) orelse
-                                                    libp2p_transport_tcp:is_public(Addr)
-                                        end, libp2p_swarm:listen_addrs(Swarm))
+                              case lists:any(fun(Addr) ->
+                                                     libp2p_relay:is_p2p_circuit(Addr) orelse
+                                                         libp2p_transport_tcp:is_public(Addr)
+                                             end, libp2p_swarm:listen_addrs(Swarm)) of
+                                  true -> "yes";
+                                  false -> "no"
+                              end
                       end,
+    CheckNatType = fun() ->
+                           Peerbook = libp2p_swarm:peerbook(Swarm),
+                           SwarmAddr = libp2p_swarm:pubkey_bin(Swarm),
+                           case libp2p_peerbook:get(Peerbook, SwarmAddr) of
+                               {ok, Peer} -> atom_to_list(libp2p_peer:nat_type(Peer));
+                               {error, _} -> "unknown"
+                           end
+                   end,
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
                 end, [], [{CheckSessions, connected},
-                          {CheckPublicAddr, dialable}]).
+                          {CheckPublicAddr, dialable},
+                          {CheckNatType, nat_type}]).
 
 %%--------------------------------------------------------------------
 %% @doc
