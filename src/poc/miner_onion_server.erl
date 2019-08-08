@@ -360,7 +360,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                                                                          udp_send_ip=IP,
                                                                          udp_send_port=Port,
                                                                          packet_id=ID}=State) ->
-    <<ID:10/binary, _/binary>> = OnionCompactKey,
+    <<POCID:10/binary, _/binary>> = OnionCompactKey,
     NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
             _ = erlang:spawn(
@@ -370,10 +370,10 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info([{poc_id, ID}], "could not decrypt packet received via ~p", [Type]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p", [Type]),
             State;
         {ok, Data, NextPacket} ->
-            lager:info([{poc_id, ID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
+            lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
             _ = erlang:spawn(
                 ?MODULE,
                 send_receipt,
@@ -396,7 +396,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                         payload=NextPacket
             },
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
-            lager:info([{poc_id, ID}], "sending ~p", [Req]),
+            lager:info([{poc_id, POCID}], "sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
             spawn(fun() ->
                           %% sleep from 3-13 seconds before sending
