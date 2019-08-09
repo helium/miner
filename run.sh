@@ -98,15 +98,29 @@ echo "Node not in consensus: $non_consensus_node"
 
 exported_genesis_file="/tmp/genesis_$(date +%Y%m%d%H%M%S)"
 # get the genesis block from one of the consensus nodes
-for node in ${nodes[@]}; do
-    if [[ $(./_build/dev\+miner$node/rel/miner$node/bin/miner$node info in_consensus) = *true* ]]; then
-        ./_build/dev\+miner$node/rel/miner$node/bin/miner$node genesis export $exported_genesis_file
-        break
-    fi
+LOOP=5
+while [ $LOOP -ne 0 ]; do
+    for node in ${nodes[@]}; do
+        if [[ $(./_build/dev\+miner$node/rel/miner$node/bin/miner$node info in_consensus) = *true* ]]; then
+            ./_build/dev\+miner$node/rel/miner$node/bin/miner$node genesis export $exported_genesis_file
+            if [ $? -eq 0 ]; then
+                LOOP=0
+                break
+            else
+                LOOP=`expr $LOOP - 1`
+            fi
+        fi
+    done
 done
-echo "Exported Genesis file: $exported_genesis_file"
 
-echo "Loading Genesis block on $non_consensus_node"
-for node in $non_consensus_node; do
-    ./_build/dev\+miner$node/rel/miner$node/bin/miner$node genesis load $exported_genesis_file
-done
+if [ -f $exported_genesis_file ]; then
+    echo "Exported Genesis file: $exported_genesis_file"
+
+    echo "Loading Genesis block on $non_consensus_node"
+    for node in $non_consensus_node; do
+        ./_build/dev\+miner$node/rel/miner$node/bin/miner$node genesis load $exported_genesis_file
+    done
+else
+    echo "couldn't export genesis file"
+    exit 1
+fi
