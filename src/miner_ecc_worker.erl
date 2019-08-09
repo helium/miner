@@ -36,12 +36,12 @@ init([KeySlot]) ->
 handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
     Reply = txn(Pid, fun() -> 
                              ecc508:sign(Pid, State#state.key_slot, Binary)
-                     end),
+                     end, 10),
     {reply, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
     Reply = txn(Pid, fun() -> 
                              ecc508:ecdh(Pid, State#state.key_slot, PubKey)
-                     end),
+                     end, 10),
     {reply, Reply, State};
 
 handle_call(_Msg, _From, State) ->
@@ -57,12 +57,16 @@ terminate(_Reason, State=#state{}) ->
     catch ecc508:stop(State#state.ecc_handle).
 
 
-txn(Pid, Fun) ->
+txn(Pid, Fun, 0) ->
+    {error, retries_exceeded};
+txn(Pid, Fun, Limit) ->
     ecc508:wake(Pid),
     case Fun() of
         {error, ecc_asleep} ->
             ecc508:sleep(Pid),
-            txn(Pid, Fun);
+            %% let the chip timeout
+            timer:sleep(150),
+            txn(Pid, Fun, Limit - 1);
         Result ->
             ecc508:sleep(Pid),
             Result
