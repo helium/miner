@@ -57,7 +57,7 @@ terminate(_Reason, State=#state{}) ->
     catch ecc508:stop(State#state.ecc_handle).
 
 
-txn(Pid, Fun, 0) ->
+txn(_Pid, _Fun, 0) ->
     {error, retries_exceeded};
 txn(Pid, Fun, Limit) ->
     ecc508:wake(Pid),
