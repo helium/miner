@@ -58,6 +58,8 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
+handle_command(have_key, State) ->
+    {reply, hbbft:have_key(State#state.hbbft), [], State};
 handle_command(get_buf, State) ->
     {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
 handle_command({set_buf, Buf}, State) ->

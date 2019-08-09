@@ -703,18 +703,36 @@ restore(Chain, Block, Height, Interval) ->
     lager:info("attempting to restore"),
     {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
     {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
-    Group = miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight),
-    start_txn_handler(Group),
     Election = next_election(EpochStart, Interval),
-    case Height of
-        %% it's possible that we've already processed the block that would
-        %% have started the election, so try this on restore
-        Ht when Ht > Election ->
-            miner_consensus_mgr:start_election(ignored, Height, Election);
-        _ ->
-            ok
-    end,
-    Group.
+    case miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight) of
+        Group when is_pid(Group) ->
+            start_txn_handler(Group),
+            case Height of
+                %% it's possible that we've already processed the block that would
+                %% have started the election, so try this on restore
+                Ht when Ht > Election ->
+                    miner_consensus_mgr:start_election(ignored, Height, Election);
+                _ ->
+                    ok
+            end,
+            Group;
+        undefined ->
+            case Height of
+                Ht when Ht > Election ->
+                    miner_consensus_mgr:start_election(ignored, Height, Election);
+                _ ->
+                    ok
+            end,
+            undefined;
+        cannot_start ->
+            %% here, we should try restarting an earlier election, as
+            %% it may not have completed.
+            {ok, Block2} = blockchain:get_block(EpochStart - 1, Chain),
+            {_, EpochStart2} = blockchain_block_v1:election_info(Block2),
+            Election2 = next_election(EpochStart2, Interval),
+            miner_consensus_mgr:start_election(ignored, Height, Election2),
+            undefined
+    end.
 
 set_next_block_timer(Chain) ->
     {ok, BlockTime} = blockchain:config(?block_time, blockchain:ledger(Chain)),
