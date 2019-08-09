@@ -368,8 +368,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
             #state{current_dkg = OldDKG,
                    initial_height = Height,
                    delay = Delay} = State)
-  when State#state.chain /= undefined andalso
-       Height =/= 1 ->
+  when State#state.chain /= undefined ->
 
     Ledger = blockchain:ledger(State#state.chain),
     {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
