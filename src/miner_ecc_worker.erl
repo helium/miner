@@ -61,7 +61,7 @@ txn(Pid, Fun) ->
     ecc508:wake(Pid),
     case Fun() of
         {error, ecc_asleep} ->
-            ecc508:sleep(),
+            ecc508:sleep(Pid),
             txn(Pid, Fun);
         Result ->
             ecc508:sleep(Pid),
