@@ -34,14 +34,14 @@ init([KeySlot]) ->
 
 
 handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
-    ecc508:wake(Pid),
-    Reply = ecc508:sign(Pid, State#state.key_slot, Binary),
-    ecc508:sleep(Pid),
+    Reply = txn(Pid, fun() -> 
+                             ecc508:sign(Pid, State#state.key_slot, Binary)
+                     end),
     {reply, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
-    ecc508:wake(Pid),
-    Reply = ecc508:ecdh(Pid, State#state.key_slot, PubKey),
-    ecc508:sleep(Pid),
+    Reply = txn(Pid, fun() -> 
+                             ecc508:ecdh(Pid, State#state.key_slot, PubKey)
+                     end),
     {reply, Reply, State};
 
 handle_call(_Msg, _From, State) ->
@@ -55,3 +55,15 @@ handle_cast(_Msg, State) ->
 
 terminate(_Reason, State=#state{}) ->
     catch ecc508:stop(State#state.ecc_handle).
+
+
+txn(Pid, Fun) ->
+    ecc508:wake(Pid),
+    case Fun() of
+        {error, ecc_asleep} ->
+            ecc508:sleep(),
+            txn(Pid, Fun);
+        Result ->
+            ecc508:sleep(Pid),
+            Result
+    end.
