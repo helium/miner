@@ -314,7 +314,8 @@ make_vars() ->
     {ok, Curve} = application:get_env(miner, curve),
     {ok, N} = application:get_env(blockchain, num_consensus_members),
 
-    #{?block_time => BlockTime,
+    #{?chain_vars_version => 2,
+      ?block_time => BlockTime,
       ?election_interval => Interval,
       ?election_restart_interval => 10,
       ?num_consensus_members => N,
