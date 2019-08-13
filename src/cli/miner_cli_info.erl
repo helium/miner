@@ -21,7 +21,8 @@ register_all_usage() ->
                    info_height_usage(),
                    info_in_consensus_usage(),
                    info_name_usage(),
-                   info_block_age_usage()
+                   info_block_age_usage(),
+                   info_p2p_status_usage()
                   ]).
 
 register_all_cmds() ->
@@ -33,7 +34,8 @@ register_all_cmds() ->
                    info_height_cmd(),
                    info_in_consensus_cmd(),
                    info_name_cmd(),
-                   info_block_age_cmd()
+                   info_block_age_cmd(),
+                   info_p2p_status_cmd()
                   ]).
 %%
 %% info
@@ -44,6 +46,9 @@ info_usage() ->
      ["miner info commands\n\n",
       "  info height - Get height of the blockchain for this miner.\n",
       "  info in_consensus - Show if this miner is in the consensus_group.\n"
+      "  name - Shows the name of this miner.\n"
+      "  block_age - Get age of the latest block in the chain, in seconds.\n"
+      "  p2p_status - Shows key peer connectivity status of this miner.\n"
      ]
     ].
 
@@ -143,10 +148,32 @@ info_block_age_usage() ->
     ].
 
 info_block_age(["info", "block_age"], [], []) ->
-    Chain = blockchain_worker:blockchain(),
-    {ok, Block} = blockchain:head_block(Chain),
-    Age = erlang:system_time(seconds) - blockchain_block:time(Block),
+    Age = miner:block_age(),
     [clique_status:text(integer_to_list(Age))];
 info_block_age([_, _, _], [], []) ->
     usage.
 
+%%
+%% info p2p_status
+%%
+
+info_p2p_status_cmd() ->
+    [
+     [["info", "p2p_status"], [], [], fun info_p2p_status/3]
+    ].
+
+info_p2p_status_usage() ->
+    [["info", "p2p_status"],
+     ["info p2p_status \n\n",
+      "  Returns peer connectivity checks for this miner.\n\n"
+     ]
+    ].
+
+info_p2p_status(["info", "p2p_status"], [], []) ->
+    StatusResults = miner:p2p_status(),
+    FormatResult = fun({Name, Result}) ->
+                           [{name, Name}, {result, Result}]
+                   end,
+    [clique_status:table(lists:map(FormatResult, StatusResults))];
+info_p2p_status([_, _, _], [], []) ->
+    usage.

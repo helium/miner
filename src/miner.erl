@@ -18,6 +18,8 @@
     onboarding_key_bin/0,
     add_gateway_txn/4,
     assert_loc_txn/6,
+    p2p_status/0,
+    block_age/0,
     relcast_info/1,
     relcast_queue/1,
     hbbft_status/0,
@@ -114,6 +116,59 @@ pubkey_bin() ->
 -spec onboarding_key_bin() -> libp2p_crypto:pubkey_bin().
 onboarding_key_bin() ->
     gen_server:call(?MODULE, onboarding_key_bin).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+block_age() ->
+    Chain = blockchain_worker:blockchain(),
+    {ok, Block} = blockchain:head_block(Chain),
+    erlang:system_time(seconds) - blockchain_block:time(Block).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec p2p_status() -> [{Check::string(), Result::string()}].
+p2p_status() ->
+    Swarm = blockchain_swarm:swarm(),
+    CheckSessions = fun() ->
+                            case length(libp2p_swarm:sessions(Swarm)) > 5 of
+                                true -> "yes";
+                                false  -> "no"
+                            end
+                    end,
+    CheckPublicAddr = fun() ->
+                              case lists:any(fun(Addr) ->
+                                                     libp2p_relay:is_p2p_circuit(Addr) orelse
+                                                         libp2p_transport_tcp:is_public(Addr)
+                                             end, libp2p_swarm:listen_addrs(Swarm)) of
+                                  true -> "yes";
+                                  false -> "no"
+                              end
+                      end,
+    CheckNatType = fun() ->
+                           Peerbook = libp2p_swarm:peerbook(Swarm),
+                           SwarmAddr = libp2p_swarm:pubkey_bin(Swarm),
+                           case libp2p_peerbook:get(Peerbook, SwarmAddr) of
+                               {ok, Peer} -> atom_to_list(libp2p_peer:nat_type(Peer));
+                               {error, _} -> "unknown"
+                           end
+                   end,
+    CheckHeight = fun() ->
+                          Chain = blockchain_worker:blockchain(),
+                          {ok, Height} = blockchain:height(Chain),
+                          integer_to_list(Height)
+                  end,
+    lists:foldr(fun({Fun, Name}, Acc) ->
+                        [{Name, Fun()} | Acc]
+                end, [], [{CheckSessions, "connected"},
+                          {CheckPublicAddr, "dialable"},
+                          {CheckNatType, "nat_type"},
+                          {CheckHeight, "height"}]).
 
 %%--------------------------------------------------------------------
 %% @doc
