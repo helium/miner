@@ -107,7 +107,8 @@ start_link(Args) ->
 %%--------------------------------------------------------------------
 -spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
 pubkey_bin() ->
-    gen_server:call(?MODULE, pubkey_bin).
+    Swarm = blockchain_swarm:swarm(),
+    libp2p_swarm:pubkey_bin(Swarm).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -181,7 +182,11 @@ p2p_status() ->
 add_gateway_txn(OwnerB58, PayerB58, Fee, StakingFee) ->
     Owner = libp2p_crypto:b58_to_bin(OwnerB58),
     Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    gen_server:call(?MODULE, {add_gateway_txn, Owner, Payer, Fee, StakingFee}).
+    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Payer, StakingFee, Fee),
+    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
+    {ok, blockchain_txn:serialize(SignedTxn)}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -198,7 +203,11 @@ assert_loc_txn(H3String, OwnerB58, PayerB58, Nonce, StakingFee, Fee) ->
     H3Index = h3:from_string(H3String),
     Owner = libp2p_crypto:b58_to_bin(OwnerB58),
     Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    gen_server:call(?MODULE, {assert_loc_txn, H3Index, Owner, Payer, Nonce, StakingFee, Fee}).
+    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, Payer, H3Index, Nonce, StakingFee, Fee),
+    SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
+    {ok, blockchain_txn:serialize(SignedTxn)}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -381,26 +390,11 @@ init(Args) ->
                         onboarding_key = proplists:get_value(onboarding_key, Args, undefined)}}
     end.
 
-handle_call(pubkey_bin, _From, State) ->
-    Swarm = blockchain_swarm:swarm(),
-    {reply, libp2p_swarm:pubkey_bin(Swarm), State};
 handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=undefined}) ->
     %% Return an empty binary if no onboarding key is present
     {reply, <<>>, State};
 handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=PubKey}) ->
     {reply, libp2p_crypto:pubkey_to_bin({ecc_compact, PubKey}), State};
-handle_call({add_gateway_txn, Owner, Payer, Fee, StakingFee}, _From, State=#state{}) ->
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Payer, StakingFee, Fee),
-    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
-    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
-handle_call({assert_loc_txn, H3Index, Owner, Payer, Nonce, StakingFee, Fee}, _From, State=#state{}) ->
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, Payer, H3Index, Nonce, StakingFee, Fee),
-    SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
-    {reply, {ok, blockchain_txn:serialize(SignedTxn)}, State};
 handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _From,
