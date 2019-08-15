@@ -599,7 +599,7 @@ wait_for_group(Group) ->
 wait_for_group(_Group, 0) ->
     {error, could_not_check};
 wait_for_group(Group, Retries) ->
-    case libp2p_group_relcast_server:status(Group) of
+    case libp2p_group_relcast:status(Group) of
         {error, _Reason} = Err ->
             Err;
         started ->
