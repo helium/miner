@@ -63,6 +63,7 @@
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     mining_delay = ?MINING_DELAY :: non_neg_integer(),
     mining_hash :: undefined | binary(),
+    mining_ledger :: undefined | blockchain_ledger_v1:ledger(),
     poc_interval :: non_neg_integer() | undefined,
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
@@ -140,12 +141,12 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{mining_timeout=MiningTimeout}=Data0) ->
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data0) ->
     case find_request(BlockHash, Data0) of
         ok ->
             lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, ?MINING_TIMEOUT]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT, mining_hash=BlockHash},
-            {next_state, delaying, Data1#data{mining_delay=?MINING_DELAY}};
+            {next_state, delaying, Data1#data{mining_delay=?MINING_DELAY, mining_ledger=PinnedLedger}};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
@@ -158,13 +159,17 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{mining_time
 mining(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-
-delaying(info, {blockchain_event, {add_block, _, _, PinnedLedger}}, #data{blockchain=Chain,
-                                                                          address=Challenger,
-                                                                          secret=Secret,
-                                                                          mining_delay=0,
-                                                                          mining_hash=MiningHash}=Data0) ->
-    lager:info("delayed over targeting"),
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
+                                                               address=Challenger,
+                                                               secret=Secret,
+                                                               mining_delay=0,
+                                                               mining_hash=MiningHash,
+                                                               mining_ledger=PinnedLedger}=Data0) ->
+    lager:info("delay over, moving to targeting"),
     {ok, Block} = blockchain:get_block(MiningHash, Chain),
     Height = blockchain_block:height(Block),
     self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},

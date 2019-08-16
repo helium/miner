@@ -336,12 +336,12 @@ startup(_Config) ->
 
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Send fake notify
     ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
@@ -370,7 +370,7 @@ startup(_Config) ->
     ?assertEqual({ok, 1}, blockchain:height(Chain)),
 
     % Now this should match the chain
-    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
     ok.
 
 %% ------------------------------------------------------------------
