@@ -137,26 +137,29 @@ block_age() ->
 p2p_status() ->
     Swarm = blockchain_swarm:swarm(),
     CheckSessions = fun() ->
-                            case length(libp2p_swarm:sessions(Swarm)) > 5 of
+                            case (catch length(libp2p_swarm:sessions(Swarm)) > 5) of
                                 true -> "yes";
-                                false  -> "no"
+                                _  -> "no"
                             end
                     end,
     CheckPublicAddr = fun() ->
-                              case lists:any(fun(Addr) ->
-                                                     libp2p_relay:is_p2p_circuit(Addr) orelse
-                                                         libp2p_transport_tcp:is_public(Addr)
-                                             end, libp2p_swarm:listen_addrs(Swarm)) of
+                              case (catch lists:any(fun(Addr) ->
+                                                            libp2p_relay:is_p2p_circuit(Addr) orelse
+                                                                libp2p_transport_tcp:is_public(Addr)
+                                                    end, libp2p_swarm:listen_addrs(Swarm))) of
                                   true -> "yes";
-                                  false -> "no"
+                                  _ -> "no"
                               end
                       end,
     CheckNatType = fun() ->
-                           Peerbook = libp2p_swarm:peerbook(Swarm),
-                           SwarmAddr = libp2p_swarm:pubkey_bin(Swarm),
-                           case libp2p_peerbook:get(Peerbook, SwarmAddr) of
-                               {ok, Peer} -> atom_to_list(libp2p_peer:nat_type(Peer));
-                               {error, _} -> "unknown"
+                           try
+                               case libp2p_peerbook:get(libp2p_swarm:peerbook(Swarm),
+                                                        libp2p_swarm:pubkey_bin(Swarm)) of
+                                   {ok, Peer} -> atom_to_list(libp2p_peer:nat_type(Peer));
+                                   {error, _} -> "unknown"
+                               end
+                           catch _:_ ->
+                                   "unknown"
                            end
                    end,
     CheckHeight = fun() ->
