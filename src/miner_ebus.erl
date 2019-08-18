@@ -45,11 +45,9 @@ init(_Args) ->
 
 handle_message(?MINER_OBJECT(?MINER_MEMBER_PUBKEY), _Msg, State=#state{}) ->
     PubKeyBin = miner:pubkey_bin(),
-    lager:info("RETURNING MINER PUBKEY"),
     {reply, [string], [libp2p_crypto:bin_to_b58(PubKeyBin)], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ONBOARDING_KEY), _Msg, State=#state{}) ->
     PubKeyBin = miner:onboarding_key_bin(),
-    lager:info("RETURNING MINER ONBOARDING_KEY"),
     {reply, [string], [libp2p_crypto:bin_to_b58(PubKeyBin)], State};
 handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) ->
     case ebus_message:args(Msg) of
@@ -88,7 +86,6 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
     end;
 handle_message(?MINER_OBJECT(?MINER_MEMBER_P2P_STATUS), _, State=#state{}) ->
     Status = miner:p2p_status(),
-    lager:info("RETURNING MINER P2PSTATUS ~p", [Status]),
     {reply, [{array, {struct, [string, string]}}], [Status], State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
