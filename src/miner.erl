@@ -831,8 +831,6 @@ set_buf(ConsensusGroup, Buf) ->
             {error, no_group}
     end.
 
-start_txn_handler(undefined) ->
-    ok;
 start_txn_handler(Group) ->
     ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
                                          {libp2p_framed_stream, server,

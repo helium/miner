@@ -290,11 +290,11 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                        initial_height = Height}};
                         {error, cannot_start} ->
                             lager:info("didn't restore consensus group, missing"),
-                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Group),
+                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
                             {reply, cannot_start, State};
                         {error, Reason} ->
                             lager:info("didn't restore consensus group: ~p", [Reason]),
-                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Group),
+                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
                             {reply, undefined, State}
                     end;
                 false ->
@@ -600,8 +600,6 @@ wait_for_group(_Group, 0) ->
     {error, could_not_check};
 wait_for_group(Group, Retries) ->
     case libp2p_group_relcast:status(Group) of
-        {error, _Reason} = Err ->
-            Err;
         started ->
             started;
         cannot_start ->
