@@ -150,7 +150,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       PrivKey,
                                       Chain,
                                       1,
-                                      []]],
+                                      []],
+                [{create, true}]],
     Name = consensus_group_name(1, Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name,
                                          libp2p_group_relcast, GroupArg),
@@ -195,12 +196,17 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                       PrivKey,
                                       Chain,
                                       1, % gets set later
-                                      []]], % gets filled later
+                                      []], % gets filled later
+                [{create, true}]],
     %% while this won't reflect the actual height, it has to be deterministic
     Name = consensus_group_name(max(0, Height), Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
+
+    %% not sure what the correct error behavior here is?
+    true = libp2p_group_relcast:handle_command(Group, have_key),
+
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     ok = miner:handoff_consensus(Group, Height + Delay),
     {reply, ok, State#state{current_dkg = undefined}};
@@ -221,7 +227,8 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
                                       PrivKey,
                                       Chain,
                                       1, % gets set later
-                                      []]], % gets filled later
+                                      []],
+                [{create, true}]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
     Name = consensus_group_name(max(0, Height), Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
@@ -250,6 +257,8 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     lager:info("restoring consensus group"),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+                    %% we intentionally don't use create here, because
+                    %% this is a restore.
                     GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
                                                       Pos,
                                                       N,
@@ -262,21 +271,33 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
-                    {ok, HeadBlock} = blockchain:head_block(Chain),
-                    Round = blockchain_block:hbbft_round(HeadBlock),
-                    libp2p_group_relcast:handle_input(
-                                  Group, {next_round, Round + 1, [], false}),
-                    %% this isn't super safe?  must make sure that a prior group wasn't running
-                    Height =
-                        case StartHeight >= State#state.initial_height of
-                            true ->
-                                StartHeight;
-                            _ ->
-                                State#state.initial_height
-                        end,
-                    {reply, Group, State#state{consensus_pos = Pos,
-                                               initial_height = Height}};
-                 false ->
+
+                    case wait_for_group(Group) of
+                        started ->
+                            {ok, HeadBlock} = blockchain:head_block(Chain),
+                            Round = blockchain_block:hbbft_round(HeadBlock),
+                            libp2p_group_relcast:handle_input(
+                              Group, {next_round, Round + 1, [], false}),
+                            %% this isn't super safe?  must make sure that a prior group wasn't running
+                            Height =
+                                case StartHeight >= State#state.initial_height of
+                                    true ->
+                                        StartHeight;
+                                    _ ->
+                                        State#state.initial_height
+                                end,
+                            {reply, Group, State#state{consensus_pos = Pos,
+                                                       initial_height = Height}};
+                        {error, cannot_start} ->
+                            lager:info("didn't restore consensus group, missing"),
+                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Group),
+                            {reply, cannot_start, State};
+                        {error, Reason} ->
+                            lager:info("didn't restore consensus group: ~p", [Reason]),
+                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Group),
+                            {reply, undefined, State}
+                    end;
+                false ->
                     lager:info("not restoring consensus group: not a member"),
                     {reply, undefined, State}
             end
@@ -390,6 +411,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             State1 = rescue_dkg(Members, term_to_binary(Members), State),
                             {noreply, State1};
                         false ->
+                            lager:info("Not in rescue DKG: ~p", [Members]),
                             {noreply, State}
                     end;
                 false when State#state.election_running ->
@@ -406,6 +428,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             {noreply, State}
                     end;
                 _Error ->
+                    lager:warning("didn't get gossiped block: ~p", [_Error]),
                     {noreply, State}
             end
     end;
@@ -534,7 +557,8 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
                                             Curve,
                                             Artifact,
                                             Sign,
-                                            {?MODULE, Done}, list_to_binary(DKGGroupName)]],
+                                            {?MODULE, Done}, list_to_binary(DKGGroupName)],
+                       [{create, true}]],
             %% the opts are added in the third position of the list
             %% The below are for in_memory_mode
             %% [{db_opts, [{in_memory_mode, true}]},
@@ -567,3 +591,22 @@ animalize(L) ->
                       N
               end,
               L).
+
+%% TODO: redo this using proper time accounting
+wait_for_group(Group) ->
+    wait_for_group(Group, 5).
+
+wait_for_group(_Group, 0) ->
+    {error, could_not_check};
+wait_for_group(Group, Retries) ->
+    case libp2p_group_relcast:status(Group) of
+        {error, _Reason} = Err ->
+            Err;
+        started ->
+            started;
+        cannot_start ->
+            {error, cannot_start};
+        not_started ->
+            timer:sleep(500),
+            wait_for_group(Group, Retries - 1)
+    end.
