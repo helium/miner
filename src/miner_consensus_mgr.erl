@@ -205,6 +205,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                          libp2p_group_relcast, GroupArg),
 
     %% not sure what the correct error behavior here is?
+    lager:info("checking that the hbbft group has successfully started"),
     true = libp2p_group_relcast:handle_command(Group, have_key),
 
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
@@ -500,6 +501,7 @@ rescue_dkg(Members, Artifact, State) ->
     {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_genesis_block},
                          rescue_done, length(Members), Curve,
                          State#state{initial_height = Height,
+                                     delay = 0,
                                      election_running = true}),
     State1.
 

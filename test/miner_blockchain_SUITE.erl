@@ -86,7 +86,7 @@ init_per_testcase(TestCase, Config0) ->
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [Txns, Addresses, NumConsensusMembers, Curve])
+                                       [Txns, Addresses, NumConsensusMembers, Curve], 120000)
                    end, Miners),
     ?assertEqual([ok], lists:usort(DKGResults)),
     [{master_key, {Priv, Pub}} | Config].
@@ -380,7 +380,7 @@ election_test(Config) ->
                                              ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                              Epoch >= 5
                                      end, shuffle(Miners))
-           end, 40, timer:seconds(1)),
+           end, 90, timer:seconds(1)),
 
     ok.
 

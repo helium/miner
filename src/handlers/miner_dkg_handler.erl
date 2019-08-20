@@ -81,7 +81,15 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
     %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
         {conf, InSigs} ->
-            Sigs1 = lists:usort(lists:append(InSigs, Sigs)),
+            Sigs1 = lists:foldl(fun({Address, Signature}, Acc) ->
+                                        case lists:keymember(Address, 1, Acc) == false andalso
+                                             libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
+                                            true ->
+                                                [{Address, Signature}|Acc];
+                                            false ->
+                                                Acc
+                                        end
+                                end, Sigs, InSigs),
             NewState = State#state{signatures = Sigs1},
             case enough_signatures(conf, NewState) of
                 {ok, GoodSignatures} ->
@@ -106,13 +114,37 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State, []}
             end;
         {signature, Address, Signature} ->
-            NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
-            case enough_signatures(sig, NewState) of
-                {ok, Signatures} when State#state.sent_conf == false ->
-                    {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
-                _ ->
-                    %% already sent a CONF, or not enough signatures
-                    {NewState, []}
+            case {libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)),
+                  not lists:keymember(Address, 1, Sigs)} of
+                {true, true} ->
+                    NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
+                    case enough_signatures(sig, NewState) of
+                        {ok, _Signatures} when State#state.sent_conf == false ->
+                            {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, NewState#state.signatures})}]};
+                        {ok, _} ->
+                            case enough_signatures(conf, NewState) of
+                                {ok, GoodSignatures} when State#state.done_called == false ->
+                                    %% this needs to be a call so we know the callback succeeded so we
+                                    %% can terminate
+                                    lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
+                                    ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
+                                                         Members, State#state.privkey),
+                                    %% stop the handler
+                                    {NewState#state{done_called = true, signatures = GoodSignatures}, [{stop, 60000}]};
+                                _ ->
+                                    %% not enough total signatures, or we've already completed
+                                    {NewState, []}
+                            end;
+                        _ ->
+                            %% already sent a CONF, or not enough signatures
+                            {NewState, []}
+                    end;
+                {true, _} ->
+                    %% duplicate, this is ok
+                    {State, []};
+                {false, _} ->
+                    lager:warning("got invalid signature ~p from ~p", [Signature, Address]),
+                    {State, []}
             end;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
@@ -127,7 +159,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                 {NewDKG, start_timer} ->
                     %% this is unused, as it's used to time out DKG elections which we're not doing
                     {State#state{dkg=NewDKG}, []};
-                {NewDKG, {result, {Shard, VK, VKs}}} ->
+                {NewDKG, {result, {Shard, VK, VKs}}} when State#state.privkey == undefined ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve),
                                                    Shard, State#state.id - 1),
@@ -148,7 +180,9 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State#state{dkg=NewDKG, privkey=PrivateKey,
                                  signatures_required=Threshold,
                                  signatures=[{Address, Signature}|State#state.signatures]},
-                     [{multicast, term_to_binary({signature, Address, Signature})}]}
+                     [{multicast, term_to_binary({signature, Address, Signature})}]};
+                {_NewDKG, {result, {_Shard, _VK, _VKs}}} ->
+                    ignore
             end
     end.
 
@@ -216,18 +250,17 @@ enough_signatures(sig, #state{signatures=Sigs, t = T}) when length(Sigs) < (T + 
     false;
 enough_signatures(conf, #state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
     false;
-enough_signatures(_, #state{artifact=Artifact, members=Members, signatures=Signatures,
-                            signatures_required=Threshold}) ->
+enough_signatures(Phase, #state{artifact=Artifact, members=Members, signatures=Signatures,
+                                t = T, signatures_required=Threshold0}) ->
+    Threshold = case Phase of
+                    sig -> T + 1;
+                    conf -> Threshold0
+                end,
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
     case blockchain_block_v1:verify_signatures(Artifact, Members, Signatures, Threshold) of
         {true, ValidSignatures} ->
-            case length(ValidSignatures) >= Threshold of
-                true ->
-                    {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
-                false ->
-                    false
-            end;
+            {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
         false ->
             false
     end.
