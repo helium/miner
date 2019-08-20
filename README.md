@@ -145,7 +145,7 @@ You will see an output roughly like the following:
 +--------------------------+-----------------------------+---------------------------------------------------------+------------------------------+
 ```
 
-As long as you have an address listed in `listen_addrs` and some peers in the table at the bottom, you're conencted to the p2p network and good to go.
+As long as you have an address listed in `listen_addrs` and some peers in the table at the bottom, you're connected to the p2p network and good to go.
 
 ### Loading the Genesis block
 
