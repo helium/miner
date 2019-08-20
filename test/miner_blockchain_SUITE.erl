@@ -83,21 +83,8 @@ init_per_testcase(TestCase, Config0) ->
     ),
     InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     Txns = InitialVars ++ InitialPayment ++ InitGen,
-    Addrs = miner_ct_utils:pmap(
-              fun(Miner) ->
-                      Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
-                      [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
-                      H
-              end, Miners),
-
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
-                           Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
-                           lists:foreach(
-                             fun(A) ->
-                                     R = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000),
-                                     ct:pal("connect to ~p returned ~p", [A, R])
-                             end, Addrs),
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
                                        [Txns, Addresses, NumConsensusMembers, Curve], 120000)
                    end, Miners),

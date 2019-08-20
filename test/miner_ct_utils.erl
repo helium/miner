@@ -253,19 +253,21 @@ init_per_testcase(TestCase, Config) ->
         ConfigResult
     ),
 
-    %% get the first miner's listen addrs
-    [First | Rest] = Miners,
-    FirstSwarm = ct_rpc:call(First, blockchain_swarm, swarm, []),
-    FirstListenAddr = hd(ct_rpc:call(First, libp2p_swarm, listen_addrs, [FirstSwarm])),
+    Addrs = miner_ct_utils:pmap(
+              fun(Miner) ->
+                      Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                      [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
+                      H
+              end, Miners),
 
-    %% tell the rest of the miners to connect to the first miner
-    lists:foreach(
-        fun(Miner) ->
-            Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
-            ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, FirstListenAddr])
-        end,
-        Rest
-    ),
+    miner_ct_utils:pmap(
+      fun(Miner) ->
+              Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+              lists:foreach(
+                fun(A) ->
+                        ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000)
+                end, Addrs)
+      end, Miners),
 
     %% accumulate the address of each miner
     Addresses = lists:foldl(
