@@ -31,7 +31,11 @@ start_link() ->
     start_link(Bus, []).
 
 start_link(Bus, Args) ->
-    ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME),
+    NameOpts = [{replace_existing, true},
+                {allow_replacement, true},
+                {do_not_queue, true}
+               ],
+    ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME, NameOpts),
     ebus_object:start_link(Bus, ?MINER_OBJECT_PATH, ?MODULE, Args, []).
 
 -spec send_signal(string(), string()) -> ok.
