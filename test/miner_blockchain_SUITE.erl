@@ -380,7 +380,7 @@ election_test(Config) ->
                                              ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                              Epoch >= 5
                                      end, shuffle(Miners))
-           end, 40, timer:seconds(1)),
+           end, 90, timer:seconds(1)),
 
     ok.
 

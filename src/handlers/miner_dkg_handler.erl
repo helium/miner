@@ -106,13 +106,18 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State, []}
             end;
         {signature, Address, Signature} ->
-            NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
-            case enough_signatures(sig, NewState) of
-                {ok, Signatures} when State#state.sent_conf == false ->
-                    {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
-                _ ->
-                    %% already sent a CONF, or not enough signatures
-                    {NewState, []}
+            case libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
+                true ->
+                    NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
+                    case enough_signatures(sig, NewState) of
+                        {ok, Signatures} when State#state.sent_conf == false ->
+                            {NewState#state{sent_conf=true}, [{multicast, term_to_binary({conf, Signatures})}]};
+                        _ ->
+                            %% already sent a CONF, or not enough signatures
+                            {NewState, []}
+                    end;
+                false ->
+                    lager:warning("got invalid signature ~p from ~p", [Signature, Address])
             end;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
@@ -127,7 +132,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                 {NewDKG, start_timer} ->
                     %% this is unused, as it's used to time out DKG elections which we're not doing
                     {State#state{dkg=NewDKG}, []};
-                {NewDKG, {result, {Shard, VK, VKs}}} ->
+                {NewDKG, {result, {Shard, VK, VKs}}} when State#state.privkey == undefined ->
                     lager:info("Completed DKG ~p", [State#state.id]),
                     PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve),
                                                    Shard, State#state.id - 1),
@@ -216,18 +221,17 @@ enough_signatures(sig, #state{signatures=Sigs, t = T}) when length(Sigs) < (T + 
     false;
 enough_signatures(conf, #state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
     false;
-enough_signatures(_, #state{artifact=Artifact, members=Members, signatures=Signatures,
-                            signatures_required=Threshold}) ->
+enough_signatures(Phase, #state{artifact=Artifact, members=Members, signatures=Signatures,
+                                t = T, signatures_required=Threshold0}) ->
+    Threshold = case Phase of
+                    sig -> T + 1;
+                    conf -> Threshold0
+                end,
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
     case blockchain_block_v1:verify_signatures(Artifact, Members, Signatures, Threshold) of
         {true, ValidSignatures} ->
-            case length(ValidSignatures) >= Threshold of
-                true ->
-                    {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
-                false ->
-                    false
-            end;
+            {ok, lists:sublist(lists:sort(ValidSignatures), Threshold)};
         false ->
             false
     end.

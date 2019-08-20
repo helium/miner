@@ -309,8 +309,13 @@ enough_signatures(#state{sig_phase = sig, signatures = Sigs, f = F}) when length
     false;
 enough_signatures(#state{sig_phase = done, signatures = Signatures}) ->
     {ok, done, Signatures};
-enough_signatures(#state{sig_phase = Phase, artifact=Artifact, members=Members,
-                         signatures=Signatures, signatures_required=Threshold}) ->
+enough_signatures(#state{sig_phase = Phase, artifact = Artifact, members = Members,
+                         f = F, signatures = Signatures, signatures_required = Threshold0}) ->
+    Threshold = case Phase of
+                    sig -> F + 1;
+                    gossip -> Threshold0
+                end,
+
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
                                             Members,
@@ -322,14 +327,14 @@ enough_signatures(#state{sig_phase = Phase, artifact=Artifact, members=Members,
             %% it should be ok as long as we disregard the signatures for testing equality but check them for validity
             case Phase of
                 gossip ->
-                    case length(ValidSignatures) >= Threshold of
+                    {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+                sig ->
+                    case length(ValidSignatures) >= Threshold0 of
                         true ->
                             {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold)};
                         false ->
-                            false
-                    end;
-                sig ->
-                    {ok, gossip, lists:sort(ValidSignatures)}
+                            {ok, gossip, lists:sort(ValidSignatures)}
+                    end
             end;
         false ->
             false
