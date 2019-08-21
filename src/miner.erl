@@ -412,6 +412,7 @@ handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _Fro
                 %% stale, kill it
                 lager:info("stopping stale group ~p at election ~p", [Pid, ElectionHeight]),
                 stop_group(Pid),
+                Ref = State#state.block_timer,
                 {State#state.consensus_group,
                  Waiting#{ElectionHeight => NewConsensusGroup}};
             %% here, we've already transitioned, so do the handoff
@@ -425,6 +426,7 @@ handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _Fro
                                       blockchain_block:transactions(Block),
                                       Sync}),
                 start_txn_handler(NewConsensusGroup),
+                Ref = set_next_block_timer(State#state.blockchain),
                 {NewConsensusGroup, #{}};
             _ when Rescue == true ->
                 lager:info("rescue true, forcing new group"),
@@ -432,15 +434,18 @@ handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _Fro
                 libp2p_group_relcast:handle_input(
                   NewConsensusGroup, {next_round, ElectionHeight, [], false}),
                 start_txn_handler(NewConsensusGroup),
+                Ref = make_ref(),
                 self() ! block_timeout,
                 {NewConsensusGroup, #{}};
             _ ->
                 lager:info("no existing group at election ~p", [ElectionHeight]),
+                Ref = State#state.block_timer,
                 {State#state.consensus_group,
                  Waiting#{ElectionHeight => NewConsensusGroup}}
         end,
     lager:info("NEW ~p", [{Group, Waiting1}]),
     {reply, ok, State#state{handoff_waiting = Waiting1,
+                            block_timer = Ref,
                             consensus_group = Group}};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),

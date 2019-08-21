@@ -229,7 +229,7 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
             ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
             ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 200]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
             ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
 
             %% set miner configuration
