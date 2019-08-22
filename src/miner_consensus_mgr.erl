@@ -417,10 +417,12 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                     end;
                 false when State#state.election_running ->
                     NextRestart = Height + Interval + Delay,
+                    Txns = blockchain_block:transactions(Block),
+                    NewGroup = blockchain_election:has_new_group(Txns),
                     case blockchain_block:height(Block) of
-                        NewHeight when NewHeight >= NextRestart ->
+                        NewHeight when NewHeight >= NextRestart andalso NewGroup == false ->
                             lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
-                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 0}),
+                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 120000}),
                             %% restart the dkg
                             State1 = restart_election(State, Hash, Height),
                             {noreply, State1};
