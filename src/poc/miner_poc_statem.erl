@@ -46,7 +46,7 @@
 
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 5).
--define(MINING_DELAY, 3).
+-define(MINING_DELAY, 10).
 -define(CHALLENGE_RETRY, 3).
 -define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
@@ -146,7 +146,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
         ok ->
             lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, ?MINING_TIMEOUT]),
             Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT, mining_hash=BlockHash},
-            {next_state, delaying, Data1#data{mining_delay=?MINING_DELAY, mining_ledger=PinnedLedger}};
+            {next_state, delaying, Data1#data{mining_delay=rand:uniform(?MINING_DELAY), mining_ledger=PinnedLedger}};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
@@ -173,7 +173,7 @@ delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
     {ok, Block} = blockchain:get_block(MiningHash, Chain),
     Height = blockchain_block:height(Block),
     self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
-    {next_state, targeting, Data0#data{mining_delay=?MINING_DELAY, mining_hash=undefined}};
+    {next_state, targeting, Data0#data{mining_hash=undefined}};
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
     {keep_state, Data0#data{mining_delay=Delay-1}};
 delaying(EventType, EventContent, Data) ->
