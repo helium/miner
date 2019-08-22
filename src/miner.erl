@@ -740,7 +740,7 @@ handle_info(init, #state{blockchain = Chain} = State) ->
             true ->
                 set_next_block_timer(Chain);
             _ ->
-                undefined
+                make_ref()
         end,
     {noreply, State#state{consensus_group = Group, block_timer = Ref}};
 handle_info(_Msg, State) ->
