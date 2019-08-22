@@ -782,12 +782,8 @@ restore(Chain, Block, Height, Interval) ->
             end,
             undefined;
         cannot_start ->
-            %% here, we should try restarting an earlier election, as
-            %% it may not have completed.
-            {ok, Block2} = blockchain:get_block(EpochStart - 1, Chain),
-            {_, EpochStart2} = blockchain_block_v1:election_info(Block2),
-            Election2 = next_election(EpochStart2, Interval),
-            miner_consensus_mgr:start_election(ignored, Height, Election2),
+            %% for now, don't do anything here.  in an emergency we
+            %% can likely restore the dkg and manually start the group
             undefined
     end.
 

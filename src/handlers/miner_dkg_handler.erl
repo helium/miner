@@ -57,6 +57,9 @@ init([Members, Id, N, F, T, Curve,
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
+handle_command({stop, _Timeout}, #state{privkey = PKey, done_called = false} = State)
+  when PKey /= undefined ->
+    {reply, {error, not_done}, [], State};
 handle_command({stop, Timeout}, State) ->
     {reply, ok, [{stop, Timeout}], State};
 handle_command(status, State) ->
@@ -83,7 +86,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
         {conf, InSigs} ->
             Sigs1 = lists:foldl(fun({Address, Signature}, Acc) ->
                                         case lists:keymember(Address, 1, Acc) == false andalso
-                                             libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
+                                            libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
                                             true ->
                                                 [{Address, Signature}|Acc];
                                             false ->
@@ -105,8 +108,10 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                             lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
                             ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
                                                  Members, State#state.privkey),
-                            %% stop the handler
-                            {State#state{done_called = true, signatures = GoodSignatures}, [{stop, 60000}]};
+                            %% rebroadcast the final set of signatures and stop the handler
+                            {State#state{done_called = true, signatures = GoodSignatures},
+                             [{multicast, term_to_binary({conf, GoodSignatures})},
+                              {stop, 10 * 60000}]};
                         _ ->
                             {State, []}
                     end;
