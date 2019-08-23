@@ -343,9 +343,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                         {error, cannot_start} ->
                             lager:info("didn't restore consensus group, missing"),
                             ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                            {reply, cannot_start, State1#state{election_running = true,
-                                                               current_dkg = State1#state.cancel_dkg,
-                                                               cancel_dkg = undefined,
+                            {reply, cannot_start, State1#state{cancel_dkg = undefined,
                                                                cancel_height = undefined}};
                         {error, Reason} ->
                             lager:info("didn't restore consensus group: ~p", [Reason]),
