@@ -43,7 +43,12 @@ init_per_testcase(TestCase, Config0) ->
     Addresses = proplists:get_value(addresses, Config),
 
     NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
+    BlockTime = case TestCase of
+                    restart_test ->
+                        3000;
+                    _ ->
+                        proplists:get_value(block_time, Config)
+                end,
     Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
@@ -212,7 +217,7 @@ restart_test(Config) ->
                                            true == lists:any(fun(Miner) ->
                                                                      Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch >= 1
+                                                                     Epoch == 2
                                                              end, shuffle(Miners))
                                    end, 90, timer:seconds(1)),
 
@@ -269,6 +274,14 @@ restart_test(Config) ->
                              end
                      end, Miners)
            end, 40, 500),
+
+    %% [begin
+    %%      %%ct_slave:stop(Miner)
+    %%       ct_rpc:call(Miner, miner, hbbft_skip, [], 300),
+    %%       MinerPid = ct_rpc:call(Miner, erlang, whereis, [miner], 300),
+    %%       MinerPid ! block_timeout
+    %%  end
+    %%  || Miner <- Miners],
 
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
