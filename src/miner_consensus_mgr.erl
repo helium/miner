@@ -41,7 +41,9 @@
          initial_height = 1 :: non_neg_integer(),
          delay = 0 :: integer(),
          chain :: undefined | blockchain:blockchain(),
-         election_running = false :: boolean()
+         election_running = false :: boolean(),
+         cancel_height = undefined :: undefined | pos_integer(),
+         cancel_dkg :: undefined | pid()
         }).
 
 %%%===================================================================
@@ -389,13 +391,23 @@ handle_cast(_Msg, State) ->
 handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
             #state{current_dkg = OldDKG,
                    initial_height = Height,
-                   delay = Delay} = State)
-  when State#state.chain /= undefined ->
-
-    Ledger = blockchain:ledger(State#state.chain),
+                   cancel_height = CancelHeight,
+                   cancel_dkg = CancelDKG,
+                   delay = Delay} = State0)
+  when State0#state.chain /= undefined ->
+    Ledger = blockchain:ledger(State0#state.chain),
     {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
-    case blockchain:get_block(Hash, State#state.chain) of
+    case blockchain:get_block(Hash, State0#state.chain) of
         {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            State = case CancelDKG of
+                        undefined ->
+                            State0;
+                        _ when BlockHeight == CancelHeight ->
+                            catch libp2p_group_relcast:handle_command(CancelDKG, {stop, 120000}),
+                            State0#state{cancel_height = undefined,
+                                         cancel_dkg = undefined}
+                    end,
             Txns = blockchain_block:transactions(Block),
             NewGroup = blockchain_election:has_new_group(Txns),
             case blockchain_block_v1:is_rescue_block(Block) of
@@ -417,27 +429,25 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             lager:info("Not in rescue DKG: ~p", [Members]),
                             {noreply, State}
                     end;
-                false when State#state.election_running and NewGroup /= false ->
+                false when State#state.election_running andalso NewGroup /= false ->
                     %% if we got a new group
                     case OldDKG of
                         %% we're not in
                         undefined ->
-                            {noreply, State#state{current_dkg = undefined,
-                                                  delay = 0,
-                                                  election_running = false}};
+                            ok;
                         _ ->
-                            start_hbbft(OldDKG, State),
-                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 120000}),
-                            {noreply, State#state{current_dkg = undefined,
-                                                  delay = 0,
-                                                  election_running = false}}
-                    end;
+                            start_hbbft(OldDKG, State)
+                    end,
+                    {noreply, State#state{cancel_height = BlockHeight + 1,
+                                          cancel_dkg = OldDKG,
+                                          current_dkg = undefined,
+                                          delay = 0,
+                                          election_running = false}};
                 false when State#state.election_running ->
                     NextRestart = Height + Interval + Delay,
-                    case blockchain_block:height(Block) of
+                    case BlockHeight of
                         NewHeight when NewHeight >= NextRestart  ->
                             lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
-                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 120000}),
                             %% restart the dkg
                             State1 = restart_election(State, Hash, Height),
                             {noreply, State1};
