@@ -228,6 +228,12 @@ restart_test(Config) ->
      end
      || Miner <- lists:sublist(Miners, 1, 2)],
 
+    [begin
+         %%ct_slave:stop(Miner)
+          ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
+     end
+     || Miner <- lists:sublist(Miners, 3, 4)],
+
     ok = miner_ct_utils:wait_until(
            fun() ->
                    lists:all(

@@ -415,18 +415,19 @@ handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
     MyAddr = blockchain_swarm:pubkey_bin(),
     {reply, lists:member(MyAddr, ConsensusGroup), State};
-handle_call(cancel_dkg, _From, #state{election_running = false} = State) ->
-    {reply, ok, State};
-handle_call(cancel_dkg, _From, #state{current_dkg = DKG} = State) ->
+handle_call(cancel_dkg, _From, #state{current_dkg = DKG, cancel_dkg = CancelDKG} = State) ->
     lager:info("cancelling DKG at ~p ~p", [State#state.initial_height,
                                            State#state.delay]),
     spawn(fun() ->
                   %% give the dkg some time to shut down so that
                   %% laggards get a chance to complete
-                  Timeout = application:get_env(miner, dkg_stop_timeout, timer:minutes(5)),
-                  catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout})
+                  Timeout = application:get_env(miner, dkg_stop_timeout, 0),
+                  catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout}),
+                  catch libp2p_group_relcast:handle_command(CancelDKG, {stop, Timeout})
           end),
     {reply, ok, State#state{current_dkg = undefined,
+                            cancel_dkg = undefined,
+                            cancel_height = undefined,
                             delay = 0,
                             election_running = false}};
 handle_call(_Request, _From, State) ->
