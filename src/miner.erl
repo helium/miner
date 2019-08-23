@@ -438,10 +438,24 @@ handle_call({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue}, _Fro
                 self() ! block_timeout,
                 {NewConsensusGroup, #{}};
             _ ->
-                lager:info("no existing group at election ~p", [ElectionHeight]),
-                Ref = State#state.block_timer,
-                {State#state.consensus_group,
-                 Waiting#{ElectionHeight => NewConsensusGroup}}
+                Ledger = blockchain:ledger(State#state.blockchain),
+                {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
+                lager:info("no existing group at election ~p: ~p?", [ElectionHeight, Height]),
+                case Height of
+                    H when H == ElectionHeight ->
+                        lager:info("this is a restore from dkg"),
+                        libp2p_group_relcast:handle_input(
+                          NewConsensusGroup, {next_round, Height + 1,
+                                              [],
+                                              false}),
+                start_txn_handler(NewConsensusGroup),
+                        Ref = set_next_block_timer(State#state.blockchain),
+                        {NewConsensusGroup, #{}};
+                    _ ->
+                        Ref = State#state.block_timer,
+                        {State#state.consensus_group,
+                         Waiting#{ElectionHeight => NewConsensusGroup}}
+                end
         end,
     lager:info("NEW ~p", [{Group, Waiting1}]),
     {reply, ok, State#state{handoff_waiting = Waiting1,
