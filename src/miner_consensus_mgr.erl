@@ -371,7 +371,7 @@ handle_call(cancel_dkg, _From, #state{current_dkg = DKG} = State) ->
     spawn(fun() ->
                   %% give the dkg some time to shut down so that
                   %% laggards get a chance to complete
-                  Timeout = application:get_env(miner, dkg_stop_timeout, timer:minutes(3)),
+                  Timeout = application:get_env(miner, dkg_stop_timeout, timer:minutes(5)),
                   catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout})
           end),
     {reply, ok, State#state{current_dkg = undefined,
@@ -396,13 +396,15 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
     {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
+            Txns = blockchain_block:transactions(Block),
+            NewGroup = blockchain_election:has_new_group(Txns),
             case blockchain_block_v1:is_rescue_block(Block) of
                 true ->
                     [Txn] =
                         lists:filter(
                           fun(T) ->
                                   blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                          end, blockchain_block:transactions(Block)),
+                          end, Txns),
                     Members = blockchain_txn_consensus_group_v1:members(Txn),
                     MyAddress = blockchain_swarm:pubkey_bin(),
                     %% check if we're in the group
@@ -415,12 +417,25 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             lager:info("Not in rescue DKG: ~p", [Members]),
                             {noreply, State}
                     end;
+                false when State#state.election_running and NewGroup /= false ->
+                    %% if we got a new group
+                    case OldDKG of
+                        %% we're not in
+                        undefined ->
+                            {noreply, State#state{current_dkg = undefined,
+                                                  delay = 0,
+                                                  election_running = false}};
+                        _ ->
+                            start_hbbft(OldDKG, State),
+                            catch libp2p_group_relcast:handle_command(OldDKG, {stop, 120000}),
+                            {noreply, State#state{current_dkg = undefined,
+                                                  delay = 0,
+                                                  election_running = false}}
+                    end;
                 false when State#state.election_running ->
                     NextRestart = Height + Interval + Delay,
-                    Txns = blockchain_block:transactions(Block),
-                    NewGroup = blockchain_election:has_new_group(Txns),
                     case blockchain_block:height(Block) of
-                        NewHeight when NewHeight >= NextRestart andalso NewGroup == false ->
+                        NewHeight when NewHeight >= NextRestart  ->
                             lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
                             catch libp2p_group_relcast:handle_command(OldDKG, {stop, 120000}),
                             %% restart the dkg
@@ -584,6 +599,33 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
             {false, State#state{consensus_pos = undefined,
                                 current_dkg = undefined}}
     end.
+
+start_hbbft(DKG, #state{initial_height = Height, delay = Delay} = State) ->
+    {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(State#state.chain)),
+    {info, PrivKey, Members, N, F} =  libp2p_group_relcast:handle_command(DKG, get_info),
+
+    GroupArg = [miner_hbbft_handler, [Members,
+                                      State#state.consensus_pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      PrivKey,
+                                      State#state.chain,
+                                      1, % gets set later
+                                      []], % gets filled later
+                [{create, true}]],
+    %% while this won't reflect the actual height, it has to be deterministic
+    Name = consensus_group_name(max(0, Height), Members),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                         Name,
+                                         libp2p_group_relcast, GroupArg),
+
+    %% not sure what the correct error behavior here is?
+    lager:info("checking that the hbbft group has successfully started"),
+    true = libp2p_group_relcast:handle_command(Group, have_key),
+
+    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
+    ok = miner:handoff_consensus(Group, Height + Delay).
 
 consensus_group_name(Height, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
