@@ -372,16 +372,61 @@ election_test(Config) ->
     ct:pal("N: ~p", [N]),
      _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, N, self()]),
 
+    ok =
+        miner_ct_utils:wait_until(
+          fun() ->
+                  true == lists:all(fun(Miner) ->
+                                            try
+                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                                ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                                %% height might go up
+                                                %% one, but it
+                                                %% shouldn't go up 5
+                                                Ht > (NewHeight + 1)
+                                            catch _:_ ->
+                                                    false
+                                            end
+                                    end, shuffle(Miners))
+          end, 60, timer:seconds(1)),
+
+    %% check consensus miners
+    NewConsensusMiners = lists:filtermap(fun(Miner) ->
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                      end, Miners),
+
+    %% check non consensus miners
+    NewNonConsensusMiners = lists:filtermap(fun(Miner) ->
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                         end, Miners),
+
+    KillList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
+    %% kill some nodes and restart them to check group restore works
+    [begin
+         %%ct_slave:stop(Miner)
+          ct_rpc:call(Miner, application, stop, [miner], 300),
+          ct_rpc:call(Miner, application, stop, [blockchain], 300)
+     end
+     || Miner <- KillList],
+
+    timer:sleep(5000),
+
+    [begin
+         %%ct_slave:stop(Miner)
+          ct_rpc:call(Miner, application, start, [miner], 300),
+          ct_rpc:call(Miner, application, start, [blockchain], 300)
+     end
+     || Miner <- KillList],
+
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true == lists:all(fun(Miner) ->
                                              Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
                                              ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                             Epoch >= 5
+                                             Epoch > ElectionEpoch + 1
                                      end, shuffle(Miners))
            end, 90, timer:seconds(1)),
-
     ok.
 
 election_check([], _Miners, Owner) ->
