@@ -110,8 +110,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                                  Members, State#state.privkey),
                             %% rebroadcast the final set of signatures and stop the handler
                             {State#state{done_called = true, signatures = GoodSignatures},
-                             [{multicast, term_to_binary({conf, GoodSignatures})},
-                              {stop, 10 * 60000}]};
+                             [{multicast, term_to_binary({conf, GoodSignatures})}]};
                         _ ->
                             {State, []}
                     end;

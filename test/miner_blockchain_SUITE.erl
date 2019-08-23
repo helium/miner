@@ -388,7 +388,7 @@ election_test(Config) ->
                                                     false
                                             end
                                     end, shuffle(Miners))
-          end, 30, timer:seconds(1)),
+          end, 60, timer:seconds(1)),
 
     %% check consensus miners
     NewConsensusMiners = lists:filtermap(fun(Miner) ->
