@@ -144,6 +144,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     F = ((N - 1) div 3),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
 
+    timer:sleep(1000),
+
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
                                       N,
@@ -161,6 +163,8 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     miner:start_chain(Group, Chain),
     {reply, ok, State#state{current_dkg = undefined,
+                            cancel_dkg = State#state.current_dkg,
+                            cancel_height = 3,
                             chain = Chain}};
 %% we've already started the group
 handle_call({election_done, _Artifact, _Signatures, _Members, _PrivKey}, _From,
@@ -211,6 +215,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
                                          libp2p_group_relcast, GroupArg),
 
     %% not sure what the correct error behavior here is?
+    started = wait_for_group(Group),
     lager:info("checking that the hbbft group has successfully started"),
     true = libp2p_group_relcast:handle_command(Group, have_key),
 
@@ -261,6 +266,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
         {ok, ConsensusAddrs} ->
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                 true ->
+                    lager:info("in group, trying to restore"),
                     {ok, Block} = blockchain:head_block(Chain),
                     BlockHeight = blockchain_block:height(Block),
                     Txns = blockchain_block:transactions(Block),
@@ -312,6 +318,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                                    libp2p_group_relcast, GroupArg),
                                 Grp;
                             _ ->
+                                lager:info("trying extraction restore"),
                                 start_hbbft(State#state.cancel_dkg, State#state{consensus_pos = Pos})
                         end,
                     case wait_for_group(Group) of
@@ -440,13 +447,16 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
     case blockchain:get_block(Hash, State0#state.chain) of
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
+            lager:info("processing block height ~p", [BlockHeight]),
             State = case CancelDKG of
                         undefined ->
                             State0;
                         _ when BlockHeight == CancelHeight ->
                             catch libp2p_group_relcast:handle_command(CancelDKG, {stop, 120000}),
                             State0#state{cancel_height = undefined,
-                                         cancel_dkg = undefined}
+                                         cancel_dkg = undefined};
+                        _ ->
+                            State0
                     end,
             Txns = blockchain_block:transactions(Block),
             NewGroup = blockchain_election:has_new_group(Txns),
@@ -469,16 +479,19 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             lager:info("Not in rescue DKG: ~p", [Members]),
                             {noreply, State}
                     end;
-                false when State#state.election_running andalso NewGroup /= false ->
+                false when State#state.election_running andalso
+                           NewGroup /= false andalso
+                           BlockHeight /= 1 ->
                     %% if we got a new group
                     case OldDKG of
                         %% we're not in
                         undefined ->
                             ok;
                         _ ->
+                            lager:info("starting hbbft at block height ~p", [BlockHeight]),
                             start_hbbft(OldDKG, State)
                     end,
-                    {noreply, State#state{cancel_height = BlockHeight + 1,
+                    {noreply, State#state{cancel_height = BlockHeight + 2,
                                           cancel_dkg = OldDKG,
                                           current_dkg = undefined,
                                           delay = 0,
@@ -684,6 +697,7 @@ start_hbbft(DKG, #state{initial_height = Height, delay = Delay} = State) ->
 
     %% not sure what the correct error behavior here is?
     lager:info("checking that the hbbft group has successfully started"),
+    started = wait_for_group(Group),
     true = libp2p_group_relcast:handle_command(Group, have_key),
 
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
