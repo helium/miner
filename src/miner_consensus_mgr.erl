@@ -213,8 +213,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
             State = #state{chain = Chain}) ->
-    {ok, Height0} = blockchain:height(Chain),
-    Height = Height0 - 1,
+    {ok, Height} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
     lager:info("rescue election done at ~p", [Height]),
 
     {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
