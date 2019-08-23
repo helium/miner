@@ -257,6 +257,31 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
         {ok, ConsensusAddrs} ->
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                 true ->
+
+                    {ok, Block} = blockchain:head_block(Chain),
+                    Txns = blockchain_block:transactions(Block),
+                    State1 = case blockchain_election:has_new_group(Txns) of
+                        {true, _, _} ->
+                            %% ok, the last block has a group transaction in it
+                            %% it's possible we lost some of our privkeys, so restart
+                            %% that last DKG and let it flush any remaining messages
+                            %% needed to boot consensus
+                            case lists:filter(fun(T) ->
+                                                      blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                                              end, blockchain_block:transactions(Block)) of
+                                [Txn] ->
+                                    ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
+                                    ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
+                                    %% TODO are the resulting state modifications safe here?
+                                    restore_dkg(ElectionHeight, ElectionDelay, State);
+                                _ ->
+                                    lager:warning("somehow cannot find group transaction"),
+                                    State
+                            end;
+                        _ ->
+                            State
+                    end,
+
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
                     %% we intentionally don't use create here, because
@@ -283,22 +308,24 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                               Group, {next_round, Round + 1, [], false}),
                             %% this isn't super safe?  must make sure that a prior group wasn't running
                             Height =
-                                case StartHeight >= State#state.initial_height of
+                                case StartHeight >= State1#state.initial_height of
                                     true ->
                                         StartHeight;
                                     _ ->
-                                        State#state.initial_height
+                                        State1#state.initial_height
                                 end,
-                            {reply, Group, State#state{consensus_pos = Pos,
+                            {reply, Group, State1#state{consensus_pos = Pos,
+                                                        %% we already completed our election
+                                                        election_running = false,
                                                        initial_height = Height}};
                         {error, cannot_start} ->
                             lager:info("didn't restore consensus group, missing"),
                             ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                            {reply, cannot_start, State};
+                            {reply, cannot_start, State1};
                         {error, Reason} ->
                             lager:info("didn't restore consensus group: ~p", [Reason]),
                             ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                            {reply, undefined, State}
+                            {reply, undefined, State1}
                     end;
                 false ->
                     lager:info("not restoring consensus group: not a member"),
@@ -492,7 +519,7 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     Artifact = term_to_binary(ConsensusAddrs),
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
-                         election_done, N, Curve, State#state{initial_height = Height,
+                         election_done, N, Curve, true, State#state{initial_height = Height,
                                                               election_running = true}),
 
     State1.
@@ -513,7 +540,7 @@ restart_election(#state{delay = Delay0,
         true ->
             Artifact = term_to_binary(ConsensusAddrs),
             {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
-                                 election_done, N, Curve, State#state{delay = Delay}),
+                                 election_done, N, Curve, true, State#state{delay = Delay}),
             State1;
         false ->
             lager:warning("issue generating new group.  skipping restart"),
@@ -526,9 +553,21 @@ rescue_dkg(Members, Artifact, State) ->
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
 
     {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_genesis_block},
-                         rescue_done, length(Members), Curve,
+                         rescue_done, length(Members), Curve, true,
                          State#state{initial_height = Height,
                                      delay = 0,
+                                     election_running = true}),
+    State1.
+
+restore_dkg(Height, Delay, State) ->
+    Ledger = blockchain:ledger(State#state.chain),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
+    Artifact = term_to_binary(ConsensusAddrs),
+    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+                         election_done, length(ConsensusAddrs), Curve, false,
+                         State#state{initial_height = Height,
+                                     delay = Delay,
                                      election_running = true}),
     State1.
 
@@ -543,9 +582,9 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
         [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
     Artifact = blockchain_block:serialize(blockchain_block:new_genesis_block(GenesisBlockTransactions)),
     do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
-           genesis_block_done, N, Curve, State).
+           genesis_block_done, N, Curve, true, State).
 
-do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
+do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
        State=#state{initial_height = Height,
                     delay = Delay,
                     chain = Chain}) ->
@@ -587,7 +626,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
                                             Artifact,
                                             Sign,
                                             {?MODULE, Done}, list_to_binary(DKGGroupName)],
-                       [{create, true}]],
+                       [{create, Create}]],
             %% the opts are added in the third position of the list
             %% The below are for in_memory_mode
             %% [{db_opts, [{in_memory_mode, true}]},
