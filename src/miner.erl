@@ -596,7 +596,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {true, true, ElectionHeight} ->
                                 {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
-                                cancel_dkg(Block),
                                 lager:info("stay in ~p", [Waiting]),
                                 Buf = get_buf(ConsensusGroup),
                                 NextRound = Round + 1,
@@ -627,7 +626,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {true, false, _} ->
                                 {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
-                                cancel_dkg(Block),
                                 lager:info("leave"),
 
                                 stop_group(ConsensusGroup),
@@ -677,7 +675,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                             lager:info("nc start group"),
-                            cancel_dkg(Block),
                             %% it's possible that waiting hasn't been set, I'm not entirely
                             %% sure how to handle that at this point
                             Round = blockchain_block:hbbft_round(Block),
@@ -709,7 +706,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
                             lager:info("nc stay out"),
-                            cancel_dkg(Block),
                             {noreply,
                              State#state{block_timer = make_ref(),
                                          handoff_waiting = #{},
@@ -844,11 +840,3 @@ next_election(_Base, Interval) when is_atom(Interval) ->
     infinity;
 next_election(Base, Interval) ->
     Base + Interval.
-
-cancel_dkg(Block) ->
-    case blockchain_block_v1:is_rescue_block(Block) of
-        true ->
-            ok;
-        false ->
-            miner_consensus_mgr:cancel_dkg()
-    end.

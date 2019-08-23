@@ -57,6 +57,8 @@ init([Members, Id, N, F, T, Curve,
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
+handle_command(get_info, #state{privkey = PKey, members = Members, n = N, f = F} = State) ->
+    {reply, {info, PKey, Members, N, F}, [], State};
 handle_command({stop, _Timeout}, #state{privkey = PKey, done_called = false} = State)
   when PKey /= undefined ->
     {reply, {error, not_done}, [], State};
