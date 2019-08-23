@@ -154,7 +154,7 @@ dist(Config0) ->
             ActiveGateways = ct_rpc:call(M, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
             lists:foreach(
                 fun({A, G}) ->
-                        {_, _, Score} = ct_rpc:call(M, blockchain_ledger_gateway_v1, score, [A, G, Height, Ledger]),
+                        {_, _, Score} = ct_rpc:call(M, blockchain_ledger_gateway_v2, score, [A, G, Height, Ledger]),
                     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Score])
                 end,
                 maps:to_list(ActiveGateways)
@@ -308,7 +308,7 @@ basic(_Config) ->
 
     Ledger = blockchain:ledger(Chain),
     {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(blockchain_swarm:pubkey_bin(), Ledger),
-    ?assertEqual(5, blockchain_ledger_gateway_v1:last_poc_challenge(GwInfo)),
+    ?assertEqual(5, blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo)),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
