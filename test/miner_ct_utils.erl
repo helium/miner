@@ -178,10 +178,18 @@ init_per_testcase(TestCase, Config) ->
     end,
 
     %% Miner configuration, can be input from os env
-    TotalMiners = get_config("T", 8),
+    TotalMiners =
+        case TestCase of
+            restart_test ->
+                4;
+            _ ->
+                get_config("T", 8)
+        end,
     NumConsensusMembers =
         case TestCase of
             group_change_test ->
+                4;
+            restart_test ->
                 4;
             _ ->
                 get_config("N", 7)
