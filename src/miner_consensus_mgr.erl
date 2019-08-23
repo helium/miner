@@ -239,7 +239,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
     %% adjust the height upwards, the rescue will be from one block
     %% above the present one.
     ok = miner:handoff_consensus(Group, Height, true),
-    {reply, ok, State#state{current_dkg = undefined}};
+    {reply, ok, State#state{current_dkg = undefined, delay = 0, election_running = false}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
