@@ -213,7 +213,8 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
             State = #state{chain = Chain}) ->
-    {ok, Height} = blockchain:height(Chain),
+    {ok, Height0} = blockchain:height(Chain),
+    Height = Height0 - 1,
     lager:info("rescue election done at ~p", [Height]),
 
     {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
@@ -238,7 +239,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
     %% adjust the height upwards, the rescue will be from one block
     %% above the present one.
-    ok = miner:handoff_consensus(Group, Height + 1, true),
+    ok = miner:handoff_consensus(Group, Height, true),
     {reply, ok, State#state{current_dkg = undefined}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
@@ -255,7 +256,6 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
         {ok, ConsensusAddrs} ->
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                 true ->
-                    lager:info("restoring consensus group"),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
                     %% we intentionally don't use create here, because
@@ -269,6 +269,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                       Chain]],
                     %% while this won't reflect the actual height, it has to be deterministic
                     Name = consensus_group_name(StartHeight, ConsensusAddrs),
+                    lager:info("restoring consensus group ~p", [Name]),
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
@@ -575,8 +576,8 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve,
                                                     libp2p_group_relcast,
                                                     GroupArg),
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
-            lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p",
-                       [Height, MyAddress, Pos]),
+            lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
+                       [Height, MyAddress, Pos, DKGGroupName]),
             {true, State#state{consensus_pos = Pos,
                                current_dkg = DKGGroup}};
         false ->
