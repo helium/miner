@@ -21,9 +21,9 @@
 %% common test callbacks
 
 all() -> [
-          consensus_test,
-          genesis_load_test,
-          growth_test,
+          %% consensus_test,
+          %% genesis_load_test,
+          %% growth_test,
           restart_test,
           election_test,
           group_change_test,
