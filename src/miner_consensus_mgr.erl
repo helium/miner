@@ -162,6 +162,10 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     miner:start_chain(Group, Chain),
     {reply, ok, State#state{current_dkg = undefined,
                             chain = Chain}};
+%% we've already started the group
+handle_call({election_done, _Artifact, _Signatures, _Members, _PrivKey}, _From,
+            State = #state{cancel_height = CancelHeight}) when CancelHeight /= undefined ->
+    {reply, ok, State};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{initial_height = Height,
                            chain = Chain,
