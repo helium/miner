@@ -1035,7 +1035,8 @@ force_consensus_stop_test(Config) ->
                                case element(2, State) of
                                    undefined -> ok;
                                    CG ->
-                                       exit(CG, normal)
+                                       RelcastServer = libp2p_group_relcast_sup:server(CG),
+                                       exit(RelcastServer, normal)
                                end
                        end, Miners),
 
