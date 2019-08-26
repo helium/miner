@@ -68,7 +68,7 @@ txn(Pid, Fun, Limit) ->
             timer:sleep(150),
             txn(Pid, Fun, Limit - 1);
         {error, ecc_response_watchdog_exp} ->
-            timer:sleep(150),
+            timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
         Result ->
             ecc508:sleep(Pid),
