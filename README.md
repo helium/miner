@@ -149,7 +149,7 @@ As long as you have an address listed in `listen_addrs` and some peers in the ta
 
 ### Loading the Genesis block
 
-First, you need the mainnet genesis block. Get it from [here](NEED A URL HERE).
+First, you need a genesis block from either the main network, or the Pescadero testnet. Get them here: [mainnet](NEED A URL HERE) or [pescadero](NEED A URL HERE).
 
 Once you've downloaded it, you'll need to use the CLI to load the genesis block in to your local miner:
 
@@ -160,3 +160,35 @@ After the genesis block has been loaded, you should be able to check your block 
 ```_build/prod/rel/miner/bin/miner info height```
 
 The first number is the election epoch, and the second number is the block height of your miner.
+
+## Adding to the Blockchain
+
+In order to participate in mining and earning Helium tokens (HLM), the Gateway needs to be added to the blockchain. There are two steps required in order to do this, as both the `owner` and the `gateway` itself must sign a transaction.
+
+### Creating the sign_gateway transaction
+
+The `owner` is the address that receives mining rewards, and can make changes to the location of the gateway. In order to create the `sign_gateway` transaction, which has the owner sign the first half of the transaction, either a separate `miner` or `blockchain-api` instance needs to be running.
+
+If you have created an address using the Helium mobile app the private key can be imported by running:
+
+```NO CLI OR TECHNOLOGY EXISTS FOR THIS PART```
+
+You can check what address your instance is running:
+
+```_build/prod/rel/miner/bin/miner peer addr```
+
+Once you've got the correct owner CLI set up, it's time to craft the `sign_gateway` transaction, which can be done as follows:
+
+```_build/prod/rel/miner/bin/miner ledger sign_gateway -g <gateway_address> -s <stake> -f <fee>```
+
+Replacing `gateway_address` with the address of the miner running on the Pi, `stake` with the appropriate staking fee, and `fee` with the transaction fee.
+
+The output, a Base64 partially signed blockchain transaction, will be something similar to the following:
+
+```
+CpABCiEAisT0F3EJUKad4lhHbf1EWguG1C1T1Kja+nzrvZGiUSYSIQAu+yjG/8AgTVj7rNJUb6Tj2M20Qgn027dQJNBDZdYeixpGMEQCIEgLTfKe1c1jLzxRXNF+textVZJpt7PKZ29k3rfbZEo5AiA99UEPru7ppnjst0KYuj/0Mqx3ml9wLR2auxrMW04ISDA
+ok
+```
+
+Copy and paste the Base64 string (the line before `ok`) into the Helium mobile app during the add hotspot process - you'll see an `Advanced` link that will allow you to paste this Base64 transaction into the app. After you've done that, the mobile app will re-sign the transaction via that owners address and submit it to the blockchain.
+
