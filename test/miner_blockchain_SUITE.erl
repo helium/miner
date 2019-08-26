@@ -28,7 +28,8 @@ all() -> [
           election_test,
           group_change_test,
           master_key_test,
-          version_change_test
+          version_change_test,
+          force_consensus_stop_test
          ].
 
 init_per_suite(Config) ->
@@ -985,3 +986,57 @@ version_change_test(Config) ->
                      end, shuffle(Miners))
            end, 40, timer:seconds(1)),
     ok.
+
+force_consensus_stop_test(Config) ->
+    Miners = proplists:get_value(miners, Config),
+
+    %% check consensus miners
+    ConsensusMiners = lists:filtermap(fun(Miner) ->
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                      end, Miners),
+
+    %% check non consensus miners
+    NonConsensusMiners = lists:filtermap(fun(Miner) ->
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                         end, Miners),
+
+    %% get the first consensus miner
+    FirstConsensusMiner = hd(ConsensusMiners),
+
+    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
+
+    %% get the genesis block from first consensus miner
+    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
+
+    %% check genesis load results for non consensus miners
+    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
+                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                                              end, NonConsensusMiners),
+
+    %% wait till the chain reaches height 10 for all miners
+    ok = miner_ct_utils:wait_until(fun() ->
+                                           true == lists:all(fun(Miner) ->
+                                                                     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
+                                                                     ct:pal("miner ~p height ~p", [Miner, Height]),
+                                                                     Height >= 10
+                                                             end, Miners)
+                                   end, 30, timer:seconds(1)),
+
+    Heights = lists:foldl(fun(Miner, Acc) ->
+                                  C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                  [{Miner, H} | Acc]
+                          end, [], Miners),
+
+    %% stop consensus group on all consensus miners
+    ok = lists:foreach(fun(Miner) ->
+                               State = ct_rpc:call(Miner, sys, get_state, [miner]),
+                               case element(2, State) of
+                                   undefined -> ok;
+                                   CG ->
+                                       exit(CG, normal)
+                               end
+                       end, Miners),
+
+    {comment, Heights}.
