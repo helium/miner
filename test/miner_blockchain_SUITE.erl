@@ -421,7 +421,7 @@ election_test(Config) ->
                                      true
                              end
                      end, Miners)
-           end, 40, 500),
+           end, 120, 500),
 
     %% second: make sure we're not making blocks anymore
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),

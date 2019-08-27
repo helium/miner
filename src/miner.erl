@@ -504,7 +504,7 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                 NewConsensusGroup]),
     {Group, Waiting1} =
         case maps:find(ElectionHeight, Waiting) of
-            {ok, Pid} when is_pid(Pid) ->
+            {ok, Pid} when is_pid(Pid) andalso Pid /= NewConsensusGroup->
                 %% stale, kill it
                 lager:info("stopping stale group ~p at election ~p", [Pid, ElectionHeight]),
                 stop_group(Pid),
@@ -536,7 +536,7 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                 start_txn_handler(NewConsensusGroup),
                 Ref = make_ref(),
                 self() ! block_timeout,
-                {NewConsensusGroup, #{}};
+                {NewConsensusGroup, #{ElectionHeight => NewConsensusGroup}};
             _ ->
                 Ledger = blockchain:ledger(State#state.blockchain),
                 {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
@@ -548,7 +548,7 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                           NewConsensusGroup, {next_round, Height + 1,
                                               [],
                                               false}),
-                start_txn_handler(NewConsensusGroup),
+                        start_txn_handler(NewConsensusGroup),
                         Ref = set_next_block_timer(State#state.blockchain),
                         {NewConsensusGroup, #{ElectionHeight => handed_off}};
                     _ ->

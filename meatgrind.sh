@@ -13,14 +13,16 @@ while true; do
         ./cmd.sh $I stop
     else
         export I=$(( $I - $N))
-        MURDERPID=$(./cmd.sh $I eval 'list_to_integer(os:getpid())')
-        kill -9 $MURDERPID
+        if [ $(./cmd.sh $I ping) = "pong" ]; then
+            MURDERPID=$(./cmd.sh $I eval 'list_to_integer(os:getpid())')
+            kill -9 $MURDERPID
+        fi
     fi
     while [ "$(./cmd.sh $I ping)" = "pong" ]; do
         sleep 1
     done
-    ## 66% chance of restarting things
-    if [ ! $(expr $RAND % 3) -eq 0 ]; then
+    ## 80% chance of restarting things
+    if [ ! $(expr $RAND % 5) -eq 0 ]; then
         ./cmd.sh $I start
     fi
 done
