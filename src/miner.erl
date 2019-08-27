@@ -496,15 +496,23 @@ handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
+handle_cast({handoff_consensus, NewConsensusGroup, _ElectionHeight, _Rescue},
+            #state{consensus_group = Group} = State) when Group == NewConsensusGroup ->
+    {noreply, State};
 handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
             #state{handoff_waiting = Waiting} = State) ->
     lager:info("handing off consensus from ~p or ~p to ~p",
                [State#state.consensus_group,
                 Waiting,
                 NewConsensusGroup]),
+    {ok, Block} = blockchain:head_block(State#state.blockchain),
+    Round = blockchain_block:hbbft_round(Block),
     {Group, Waiting1} =
         case maps:find(ElectionHeight, Waiting) of
-            {ok, Pid} when is_pid(Pid) andalso Pid /= NewConsensusGroup->
+            {ok, NewConsensusGroup} ->
+                Ref = State#state.block_timer,
+                {State#state.consensus_group, Waiting};
+            {ok, Pid} when is_pid(Pid) ->
                 %% stale, kill it
                 lager:info("stopping stale group ~p at election ~p", [Pid, ElectionHeight]),
                 stop_group(Pid),
@@ -536,7 +544,7 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                 start_txn_handler(NewConsensusGroup),
                 Ref = make_ref(),
                 self() ! block_timeout,
-                {NewConsensusGroup, #{ElectionHeight => NewConsensusGroup}};
+                {NewConsensusGroup, #{ElectionHeight => handed_off}};
             _ ->
                 Ledger = blockchain:ledger(State#state.blockchain),
                 {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
@@ -545,7 +553,7 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                     H when H >= ElectionHeight ->
                         lager:info("this is a restore from dkg"),
                         libp2p_group_relcast:handle_input(
-                          NewConsensusGroup, {next_round, Height + 1,
+                          NewConsensusGroup, {next_round, Round + 1,
                                               [],
                                               false}),
                         start_txn_handler(NewConsensusGroup),

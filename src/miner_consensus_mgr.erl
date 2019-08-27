@@ -35,15 +35,14 @@
 
 -record(state,
         {
-         current_dkg :: undefined | pid(),
+         current_dkg = #{} :: #{pos_integer() => pid()},
          dkg_await :: undefined | {reference(), term()},
          consensus_pos :: undefined | pos_integer(),
          initial_height = 1 :: non_neg_integer(),
          delay = 0 :: integer(),
          chain :: undefined | blockchain:blockchain(),
          election_running = false :: boolean(),
-         cancel_height = undefined :: undefined | pos_integer(),
-         cancel_dkg :: undefined | pid()
+         cancel_dkg  = #{} :: #{pos_integer() => pid()}
         }).
 
 %%%===================================================================
@@ -163,9 +162,10 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     lager:info("started initial hbbft group: ~p~n", [Group]),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     miner:start_chain(Group, Chain),
-    {reply, ok, State#state{current_dkg = undefined,
-                            cancel_dkg = State#state.current_dkg,
-                            cancel_height = 3,
+
+    #{1 := DKGGroup} = State#state.current_dkg,
+    {reply, ok, State#state{current_dkg = #{},
+                            cancel_dkg = #{3 => DKGGroup},
                             chain = Chain}};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{initial_height = Height,
@@ -228,12 +228,13 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     {reply, ok, State};
 handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
             State = #state{chain = Chain}) ->
-    {ok, Height} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
     lager:info("rescue election done at ~p", [Height]),
 
-    {ok, N} = blockchain:config(num_consensus_members, blockchain:ledger(Chain)),
+    {ok, N} = blockchain:config(num_consensus_members, Ledger),
     F = ((N - 1) div 3),
-    {ok, BatchSize} = blockchain:config(batch_size, blockchain:ledger(Chain)),
+    {ok, BatchSize} = blockchain:config(batch_size, Ledger),
 
     GroupArg = [miner_hbbft_handler, [Members,
                                       State#state.consensus_pos,
@@ -254,7 +255,8 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
     %% adjust the height upwards, the rescue will be from one block
     %% above the present one.
     ok = miner:handoff_consensus(Group, Height, true),
-    {reply, ok, State#state{current_dkg = undefined, delay = 0, election_running = false}};
+    %% here the dkg has already been moved into the cancel state.
+    {reply, ok, State#state{delay = 0, election_running = false}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
@@ -271,7 +273,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
             case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                 true ->
                     #{election_height := ElectionHeight,
-                      election_delay := Delay} =
+                      election_delay := ElectionDelay} =
                         election_info(Ledger, Chain),
                     lager:info("in group, trying to restore"),
                     {ok, Block} = blockchain:head_block(Chain),
@@ -279,8 +281,8 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                     Name = consensus_group_name(StartHeight, ConsensusAddrs),
                     Group =
-                        case State#state.cancel_height of
-                            undefined ->
+                        case maps:find(ElectionHeight+ElectionDelay, State#state.cancel_dkg) of
+                            error ->
                                 {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
                                 %% we intentionally don't use create here, because
                                 %% this is a restore.
@@ -297,9 +299,9 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                                    Name,
                                                                    libp2p_group_relcast, GroupArg),
                                 Grp;
-                            _ ->
+                            {ok, ExtractDKGGroup} ->
                                 lager:info("trying extraction restore"),
-                                start_hbbft(State#state.cancel_dkg, State#state{consensus_pos = Pos})
+                                start_hbbft(ExtractDKGGroup, State#state{consensus_pos = Pos})
                         end,
                     case wait_for_group(Group) of
                         started ->
@@ -310,7 +312,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                     _ ->
                                         State#state.initial_height
                                 end,
-                            ok = miner:handoff_consensus(Group, ElectionHeight + Delay),
+                            ok = miner:handoff_consensus(Group, ElectionHeight + ElectionDelay),
                             {reply, Group, State#state{consensus_pos = Pos,
                                                        %% we already completed our election
                                                        election_running = false,
@@ -332,17 +334,32 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                      ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
                                                      ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
                                                      %% TODO are the resulting state modifications safe here?
-                                                     StateR = restore_dkg(ElectionHeight, ElectionDelay, State),
-                                                     StateR#state{cancel_height = BlockHeight + 2,
-                                                                  cancel_dkg = StateR#state.current_dkg,
-                                                                  current_dkg = undefined,
+                                                     StateR =
+                                                         #state{cancel_dkg = CancelDKGs,
+                                                                current_dkg = DKGs} =
+                                                         restore_dkg(ElectionHeight, ElectionDelay, State),
+                                                     {DKGGroup, DKGs1} = maps:take(ElectionHeight+ElectionDelay, DKGs),
+                                                     StateR#state{cancel_dkg = CancelDKGs#{BlockHeight+10 =>
+                                                                                               DKGGroup},
+                                                                  current_dkg = DKGs1,
                                                                   delay = 0,
                                                                   election_running = false};
                                                  _ ->
                                                      lager:warning("somehow cannot find group transaction"),
                                                      State
                                              end;
-                                         _ ->
+                                         _ when BlockHeight < (ElectionHeight+ElectionDelay+10) ->
+                                             StateR =
+                                                 #state{cancel_dkg = CancelDKGs,
+                                                        current_dkg = DKGs} =
+                                                 restore_dkg(ElectionHeight, ElectionDelay, State),
+                                             {DKGGroup, DKGs1} = maps:take(ElectionHeight+ElectionDelay, DKGs),
+                                             StateR#state{cancel_dkg = CancelDKGs#{BlockHeight+10 =>
+                                                                                       DKGGroup},
+                                                          current_dkg = DKGs1,
+                                                          delay = 0,
+                                                          election_running = false};
+                                         _ when BlockHeight < (ElectionHeight+ElectionDelay+10) ->
                                              State
                                      end,
                             {reply, cannot_start, State1};
@@ -374,33 +391,37 @@ handle_call({start_election, _Hash, _Current, Height}, _From, State)
     lager:info("election already ran at ~p bc initial ~p", [Height, State#state.initial_height]),
     {reply, already_ran, State};
 handle_call({start_election, Hash0, CurrentHeight, StartHeight}, _From,
-            #state{current_dkg = undefined, chain = Chain} = State0) ->
+            #state{current_dkg = DKGs, chain = Chain} = State0) ->
     lager:info("election started at ~p curr ~p", [StartHeight, CurrentHeight]),
     Diff = CurrentHeight - StartHeight,
     Ledger = blockchain:ledger(Chain),
     {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
 
     Delay = (Diff div Interval) * Interval,
-    State = State0#state{initial_height = StartHeight,
-                         delay = Delay},
-    %% this is a crappy workaround for not wanting to duplicate the
-    %% delay calculation logic in the miner as well. in other cases
-    %% the hash is always correct, but we can do the work more easily
-    %% here in the restart case. this will go away when the restart
-    %% logic is refactored into this module.
-    Hash =
-        case Hash0 of
-            ignored ->
-                Election = StartHeight + Delay,
-                {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
-                blockchain_block:hash_block(ElectionBlock);
-            _ -> Hash0
-        end,
-    State1 = initiate_election(Hash, StartHeight, State),
-    {reply, State1#state.current_dkg /= undefined, State1};
-handle_call({start_election, _Hash, _Current, _Height}, _From, State) ->
-    lager:info("election started at ~p, already running", [_Height]),
-    {reply, already_running, State};
+
+    case maps:find(StartHeight+Delay, DKGs) of
+        error ->
+            State = State0#state{initial_height = StartHeight,
+                                 delay = Delay},
+            %% this is a crappy workaround for not wanting to duplicate the
+            %% delay calculation logic in the miner as well. in other cases
+            %% the hash is always correct, but we can do the work more easily
+            %% here in the restart case. this will go away when the restart
+            %% logic is refactored into this module.
+            Hash =
+                case Hash0 of
+                    ignored ->
+                        Election = StartHeight + Delay,
+                        {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
+                        blockchain_block:hash_block(ElectionBlock);
+                    _ -> Hash0
+                end,
+            State1 = initiate_election(Hash, StartHeight, State),
+            {reply, State1#state.current_dkg /= undefined, State1};
+        _ ->
+            lager:info("election started at ~p, already running", [StartHeight]),
+            {reply, already_running, State0}
+    end;
 handle_call(consensus_pos, _From, State) ->
     {reply, State#state.consensus_pos, State};
 handle_call(in_consensus, _From, #state{chain=undefined, consensus_pos=Pos}=State) ->
@@ -416,21 +437,20 @@ handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
     MyAddr = blockchain_swarm:pubkey_bin(),
     {reply, lists:member(MyAddr, ConsensusGroup), State};
-handle_call(cancel_dkg, _From, #state{current_dkg = DKG, cancel_dkg = CancelDKG} = State) ->
-    lager:info("cancelling DKG at ~p ~p", [State#state.initial_height,
-                                           State#state.delay]),
-    spawn(fun() ->
-                  %% give the dkg some time to shut down so that
-                  %% laggards get a chance to complete
-                  Timeout = application:get_env(miner, dkg_stop_timeout, 0),
-                  catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout}),
-                  catch libp2p_group_relcast:handle_command(CancelDKG, {stop, Timeout})
-          end),
-    {reply, ok, State#state{current_dkg = undefined,
-                            cancel_dkg = undefined,
-                            cancel_height = undefined,
-                            delay = 0,
-                            election_running = false}};
+%% handle_call(cancel_dkg, _From, #state{current_dkg = DKG, cancel_dkg = CancelDKG} = State) ->
+%%     lager:info("cancelling DKG at ~p ~p", [State#state.initial_height,
+%%                                            State#state.delay]),
+%%     spawn(fun() ->
+%%                   %% give the dkg some time to shut down so that
+%%                   %% laggards get a chance to complete
+%%                   Timeout = application:get_env(miner, dkg_stop_timeout, 0),
+%%                   catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout}),
+%%                   catch libp2p_group_relcast:handle_command(CancelDKG, {stop, Timeout})
+%%           end),
+%%     {reply, ok, State#state{current_dkg = undefined,
+%%                             cancel_dkg = undefined,
+%%                             delay = 0,
+%%                             election_running = false}};
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
     Reply = ok,
@@ -441,10 +461,9 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
-            #state{current_dkg = OldDKG,
+            #state{current_dkg = DKGs,
                    initial_height = Height,
-                   cancel_height = CancelHeight,
-                   cancel_dkg = CancelDKG,
+                   cancel_dkg = CancelDKGs,
                    delay = Delay} = State0)
   when State0#state.chain /= undefined ->
     Ledger = blockchain:ledger(State0#state.chain),
@@ -453,16 +472,13 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
             lager:info("processing block height ~p", [BlockHeight]),
-            State = case CancelDKG of
-                        undefined ->
+            State = case maps:find(BlockHeight, CancelDKGs) of
+                        error ->
                             State0;
-                        _ when BlockHeight >= CancelHeight ->
-                            lager:info("cancelling DKG at height ~p", [CancelHeight]),
-                            catch libp2p_group_relcast:handle_command(CancelDKG, {stop, 120000}),
-                            State0#state{cancel_height = undefined,
-                                         cancel_dkg = undefined};
-                        _ ->
-                            State0
+                        {ok, Group} ->
+                            lager:info("cancelling DKG ~p at height ~p", [Group, BlockHeight]),
+                            catch libp2p_group_relcast:handle_command(Group, {stop, 120000}),
+                            State0#state{cancel_dkg = maps:remove(BlockHeight, CancelDKGs)}
                     end,
             Txns = blockchain_block:transactions(Block),
             NewGroup = blockchain_election:has_new_group(Txns),
@@ -488,20 +504,28 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                 false when State#state.election_running andalso
                            NewGroup /= false andalso
                            BlockHeight /= 1 ->
+                    [Txn] =
+                        lists:filter(
+                          fun(T) ->
+                                  blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                          end, Txns),
+                    ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
+                    ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
+
                     %% if we got a new group
-                    case OldDKG of
-                        %% we're not in
-                        undefined ->
-                            ok;
-                        _ ->
-                            lager:info("starting hbbft at block height ~p", [BlockHeight]),
-                            start_hbbft(OldDKG, State)
-                    end,
-                    {noreply, State#state{cancel_height = BlockHeight + 2,
-                                          cancel_dkg = OldDKG,
-                                          current_dkg = undefined,
-                                          delay = 0,
-                                          election_running = false}};
+                    State1 =
+                        case maps:find(ElectionHeight+ElectionDelay, DKGs) of
+                            %% we're not in
+                            error ->
+                                State;
+                            {ok, ElectionGroup} ->
+                                lager:info("starting hbbft at block height ~p", [BlockHeight]),
+                                start_hbbft(ElectionGroup, State),
+                                State#state{cancel_dkg = CancelDKGs#{ElectionHeight+ElectionDelay+2 =>
+                                                                         ElectionGroup}}
+                        end,
+                    {noreply, State1#state{delay = 0,
+                                           election_running = false}};
                 false when State#state.election_running ->
                     NextRestart = Height + Interval + Delay,
                     case BlockHeight of
@@ -552,7 +576,7 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
                          election_done, N, Curve, true, State#state{initial_height = Height,
-                                                              election_running = true}),
+                                                                    election_running = true}),
 
     State1.
 
@@ -619,6 +643,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
 do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
        State=#state{initial_height = Height,
                     delay = Delay,
+                    current_dkg = DKGs,
                     chain = Chain}) ->
     lager:info("N: ~p", [N]),
     F = ((N-1) div 3),
@@ -674,11 +699,10 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
             lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
                        [Height, MyAddress, Pos, DKGGroupName]),
             {true, State#state{consensus_pos = Pos,
-                               current_dkg = DKGGroup}};
+                               current_dkg = DKGs#{Height+Delay => DKGGroup}}};
         false ->
             lager:info("not in DKG this round at height ~p ~p", [Height, Delay]),
-            {false, State#state{consensus_pos = undefined,
-                                current_dkg = undefined}}
+            {false, State#state{consensus_pos = undefined}}
     end.
 
 start_hbbft(DKG, #state{initial_height = Height, delay = Delay} = State) ->
@@ -749,8 +773,9 @@ election_info(Ledger, Chain) ->
     {Epoch, StartHeight} = blockchain_block_v1:election_info(Block),
 
     %% get the election txn
-    {ok, Block} = blockchain:get_block(Height, Chain),
-    Txn = get_election_txn(Block),
+    {ok, StartBlock} = blockchain:get_block(StartHeight, Chain),
+    {ok, Txn} = get_election_txn(StartBlock),
+    lager:debug("txn ~p", [Txn]),
     ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
     ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
 
@@ -771,7 +796,7 @@ get_election_txn(Block) ->
                    blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
            end, Txns) of
         [Txn] ->
-            Txn;
+            {ok, Txn};
         _ ->
             {error, no_group_txn}
     end.

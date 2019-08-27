@@ -22,7 +22,7 @@ while true; do
         sleep 1
     done
     ## 80% chance of restarting things
-    if [ ! $(expr $RAND % 5) -eq 0 ]; then
+    if [ $(expr $RAND % 5) -ne 0 ]; then
         ./cmd.sh $I start
     fi
 done
