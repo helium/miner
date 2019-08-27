@@ -167,11 +167,6 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                             cancel_dkg = State#state.current_dkg,
                             cancel_height = 3,
                             chain = Chain}};
-%% we've already started the group
-handle_call({election_done, _Artifact, _Signatures, _Members, _PrivKey}, _From,
-            State = #state{cancel_height = CancelHeight}) when CancelHeight /= undefined ->
-    lager:info("ignoring election done"),
-    {reply, ok, State};
 handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
             State = #state{initial_height = Height,
                            chain = Chain,
@@ -494,8 +489,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             ok;
                         _ ->
                             lager:info("starting hbbft at block height ~p", [BlockHeight]),
-                            %%start_hbbft(OldDKG, State)
-                            ok
+                            start_hbbft(OldDKG, State)
                     end,
                     {noreply, State#state{cancel_height = BlockHeight + 2,
                                           cancel_dkg = OldDKG,

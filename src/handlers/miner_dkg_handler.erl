@@ -93,6 +93,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                         case lists:keymember(Address, 1, Acc) == false andalso
                                             libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
                                             true ->
+                                                lager:info("adding sig from conf"),
                                                 [{Address, Signature}|Acc];
                                             false ->
                                                 Acc
@@ -100,33 +101,29 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                 end, Sigs, InSigs),
             NewState = State#state{signatures = Sigs1},
             case enough_signatures(conf, NewState) of
-                {ok, GoodSignatures} ->
-                    case State#state.sent_conf of
-                        false ->
-                            %% relies on implicit self-send to hit the
-                            %% other clause here in some cases
-                            {State#state{sent_conf=true, signatures=GoodSignatures},
-                             [{multicast, term_to_binary({conf, GoodSignatures})}]};
-                        true when State#state.done_called == false ->
-                            %% this needs to be a call so we know the callback succeeded so we
-                            %% can terminate
-                            lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
-                            ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
-                                                 Members, State#state.privkey),
-                            %% rebroadcast the final set of signatures and stop the handler
-                            {State#state{done_called = true, signatures = GoodSignatures},
-                             [{multicast, term_to_binary({conf, GoodSignatures})}]};
-                        _ ->
-                            {State, []}
-                    end;
-                false ->
+                {ok, GoodSignatures} when State#state.done_called == false ->
+                    %% this needs to be a call so we know the callback succeeded so we
+                    %% can terminate
+                    lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
+                    ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
+                                         Members, State#state.privkey),
+                    %% rebroadcast the final set of signatures and stop the handler
+                    {State#state{done_called = true, sent_conf = true,
+                                 signatures = GoodSignatures},
+                     [{multicast, term_to_binary({conf, GoodSignatures})}]};
+                {ok, _GoodSignatures} ->
+                    lager:info("already done"),
+                    {State, []};
+                _ ->
+                    lager:info("not done, conf have ~p", [length(Sigs1)]),
                     {State, []}
             end;
         {signature, Address, Signature} ->
-            lager:info("got sig ~p from ~p", [Signature, Index]),
             case {libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)),
                   not lists:keymember(Address, 1, Sigs)} of
                 {true, true} ->
+                    lager:info("got good sig ~p from ~p, have ~p", [Signature, Index,
+                                                                    length(State#state.signatures) + 1]),
                     NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
                     case enough_signatures(sig, NewState) of
                         {ok, Signatures} when State#state.sent_conf == false ->
@@ -161,7 +158,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                             lager:info("good len ~p sigs ~p", [length(Signatures), Signatures]),
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
                                                                  Members, State#state.privkey),
-                                            {NewState#state{done_called = true, sent_conf = true,  signatures = Signatures},
+                                            {NewState#state{done_called = true, signatures = Signatures},
                                              [{multicast, term_to_binary({conf, Signatures})}]};
                                         _ ->
                                             %% not enough total signatures, or we've already completed
@@ -289,12 +286,8 @@ enough_signatures(sig, #state{signatures=Sigs, n = N, t = T}) when length(Sigs) 
 enough_signatures(conf, #state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
     lager:debug("failconf count ~p sigs ~p", [Count, length(Sigs)]),
     false;
-enough_signatures(Phase, #state{artifact=Artifact, members=Members, signatures=Signatures,
-                                n = N, t = T, signatures_required=Threshold0}) ->
-    Threshold = case Phase of
-                    sig -> N - T;
-                    conf -> Threshold0
-                end,
+enough_signatures(_Phase, #state{artifact=Artifact, members=Members, signatures=Signatures,
+                                 signatures_required=Threshold}) ->
     lager:debug("checking using ~p", [Threshold]),
     %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
     %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
