@@ -34,12 +34,12 @@ init([KeySlot]) ->
 
 
 handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
-    Reply = txn(Pid, fun() -> 
+    Reply = txn(Pid, fun() ->
                              ecc508:sign(Pid, State#state.key_slot, Binary)
                      end, 10),
     {reply, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
-    Reply = txn(Pid, fun() -> 
+    Reply = txn(Pid, fun() ->
                              ecc508:ecdh(Pid, State#state.key_slot, PubKey)
                      end, 10),
     {reply, Reply, State};
@@ -66,6 +66,26 @@ txn(Pid, Fun, Limit) ->
             ecc508:sleep(Pid),
             %% let the chip timeout
             timer:sleep(150),
+            txn(Pid, Fun, Limit - 1);
+        {error, ecc_response_watchdog_exp} ->
+            %% There is insufficient time to execute the given command
+            %% before the watchdog timer will expire. The system must
+            %% reset the watchdog timer by entering the idle or sleep
+            %% modes.
+            ecc508:sleep(Pid),
+            timer:sleep(10),
+            txn(Pid, Fun, Limit - 1);
+        {error, ecc_command_timeout} ->
+            %% Command was not properly received by ATECC508A and should be
+            %% re-transmitted by the I/O driver in the system. No attempt was made
+            %% to parse or execute the command
+            timer:sleep(10),
+            txn(Pid, Fun, Limit - 1);
+        {error, ecc_checksum_failed} ->
+            %% Corruption may have occurred on the bus. Try again
+            %% after cycling the volatile areas with a sleep
+            ecc805:sleep(Pid),
+            timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
         Result ->
             ecc508:sleep(Pid),
