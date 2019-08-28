@@ -373,8 +373,14 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     {reply, undefined, State}
             end
     end;
-handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
-    {reply, Group, State};
+handle_call(dkg_group, _From, #state{current_dkg = DKGs} = State) ->
+    %% get the highest one
+    case lists:reverse(lists:sort(maps:to_list(DKGs))) of
+        [{_Ht, Group}|_] ->
+            {reply, Group, State};
+        [] ->
+            {reply, undefined, State}
+    end;
 handle_call({initial_dkg, GenesisTransactions, Addrs, N, Curve}, From, State0) ->
     State = State0#state{initial_height = 1,
                          delay = 0},
@@ -437,20 +443,6 @@ handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
     MyAddr = blockchain_swarm:pubkey_bin(),
     {reply, lists:member(MyAddr, ConsensusGroup), State};
-%% handle_call(cancel_dkg, _From, #state{current_dkg = DKG, cancel_dkg = CancelDKG} = State) ->
-%%     lager:info("cancelling DKG at ~p ~p", [State#state.initial_height,
-%%                                            State#state.delay]),
-%%     spawn(fun() ->
-%%                   %% give the dkg some time to shut down so that
-%%                   %% laggards get a chance to complete
-%%                   Timeout = application:get_env(miner, dkg_stop_timeout, 0),
-%%                   catch libp2p_group_relcast:handle_command(DKG, {stop, Timeout}),
-%%                   catch libp2p_group_relcast:handle_command(CancelDKG, {stop, Timeout})
-%%           end),
-%%     {reply, ok, State#state{current_dkg = undefined,
-%%                             cancel_dkg = undefined,
-%%                             delay = 0,
-%%                             election_running = false}};
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
     Reply = ok,

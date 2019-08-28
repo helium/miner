@@ -812,6 +812,12 @@ restore(Chain, Block, Height, Interval) ->
         cannot_start ->
             %% for now, don't do anything here.  in an emergency we
             %% can likely restore the dkg and manually start the group
+            case Height of
+                Ht when Ht > Election ->
+                    miner_consensus_mgr:start_election(ignored, Height, Election);
+                _ ->
+                    ok
+            end,
             undefined
     end.
 
