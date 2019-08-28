@@ -389,7 +389,7 @@ election_test(Config) ->
                                      not lists:keymember(miner, 1, Apps)
                              end
                      end, lists:sublist(Miners, 1, 4))
-           end, 40, 500),
+           end, 120, 500),
 
 
     Data = string:trim(os:cmd("pwd")),
@@ -421,7 +421,7 @@ election_test(Config) ->
                                      true
                              end
                      end, Miners)
-           end, 40, 500),
+           end, 120, 500),
 
     %% second: make sure we're not making blocks anymore
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -510,7 +510,7 @@ election_test(Config) ->
                                                 %% height might go up
                                                 %% one, but it
                                                 %% shouldn't go up 5
-                                                Ht > (NewHeight + 1)
+                                                Ht > (NewHeight + 3)
                                             catch _:_ ->
                                                     false
                                             end
@@ -519,22 +519,25 @@ election_test(Config) ->
 
     %% check consensus miners
     NewConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], 500)
                                       end, Miners),
 
     %% check non consensus miners
     NewNonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], 500)
                                          end, Miners),
 
-    KillList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
-    %% kill some nodes and restart them to check group restore works
+    StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
+    %% stop some nodes and restart them to check group restore works
+
+    ct:pal("stop list ~p", [StopList]),
+
     [begin
          %%ct_slave:stop(Miner)
           ct_rpc:call(Miner, application, stop, [miner], 300),
           ct_rpc:call(Miner, application, stop, [blockchain], 300)
      end
-     || Miner <- KillList],
+     || Miner <- StopList],
 
     timer:sleep(5000),
 
@@ -543,7 +546,7 @@ election_test(Config) ->
           ct_rpc:call(Miner, application, start, [miner], 300),
           ct_rpc:call(Miner, application, start, [blockchain], 300)
      end
-     || Miner <- KillList],
+     || Miner <- StopList],
 
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_until(
@@ -612,7 +615,7 @@ group_change_test(Config) ->
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
                                                              end, shuffle(Miners))
-                                   end, 30, timer:seconds(1)),
+                                   end, 60, timer:seconds(1)),
     %% submit the transaction
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -641,7 +644,7 @@ group_change_test(Config) ->
                    true == lists:all(fun(Miner) ->
                                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
                                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
-                                             ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                             ct:pal("miner ~p height ~p target ~p", [Miner, Ht, Height+20]),
                                              Ht > (Height + 20)
                                      end, shuffle(Miners))
            end, 80, timer:seconds(1)),
@@ -665,6 +668,7 @@ group_change_test(Config) ->
                                                       fun(Miner) ->
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
+                                           ct:pal("group size: ~p", [length(CGroup)]),
                                            7 == length(CGroup)
                                    end, 60, timer:seconds(1)),
 
