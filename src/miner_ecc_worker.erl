@@ -84,7 +84,7 @@ txn(Pid, Fun, Limit) ->
         {error, ecc_checksum_failed} ->
             %% Corruption may have occurred on the bus. Try again
             %% after cycling the volatile areas with a sleep
-            ecc805:sleep(Pid),
+            ecc508:sleep(Pid),
             timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
         Result ->
