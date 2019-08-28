@@ -373,8 +373,14 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                     {reply, undefined, State}
             end
     end;
-handle_call(dkg_group, _From, #state{current_dkg = Group} = State) ->
-    {reply, Group, State};
+handle_call(dkg_group, _From, #state{current_dkg = DKGs} = State) ->
+    %% get the highest one
+    case lists:reverse(lists:sort(maps:to_list(DKGs))) of
+        [{_Ht, Group}|_] ->
+            {reply, Group, State};
+        [] ->
+            {reply, undefined, State}
+    end;
 handle_call({initial_dkg, GenesisTransactions, Addrs, N, Curve}, From, State0) ->
     State = State0#state{initial_height = 1,
                          delay = 0},
