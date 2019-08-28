@@ -359,7 +359,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                                                           current_dkg = DKGs1,
                                                           delay = 0,
                                                           election_running = false};
-                                         _ when BlockHeight < (ElectionHeight+ElectionDelay+10) ->
+                                         _ ->
                                              State
                                      end,
                             {reply, cannot_start, State1};
