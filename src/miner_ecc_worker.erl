@@ -87,6 +87,11 @@ txn(Pid, Fun, Limit) ->
             ecc508:sleep(Pid),
             timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
+        {error, {ecc_unknown_response, _}} ->
+            %% Got a weird status response back. Retry
+            ecc508:sleep(Pid),
+            timer:sleep(10),
+            txn(Pid, Fun, Limit - 1);
         Result ->
             ecc508:sleep(Pid),
             Result
