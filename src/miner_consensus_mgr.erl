@@ -513,7 +513,8 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             {ok, ElectionGroup} ->
                                 lager:info("starting hbbft at block height ~p", [BlockHeight]),
                                 start_hbbft(ElectionGroup, State),
-                                State#state{cancel_dkg = CancelDKGs#{ElectionHeight+ElectionDelay+2 =>
+                                State#state{current_dkg = maps:remove(ElectionHeight+ElectionDelay, DKGs),
+                                            cancel_dkg = CancelDKGs#{ElectionHeight+ElectionDelay+2 =>
                                                                          ElectionGroup}}
                         end,
                     {noreply, State1#state{delay = 0,
@@ -525,7 +526,10 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
                             %% restart the dkg
                             State1 = restart_election(State, Hash, Height),
-                            {noreply, State1};
+                            {LastGroup, DKGs1} = maps:take(Height+Delay, State1#state.current_dkg),
+                            {noreply, State1#state{current_dkg = DKGs1,
+                                                   cancel_dkg = CancelDKGs#{Height+Delay+2 =>
+                                                                                LastGroup}}};
                         NewHeight ->
                             lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
                             {noreply, State}
