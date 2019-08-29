@@ -1,5 +1,4 @@
 -module(miner_ecc_worker).
-
 -behavior(gen_server).
 
 -export([sign/1,
@@ -87,8 +86,9 @@ txn(Pid, Fun, Limit) ->
             ecc508:sleep(Pid),
             timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
-        {error, {ecc_unknown_response, _}} ->
+        {error, {ecc_unknown_response, Resp}} ->
             %% Got a weird status response back. Retry
+            lager:warning("Unknown ECC response ~p, retrying", [Resp]),
             ecc508:sleep(Pid),
             timer:sleep(10),
             txn(Pid, Fun, Limit - 1);
