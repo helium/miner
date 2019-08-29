@@ -163,6 +163,8 @@ mining(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
+    {keep_state, Data0#data{mining_delay=Delay-1}};
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
                                                                address=Challenger,
                                                                secret=Secret,
@@ -174,8 +176,6 @@ delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
     Height = blockchain_block:height(Block),
     self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
     {next_state, targeting, Data0#data{mining_hash=undefined}};
-delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
-    {keep_state, Data0#data{mining_delay=Delay-1}};
 delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
