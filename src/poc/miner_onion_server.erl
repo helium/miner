@@ -92,9 +92,11 @@ decrypt(Onion, Stream) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok.
-send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, Stream) ->
+send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
     ok = blockchain_event:add_handler(self()),
-    send_receipt(_Data, _OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
+    <<ID:10/binary, _/binary>> = OnionCompactKey,
+    lager:md([{poc_id, ID}]),
+    send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
 
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok.
 send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _Stream, 0) ->
@@ -152,9 +154,11 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
-send_witness(_Data, _OnionCompactKey, Time, RSSI) ->
+send_witness(_Data, OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
-    send_witness(_Data, _OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
+    <<ID:10/binary, _/binary>> = OnionCompactKey,
+    lager:md([{poc_id, ID}]),
+    send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
 
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
@@ -356,6 +360,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                                                                          udp_send_ip=IP,
                                                                          udp_send_port=Port,
                                                                          packet_id=ID}=State) ->
+    <<POCID:10/binary, _/binary>> = OnionCompactKey,
     NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
         error ->
             _ = erlang:spawn(
@@ -365,10 +370,10 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info("could not decrypt packet received via ~p", [Type]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p", [Type]),
             State;
         {ok, Data, NextPacket} ->
-            lager:info("decrypted a layer: ~w received via ~p~n", [Data, Type]),
+            lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
             _ = erlang:spawn(
                 ?MODULE,
                 send_receipt,
@@ -391,7 +396,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                         payload=NextPacket
             },
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
-            lager:info("sending ~p", [Req]),
+            lager:info([{poc_id, POCID}], "sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
             spawn(fun() ->
                           %% sleep from 3-13 seconds before sending
