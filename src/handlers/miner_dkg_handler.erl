@@ -29,13 +29,16 @@
          donemod :: atom(),
          donefun :: atom(),
          done_called = false :: boolean(),
-         sent_conf = false :: boolean()
+         sent_conf = false :: boolean(),
+         height :: pos_integer(),
+         delay :: non_neg_integer()
         }).
 
 init([Members, Id, N, F, T, Curve,
       ThingToSign,
       {SigMod, SigFun},
-      {DoneMod, DoneFun}, Round]) ->
+      {DoneMod, DoneFun}, Round,
+      Height, Delay]) ->
     {G1, G2} = generate(Curve, Members),
     %% get the fun used to sign things with our swarm key
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
@@ -52,7 +55,9 @@ init([Members, Id, N, F, T, Curve,
                 artifact = ThingToSign,
                 sigmod = SigMod, sigfun = SigFun,
                 donemod = DoneMod, donefun = DoneFun,
-                members = Members}}.
+                members = Members,
+                height = Height,
+                delay = Delay}}.
 
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
@@ -82,6 +87,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                            g1 = G1, g2 = G2,
                                            members = Members,
                                            signatures = Sigs,
+                                           height = Height, delay = Delay,
                                            sigmod = SigMod, sigfun = SigFun,
                                            donemod = DoneMod, donefun = DoneFun}) ->
     Msg = binary_to_term(BinMsg),
@@ -106,7 +112,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     %% can terminate
                     lager:info("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
                     ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
-                                         Members, State#state.privkey),
+                                         Members, State#state.privkey, Height, Delay),
                     %% rebroadcast the final set of signatures and stop the handler
                     {State#state{done_called = true, sent_conf = true,
                                  signatures = GoodSignatures},
@@ -136,7 +142,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                             %% can terminate
                                             lager:info("good len ~p sigs ~p", [length(Signatures), Signatures]),
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
-                                                                 Members, State#state.privkey),
+                                                                 Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
                                              [{multicast, term_to_binary({conf, Signatures})}]};
                                         _ ->
@@ -157,7 +163,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                             %% can terminate
                                             lager:info("good len ~p sigs ~p", [length(Signatures), Signatures]),
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
-                                                                 Members, State#state.privkey),
+                                                                 Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
                                              [{multicast, term_to_binary({conf, Signatures})}]};
                                         _ ->
@@ -263,10 +269,11 @@ restore(#state{done_called = true, % if this is true on restore, we might not ha
                                    % this correctly yet
                donemod = DoneMod, donefun = DoneFun,
                artifact = Artifact, signatures = Sigs,
-               members = Members, privkey = PrivKey
+               members = Members, privkey = PrivKey,
+               height = Height, delay = Delay
               } = OldState, _NewState) ->
     lager:info("restored dkg was completed, attempting to restart hbbft group"),
-    ok = DoneMod:DoneFun(Artifact, Sigs, Members, PrivKey),
+    ok = DoneMod:DoneFun(Artifact, Sigs, Members, PrivKey, Height, Delay),
     {ok, OldState};
 restore(OldState, _NewState) ->
     {ok, OldState}.
