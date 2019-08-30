@@ -141,19 +141,22 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data0) ->
-    case find_request(BlockHash, Data0) of
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data) ->
+    case find_request(BlockHash, Data) of
         ok ->
-            lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, ?MINING_TIMEOUT]),
-            Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT, mining_hash=BlockHash},
-            {next_state, delaying, Data1#data{mining_delay=rand:uniform(?MINING_DELAY), mining_ledger=PinnedLedger}};
+            RandomDelay = rand:uniform(?MINING_DELAY),
+            lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, RandomDelay]),
+            {next_state, delaying, Data#data{mining_timeout=?MINING_TIMEOUT,
+                                             mining_hash=BlockHash,
+                                             mining_delay=RandomDelay,
+                                             mining_ledger=PinnedLedger}};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
-                    {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
+                    {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
                     lager:error("did not see PoC request in last ~p block, retrying", [?MINING_TIMEOUT]),
-                    {next_state, requesting, Data0#data{mining_timeout=?MINING_TIMEOUT}}
+                    {next_state, requesting, Data#data{mining_timeout=?MINING_TIMEOUT}}
             end
     end;
 mining(EventType, EventContent, Data) ->
@@ -193,8 +196,8 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
             self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
             {next_state, challenging, Data#data{challengees=[]}};
         no_target ->
-            lager:warning("no target found"),
-            keep_state_and_data
+            lager:warning("no target found, back to requesting"),
+            {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}}
     end;
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -204,8 +207,8 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
-                                                                        onion_keys=OnionKey
-                                                                       }=Data) ->
+                                                                                onion_keys=OnionKey
+                                                                               }=Data) ->
     case blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
