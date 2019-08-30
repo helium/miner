@@ -32,6 +32,7 @@
 -export([
     requesting/3,
     mining/3,
+    delaying/3,
     targeting/3,
     challenging/3,
     receiving/3,
@@ -45,6 +46,7 @@
 
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 5).
+-define(MINING_DELAY, 10).
 -define(CHALLENGE_RETRY, 3).
 -define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
@@ -59,6 +61,9 @@
     responses = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
+    mining_delay = ?MINING_DELAY :: non_neg_integer(),
+    mining_hash :: undefined | binary(),
+    mining_ledger :: undefined | blockchain_ledger_v1:ledger(),
     poc_interval :: non_neg_integer() | undefined,
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
@@ -136,28 +141,45 @@ requesting(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{address=Challenger,
-                                                                                secret=Secret,
-                                                                                mining_timeout=MiningTimeout,
-                                                                                blockchain=Chain}=Data0) ->
-    case find_request(BlockHash, Data0) of
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data) ->
+    case find_request(BlockHash, Data) of
         ok ->
-            {ok, Block} = blockchain:get_block(BlockHash, Chain),
-            Height = blockchain_block:height(Block),
-            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger},
-            lager:info("request was mined @ ~p", [BlockHash]),
-            Data1 = Data0#data{mining_timeout=?MINING_TIMEOUT},
-            {next_state, targeting, Data1};
+            RandomDelay = rand:uniform(?MINING_DELAY),
+            lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, RandomDelay]),
+            {next_state, delaying, Data#data{mining_timeout=?MINING_TIMEOUT,
+                                             mining_hash=BlockHash,
+                                             mining_delay=RandomDelay,
+                                             mining_ledger=PinnedLedger}};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
-                    {keep_state, Data0#data{mining_timeout=MiningTimeout-1}};
+                    {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
                     lager:error("did not see PoC request in last ~p block, retrying", [?MINING_TIMEOUT]),
-                    {next_state, requesting, Data0#data{mining_timeout=?MINING_TIMEOUT}}
+                    {next_state, requesting, Data#data{mining_timeout=?MINING_TIMEOUT}}
             end
     end;
 mining(EventType, EventContent, Data) ->
+    handle_event(EventType, EventContent, Data).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
+    {keep_state, Data0#data{mining_delay=Delay-1}};
+delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
+                                                               address=Challenger,
+                                                               secret=Secret,
+                                                               mining_delay=0,
+                                                               mining_hash=MiningHash,
+                                                               mining_ledger=PinnedLedger}=Data0) ->
+    lager:info("delay over, moving to targeting"),
+    {ok, Block} = blockchain:get_block(MiningHash, Chain),
+    Height = blockchain_block:height(Block),
+    self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
+    {next_state, targeting, Data0#data{mining_hash=undefined}};
+delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 %%--------------------------------------------------------------------
@@ -174,8 +196,8 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
             self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
             {next_state, challenging, Data#data{challengees=[]}};
         no_target ->
-            lager:warning("no target found"),
-            keep_state_and_data
+            lager:warning("no target found, back to requesting"),
+            {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}}
     end;
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -185,8 +207,8 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
-                                                                        onion_keys=OnionKey
-                                                                       }=Data) ->
+                                                                                onion_keys=OnionKey
+                                                                               }=Data) ->
     case blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger) of
         {error, Reason} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),

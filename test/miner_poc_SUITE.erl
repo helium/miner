@@ -141,7 +141,15 @@ dist(Config0) ->
     ),
 
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
-    ?assertEqual({0, 0}, rcv_loop(M, 35, {length(Miners), length(Miners)})),
+    
+    ReqsRecipts = lists:foldl(
+        fun(A, Acc) ->
+            maps:put(A, {0, 0}, Acc)
+        end,
+        #{},
+        Addresses
+    ),
+    ?assert(rcv_loop(M, 100, ReqsRecipts)),
 
     %% wait until one node has a working chain
 
@@ -336,12 +344,12 @@ startup(_Config) ->
 
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Send fake notify
     ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
 
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
@@ -370,54 +378,82 @@ startup(_Config) ->
     ?assertEqual({ok, 1}, blockchain:height(Chain)),
 
     % Now this should match the chain
-    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
     ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-rcv_loop(_Miner, _, {0, 0}=Acc) ->
-    Acc;
+check_map(Map) ->
+    lists:all(
+        fun({_, {Rq, Rc}}) when Rq > 0 andalso Rc > 0 andalso Rq >= Rc ->
+            true;
+           ({Address, {Rq, Rc}}) ->
+               ct:pal("~p did not get enough req ~p or receipts ~p", [Address, Rq, Rc]),
+               false
+        end,
+        maps:to_list(Map)
+    ).
+
 rcv_loop(_Miner, 0, Acc) ->
-    Acc;
+    check_map(Acc);
 rcv_loop(Miner, I, Acc0) ->
-    receive
-        {blockchain_event, {add_block, Hash, false, _}} ->
-            ct:pal("hash ~p", [Hash]),
-            Acc1 = case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
-                undefined ->
-                    Acc0;
-                Chain ->
-                    {ok, Block} = ct_rpc:call(Miner, blockchain, get_block, [Hash, Chain]),
-                    lists:foldl(
-                        fun(Txn, {Reqs, Recs}=A) ->
-                            case blockchain_txn:type(Txn) of
-                                blockchain_txn_poc_receipts_v1 ->
-                                    Path = blockchain_txn_poc_receipts_v1:path(Txn),
-                                    case lists:all(fun(PE) ->
-                                                      blockchain_poc_path_element_v1:receipt(PE) /= undefined
-                                                      andalso length(blockchain_poc_path_element_v1:witnesses(PE)) > 0
-                                              end, Path) of
-                                        true ->
-                                            {Reqs, Recs-1};
-                                        false ->
-                                            A
-                                    end;
-                                blockchain_txn_poc_request_v1 ->
-                                    {Reqs-1, Recs};
-                                _ ->
-                                    A
-                            end
-                        end,
-                        Acc0,
-                        blockchain_block:transactions(Block)
-                    )
-            end,
-            ct:pal("counter ~p accumulated lengths ~p", [I, Acc1]),
-            rcv_loop(Miner, I-1, Acc1);
-        {blockchain_event, {add_block, _Hash, true, _}} ->
-            rcv_loop(Miner, I, Acc0)
+    case check_map(Acc0) of
+        true ->
+            true;
+        false ->
+            receive
+                {blockchain_event, {add_block, Hash, false, _}} ->
+                    ct:pal("hash ~p", [Hash]),
+                    Acc1 = case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+                        undefined ->
+                            Acc0;
+                        Chain ->
+                            {ok, Block} = ct_rpc:call(Miner, blockchain, get_block, [Hash, Chain]),
+                            lists:foldl(
+                                fun(Txn, SubAcc) ->
+                                    case blockchain_txn:type(Txn) of
+                                        blockchain_txn_poc_receipts_v1 ->
+                                            Path = blockchain_txn_poc_receipts_v1:path(Txn),
+                                            Challenger = blockchain_txn_poc_receipts_v1:challenger(Txn),
+                                            ct:pal("~p got RECEIPTS", [Challenger]),
+                                            case lists:all(fun(PE) ->
+                                                            blockchain_poc_path_element_v1:receipt(PE) /= undefined
+                                                            andalso length(blockchain_poc_path_element_v1:witnesses(PE)) > 0
+                                                    end, Path) of
+                                                false ->
+                                                    SubAcc;
+                                                true ->
+                                                    
+                                                    case maps:get(Challenger, Acc0, undefined) of
+                                                        undefined ->
+                                                            SubAcc;
+                                                        {Reqs, Recs} ->
+                                                            maps:update(Challenger, {Reqs, Recs+1}, SubAcc)
+                                                    end
+                                            end;
+                                        blockchain_txn_poc_request_v1 ->
+                                            Challenger = blockchain_txn_poc_request_v1:challenger(Txn),
+                                            ct:pal("~p got REQ", [Challenger]),
+                                            case maps:get(Challenger, Acc0, undefined) of
+                                                undefined ->
+                                                    SubAcc;
+                                                {Reqs, Recs} ->
+                                                    maps:update(Challenger, {Reqs+1, Recs}, SubAcc)
+                                            end;
+                                        _ ->
+                                            SubAcc
+                                    end
+                                end,
+                                Acc0,
+                                blockchain_block:transactions(Block)
+                            )
+                    end,
+                    rcv_loop(Miner, I-1, Acc1);
+                {blockchain_event, {add_block, _Hash, true, _}} ->
+                    rcv_loop(Miner, I, Acc0)
+            end
     end.
 
 get_submited_txn(Pid) ->
