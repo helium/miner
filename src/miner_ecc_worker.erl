@@ -15,13 +15,19 @@
                 key_slot :: non_neg_integer()
                }).
 
+-define(SHORT_RETRY_WAIT, 10).
+-define(LONG_RETRY_WAIT, 150).
+
+-define(MAX_TXN_RETRIES, 10).
+-define(CALL_TIMEOUT, (?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT) + 500).
+
 -spec sign(binary()) -> {ok, Signature::binary()} | {error, term()}.
 sign(Binary) ->
-    gen_server:call(?MODULE, {sign, Binary}).
+    gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
 -spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed::binary()} | {error, term()}.
 ecdh({ecc_compact, PubKey}) ->
-    gen_server:call(?MODULE, {ecdh, PubKey}).
+    gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
 start_link(KeySlot) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [KeySlot], []).
@@ -35,12 +41,12 @@ init([KeySlot]) ->
 handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
     Reply = txn(Pid, fun() ->
                              ecc508:sign(Pid, State#state.key_slot, Binary)
-                     end, 10),
+                     end, ?MAX_TXN_RETRIES),
     {reply, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
     Reply = txn(Pid, fun() ->
                              ecc508:ecdh(Pid, State#state.key_slot, PubKey)
-                     end, 10),
+                     end, ?MAX_TXN_RETRIES),
     {reply, Reply, State};
 
 handle_call(_Msg, _From, State) ->
@@ -64,7 +70,7 @@ txn(Pid, Fun, Limit) ->
         {error, ecc_asleep} ->
             ecc508:sleep(Pid),
             %% let the chip timeout
-            timer:sleep(150),
+            timer:sleep(?LONG_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
         {error, ecc_response_watchdog_exp} ->
             %% There is insufficient time to execute the given command
@@ -72,25 +78,25 @@ txn(Pid, Fun, Limit) ->
             %% reset the watchdog timer by entering the idle or sleep
             %% modes.
             ecc508:sleep(Pid),
-            timer:sleep(10),
+            timer:sleep(?SHORT_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
         {error, ecc_command_timeout} ->
             %% Command was not properly received by ATECC508A and should be
             %% re-transmitted by the I/O driver in the system. No attempt was made
             %% to parse or execute the command
-            timer:sleep(10),
+            timer:sleep(?SHORT_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
         {error, ecc_checksum_failed} ->
             %% Corruption may have occurred on the bus. Try again
             %% after cycling the volatile areas with a sleep
             ecc508:sleep(Pid),
-            timer:sleep(10),
+            timer:sleep(?SHORT_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
         {error, {ecc_unknown_response, Resp}} ->
             %% Got a weird status response back. Retry
             lager:warning("Unknown ECC response ~p, retrying", [Resp]),
             ecc508:sleep(Pid),
-            timer:sleep(10),
+            timer:sleep(?SHORT_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
         Result ->
             ecc508:sleep(Pid),
