@@ -19,7 +19,7 @@
 -define(LONG_RETRY_WAIT, 150).
 
 -define(MAX_TXN_RETRIES, 10).
--define(CALL_TIMEOUT, ?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT).
+-define(CALL_TIMEOUT, (?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT) + 500).
 
 -spec sign(binary()) -> {ok, Signature::binary()} | {error, term()}.
 sign(Binary) ->
