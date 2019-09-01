@@ -19,7 +19,9 @@
 -define(LONG_RETRY_WAIT, 150).
 
 -define(MAX_TXN_RETRIES, 10).
--define(CALL_TIMEOUT, (?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT) + 500).
+%% Make the call timeout quite long since this worker has to process
+%% all signing requests for the system
+-define(CALL_TIMEOUT, (?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT) * 10).
 
 -spec sign(binary()) -> {ok, Signature::binary()} | {error, term()}.
 sign(Binary) ->
