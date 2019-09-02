@@ -438,7 +438,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                 %% cheap enough?
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
                     case blockchain_election:has_new_group(ValidTransactions) of
-                        {true, _, _} ->
+                        {true, _, ConsensusGroupTxn, _} ->
                             Epoch = ElectionEpoch0 + 1,
                             Start = EpochStart0 + 1,
                             End = CurrentBlockHeight,
@@ -448,9 +448,6 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                             %% to cut down on the size of group txn blocks, which we'll
                             %% need to fetch and store all of to validate snapshots, we
                             %% discard all other txns for this block
-                            [ConsensusGroupTxn] = lists:filter(fun(T) ->
-                                                                       blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                                                               end, ValidTransactions),
                             {Epoch, NewHeight, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
@@ -491,7 +488,7 @@ handle_call(_Msg, _From, State) ->
 handle_cast({handoff_consensus, NewConsensusGroup, _ElectionHeight, _Rescue},
             #state{consensus_group = Group} = State) when Group == NewConsensusGroup ->
     {noreply, State};
-handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
+handle_cast({handoff_consensus, NewConsensusGroup, {ElectionHeight, _Delay} = EID, Rescue},
             #state{handoff_waiting = Waiting} = State) ->
     lager:info("handing off consensus from ~p or ~p to ~p",
                [State#state.consensus_group,
@@ -500,25 +497,25 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
     {ok, Block} = blockchain:head_block(State#state.blockchain),
     Round = blockchain_block:hbbft_round(Block),
     {Group, Waiting1} =
-        case maps:find(ElectionHeight, Waiting) of
+        case maps:find(EID, Waiting) of
             {ok, NewConsensusGroup} ->
                 Ref = State#state.block_timer,
                 {State#state.consensus_group, Waiting};
             {ok, Pid} when is_pid(Pid) ->
                 %% stale, kill it
-                lager:info("stopping stale group ~p at election ~p", [Pid, ElectionHeight]),
+                lager:info("stopping stale group ~p at election ~p", [Pid, EID]),
                 stop_group(Pid),
                 Ref = State#state.block_timer,
                 {State#state.consensus_group,
-                 Waiting#{ElectionHeight => NewConsensusGroup}};
+                 Waiting#{EID => NewConsensusGroup}};
             {ok, handed_off} ->
-                lager:info("double handoff at ~p, ignoring", [ElectionHeight]),
+                lager:info("double handoff at ~p, ignoring", [EID]),
                 Ref = State#state.block_timer,
                 {State#state.consensus_group, Waiting};
             %% here, we've already transitioned, so do the handoff
             {ok, {pending, Buf, NextRound, Block, Sync}} ->
                 BlockHeight = blockchain_block:height(Block),
-                lager:info("txn recvd at block ~p at election ~p", [BlockHeight, ElectionHeight]),
+                lager:info("txn recvd at block ~p at election ~p", [BlockHeight, EID]),
                 set_buf(NewConsensusGroup, Buf),
                 stop_group(State#state.consensus_group),
                 libp2p_group_relcast:handle_input(
@@ -536,11 +533,11 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                 start_txn_handler(NewConsensusGroup),
                 Ref = make_ref(),
                 self() ! block_timeout,
-                {NewConsensusGroup, #{ElectionHeight => handed_off}};
+                {NewConsensusGroup, #{EID => handed_off}};
             _ ->
                 Ledger = blockchain:ledger(State#state.blockchain),
                 {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
-                lager:info("no existing group at election ~p: ~p?", [ElectionHeight, Height]),
+                lager:info("no existing group at election ~p: ~p?", [EID, Height]),
                 case Height of
                     H when H >= ElectionHeight ->
                         lager:info("this is a restore from dkg"),
@@ -550,11 +547,11 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                                               false}),
                         start_txn_handler(NewConsensusGroup),
                         Ref = set_next_block_timer(State#state.blockchain),
-                        {NewConsensusGroup, #{ElectionHeight => handed_off}};
+                        {NewConsensusGroup, #{EID => handed_off}};
                     _ ->
                         Ref = State#state.block_timer,
                         {State#state.consensus_group,
-                         Waiting#{ElectionHeight => NewConsensusGroup}}
+                         Waiting#{EID => NewConsensusGroup}}
                 end
         end,
     lager:info("NEW ~p", [{Group, Waiting1}]),
@@ -607,13 +604,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             current_height = Height};
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
-                            {true, true, ElectionHeight} ->
+                            {true, true, _, EID} ->
                                 lager:info("stay in ~p", [Waiting]),
                                 Buf = get_buf(ConsensusGroup),
                                 NextRound = Round + 1,
 
                                 {NewGroup, Waiting1} =
-                                    case maps:find(ElectionHeight, Waiting) of
+                                    case maps:find(EID, Waiting) of
                                         {ok, Pid} when is_pid(Pid) ->
                                             set_buf(Pid, Buf),
                                             libp2p_group_relcast:handle_input(
@@ -621,10 +618,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                                     blockchain_block:transactions(Block),
                                                     Sync}),
                                             start_txn_handler(Pid),
-                                            {Pid, #{ElectionHeight => handed_off}};
+                                            {Pid, #{EID => handed_off}};
                                         error ->
                                             {undefined, % shouldn't be too harmful to kick onto nc track for a bit
-                                             Waiting#{ElectionHeight => {pending, Buf, NextRound, Block, Sync}}}
+                                             Waiting#{EID => {pending, Buf, NextRound, Block, Sync}}}
                                     end,
                                 stop_group(ConsensusGroup),
                                 State#state{block_timer = set_next_block_timer(Chain),
@@ -634,7 +631,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             current_height = Height,
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
-                            {true, false, _} ->
+                            {true, false, _, _} ->
                                 lager:info("leave"),
 
                                 stop_group(ConsensusGroup),
@@ -675,24 +672,24 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         false ->
                             lager:info("nc reg round"),
                             {noreply, State#state{current_height = Height}};
-                        {true, true, ElectionHeight} ->
+                        {true, true, _, EID} ->
                             lager:info("nc start group"),
                             %% it's possible that waiting hasn't been set, I'm not entirely
                             %% sure how to handle that at this point
                             Round = blockchain_block:hbbft_round(Block),
                             NextRound = Round + 1,
                             {NewGroup, Waiting1} =
-                                case maps:find(ElectionHeight, Waiting) of
+                                case maps:find(EID, Waiting) of
                                     {ok, Pid} when is_pid(Pid) ->
                                         libp2p_group_relcast:handle_input(
                                           Pid, {next_round, NextRound,
                                                 blockchain_block:transactions(Block),
                                                 Sync}),
                                         start_txn_handler(Pid),
-                                        {Pid, #{ElectionHeight => handed_off}};
+                                        {Pid, #{EID => handed_off}};
                                     error ->
                                         {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
-                                         Waiting#{ElectionHeight => {pending, [], NextRound, Block, Sync}}}
+                                         Waiting#{EID => {pending, [], NextRound, Block, Sync}}}
                                 end,
                             lager:info("nc got here"),
                             {noreply,
@@ -703,7 +700,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          current_height = Height,
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
-                        {true, false, _} ->
+                        {true, false, _, _} ->
                             lager:info("nc stay out"),
                             {noreply,
                              State#state{block_timer = make_ref(),

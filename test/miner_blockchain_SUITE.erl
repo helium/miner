@@ -404,8 +404,8 @@ election_test(Config) ->
     %% [ct_slave:start(Miner, Args) || Miner <- lists:sublist(Miners, 1, 4)],
     [begin
          %%ct_slave:stop(Miner)
-         ct_rpc:call(Miner, application, start, [blockchain], 300),
-         ct_rpc:call(Miner, application, start, [miner], 300)
+          ct_rpc:call(Miner, application, start, [blockchain], 300),
+          ct_rpc:call(Miner, application, start, [miner], 300)
      end
      || Miner <- lists:sublist(Miners, 1, 4)],
 

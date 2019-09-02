@@ -42,7 +42,9 @@ init([Members, Id, N, F, T, Curve,
     {G1, G2} = generate(Curve, Members),
     %% get the fun used to sign things with our swarm key
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, Round, [{callback, true}, {elections, false}, {signfun, ReadySigFun}, {verifyfun, mk_verification_fun(Members)}]),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, Round, [{callback, true}, {elections, false},
+                                                          {signfun, ReadySigFun},
+                                                          {verifyfun, mk_verification_fun(Members)}]),
     lager:info("DKG~p started", [Id]),
     {ok, #state{n = N,
                 id = Id,
@@ -62,8 +64,10 @@ init([Members, Id, N, F, T, Curve,
 handle_command(start, State) ->
     {NewDKG, {send, Msgs}} = dkg_hybriddkg:start(State#state.dkg),
     {reply, ok, fixup_msgs(Msgs), State#state{dkg=NewDKG}};
-handle_command(get_info, #state{privkey = PKey, members = Members, n = N, f = F} = State) ->
-    {reply, {info, PKey, Members, N, F}, [], State};
+handle_command(get_info, #state{privkey = undefined} = State) ->
+    {reply, {error, not_done}, [], State};
+handle_command(get_info, #state{privkey = PKey, members = Members} = State) ->
+    {reply, {ok, PKey, Members}, [], State};
 handle_command({stop, _Timeout}, #state{privkey = PKey, done_called = false} = State)
   when PKey /= undefined ->
     {reply, {error, not_done}, [], State};
@@ -265,16 +269,6 @@ deserialize(BinState) ->
     end,
     State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey}.
 
-restore(#state{done_called = true, % if this is true on restore, we might not have started
-                                   % this correctly yet
-               donemod = DoneMod, donefun = DoneFun,
-               artifact = Artifact, signatures = Sigs,
-               members = Members, privkey = PrivKey,
-               height = Height, delay = Delay
-              } = OldState, _NewState) ->
-    lager:info("restored dkg was completed, attempting to restart hbbft group"),
-    ok = DoneMod:DoneFun(Artifact, Sigs, Members, PrivKey, Height, Delay),
-    {ok, OldState};
 restore(OldState, _NewState) ->
     {ok, OldState}.
 
