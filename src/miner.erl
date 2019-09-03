@@ -51,7 +51,6 @@
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
-    election_interval = infinity :: pos_integer() | infinity,
     current_height = -1 :: integer(),
     handoff_waiting = #{} :: #{pos_integer => pid() | {pending, [binary()], pos_integer(),
                                                        blockchain_block:block(), boolean()}},
@@ -382,14 +381,11 @@ init(Args) ->
             {ok, Top} = blockchain:height(Chain),
             {ok, Block} = blockchain:get_block(Top, Chain),
             {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
-            Ledger = blockchain:ledger(Chain),
-            {ok, Interval} = blockchain:config(?election_interval, Ledger),
             self() ! init,
 
             {ok, #state{blockchain = Chain,
                         election_epoch = ElectionEpoch,
                         consensus_start = EpochStart,
-                        election_interval = Interval,
                         blockchain_ref = BlockchainRef,
                         onboarding_key = proplists:get_value(onboarding_key, Args, undefined)}}
     end.
@@ -408,16 +404,12 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
                                           [blockchain_txn_handler, self(),
                                            ConsensusGroup]}),
 
-    Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
     Ref = set_next_block_timer(Chain),
     {reply, ok, State#state{consensus_group = ConsensusGroup,
                             blockchain = Chain,
                             consensus_start = 1,
                             election_epoch = 1,
-                            block_timer = Ref,
-                            election_interval = Interval}};
+                            block_timer = Ref}};
 handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
             #state{election_epoch = ElectionEpoch0,
                    consensus_start = EpochStart0} = State) ->
@@ -446,7 +438,7 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                 %% cheap enough?
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
                     case blockchain_election:has_new_group(ValidTransactions) of
-                        {true, _, _} ->
+                        {true, _, ConsensusGroupTxn, _} ->
                             Epoch = ElectionEpoch0 + 1,
                             Start = EpochStart0 + 1,
                             End = CurrentBlockHeight,
@@ -456,9 +448,6 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From,
                             %% to cut down on the size of group txn blocks, which we'll
                             %% need to fetch and store all of to validate snapshots, we
                             %% discard all other txns for this block
-                            [ConsensusGroupTxn] = lists:filter(fun(T) ->
-                                                                       blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                                                               end, ValidTransactions),
                             {Epoch, NewHeight, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
@@ -499,7 +488,7 @@ handle_call(_Msg, _From, State) ->
 handle_cast({handoff_consensus, NewConsensusGroup, _ElectionHeight, _Rescue},
             #state{consensus_group = Group} = State) when Group == NewConsensusGroup ->
     {noreply, State};
-handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
+handle_cast({handoff_consensus, NewConsensusGroup, {ElectionHeight, _Delay} = EID, Rescue},
             #state{handoff_waiting = Waiting} = State) ->
     lager:info("handing off consensus from ~p or ~p to ~p",
                [State#state.consensus_group,
@@ -508,25 +497,25 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
     {ok, Block} = blockchain:head_block(State#state.blockchain),
     Round = blockchain_block:hbbft_round(Block),
     {Group, Waiting1} =
-        case maps:find(ElectionHeight, Waiting) of
+        case maps:find(EID, Waiting) of
             {ok, NewConsensusGroup} ->
                 Ref = State#state.block_timer,
                 {State#state.consensus_group, Waiting};
             {ok, Pid} when is_pid(Pid) ->
                 %% stale, kill it
-                lager:info("stopping stale group ~p at election ~p", [Pid, ElectionHeight]),
+                lager:info("stopping stale group ~p at election ~p", [Pid, EID]),
                 stop_group(Pid),
                 Ref = State#state.block_timer,
                 {State#state.consensus_group,
-                 Waiting#{ElectionHeight => NewConsensusGroup}};
+                 Waiting#{EID => NewConsensusGroup}};
             {ok, handed_off} ->
-                lager:info("double handoff at ~p, ignoring", [ElectionHeight]),
+                lager:info("double handoff at ~p, ignoring", [EID]),
                 Ref = State#state.block_timer,
                 {State#state.consensus_group, Waiting};
             %% here, we've already transitioned, so do the handoff
             {ok, {pending, Buf, NextRound, Block, Sync}} ->
                 BlockHeight = blockchain_block:height(Block),
-                lager:info("txn recvd at block ~p at election ~p", [BlockHeight, ElectionHeight]),
+                lager:info("txn recvd at block ~p at election ~p", [BlockHeight, EID]),
                 set_buf(NewConsensusGroup, Buf),
                 stop_group(State#state.consensus_group),
                 libp2p_group_relcast:handle_input(
@@ -544,13 +533,18 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                 start_txn_handler(NewConsensusGroup),
                 Ref = make_ref(),
                 self() ! block_timeout,
-                {NewConsensusGroup, #{ElectionHeight => handed_off}};
+                {NewConsensusGroup, #{EID => handed_off}};
             _ ->
                 Ledger = blockchain:ledger(State#state.blockchain),
-                {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
-                lager:info("no existing group at election ~p: ~p?", [ElectionHeight, Height]),
+                {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+                lager:info("no existing group at election ~p: ~p?", [EID, Height]),
+                #{election_height := TxnHeight,
+                  election_delay := TxnDelay} =
+                    blockchain_election:election_info(Ledger, State#state.blockchain),
+                TxnEID = {TxnHeight, TxnDelay},
                 case Height of
-                    H when H >= ElectionHeight ->
+                    H when H >= ElectionHeight andalso
+                           EID == TxnEID ->
                         lager:info("this is a restore from dkg"),
                         libp2p_group_relcast:handle_input(
                           NewConsensusGroup, {next_round, Round + 1,
@@ -558,11 +552,11 @@ handle_cast({handoff_consensus, NewConsensusGroup, ElectionHeight, Rescue},
                                               false}),
                         start_txn_handler(NewConsensusGroup),
                         Ref = set_next_block_timer(State#state.blockchain),
-                        {NewConsensusGroup, #{ElectionHeight => handed_off}};
+                        {NewConsensusGroup, #{EID => handed_off}};
                     _ ->
                         Ref = State#state.block_timer,
                         {State#state.consensus_group,
-                         Waiting#{ElectionHeight => NewConsensusGroup}}
+                         Waiting#{EID => NewConsensusGroup}}
                 end
         end,
     lager:info("NEW ~p", [{Group, Waiting1}]),
@@ -584,7 +578,6 @@ handle_info(block_timeout, State) ->
     {noreply, State};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
-                         election_interval = Interval,
                          current_height = CurrHeight,
                          consensus_start = Start,
                          blockchain = Chain,
@@ -594,8 +587,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
     %% NOTE: only the consensus group member must do this
     %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
     lager:info("add block @ ~p ~p ~p", [ConsensusGroup, Start, Epoch]),
-    Ledger = blockchain:ledger(Chain),
-
     NewState =
         case blockchain:get_block(Hash, Chain) of
             {ok, Block} ->
@@ -608,10 +599,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         case blockchain_election:has_new_group(Txns) of
                             %% not here yet, regular round
                             false ->
-                                NextElection = next_election(Start, Interval),
-                                lager:info("reg round c ~p n ~p", [Height, NextElection]),
-                                miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
-                                lager:info("past maybe start"),
+                                lager:info("reg round c ~p", [Height]),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,
@@ -621,15 +609,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             current_height = Height};
                             %% there's a new group now, and we're still in, so pass over the
                             %% buffer, shut down the old one and elevate the new one
-                            {true, true, ElectionHeight} ->
-                                {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
+                            {true, true, _, EID} ->
                                 lager:info("stay in ~p", [Waiting]),
                                 Buf = get_buf(ConsensusGroup),
                                 NextRound = Round + 1,
 
                                 {NewGroup, Waiting1} =
-                                    case maps:find(ElectionHeight, Waiting) of
+                                    case maps:find(EID, Waiting) of
                                         {ok, Pid} when is_pid(Pid) ->
                                             set_buf(Pid, Buf),
                                             libp2p_group_relcast:handle_input(
@@ -637,23 +623,20 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                                     blockchain_block:transactions(Block),
                                                     Sync}),
                                             start_txn_handler(Pid),
-                                            {Pid, #{ElectionHeight => handed_off}};
+                                            {Pid, #{EID => handed_off}};
                                         error ->
                                             {undefined, % shouldn't be too harmful to kick onto nc track for a bit
-                                             Waiting#{ElectionHeight => {pending, Buf, NextRound, Block, Sync}}}
+                                             Waiting#{EID => {pending, Buf, NextRound, Block, Sync}}}
                                     end,
                                 stop_group(ConsensusGroup),
                                 State#state{block_timer = set_next_block_timer(Chain),
-                                            election_interval = Interval,
                                             handoff_waiting = Waiting1,
                                             consensus_group = NewGroup,
                                             election_epoch = State#state.election_epoch + 1,
                                             current_height = Height,
                                             consensus_start = Height};
                             %% we're not a member of the new group, we can shut down
-                            {true, false, _} ->
-                                {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
+                            {true, false, _, _} ->
                                 lager:info("leave"),
 
                                 stop_group(ConsensusGroup),
@@ -662,7 +645,6 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             handoff_waiting = #{},
                                             consensus_group = undefined,
                                             election_epoch = State#state.election_epoch + 1,
-                                            election_interval = Interval,
                                             consensus_start = Height,
                                             current_height = Height}
                             end;
@@ -677,14 +659,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
     {noreply, NewState};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{consensus_group = ConsensusGroup,
-                   election_interval = Interval,
                    current_height = CurrHeight,
                    consensus_start = Start,
                    handoff_waiting = Waiting,
                    election_epoch = Epoch,
                    blockchain = Chain} = State) when ConsensusGroup == undefined andalso
                                                      Chain /= undefined ->
-    Ledger = blockchain:ledger(Chain),
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             Height = blockchain_block:height(Block),
@@ -696,29 +676,25 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                     case blockchain_election:has_new_group(Txns) of
                         false ->
                             lager:info("nc reg round"),
-                            NextElection = next_election(Start, Interval),
-                            miner_consensus_mgr:maybe_start_election(Hash, Height, NextElection),
                             {noreply, State#state{current_height = Height}};
-                        {true, true, ElectionHeight} ->
-                            {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
+                        {true, true, _, EID} ->
                             lager:info("nc start group"),
                             %% it's possible that waiting hasn't been set, I'm not entirely
                             %% sure how to handle that at this point
                             Round = blockchain_block:hbbft_round(Block),
                             NextRound = Round + 1,
                             {NewGroup, Waiting1} =
-                                case maps:find(ElectionHeight, Waiting) of
+                                case maps:find(EID, Waiting) of
                                     {ok, Pid} when is_pid(Pid) ->
                                         libp2p_group_relcast:handle_input(
                                           Pid, {next_round, NextRound,
                                                 blockchain_block:transactions(Block),
                                                 Sync}),
                                         start_txn_handler(Pid),
-                                        {Pid, #{ElectionHeight => handed_off}};
+                                        {Pid, #{EID => handed_off}};
                                     error ->
                                         {undefined, %% shouldn't be too harmful to kick onto nc track for a bit
-                                         Waiting#{ElectionHeight => {pending, [], NextRound, Block, Sync}}}
+                                         Waiting#{EID => {pending, [], NextRound, Block, Sync}}}
                                 end,
                             lager:info("nc got here"),
                             {noreply,
@@ -726,20 +702,16 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                          handoff_waiting = Waiting1,
                                          consensus_group = NewGroup,
                                          election_epoch = State#state.election_epoch + 1,
-                                         election_interval = Interval,
                                          current_height = Height,
                                          consensus_start = Height}};
                         %% we're not a member of the new group, we can stay down
-                        {true, false, _} ->
-                            {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
+                        {true, false, _, _} ->
                             lager:info("nc stay out"),
                             {noreply,
                              State#state{block_timer = make_ref(),
                                          handoff_waiting = #{},
                                          consensus_group = undefined,
                                          election_epoch = State#state.election_epoch + 1,
-                                         election_interval = Interval,
                                          current_height = Height,
                                          consensus_start = Height}}
                     end;
@@ -754,16 +726,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(?election_interval, Ledger),
-
-    {noreply, State#state{blockchain = Chain,
-                          election_interval = Interval}};
+    {noreply, State#state{blockchain = Chain}};
 handle_info(init, #state{blockchain = Chain} = State) ->
     {ok, Height} = blockchain:height(Chain),
     lager:info("cold start blockchain at known height ~p", [Height]),
     {ok, Block} = blockchain:get_block(Height, Chain),
-    Group = restore(Chain, Block, Height, State#state.election_interval),
+    Group = restore(Chain, Block, Height),
     Ref =
         case is_pid(Group) of
             true ->
@@ -784,42 +752,29 @@ terminate(Reason, _State) ->
 %% Internal functions
 %% =================================================================
 
-restore(Chain, Block, Height, Interval) ->
+restore(Chain, Block, Height) ->
     lager:info("attempting to restore"),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Interval} = blockchain:config(?election_interval, Ledger),
     {_ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(Block),
     {ok, ConsensusHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
     Election = next_election(EpochStart, Interval),
-    case miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight) of
-        Group when is_pid(Group) ->
-            start_txn_handler(Group),
-            case Height of
-                %% it's possible that we've already processed the block that would
-                %% have started the election, so try this on restore
-                Ht when Ht > Election ->
-                    miner_consensus_mgr:start_election(ignored, Height, Election);
-                _ ->
-                    ok
-            end,
-            Group;
-        undefined ->
-            case Height of
-                Ht when Ht > Election ->
-                    miner_consensus_mgr:start_election(ignored, Height, Election);
-                _ ->
-                    ok
-            end,
-            undefined;
-        cannot_start ->
-            %% for now, don't do anything here.  in an emergency we
-            %% can likely restore the dkg and manually start the group
-            case Height of
-                Ht when Ht > Election ->
-                    miner_consensus_mgr:start_election(ignored, Height, Election);
-                _ ->
-                    ok
-            end,
-            undefined
-    end.
+    Reply =
+        case miner_consensus_mgr:maybe_start_consensus_group(ConsensusHeight) of
+            Group when is_pid(Group) ->
+                start_txn_handler(Group),
+                Group;
+            _ ->
+                undefined
+        end,
+    case Height of
+        %% it's possible that we've already processed the block that would
+        %% have started the election, so try this on restore
+        Ht when Ht > Election ->
+            miner_consensus_mgr:start_election(ignored, Height, Election);
+        _ -> ok
+    end,
+    Reply.
 
 set_next_block_timer(Chain) ->
     {ok, BlockTime} = blockchain:config(?block_time, blockchain:ledger(Chain)),

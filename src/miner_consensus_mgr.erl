@@ -10,15 +10,14 @@
          start_link/1,
 
          initial_dkg/4,
-         maybe_start_election/3,
          start_election/3,
          maybe_start_consensus_group/1,
          cancel_dkg/0,
 
          %% internal
-         genesis_block_done/4,
-         election_done/4,
-         rescue_done/4,
+         genesis_block_done/6,
+         election_done/6,
+         rescue_done/6,
          sign_genesis_block/2,
 
          %% info
@@ -35,13 +34,11 @@
 
 -record(state,
         {
-         current_dkg = #{} :: #{pos_integer() => pid()},
+         current_dkg = #{} :: #{{pos_integer(),non_neg_integer()} => pid()},
          dkg_await :: undefined | {reference(), term()},
-         consensus_pos :: undefined | pos_integer(),
          initial_height = 1 :: non_neg_integer(),
          delay = 0 :: integer(),
          chain :: undefined | blockchain:blockchain(),
-         election_running = false :: boolean(),
          cancel_dkg  = #{} :: #{pos_integer() => pid()}
         }).
 
@@ -69,12 +66,6 @@ in_consensus() ->
 initial_dkg(GenesisTransactions, Addrs, N, Curve) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs, N, Curve}, infinity).
 
-maybe_start_election(_Hash, Height, NextElection) when Height =/= NextElection ->
-    lager:debug("not starting election ~p", [{_Hash, Height, NextElection}]),
-    ok;
-maybe_start_election(Hash, _, NextElection) ->
-    start_election(Hash, NextElection, NextElection).
-
 start_election(Hash, CurrentHeight, StartHeight) ->
     gen_server:call(?MODULE, {start_election, Hash, CurrentHeight, StartHeight}, infinity).
 
@@ -92,17 +83,24 @@ sign_genesis_block(GenesisBlock, PrivKey) ->
 -spec genesis_block_done(GenesisBLock :: binary(),
                          Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
                          Members :: [libp2p_crypto:address()],
-                         PrivKey :: tpke_privkey:privkey()) -> ok.
-genesis_block_done(GenesisBlock, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures, Members, PrivKey}, infinity).
+                         PrivKey :: tpke_privkey:privkey(),
+                         Height :: pos_integer(),
+                         Delay :: non_neg_integer()
+                        ) -> ok.
+genesis_block_done(GenesisBlock, Signatures, Members, PrivKey, Height, Delay) ->
+    gen_server:call(?MODULE, {genesis_block_done, GenesisBlock, Signatures,
+                              Members, PrivKey, Height, Delay}, infinity).
 
 -spec election_done(binary(), [{libp2p_crypto:pubkey_bin(), binary()}],
-                    [libp2p_crypto:address()], tpke_privkey:privkey()) -> ok.
-election_done(Artifact, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {election_done, Artifact, Signatures, Members, PrivKey}, infinity).
+                    [libp2p_crypto:address()], tpke_privkey:privkey(),
+                    pos_integer(), non_neg_integer()) -> ok.
+election_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
+    gen_server:call(?MODULE, {election_done, Artifact, Signatures,
+                              Members, PrivKey, Height, Delay}, infinity).
 
-rescue_done(Artifact, Signatures, Members, PrivKey) ->
-    gen_server:call(?MODULE, {rescue_done, Artifact, Signatures, Members, PrivKey}, infinity).
+rescue_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
+    gen_server:call(?MODULE, {rescue_done, Artifact, Signatures,
+                              Members, PrivKey, Height, Delay}, infinity).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -124,7 +122,7 @@ handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
     Signature = SignFun(GenesisBlock),
     Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
     {reply, {ok, Address, Signature}, State};
-handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey}, _From,
+handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey, _Height, _Delay}, _From,
             State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
     SignedGenesisBlock = blockchain_block:set_signatures(GenesisBlock, Signatures),
@@ -145,9 +143,9 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     F = ((N - 1) div 3),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
 
-
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
     GroupArg = [miner_hbbft_handler, [Members,
-                                      State#state.consensus_pos,
+                                      Pos,
                                       N,
                                       F,
                                       BatchSize,
@@ -163,16 +161,13 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
     miner:start_chain(Group, Chain),
 
-    #{1 := DKGGroup} = State#state.current_dkg,
+    #{ {1,0} := DKGGroup} = State#state.current_dkg,
     {reply, ok, State#state{current_dkg = #{},
                             cancel_dkg = #{3 => DKGGroup},
                             chain = Chain}};
-handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
-            State = #state{initial_height = Height,
-                           chain = Chain,
-                           delay = Delay}) ->
+handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Delay}, _From,
+            State = #state{chain = Chain}) ->
     lager:info("election done at ~p delay ~p", [Height, Delay]),
-
     {ok, N} = blockchain:config(?num_consensus_members, blockchain:ledger(Chain)),
     F = ((N - 1) div 3),
 
@@ -201,9 +196,10 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
         false -> ok
     end,
     {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(Chain)),
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
 
     GroupArg = [miner_hbbft_handler, [Members,
-                                      State#state.consensus_pos,
+                                      Pos,
                                       N,
                                       F,
                                       BatchSize,
@@ -223,10 +219,10 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey}, _From,
     lager:info("checking that the hbbft group has successfully started"),
     true = libp2p_group_relcast:handle_command(Group, have_key),
 
-    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
-    ok = miner:handoff_consensus(Group, Height + Delay),
+    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
+    ok = miner:handoff_consensus(Group, {Height, Delay}),
     {reply, ok, State};
-handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
+handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _Delay}, _From,
             State = #state{chain = Chain}) ->
     Ledger = blockchain:ledger(Chain),
     {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
@@ -235,9 +231,10 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
     {ok, N} = blockchain:config(num_consensus_members, Ledger),
     F = ((N - 1) div 3),
     {ok, BatchSize} = blockchain:config(batch_size, Ledger),
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
 
     GroupArg = [miner_hbbft_handler, [Members,
-                                      State#state.consensus_pos,
+                                      Pos,
                                       N,
                                       F,
                                       BatchSize,
@@ -251,12 +248,12 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey}, _From,
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
-    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
+    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
     %% adjust the height upwards, the rescue will be from one block
     %% above the present one.
-    ok = miner:handoff_consensus(Group, Height, true),
+    ok = miner:handoff_consensus(Group, {Height,0}, true),
     %% here the dkg has already been moved into the cancel state.
-    {reply, ok, State#state{delay = 0, election_running = false}};
+    {reply, ok, State#state{delay = 0}};
 handle_call({maybe_start_consensus_group, StartHeight}, _From,
             State) ->
     lager:info("try cold start consensus group at ~p", [StartHeight]),
@@ -274,91 +271,45 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                 true ->
                     #{election_height := ElectionHeight,
                       election_delay := ElectionDelay} =
-                        election_info(Ledger, Chain),
+                        blockchain_election:election_info(Ledger, Chain),
                     lager:info("in group, trying to restore"),
                     {ok, Block} = blockchain:head_block(Chain),
                     BlockHeight = blockchain_block:height(Block),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                     Name = consensus_group_name(StartHeight, ConsensusAddrs),
-                    Group =
-                        case maps:find(ElectionHeight+ElectionDelay, State#state.cancel_dkg) of
-                            error ->
-                                {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
-                                %% we intentionally don't use create here, because
-                                %% this is a restore.
-                                GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
-                                                                  Pos,
-                                                                  N,
-                                                                  F,
-                                                                  BatchSize,
-                                                                  undefined,
-                                                                  Chain]],
-                                %% while this won't reflect the actual height, it has to be deterministic
-                                lager:info("restoring consensus group ~p", [Name]),
-                                {ok, Grp} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                                                   Name,
-                                                                   libp2p_group_relcast, GroupArg),
-                                Grp;
-                            {ok, ExtractDKGGroup} ->
-                                lager:info("trying extraction restore"),
-                                start_hbbft(ExtractDKGGroup, State#state{consensus_pos = Pos})
-                        end,
+                    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+                    %% we intentionally don't use create here, because
+                    %% this is a restore.
+                    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                                      Pos,
+                                                      N,
+                                                      F,
+                                                      BatchSize,
+                                                      undefined,
+                                                      Chain]],
+                    %% while this won't reflect the actual height, it has to be deterministic
+                    lager:info("restoring consensus group ~p", [Name]),
+                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                         Name,
+                                                         libp2p_group_relcast, GroupArg),
                     case wait_for_group(Group) of
                         started ->
-                            Height =
-                                case StartHeight >= State#state.initial_height of
-                                    true ->
-                                        StartHeight;
-                                    _ ->
-                                        State#state.initial_height
-                                end,
-                            ok = miner:handoff_consensus(Group, ElectionHeight + ElectionDelay),
-                            {reply, Group, State#state{consensus_pos = Pos,
-                                                       %% we already completed our election
-                                                       election_running = false,
-                                                       initial_height = Height}};
+                            ok = miner:handoff_consensus(Group, {ElectionHeight, ElectionDelay}),
+                            %% we already completed our election
+                            {reply, Group, State};
                         {error, cannot_start} ->
                             lager:info("didn't restore consensus group, missing"),
                             ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
                             Txns = blockchain_block:transactions(Block),
                             State1 = case blockchain_election:has_new_group(Txns) of
-                                         {true, _, _} ->
+                                         {true, _, _Txn, {ElectionHeight1, ElectionDelay1}} ->
                                              %% ok, the last block has a group transaction in it
                                              %% it's possible we lost some of our privkeys, so restart
                                              %% that last DKG and let it flush any remaining messages
                                              %% needed to boot consensus
-                                             case lists:filter(fun(T) ->
-                                                                       blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                                                               end, blockchain_block:transactions(Block)) of
-                                                 [Txn] ->
-                                                     ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
-                                                     ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
-                                                     %% TODO are the resulting state modifications safe here?
-                                                     StateR =
-                                                         #state{cancel_dkg = CancelDKGs,
-                                                                current_dkg = DKGs} =
-                                                         restore_dkg(ElectionHeight, ElectionDelay, State),
-                                                     {DKGGroup, DKGs1} = maps:take(ElectionHeight+ElectionDelay, DKGs),
-                                                     StateR#state{cancel_dkg = CancelDKGs#{BlockHeight+10 =>
-                                                                                               DKGGroup},
-                                                                  current_dkg = DKGs1,
-                                                                  delay = 0,
-                                                                  election_running = false};
-                                                 _ ->
-                                                     lager:warning("somehow cannot find group transaction"),
-                                                     State
-                                             end;
+                                             restore_dkg(ElectionHeight1, ElectionDelay1, BlockHeight, State);
                                          _ when BlockHeight < (ElectionHeight+ElectionDelay+10) ->
-                                             StateR =
-                                                 #state{cancel_dkg = CancelDKGs,
-                                                        current_dkg = DKGs} =
-                                                 restore_dkg(ElectionHeight, ElectionDelay, State),
-                                             {DKGGroup, DKGs1} = maps:take(ElectionHeight+ElectionDelay, DKGs),
-                                             StateR#state{cancel_dkg = CancelDKGs#{BlockHeight+10 =>
-                                                                                       DKGGroup},
-                                                          current_dkg = DKGs1,
-                                                          delay = 0,
-                                                          election_running = false};
+                                             restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, State);
                                          _ ->
                                              State
                                      end,
@@ -405,7 +356,7 @@ handle_call({start_election, Hash0, CurrentHeight, StartHeight}, _From,
 
     Delay = (Diff div Interval) * Interval,
 
-    case maps:find(StartHeight+Delay, DKGs) of
+    case maps:find({StartHeight, Delay}, DKGs) of
         error ->
             State = State0#state{initial_height = StartHeight,
                                  delay = Delay},
@@ -429,9 +380,18 @@ handle_call({start_election, Hash0, CurrentHeight, StartHeight}, _From,
             {reply, already_running, State0}
     end;
 handle_call(consensus_pos, _From, State) ->
-    {reply, State#state.consensus_pos, State};
-handle_call(in_consensus, _From, #state{chain=undefined, consensus_pos=Pos}=State) ->
-    {reply, is_integer(Pos), State};
+    Ledger = blockchain:ledger(State#state.chain),
+    {ok, Members} = blockchain_ledger_v1:consensus_members(Ledger),
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
+    {reply, Pos, State};
+handle_call(in_consensus, _From, #state{chain=undefined, current_dkg = DKGs} = State) ->
+    Reply =
+        case maps:find({1, 0}, DKGs) of
+            error -> false;
+            {ok, out} -> false;
+            _ -> true
+        end,
+    {reply, Reply, State};
 handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     %% there are three aspects to this:
     %%   1) are we in the consensus group as viewed by the chain
@@ -454,24 +414,40 @@ handle_cast(_Msg, State) ->
 
 handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
             #state{current_dkg = DKGs,
-                   initial_height = Height,
-                   cancel_dkg = CancelDKGs,
-                   delay = Delay} = State0)
-  when State0#state.chain /= undefined ->
-    Ledger = blockchain:ledger(State0#state.chain),
-    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
-    case blockchain:get_block(Hash, State0#state.chain) of
+                   cancel_dkg = CancelDKGs} = State)
+  when State#state.chain /= undefined ->
+    Ledger = blockchain:ledger(State#state.chain),
+    {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
+    {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
+    case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
             lager:info("processing block height ~p", [BlockHeight]),
-            State = case maps:find(BlockHeight, CancelDKGs) of
+            State1 = case maps:find(BlockHeight, CancelDKGs) of
                         error ->
-                            State0;
+                            State;
                         {ok, Group} ->
                             lager:info("cancelling DKG ~p at height ~p", [Group, BlockHeight]),
                             catch libp2p_group_relcast:handle_command(Group, {stop, 120000}),
-                            State0#state{cancel_dkg = maps:remove(BlockHeight, CancelDKGs)}
+                            State#state{cancel_dkg = maps:remove(BlockHeight, CancelDKGs)}
                     end,
+            {_, EpochStart} = blockchain_block_v1:election_info(Block),
+            Height = next_election(EpochStart, ElectionInterval),
+            Diff = BlockHeight - Height,
+            Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+            ElectionRunning = Height /= 1 andalso BlockHeight >= Height,
+            State2 =
+                case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
+                    true ->
+                        %% start the election running here
+                        lager:info("starting new election at ~p+~p", [Height, Delay]),
+                        initiate_election(Hash, Height,
+                                          State1#state{delay = Delay,
+                                                       initial_height = Height});
+                    false ->
+                        State1#state{delay = Delay,
+                                     initial_height = Height}
+                end,
             Txns = blockchain_block:transactions(Block),
             NewGroup = blockchain_election:has_new_group(Txns),
             case blockchain_block_v1:is_rescue_block(Block) of
@@ -487,52 +463,51 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                     case lists:member(MyAddress, Members) of
                         true ->
                             lager:info("Preparing to run rescue DKG: ~p", [Members]),
-                            State1 = rescue_dkg(Members, term_to_binary(Members), State),
-                            {noreply, State1};
+                            State3 = rescue_dkg(Members, term_to_binary(Members), State2),
+                            {noreply, State3};
                         false ->
                             lager:info("Not in rescue DKG: ~p", [Members]),
-                            {noreply, State}
+                            {noreply, State2}
                     end;
-                false when State#state.election_running andalso
-                           NewGroup /= false andalso
+                false when NewGroup /= false andalso
                            BlockHeight /= 1 ->
-                    [Txn] =
-                        lists:filter(
-                          fun(T) ->
-                                  blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                          end, Txns),
-                    ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
-                    ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
-
                     %% if we got a new group
-                    State1 =
-                        case maps:find(ElectionHeight+ElectionDelay, DKGs) of
+                    {_, _, _Txn, {ElectionHeight, ElectionDelay} = EID} = NewGroup,
+                    State3 =
+                        case maps:find(EID, State#state.current_dkg) of
                             %% we're not in
                             error ->
-                                State;
+                                State2;
+                            {ok, out} ->
+                                State2#state{current_dkg = maps:remove(EID, State2#state.current_dkg)};
                             {ok, ElectionGroup} ->
-                                lager:info("starting hbbft at block height ~p", [BlockHeight]),
-                                start_hbbft(ElectionGroup, State),
-                                State#state{cancel_dkg = CancelDKGs#{ElectionHeight+ElectionDelay+2 =>
-                                                                         ElectionGroup}}
+                                lager:info("starting hbbft ~p+~p at block height ~p",
+                                           [ElectionHeight, ElectionDelay, BlockHeight]),
+                                %% we explicitly ignore this because there's nothing that
+                                %% we can do about errors here
+                                _ = start_hbbft(ElectionGroup, ElectionHeight, ElectionDelay, State2#state.chain),
+                                State2#state{current_dkg = maps:remove(EID, State2#state.current_dkg),
+                                             cancel_dkg = CancelDKGs#{BlockHeight+2 => ElectionGroup}}
                         end,
-                    {noreply, State1#state{delay = 0,
-                                           election_running = false}};
-                false when State#state.election_running ->
-                    NextRestart = Height + Interval + Delay,
+                    {noreply, State3#state{delay = 0}};
+                false when ElectionRunning ->
+                    NextRestart = Height + RestartInterval + Delay,
                     case BlockHeight of
                         NewHeight when NewHeight >= NextRestart  ->
                             lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
                             %% restart the dkg
-                            State1 = restart_election(State, Hash, Height),
-                            {noreply, State1};
+                            State3 = restart_election(State2, Hash, Height),
+                            {LastGroup, DKGs1} = maps:take({Height, Delay}, State3#state.current_dkg),
+                            {noreply, State3#state{current_dkg = DKGs1,
+                                                   cancel_dkg = CancelDKGs#{Height+Delay+2 =>
+                                                                                LastGroup}}};
                         NewHeight ->
                             lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
-                            {noreply, State}
+                            {noreply, State2}
                     end;
                 _Error ->
                     lager:warning("didn't get gossiped block: ~p", [_Error]),
-                    {noreply, State}
+                    {noreply, State2}
             end
     end;
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
@@ -563,22 +538,19 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
+    lager:info("hash ~p height ~p delay ~p", [Hash, Height, Delay]),
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
-                         election_done, N, Curve, true, State#state{initial_height = Height,
-                                                                    election_running = true}),
+                         election_done, N, Curve, true, State#state{initial_height = Height}),
 
     State1.
 
-restart_election(#state{delay = Delay0,
+restart_election(#state{delay = Delay,
                         chain=Chain} = State, Hash, Height) ->
 
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
-
-    Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
@@ -603,21 +575,65 @@ rescue_dkg(Members, Artifact, State) ->
     {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_genesis_block},
                          rescue_done, length(Members), Curve, true,
                          State#state{initial_height = Height,
-                                     delay = 0,
-                                     election_running = true}),
+                                     delay = 0}),
     State1.
 
-restore_dkg(Height, Delay, State) ->
+restore_dkg(Height, Delay, CurrHeight, State) ->
     Ledger = blockchain:ledger(State#state.chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
     Artifact = term_to_binary(ConsensusAddrs),
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
                          election_done, length(ConsensusAddrs), Curve, false,
                          State#state{initial_height = Height,
-                                     delay = Delay,
-                                     election_running = true}),
-    State1.
+                                     delay = Delay}),
+    DKGGroup = maps:get({Height, Delay}, State1#state.current_dkg),
+    case wait_for_group(DKGGroup) of
+        started ->
+            %% this is only called when we cannot start the current consensus
+            %% group on restore, so should be safe to do create.  maybe set
+            %% round correctly here?
+            F = ((N - 1) div 3),
+            case libp2p_group_relcast:handle_command(DKGGroup, get_info) of
+                {ok, PrivKey, Members} ->
+                    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
+                    GroupArg = [miner_hbbft_handler, [Members,
+                                                      Pos,
+                                                      N,
+                                                      F,
+                                                      BatchSize,
+                                                      PrivKey,
+                                                      State#state.chain,
+                                                      1, % gets set later
+                                                      []], % gets filled later
+                                [{create, true}]],
+                    %% while this won't reflect the actual height, it has to be deterministic
+                    Name = consensus_group_name(max(0, Height), Members),
+                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                         Name,
+                                                         libp2p_group_relcast, GroupArg),
+
+                    %% not sure what the correct error behavior here is?
+                    lager:info("checking that the hbbft group has successfully started"),
+                    started = wait_for_group(Group),
+                    true = libp2p_group_relcast:handle_command(Group, have_key),
+                    lager:info("restore start group ~p ~p in pos ~p", [Name, Group, Pos]),
+                    ok = miner:handoff_consensus(Group, {Height,Delay}),
+                    #state{cancel_dkg = CancelDKGs,
+                           current_dkg = DKGs} = State1,
+                    {DKGGroup, DKGs1} = maps:take({Height, Delay}, DKGs),
+                    State1#state{cancel_dkg = CancelDKGs#{CurrHeight+10 =>
+                                                              DKGGroup},
+                                 current_dkg = DKGs1};
+                {error, not_done} ->
+                    State1
+            end;
+        {error, _} ->
+            lager:info("no election group to restore"),
+            State1
+    end.
 
 do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     lager:info("do initial"),
@@ -674,14 +690,10 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
                                             Curve,
                                             Artifact,
                                             Sign,
-                                            {?MODULE, Done}, list_to_binary(DKGGroupName)],
+                                            {?MODULE, Done}, list_to_binary(DKGGroupName),
+                                            Height,
+                                            Delay],
                        [{create, Create}]],
-            %% the opts are added in the third position of the list
-            %% The below are for in_memory_mode
-            %% [{db_opts, [{in_memory_mode, true}]},
-            %%  {write_opts, [{disable_wal, true}]}]],
-            %% The below are for in_memory, which seems the right option
-            %% [{db_opts, [{in_memory, true}]}],
 
             {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                     DKGGroupName,
@@ -690,42 +702,48 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
             lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
                        [Height, MyAddress, Pos, DKGGroupName]),
-            {true, State#state{consensus_pos = Pos,
-                               current_dkg = DKGs#{Height+Delay => DKGGroup}}};
+            {true, State#state{current_dkg = DKGs#{{Height, Delay} => DKGGroup}}};
         false ->
             lager:info("not in DKG this round at height ~p ~p", [Height, Delay]),
-            {false, State#state{consensus_pos = undefined}}
+            {false, State#state{current_dkg = DKGs#{{Height, Delay} => out}}}
     end.
 
-start_hbbft(DKG, #state{initial_height = Height, delay = Delay} = State) ->
-    {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(State#state.chain)),
-    {info, PrivKey, Members, N, F} =  libp2p_group_relcast:handle_command(DKG, get_info),
+start_hbbft(DKG, Height, Delay, Chain) ->
+    Ledger = blockchain:ledger(Chain),
+    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    F = ((N - 1) div 3),
+    case libp2p_group_relcast:handle_command(DKG, get_info) of
+        {ok, PrivKey, Members} ->
+            Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
+            GroupArg = [miner_hbbft_handler, [Members,
+                                              Pos,
+                                              N,
+                                              F,
+                                              BatchSize,
+                                              PrivKey,
+                                              Chain,
+                                              1, % gets set later
+                                              []], % gets filled later
+                        [{create, true}]],
+            %% while this won't reflect the actual height, it has to be deterministic
+            Name = consensus_group_name(max(0, Height), Members),
+            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                 Name,
+                                                 libp2p_group_relcast, GroupArg),
 
-    GroupArg = [miner_hbbft_handler, [Members,
-                                      State#state.consensus_pos,
-                                      N,
-                                      F,
-                                      BatchSize,
-                                      PrivKey,
-                                      State#state.chain,
-                                      1, % gets set later
-                                      []], % gets filled later
-                [{create, true}]],
-    %% while this won't reflect the actual height, it has to be deterministic
-    Name = consensus_group_name(max(0, Height), Members),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
-                                         Name,
-                                         libp2p_group_relcast, GroupArg),
+            %% not sure what the correct error behavior here is?
+            lager:info("checking that the hbbft group has successfully started"),
+            started = wait_for_group(Group),
+            true = libp2p_group_relcast:handle_command(Group, have_key),
+            ok = libp2p_group_relcast:handle_command(DKG, mark_done),
 
-    %% not sure what the correct error behavior here is?
-    lager:info("checking that the hbbft group has successfully started"),
-    started = wait_for_group(Group),
-    true = libp2p_group_relcast:handle_command(Group, have_key),
-    ok = libp2p_group_relcast:handle_command(DKG, mark_done),
-
-    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, State#state.consensus_pos]),
-    ok = miner:handoff_consensus(Group, Height + Delay),
-    Group.
+            lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
+            ok = miner:handoff_consensus(Group, {Height, Delay}),
+            {ok, Group};
+        {error, not_done} ->
+            {error, not_done}
+    end.
 
 consensus_group_name(Height, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
@@ -755,40 +773,7 @@ wait_for_group(Group, Retries) ->
             wait_for_group(Group, Retries - 1)
     end.
 
-%% todo: move to blockchain_elections?
-election_info(Ledger, Chain) ->
-    %% grab the current height and get the block.
-    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
-    {ok, Block} = blockchain:get_block(Height, Chain),
-
-    %% get the election info
-    {Epoch, StartHeight} = blockchain_block_v1:election_info(Block),
-
-    %% get the election txn
-    {ok, StartBlock} = blockchain:get_block(StartHeight, Chain),
-    {ok, Txn} = get_election_txn(StartBlock),
-    lager:debug("txn ~p", [Txn]),
-    ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
-    ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
-
-    %% wrap it all up as a map
-
-    #{
-      epoch => Epoch,
-      start_height => StartHeight,
-      election_height => ElectionHeight,
-      election_delay => ElectionDelay
-     }.
-
-%% todo move also
-get_election_txn(Block) ->
-    Txns = blockchain_block:transactions(Block),
-    case lists:filter(
-           fun(T) ->
-                   blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-           end, Txns) of
-        [Txn] ->
-            {ok, Txn};
-        _ ->
-            {error, no_group_txn}
-    end.
+next_election(_Base, Interval) when is_atom(Interval) ->
+    infinity;
+next_election(Base, Interval) ->
+    Base + Interval.
