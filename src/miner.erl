@@ -536,10 +536,15 @@ handle_cast({handoff_consensus, NewConsensusGroup, {ElectionHeight, _Delay} = EI
                 {NewConsensusGroup, #{EID => handed_off}};
             _ ->
                 Ledger = blockchain:ledger(State#state.blockchain),
-                {ok, Height} = blockchain_ledger_v1:election_height(Ledger),
+                {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
                 lager:info("no existing group at election ~p: ~p?", [EID, Height]),
+                #{election_height := TxnHeight,
+                  election_delay := TxnDelay} =
+                    blockchain_election:election_info(Ledger, State#state.blockchain),
+                TxnEID = {TxnHeight, TxnDelay},
                 case Height of
-                    H when H >= ElectionHeight ->
+                    H when H >= ElectionHeight andalso
+                           EID == TxnEID ->
                         lager:info("this is a restore from dkg"),
                         libp2p_group_relcast:handle_input(
                           NewConsensusGroup, {next_round, Round + 1,

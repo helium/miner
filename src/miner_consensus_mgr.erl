@@ -271,7 +271,7 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
                 true ->
                     #{election_height := ElectionHeight,
                       election_delay := ElectionDelay} =
-                        election_info(Ledger, Chain),
+                        blockchain_election:election_info(Ledger, Chain),
                     lager:info("in group, trying to restore"),
                     {ok, Block} = blockchain:head_block(Chain),
                     BlockHeight = blockchain_block:height(Block),
@@ -547,13 +547,10 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 
     State1.
 
-restart_election(#state{delay = Delay0,
+restart_election(#state{delay = Delay,
                         chain=Chain} = State, Hash, Height) ->
 
     Ledger = blockchain:ledger(Chain),
-    {ok, Interval} = blockchain:config(?election_restart_interval, Ledger),
-
-    Delay = Delay0 + Interval,
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
@@ -774,44 +771,6 @@ wait_for_group(Group, Retries) ->
         not_started ->
             timer:sleep(500),
             wait_for_group(Group, Retries - 1)
-    end.
-
-%% todo: move to blockchain_elections?
-election_info(Ledger, Chain) ->
-    %% grab the current height and get the block.
-    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
-    {ok, Block} = blockchain:get_block(Height, Chain),
-
-    %% get the election info
-    {Epoch, StartHeight} = blockchain_block_v1:election_info(Block),
-
-    %% get the election txn
-    {ok, StartBlock} = blockchain:get_block(StartHeight, Chain),
-    {ok, Txn} = get_election_txn(StartBlock),
-    lager:debug("txn ~p", [Txn]),
-    ElectionHeight = blockchain_txn_consensus_group_v1:height(Txn),
-    ElectionDelay = blockchain_txn_consensus_group_v1:delay(Txn),
-
-    %% wrap it all up as a map
-
-    #{
-      epoch => Epoch,
-      start_height => StartHeight,
-      election_height => ElectionHeight,
-      election_delay => ElectionDelay
-     }.
-
-%% todo move also
-get_election_txn(Block) ->
-    Txns = blockchain_block:transactions(Block),
-    case lists:filter(
-           fun(T) ->
-                   blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-           end, Txns) of
-        [Txn] ->
-            {ok, Txn};
-        _ ->
-            {error, no_group_txn}
     end.
 
 next_election(_Base, Interval) when is_atom(Interval) ->
