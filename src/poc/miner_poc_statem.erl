@@ -58,7 +58,7 @@
     address :: libp2p_crypto:pubkey_bin(),
     poc_interval :: non_neg_integer() | undefined,
 
-    state = requesting :: requesting | mining | targeting | challenging | receiving | submitting | waiting,
+    state = requesting :: state(),
     secret :: binary() | undefined,
     onion_keys :: keys() | undefined,
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
@@ -73,6 +73,7 @@
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
 
+-type state() :: requesting | mining | targeting | challenging | receiving | submitting | waiting.
 -type data() :: #data{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 
@@ -101,8 +102,14 @@ init(Args) ->
     %% this should really only be overriden for testing
     Delay = maps:get(delay, Args, undefined),
     lager:info("init with ~p", [Args]),
-    {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                           address=Address, poc_interval=Delay, state=requesting}}.
+    case load_data(BaseDir) of
+        {error, _} ->
+            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting}};
+        {ok, State, Data} ->
+            {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                                  address=Address, poc_interval=Delay, state=State}}
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -137,7 +144,7 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #dat
             lager:info("request allowed @ ~p", [BlockHash]),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, save_state(Data#data{state=mining, secret=Secret, onion_keys=Keys, responses=#{}})}
+            {next_state, mining, save_data(Data#data{state=mining, secret=Secret, onion_keys=Keys, responses=#{}})}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -147,7 +154,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
         ok ->
             RandomDelay = rand:uniform(?MINING_DELAY),
             lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, RandomDelay]),
-            {next_state, delaying, save_state(Data#data{state=delaying, 
+            {next_state, delaying, save_data(Data#data{state=delaying, 
                                                         mining_timeout=?MINING_TIMEOUT,
                                                         mining_hash=BlockHash,
                                                         mining_delay=RandomDelay,
@@ -158,14 +165,14 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
                     {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
                     lager:error("did not see PoC request in last ~p block, retrying", [?MINING_TIMEOUT]),
-                    {next_state, requesting, save_state(Data#data{state=requesting, mining_timeout=?MINING_TIMEOUT})}
+                    {next_state, requesting, save_data(Data#data{state=requesting, mining_timeout=?MINING_TIMEOUT})}
             end
     end;
 mining(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
-    {keep_state, save_state(Data0#data{mining_delay=Delay-1})};
+    {keep_state, save_data(Data0#data{mining_delay=Delay-1})};
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
                                                                address=Challenger,
                                                                secret=Secret,
@@ -176,22 +183,22 @@ delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
     {ok, Block} = blockchain:get_block(MiningHash, Chain),
     Height = blockchain_block:height(Block),
     self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
-    {next_state, targeting, save_state(Data0#data{state=targeting, mining_hash=undefined})};
+    {next_state, targeting, save_data(Data0#data{state=targeting, mining_hash=undefined})};
 delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 targeting(info, {target, _, _, _}, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
-    {next_state, requesting, save_state(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+    {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
 targeting(info, {target, Entropy, Height, Ledger}, Data) ->
     case blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()) of
         {Target, Gateways} ->
             lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
             self() ! {challenge, Entropy, Target, Gateways, Height, Ledger},
-            {next_state, challenging, save_state(Data#data{state=challenging, challengees=[]})};
+            {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})};
         no_target ->
             lager:warning("no target found, back to requesting"),
-            {next_state, requesting, save_state(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
+            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
     end;
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -204,7 +211,7 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
             self() ! {target, Entropy, Height, Ledger},
-            {next_state, targeting, save_state(Data#data{state=targeting, retry=Retry-1})};
+            {next_state, targeting, save_data(Data#data{state=targeting, retry=Retry-1})};
         {ok, Path} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
@@ -218,12 +225,12 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, save_state(Data#data{state=receiving, challengees=lists:zip(Path, LayerData), packet_hashes=lists:zip(Path, LayerHashes)})};
+                    {next_state, receiving, save_data(Data#data{state=receiving, challengees=lists:zip(Path, LayerData), packet_hashes=lists:zip(Path, LayerHashes)})};
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
                     self() ! {target, Entropy, Height, Ledger},
-                    {next_state, targeting, save_state(Data#data{state=targeting, retry=Retry-1})}
+                    {next_state, targeting, save_data(Data#data{state=targeting, retry=Retry-1})}
             end
     end;
 challenging(EventType, EventContent, Data) ->
@@ -234,15 +241,15 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
-            {next_state, requesting, save_state(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             self() ! submit,
-            {next_state, submitting, save_state(Data#data{state=submitting, receiving_timeout=?RECEIVING_TIMEOUT})}
+            {next_state, submitting, save_data(Data#data{state=submitting, receiving_timeout=?RECEIVING_TIMEOUT})}
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
-    {keep_state, save_state(Data#data{receiving_timeout=T-1})};
+    {keep_state, save_data(Data#data{receiving_timeout=T-1})};
 receiving(cast, {witness, Witness}, #data{responses=Responses0,
                                           packet_hashes=PacketHashes,
                                           blockchain=Chain}=Data) ->
@@ -271,7 +278,7 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                             {keep_state, Data};
                         false ->
                             Responses1 = maps:put(PacketHash, [Witness|Witnesses], Responses0),
-                            {keep_state, save_state(Data#data{responses=Responses1})}
+                            {keep_state, save_data(Data#data{responses=Responses1})}
                     end
             end
     end;
@@ -290,7 +297,7 @@ receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Chal
                     case maps:get(Gateway, Responses0, undefined) of
                         undefined ->
                             Responses1 = maps:put(Gateway, Receipt, Responses0),
-                            {keep_state, save_state(Data#data{responses=Responses1})};
+                            {keep_state, save_data(Data#data{responses=Responses1})};
                         _ ->
                             lager:warning("Already got this receipt ~p for ~p ignoring", [Receipt, Gateway]),
                             {keep_state, Data}
@@ -327,20 +334,20 @@ submitting(info, submit, #data{address=Challenger,
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     ok = blockchain_worker:submit_txn(Txn1),
     lager:info("submitted blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
-    {next_state, waiting, save_state(Data#data{state=waiting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+    {next_state, waiting, save_data(Data#data{state=waiting, receipts_timeout=?RECEIPTS_TIMEOUT})};
 submitting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
-    {next_state, requesting,  save_state(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+    {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
-            {next_state, requesting,  save_state(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+            {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
-            {keep_state, save_state(Data#data{receipts_timeout=Timeout-1})}
+            {keep_state, save_data(Data#data{receipts_timeout=Timeout-1})}
     end;
 waiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -349,13 +356,26 @@ waiting(EventType, EventContent, Data) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec save_state(data()) -> data().
-save_state(#data{base_dir=undefined}=State) ->
+-spec save_data(data()) -> data().
+save_data(#data{base_dir=undefined}=State) ->
     State;
-save_state(#data{base_dir=BaseDir}=State) ->
+save_data(#data{base_dir=BaseDir}=State) ->
     BinState = erlang:term_to_binary(State),
-    ok = file:write_file(filename:join([BaseDir, ?STATE_FILE]), BinState),
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    ok = file:write_file(File, BinState),
     State.
+
+-spec load_data(file:filename_all()) -> {error, any()} | {ok, state(), data()}.
+load_data(BaseDir) ->
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    case file:read_file(File) of
+        {error, _Reason}=Error ->
+            Error;
+        {ok, Binary} ->
+            Data = erlang:binary_to_term(Binary),
+            #data{state=State} = Data,
+            {ok, State, Data}
+    end.
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
 validate_witness(Witness, Ledger) ->
