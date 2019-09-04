@@ -116,10 +116,6 @@ terminate(_Reason, _State) ->
 %% gen_statem callbacks
 %% ------------------------------------------------------------------
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 requesting(info, Msg, #data{blockchain=undefined}=Data) ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -146,10 +142,6 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #dat
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data) ->
     case find_request(BlockHash, Data) of
         ok ->
@@ -172,10 +164,6 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
 mining(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
     {keep_state, save_state(Data0#data{mining_delay=Delay-1})};
 delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
@@ -192,10 +180,6 @@ delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
 delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 targeting(info, {target, _, _, _}, #data{retry=0}=Data) ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
     {next_state, requesting, save_state(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
@@ -212,10 +196,6 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
 targeting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
                                                                                 onion_keys=OnionKey
                                                                                }=Data) ->
@@ -249,10 +229,6 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
@@ -330,10 +306,6 @@ receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Chal
 receiving(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 submitting(info, submit, #data{address=Challenger,
                                responses=Responses0,
                                secret=Secret,
@@ -359,10 +331,6 @@ submitting(info, submit, #data{address=Challenger,
 submitting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
     {next_state, requesting,  save_state(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
@@ -372,7 +340,7 @@ waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_t
             {next_state, requesting,  save_state(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
-            {keep_state,  save_state(Data#data{receipts_timeout=Timeout-1})}
+            {keep_state, save_state(Data#data{receipts_timeout=Timeout-1})}
     end;
 waiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -381,7 +349,7 @@ waiting(EventType, EventContent, Data) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-
+-spec save_state(data()) -> data().
 save_state(#data{base_dir=undefined}=State) ->
     State;
 save_state(#data{base_dir=BaseDir}=State) ->
@@ -389,10 +357,6 @@ save_state(#data{base_dir=BaseDir}=State) ->
     ok = file:write_file(filename:join([BaseDir, ?STATE_FILE]), BinState),
     State.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
 validate_witness(Witness, Ledger) ->
     Gateway = blockchain_poc_witness_v1:gateway(Witness),
@@ -411,10 +375,6 @@ validate_witness(Witness, Ledger) ->
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
                                address=Address,
@@ -450,10 +410,6 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->
     {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
 create_request(Address, BlockHash, Ledger) ->
@@ -471,10 +427,6 @@ create_request(Address, BlockHash, Ledger) ->
     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec find_request(binary(), data()) -> ok | {error, any()}.
 find_request(BlockHash, #data{blockchain=Blockchain,
                               address=Challenger,
@@ -505,10 +457,6 @@ find_request(BlockHash, #data{blockchain=Blockchain,
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec find_receipts(binary(), data()) -> ok | {error, any()}.
 find_receipts(BlockHash, #data{blockchain=Blockchain,
                                address=Challenger,
@@ -535,10 +483,6 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 handle_event(info, {blockchain_event, {add_block, _, _, _}}, Data) ->
     %% suppress the warning here
     {keep_state, Data};
@@ -546,10 +490,6 @@ handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 send_onion(_P2P, _Onion, 0) ->
     {error, retries_exceeded};
 send_onion(P2P, Onion, Retry) ->
