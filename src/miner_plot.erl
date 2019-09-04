@@ -12,15 +12,22 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 -define(SERVER, ?MODULE).
 
+%% in seconds
 -define(minutes(N), N * 60).
 -define(hours(N), N * ?minutes(60)).
+
+%% in hours
+-define(days(N), 24 * 60 * N).
 
 -record(stats,
         {
          times = [] :: [integer()],
-         tlens = [] :: [integer()]
+         tlens = [] :: [integer()],
+         delay = 0 :: integer()
         }).
 
 -record(state,
@@ -62,18 +69,21 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, _) ->
     Chain = blockchain_worker:blockchain(),
+    {ok, Interval} = blockchain:config(?election_interval, blockchain:ledger(Chain)),
     {ok, CurrHeight} = blockchain:height(Chain),
+    Start = max(1, CurrHeight - ?days(3)),
     %% trunc any existing file for now
-    {ok, File} = file:open("/tmp/miner-chain-stats", [write]),
+    Filename = application:get_env(miner, stats_file, "/tmp/miner-chain-stats"),
+    {ok, File} = file:open(Filename, [write]),
     Infos =
         [begin
              {ok, B} = blockchain:get_block(H, Chain),
              Time = blockchain_block:time(B),
              Txns = blockchain_block:transactions(B),
-             {Epoch, _} = blockchain_block_v1:election_info(B),
-             {Time, Txns, Epoch, H}
+             Epoch = blockchain_block_v1:election_info(B),
+             {Time, Txns, Epoch, H, Interval}
          end
-         || H <- lists:seq(1, CurrHeight)],
+         || H <- lists:seq(Start, CurrHeight)],
     %% calculate a moving average over the history of the blockchain
     %% eventually we might want to scan an existing file so we don't
     %% always have to recalculate this from the beginning.
@@ -91,18 +101,20 @@ handle_info(timeout, _) ->
                      stats = Stats,
                      height = CurrHeight,
                      fd = File}};
-handle_info({blockchain_event, {add_block, Hash, _, _}}, #state{chain = Chain,
+handle_info({blockchain_event, {add_block, Hash, _, Ledger}}, #state{chain = Chain,
                                                                 height = CurrHeight,
                                                                 fd = File,
                                                                 stats = Stats} = State) ->
+    {ok, Interval} = blockchain:config(?election_interval, Ledger),
+
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
                 Height when Height > CurrHeight ->
                     Time = blockchain_block:time(Block),
                     Txns = blockchain_block:transactions(Block),
-                    {Epoch, _} = blockchain_block_v1:election_info(Block),
-                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height}, Stats),
+                    Epoch = blockchain_block_v1:election_info(Block),
+                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height, Interval}, Stats),
                     lager:debug("writing:~n ~s to dat file", [Iolist]),
                     file:write(File, Iolist),
                     {noreply, State#state{height = Height,
@@ -176,13 +188,14 @@ get_intervals(Prev, [H|T], Acc) ->
     Int = H - Prev,
     get_intervals(H, T, [Int | Acc]).
 
-process_line({0, _Txns, _Epoch, _Height}, Acc) ->
+process_line({0, _Txns, _Epoch, _Height, _Interval}, Acc) ->
     {[], Acc};
-process_line({Time, Txns, Epoch, Height}, #stats{times = Times0,
-                                                  tlens = TLens1}) ->
+process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
+             #stats{times = Times0,
+                    tlens = TLens1}) ->
     TLen = length(Txns),
     TLens0 = TLens1 ++ [TLen],
-    Times = truncate(Time, Times0, 120), % minutes
+    Times = truncate(Time, Times0, 24 * 60 * 10), % two days in minutes
     {_, TLens} = lists:split(length(TLens0) - length(Times), TLens0),
     Interval =
         case Times0 of
@@ -193,6 +206,7 @@ process_line({Time, Txns, Epoch, Height}, #stats{times = Times0,
         end,
     AvgInterval = avg_interval(Times),
     MedInterval = median_interval(Times),
+    Delay = max(0, Height - (EpochStart + Int)),
     AvgTxns = lists:sum(TLens) div length(TLens),
     {[integer_to_list(Time), "\t",
       integer_to_list(Interval), "\t",
@@ -202,7 +216,8 @@ process_line({Time, Txns, Epoch, Height}, #stats{times = Times0,
       integer_to_list(AvgTxns), "\t",
       integer_to_list(Height), "\t",
       float_to_list(Height / Epoch), "\t",
-      extract_delay(Txns),      "\n"],
+      integer_to_list(Delay), "\t",
+      extract_delay(Txns), "\n"],
      #stats{times = Times, tlens = TLens}}.
 
 extract_delay(Txns) ->
