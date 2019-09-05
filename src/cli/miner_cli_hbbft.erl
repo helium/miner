@@ -6,6 +6,8 @@
 
 -behavior(clique_handler).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 -export([register_cli/0]).
 
 register_cli() ->
@@ -20,7 +22,8 @@ register_all_usage() ->
                   hbbft_usage(),
                   hbbft_status_usage(),
                   hbbft_skip_usage(),
-                  hbbft_queue_usage()
+                  hbbft_queue_usage(),
+                  hbbft_group_usage()
                  ]).
 
 register_all_cmds() ->
@@ -31,7 +34,8 @@ register_all_cmds() ->
                   hbbft_cmd(),
                   hbbft_status_cmd(),
                   hbbft_skip_cmd(),
-                  hbbft_queue_cmd()
+                  hbbft_queue_cmd(),
+                  hbbft_group_cmd()
                  ]).
 %%
 %% hbbft
@@ -165,4 +169,45 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
             [clique_status:table([[{message, lists:flatten(io_lib:format("~p", [Msg]))}] || Msg <- Msgs])]
     end;
 hbbft_queue([], [], []) ->
+    usage.
+
+hbbft_group_cmd() ->
+    [
+     [["hbbft", "group"], [],
+      [
+       {plain, [{shortname, "p"}, {longname, "plain"}]}
+      ], fun hbbft_group/3]
+    ].
+
+hbbft_group_usage() ->
+    [["hbbft", "group"],
+     ["hbbft queue \n\n",
+      "  Display the currently running hbbft group from any node\n"
+      " -p --plain\n"
+      "  display only the animal names"
+     ]
+    ].
+
+hbbft_group(["hbbft", "group"], [], Flags) ->
+    %% calculate the current election start height
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    case proplists:get_value(plain, Flags, false) of
+        false ->
+            [clique_status:table(
+               [[{index, integer_to_list(Idx)},
+                 {name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))},
+                 {address, libp2p_crypto:pubkey_bin_to_p2p(A)}]
+                || {Idx, A} <- lists:zip(lists:seq(1, length(ConsensusAddrs)),
+                                         ConsensusAddrs)])];
+        _ ->
+            L = lists:map(fun(X) ->
+                                  {ok, A} = erl_angry_purple_tiger:animal_name(
+                                              libp2p_crypto:bin_to_b58(X)),
+                                  io_lib:format("~s~n", [A])
+                          end, ConsensusAddrs),
+            [clique_status:text(L)]
+    end;
+hbbft_group([], [], []) ->
     usage.

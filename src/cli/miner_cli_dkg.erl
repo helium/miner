@@ -6,6 +6,8 @@
 
 -behavior(clique_handler).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 -export([register_cli/0]).
 
 register_cli() ->
@@ -19,7 +21,9 @@ register_all_usage() ->
                  [
                   dkg_usage(),
                   dkg_status_usage(),
-                  dkg_queue_usage()
+                  dkg_queue_usage(),
+                  dkg_running_usage(),
+                  dkg_next_usage()
                  ]).
 
 register_all_cmds() ->
@@ -29,7 +33,9 @@ register_all_cmds() ->
                  [
                   dkg_cmd(),
                   dkg_status_cmd(),
-                  dkg_queue_cmd()
+                  dkg_queue_cmd(),
+                  dkg_running_cmd(),
+                  dkg_next_cmd()
                  ]).
 %%
 %% dkg
@@ -39,6 +45,9 @@ dkg_usage() ->
     [["dkg"],
      ["miner dkg commands\n\n",
       "  dkg status           - Display dkg status.\n"
+      "  dkg queue            - Display dkg queue.\n"
+      "  dkg running          - Display the running dkg group on a non-dkg mode.\n"
+      "  dkg next             - Display the next block at which an election will take place.\n"
      ]
     ].
 
@@ -144,4 +153,97 @@ dkg_queue(["dkg", "queue"], [], Flags) ->
             [clique_status:table([[{message, lists:flatten(io_lib:format("~p", [Msg]))}] || Msg <- Msgs])]
     end;
 dkg_queue([], [], []) ->
+    usage.
+
+dkg_running_cmd() ->
+    [
+     [["dkg", "running"], [],
+      [
+       {plain, [{shortname, "p"}, {longname, "plain"}]}
+      ], fun dkg_running/3]
+    ].
+
+dkg_running_usage() ->
+    [["dkg", "running"],
+     ["dkg queue \n\n",
+      "  Display the currently running dkg group from any node\n"
+      " -p --plain\n"
+      "  display only the animal names"
+     ]
+    ].
+
+dkg_running(["dkg", "running"], [], Flags) ->
+    %% calculate the current election start height
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Curr} = blockchain_ledger_v1:current_height(Ledger),
+    {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
+    {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+
+    #{start_height := EpochStart} = blockchain_election:election_info(Ledger, Chain),
+    Height = EpochStart + ElectionInterval,
+    Diff = Curr - Height,
+    Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+    case Curr >= Height of
+        false ->
+            [clique_status:text("not running")];
+        _ ->
+            {ok, Block} = blockchain:get_block(Height+Delay, Chain),
+            Hash = blockchain_block:hash_block(Block),
+            ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
+            case proplists:get_value(plain, Flags, false) of
+                false ->
+                    [clique_status:table(
+                       [[{index, integer_to_list(Idx)},
+                         {name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))},
+                         {address, libp2p_crypto:pubkey_bin_to_p2p(A)}]
+                        || {Idx, A} <- lists:zip(lists:seq(1, length(ConsensusAddrs)),
+                                                 ConsensusAddrs)])];
+                _ ->
+                    L = lists:map(fun(X) ->
+                                          {ok, A} = erl_angry_purple_tiger:animal_name(
+                                                      libp2p_crypto:bin_to_b58(X)),
+                                          io_lib:format("~s~n", [A])
+                                  end, ConsensusAddrs),
+                    [clique_status:text(L)]
+            end
+    end;
+dkg_running([], [], []) ->
+    usage.
+
+dkg_next_cmd() ->
+    [
+     [["dkg", "next"], [], [], fun dkg_next/3]
+    ].
+
+dkg_next_usage() ->
+    [["dkg", "next"],
+     ["dkg next \n\n",
+      "  Show the block height of the current election, or if it is running\n"
+      "  height of the next restart\n"
+     ]
+    ].
+
+dkg_next(["dkg", "next"], [], _Flags) ->
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Curr} = blockchain_ledger_v1:current_height(Ledger),
+    {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
+    {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
+
+    #{start_height := EpochStart} = blockchain_election:election_info(Ledger, Chain),
+    Height = EpochStart + ElectionInterval,
+    Diff = Curr - Height,
+    Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+    case Curr >= Height of
+        false ->
+            [clique_status:text(["next election: ", integer_to_list(Height),
+                                 " in ", integer_to_list(Height - Curr), " blocks."])];
+        _ ->
+            NextRestart = Height + Delay + RestartInterval,
+            [clique_status:text(["running, next restart: ", integer_to_list(NextRestart),
+                                 " in ", integer_to_list(NextRestart - Curr), " blocks."])]
+    end;
+dkg_next([], [], []) ->
     usage.
