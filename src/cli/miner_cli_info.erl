@@ -71,19 +71,28 @@ info_height_usage() ->
     [["info", "height"],
      ["info height \n\n",
       "  Get height of the blockchain for this miner.\n\n"
+      "  The first number is the current election epoch, and the second is\n"
+      "  the block height.  If the second number is displayed with an asterisk (*)\n"
+      "  this node has yet to sync past the assumed valid hash in the node config.\n\n"
      ]
     ].
 
 info_height(["info", "height"], [], []) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
+    {ok, SyncHeight} = blockchain:sync_height(Chain),
     Epoch =
-    try integer_to_list(miner:election_epoch()) of
-        E -> E
-    catch _:_ ->
-            io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
-    end,
-    [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
+        try integer_to_list(miner:election_epoch()) of
+            E -> E
+        catch _:_ ->
+                io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
+        end,
+    case SyncHeight == Height of
+        true ->
+            [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
+        false ->
+            [clique_status:text([Epoch, "\t\t", integer_to_list(SyncHeight), "*"])]
+    end;
 info_height([_, _, _], [], []) ->
     usage.
 
