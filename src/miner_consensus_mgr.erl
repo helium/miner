@@ -327,6 +327,8 @@ handle_call({maybe_start_consensus_group, StartHeight}, _From,
 handle_call(dkg_group, _From, #state{current_dkg = DKGs} = State) ->
     %% get the highest one
     case lists:reverse(lists:sort(maps:to_list(DKGs))) of
+        [{_Ht, out}|_] ->
+            {reply, undefined, State};
         [{_Ht, Group}|_] ->
             {reply, Group, State};
         [] ->
