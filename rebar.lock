@@ -65,7 +65,7 @@
   1},
  {<<"hbbft">>,
   {git,"https://github.com/helium/erlang-hbbft.git",
-       {ref,"39ec7f75139b3c0da0a113948e58aee4897af4c7"}},
+       {ref,"79248f89bc058ad2bdb13038c4385c90a242e49d"}},
   0},
  {<<"helium_proto">>,
   {git,"https://github.com/helium/proto.git",
