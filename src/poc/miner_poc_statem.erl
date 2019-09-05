@@ -344,7 +344,7 @@ waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
-            {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+            {next_state, requesting, save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
             {keep_state, save_data(Data#data{receipts_timeout=Timeout-1})}
