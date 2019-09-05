@@ -77,13 +77,19 @@ info_height_usage() ->
 info_height(["info", "height"], [], []) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
+    {ok, SyncHeight} = blockchain:sync_height(Chain),
     Epoch =
-    try integer_to_list(miner:election_epoch()) of
-        E -> E
-    catch _:_ ->
-            io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
-    end,
-    [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
+        try integer_to_list(miner:election_epoch()) of
+            E -> E
+        catch _:_ ->
+                io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
+        end,
+    case SyncHeight == Height of
+        true ->
+            [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
+        false ->
+            [clique_status:text([Epoch, "\t\t", integer_to_list(SyncHeight), "*"])]
+    end;
 info_height([_, _, _], [], []) ->
     usage.
 
