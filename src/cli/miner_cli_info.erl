@@ -71,6 +71,9 @@ info_height_usage() ->
     [["info", "height"],
      ["info height \n\n",
       "  Get height of the blockchain for this miner.\n\n"
+      "  The first number is the current election epoch, and the second is\n"
+      "  the block height.  If the second number is displayed with an asterisk (*)\n"
+      "  this node has yet to sync past the assumed valid hash in the node config.\n\n"
      ]
     ].
 
