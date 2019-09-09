@@ -91,16 +91,17 @@ decrypt(Onion, Stream) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok.
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok | {error, any()}.
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
     ok = blockchain_event:add_handler(self()),
     <<ID:10/binary, _/binary>> = OnionCompactKey,
     lager:md([{poc_id, ID}]),
     send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
 
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok.
+-spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok | {error, any()}.
 send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _Stream, 0) ->
-    lager:error("failed to send receipts, max retry");
+    lager:error("failed to send receipts, max retry"),
+    {error, too_many_retries};
 send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
@@ -374,17 +375,6 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             State;
         {ok, Data, NextPacket} ->
             lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
-            _ = erlang:spawn(
-                ?MODULE,
-                send_receipt,
-                [Data,
-                 OnionCompactKey,
-                 Type,
-                 os:system_time(nanosecond),
-                 RSSI,
-                 Stream]
-            ),
-
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
             Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
@@ -398,11 +388,18 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
             lager:info([{poc_id, POCID}], "sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
-            spawn(fun() ->
-                          %% sleep from 3-13 seconds before sending
-                          timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-                          _ = gen_udp:send(Socket, IP, Port, Packet)
-                  end),
+            erlang:spawn(
+                fun() ->
+                    Resp = ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream),
+                    case Resp of
+                        {error, Reason} ->
+                            lager:error("not sending RF because we could not deliver receipt: ~p", [Reason]);
+                        ok ->
+                            timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
+                            _ = gen_udp:send(Socket, IP, Port, Packet)
+                    end
+                end
+            ),
             State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}
     end,
     ok = inet:setopts(Socket, [{active, once}]),

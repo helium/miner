@@ -108,7 +108,8 @@ basic(_Config) ->
     meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _Stream) ->
         ?assertEqual(radio, Origin),
         Passed = Data2 == Data0 andalso libp2p_crypto:pubkey_to_bin(OnionCompactKey) == OnionCompactKey0,
-        Parent ! {passed, Passed}
+        Parent ! {passed, Passed},
+        ok
     end),
 
     {ok, Server1} = miner_onion_server:start_link(#{
