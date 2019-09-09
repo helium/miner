@@ -372,9 +372,12 @@ load_data(BaseDir) ->
         {error, _Reason}=Error ->
             Error;
         {ok, Binary} ->
-            Data = erlang:binary_to_term(Binary),
-            #data{state=State} = Data,
-            {ok, State, Data}
+            case erlang:binary_to_term(Binary) of
+                #data{state=State}=Data ->
+                     {ok, State, Data};
+                _ ->
+                    {error, wrong_data}
+            end
     end.
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
