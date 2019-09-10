@@ -73,7 +73,7 @@
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
 
--type state() :: requesting | mining | targeting | challenging | receiving | submitting | waiting.
+-type state() :: requesting | mining | delaying | targeting | challenging | receiving | submitting | waiting.
 -type data() :: #data{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 
@@ -155,10 +155,10 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
             RandomDelay = rand:uniform(?MINING_DELAY),
             lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, RandomDelay]),
             {next_state, delaying, save_data(Data#data{state=delaying, 
-                                                        mining_timeout=?MINING_TIMEOUT,
-                                                        mining_hash=BlockHash,
-                                                        mining_delay=RandomDelay,
-                                                        mining_ledger=PinnedLedger})};
+                                                       mining_timeout=?MINING_TIMEOUT,
+                                                       mining_hash=BlockHash,
+                                                       mining_delay=RandomDelay,
+                                                       mining_ledger=PinnedLedger})};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
