@@ -8,6 +8,8 @@
 
 -export([register_cli/0]).
 
+-export([get_info/0]).
+
 register_cli() ->
     register_all_usage(),
     register_all_cmds().
@@ -77,16 +79,18 @@ info_height_usage() ->
      ]
     ].
 
-info_height(["info", "height"], [], []) ->
+get_info() ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    Epoch =
-        try integer_to_list(miner:election_epoch()) of
-            E -> E
-        catch _:_ ->
-                io_lib:format("~p", [erlang:process_info(whereis(miner), current_stacktrace)])
-        end,
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    {Height, SyncHeight, Epoch}.
+
+info_height(["info", "height"], [], []) ->
+    {Height, SyncHeight, Epoch0} = get_info(),
+    Epoch = integer_to_list(Epoch0),
+
     case SyncHeight == Height of
         true ->
             [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];

@@ -215,7 +215,7 @@ restart_test(Config) ->
     ok = miner_ct_utils:wait_until(fun() ->
                                            %% do any to increase the chance of interesting outcomes
                                            true == lists:any(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch == 2
                                                              end, shuffle(Miners))
@@ -291,7 +291,7 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch >= 3
                                                              end, shuffle(Miners))
@@ -348,7 +348,7 @@ election_test(Config) ->
                     Miner = lists:nth(rand:uniform(length(Miners)), Miners),
                     try
                         C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                        Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                        {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                         {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
                             ct:pal("not seen: ~p height ~p ~p", [Not, Epoch, Height])
                     catch _:_ ->
@@ -364,7 +364,7 @@ election_test(Config) ->
     %% one election can happen.
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch >= 3
                                                              end, shuffle(Miners))
@@ -552,7 +552,7 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true == lists:all(fun(Miner) ->
-                                             Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                              ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                              Epoch > ElectionEpoch + 1
                                      end, shuffle(Miners))
@@ -611,7 +611,7 @@ group_change_test(Config) ->
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
                                                              end, shuffle(Miners))
@@ -718,7 +718,7 @@ master_key_test(Config) ->
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
                                                              end, shuffle(Miners))
@@ -887,7 +887,7 @@ version_change_test(Config) ->
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     Epoch = ct_rpc:call(Miner, miner, election_epoch, []),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
                                                              end, shuffle(Miners))
