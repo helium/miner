@@ -94,6 +94,12 @@ txn(Pid, Fun, Limit) ->
             ecc508:sleep(Pid),
             timer:sleep(?SHORT_RETRY_WAIT),
             txn(Pid, Fun, Limit - 1);
+        {error, i2c_read_failed} ->
+            %% Corruption may have occurred on the bus. Try again
+            %% after cycling the volatile areas with a sleep
+            ecc508:sleep(Pid),
+            timer:sleep(?SHORT_RETRY_WAIT),
+            txn(Pid, Fun, Limit - 1);
         {error, {ecc_unknown_response, Resp}} ->
             %% Got a weird status response back. Retry
             lager:warning("Unknown ECC response ~p, retrying", [Resp]),
