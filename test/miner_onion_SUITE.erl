@@ -56,13 +56,16 @@ basic(_Config) ->
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
 
+    TestDir = test_utils:tmp_dir("miner_onion_suite_basic"),
+    Ledger = blockchain_ledger_v1:new(TestDir),
+    BlockHash = crypto:strong_rand_bytes(32),
     Data1 = <<1, 2, 3>>,
     Data2 = <<4, 5, 6>>,
     Data3 = <<7, 8, 9>>,
     OnionKey = #{public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
     {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, [{PubKey, Data1},
                                                               {PubKey2, Data2},
-                                                              {PubKey3, Data3}]),
+                                                              {PubKey3, Data3}], BlockHash, Ledger),
     ct:pal("constructed onion ~p", [Onion]),
 
     meck:new(miner_onion_server, [passthrough]),

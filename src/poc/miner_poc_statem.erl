@@ -176,12 +176,12 @@ delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
                                                                secret=Secret,
                                                                mining_delay=0,
                                                                mining_hash=MiningHash,
-                                                               mining_ledger=PinnedLedger}=Data0) ->
+                                                               mining_ledger=PinnedLedger}=Data) ->
     lager:info("delay over, moving to targeting"),
     {ok, Block} = blockchain:get_block(MiningHash, Chain),
     Height = blockchain_block:height(Block),
     self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
-    {next_state, targeting, Data0#data{mining_hash=undefined}};
+    {next_state, targeting, Data};
 delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
@@ -210,7 +210,8 @@ targeting(EventType, EventContent, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{retry=Retry,
-                                                                                onion_keys=OnionKey
+                                                                                onion_keys=OnionKey,
+                                                                                mining_hash=MiningHash
                                                                                }=Data) ->
     case blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger) of
         {error, Reason} ->
@@ -223,7 +224,7 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
             OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
-            {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList),
+            {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList, MiningHash, Ledger),
             %% no witness will exist for the first layer hash as it is delivered over p2p
             [_|LayerHashes] = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),

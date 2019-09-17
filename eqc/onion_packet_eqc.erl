@@ -12,6 +12,9 @@ prop_onion_packet() ->
     KeyMap = #{ecc_compact => binary_to_term(ECCBin),
                ed25519 => binary_to_term(ED25519Bin)},
 
+    TestDir = test_utils:tmp_dir("onion_packet_eqc_prop_onion_packet"),
+    Ledger = blockchain_ledger_v1:new(TestDir),
+    BlockHash = crypto:strong_rand_bytes(32),
 
     ?FORALL({{KeyType, DataAndKeys}, DecryptOrder}, {gen_data_and_keys(KeyMap), gen_decrypt_order()},
             begin
@@ -20,7 +23,7 @@ prop_onion_packet() ->
                 ECDHFuns = [libp2p_crypto:mk_ecdh_fun(PvtKey) || {_Data, #{secret := PvtKey}} <- DataAndKeys],
                 DataAndBinKeys = [{Key, Data} || {Data, #{public := Key}} <- DataAndKeys],
                 %% construct onion in "correct" order
-                {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, DataAndBinKeys),
+                {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, DataAndBinKeys, BlockHash, Ledger),
                 ShuffledDataAndKeys = shuffle(DataAndKeys, DecryptOrder),
                 ShuffledECDHFuns = [libp2p_crypto:mk_ecdh_fun(PvtKey) || {_Data, #{secret := PvtKey}} <- ShuffledDataAndKeys],
                 %% decrypt onion in "correct" order

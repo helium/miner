@@ -379,11 +379,11 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
             UpLink = #helium_LongFiTxUplinkPacket_pb{
-                        oui=0,
-                        device_id=1,
-                        disable_fragmentation=Fragmentation == false,
-                        spreading=Spreading,
-                        payload=NextPacket
+                oui=0,
+                device_id=1,
+                disable_fragmentation=Fragmentation == false,
+                spreading=Spreading,
+                payload=NextPacket
             },
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
             lager:info([{poc_id, POCID}], "sending ~p", [Req]),
@@ -410,20 +410,30 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
 %% @end
 %%--------------------------------------------------------------------
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
-        error ->
-            error;
-        {Payload, NextLayer} ->
-            {ok, Payload, NextLayer}
-    catch _:_ ->
-              error
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    case blockchain_ledger_v1:find_poc(OnionCompactKey, Ledger) of
+        {error, _}=Err ->
+            Err;
+        {ok, [PoC]} ->
+            Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
+            try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, Blockhash, Ledger) of
+                error ->
+                    error;
+                {Payload, NextLayer} ->
+                    {ok, Payload, NextLayer}
+            catch _:_ ->
+                    error
+            end;
+        {ok, _} ->
+            {error, too_many_pocs}
     end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-% This is aan onion packet cause oui/device_id = 0
+% This is an onion packet cause oui/device_id = 0
 handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
     <<IV:2/binary,
       OnionCompactKey:33/binary,
