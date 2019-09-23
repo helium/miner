@@ -334,7 +334,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                                                                          packet_id=ID}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
     NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
-        {error, _Reaon} ->
+        {error, _Reason} ->
             _ = erlang:spawn(
                 ?MODULE,
                 send_witness,
@@ -342,7 +342,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: ~p", [Type, _Reaon]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: ~p", [Type, _Reason]),
             State;
         {ok, Data, NextPacket} ->
             lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
