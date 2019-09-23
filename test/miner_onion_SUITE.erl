@@ -56,7 +56,7 @@ basic(_Config) ->
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
 
-    TestDir = test_utils:tmp_dir("miner_onion_suite_basic"),
+    TestDir = miner_ct_utils:tmp_dir("miner_onion_suite_basic"),
     Ledger = blockchain_ledger_v1:new(TestDir),
     BlockHash = crypto:strong_rand_bytes(32),
     Data1 = <<1, 2, 3>>,
