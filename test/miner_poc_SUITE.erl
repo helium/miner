@@ -10,7 +10,6 @@
 
 -export([
     basic/1,
-    startup/1,
     dist/1
 ]).
 
@@ -25,12 +24,11 @@
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [startup, dist].
+    [basic, dist].
 
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
-
 dist(Config0) ->
     RPCTimeout = timer:seconds(2),
     miner_fake_radio_backplane:start_link(45000, lists:seq(46001, 46008)),
@@ -172,13 +170,7 @@ dist(Config0) ->
     miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
 
-%%--------------------------------------------------------------------
-%% @public
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 basic(_Config) ->
-    % Create chain
     BaseDir = "data/miner_poc_SUITE/basic",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
@@ -193,6 +185,7 @@ basic(_Config) ->
     {ok, _Sup} = blockchain_sup:start_link(Opts),
     ?assert(erlang:is_pid(blockchain_swarm:swarm())),
 
+    % Now add genesis
     % Generate fake blockchains (just the keys)
     RandomKeys = generate_keys(6),
     Address = blockchain_swarm:pubkey_bin(),
@@ -202,10 +195,15 @@ basic(_Config) ->
 
     % Create genesis block
     Balance = 5000,
-    GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
+    ConbaseTxns = [blockchain_txn_coinbase_v1:new(Addr, Balance)
+                     || {Addr, _} <- ConsensusMembers],
+    ConbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance)
                      || {Addr, _} <- ConsensusMembers],
     GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
-    Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
+    VarsKeys = libp2p_crypto:generate_keys(ecc_compact),
+    VarsTx = miner_ct_utils:make_vars(VarsKeys),
+
+    Txs = ConbaseTxns ++ ConbaseDCTxns ++ [GenConsensusGroupTx] ++ VarsTx,
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
     ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
 
@@ -234,18 +232,23 @@ basic(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+    {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
+
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem))),
+    ?assertEqual(Chain, erlang:element(2, erlang:element(2, sys:get_state(Statem)))), % Blockchain is = to Chain
 
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn) ->
         add_block(Chain, ConsensusMembers, [Txn])
     end),
-
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
         {ok, self()}
@@ -256,9 +259,10 @@ basic(_Config) ->
         ?assertEqual(self(), Stream)
     end),
 
-    % Start poc statem @ height 3
-    {ok, Statem} = miner_poc_statem:start_link(#{}),
-    ?assertMatch({requesting, _}, sys:get_state(Statem)),
+    meck:new(blockchain_txn_poc_receipts_v1, [passthrough]),
+    meck:expect(blockchain_txn_poc_receipts_v1, is_valid, fun(_, _) -> ok end),
+
+    ?assertEqual(10, erlang:element(12, erlang:element(2, sys:get_state(Statem)))),
 
     % Add some block to start process
     ok = add_block(Chain, ConsensusMembers, []),
@@ -266,13 +270,17 @@ basic(_Config) ->
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
-    SubmitedTxns0 = get_submited_txn(Statem),
-    ?assertEqual(1, erlang:length(SubmitedTxns0)),
-    [PocReqTxn] = SubmitedTxns0,
-    ?assertEqual(blockchain_txn_poc_request_v1, blockchain_txn:type(PocReqTxn)),
-    Gateway = blockchain_txn_poc_request_v1:challenger(PocReqTxn),
-    ?assertEqual(blockchain_swarm:pubkey_bin(), Gateway),
+    % Passing the random delay
+    ?assertEqual(delaying, erlang:element(1, sys:get_state(Statem))),
+    RandDelay = erlang:element(12, erlang:element(2, sys:get_state(Statem))),
+    lists:foreach(
+        fun(_) ->
+             ok = add_block(Chain, ConsensusMembers, [])
+        end,
+        lists:seq(1, RandDelay+1)
+    ),
 
+    % Moving threw targeting and challenging
     ok = miner_ct_utils:wait_until(fun() ->
         case sys:get_state(Statem) of
             {receiving, _} -> true;
@@ -280,43 +288,36 @@ basic(_Config) ->
         end
     end),
 
-    % Send receipts and add 3 block to pass timeout
-    ok = send_receipts(LatLongs),
+    % Send 7 receipts and add blocks to pass timeout
+    ?assertEqual(0, maps:size(erlang:element(8, erlang:element(2, sys:get_state(Statem))))),
+    Challengees = erlang:element(6, erlang:element(2, sys:get_state(Statem))),
+    ok = send_receipts(LatLongs, Challengees),
     timer:sleep(100),
+
+    ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem))),
+    ?assert(maps:size(erlang:element(8, erlang:element(2, sys:get_state(Statem)))) > 0), % Get reponses
+
+    % Passing receiving_timeout
     lists:foreach(
         fun(_) ->
             ok = add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
-        lists:seq(1, 4)
+        lists:seq(1, 10)
     ),
 
-    ct:pal("Height: ~p", [blockchain:height(Chain)]),
-
-     % 5 previous blocks + 4 block to pass receiving timeout + 1 block with poc receipts txn
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 10} =:= blockchain:height(Chain) end),
-
-    SubmitedTxns1 = get_submited_txn(Statem),
-    ?assertEqual(2, erlang:length(SubmitedTxns1)),
-    [_, PocReceiptsTxn] = SubmitedTxns1,
-    ?assertEqual(blockchain_txn_poc_receipts_v1, blockchain_txn:type(PocReceiptsTxn)),
-
-    ?assert(0 < erlang:length(blockchain_txn_poc_receipts_v1:receipts(PocReceiptsTxn))),
-    ?assertEqual(blockchain_swarm:pubkey_bin(), blockchain_txn_poc_receipts_v1:challenger(PocReceiptsTxn)),
-    ?assertEqual([], blockchain_txn_poc_receipts_v1:witnesses(PocReceiptsTxn)),
-    Hash = blockchain_txn_poc_request_v1:secret_hash(PocReqTxn),
-    ?assertEqual(Hash, crypto:hash(sha256, blockchain_txn_poc_receipts_v1:secret(PocReceiptsTxn))),
+    ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem))),
+    ?assertEqual(0, erlang:element(9, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
+    ok = add_block(Chain, ConsensusMembers, []),
 
     ok = miner_ct_utils:wait_until(fun() ->
         case sys:get_state(Statem) of
+            {waiting, _} -> true;
+            {submitting, _} -> true;
             {requesting, _} -> true;
-            _Other -> false
+            {_Other, _} -> false
         end
     end),
-
-    Ledger = blockchain:ledger(Chain),
-    {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(blockchain_swarm:pubkey_bin(), Ledger),
-    ?assertEqual(5, blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo)),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
@@ -324,61 +325,10 @@ basic(_Config) ->
     meck:unload(miner_onion),
     ?assert(meck:validate(miner_onion_handler)),
     meck:unload(miner_onion_handler),
-    ok.
+    ?assert(meck:validate(blockchain_txn_poc_receipts_v1)),
+    meck:unload(blockchain_txn_poc_receipts_v1),
 
-startup(_Config) ->
-    % Create chain but never integrate to leave blockchain = undefined
-    BaseDir = "data/miner_poc_SUITE/startup",
-    {PrivKey, PubKey} = new_random_key(ecc_compact),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
-    Opts = [
-        {key, {PubKey, SigFun, ECDHFun}},
-        {seed_nodes, []},
-        {port, 0},
-        {num_consensus_members, 7},
-        {base_dir, BaseDir}
-    ],
-    {ok, _Sup} = blockchain_sup:start_link(Opts),
-    ?assert(erlang:is_pid(blockchain_swarm:swarm())),
-
-    {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
-
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
-
-    % Send fake notify
-    ok = blockchain_worker:notify({add_block, <<"fake block">>, true}),
-
-    ?assertMatch({requesting, {data, undefined, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
-
-    % Now add genesis
-    % Generate fake blockchains (just the keys)
-    RandomKeys = generate_keys(6),
-    Address = blockchain_swarm:pubkey_bin(),
-    ConsensusMembers = [
-        {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
-    ] ++ RandomKeys,
-
-    % Create genesis block
-    Balance = 5000,
-    GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance)
-                     || {Addr, _} <- ConsensusMembers],
-    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
-    Txs = GenPaymentTxs ++ [GenConsensusGroupTx],
-    GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
-    ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
-
-    Chain = blockchain_worker:blockchain(),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-
-    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain_block:hash_block(HeadBlock)),
-    ?assertEqual({ok, GenesisBlock}, blockchain:head_block(Chain)),
-    ?assertEqual({ok, blockchain_block:hash_block(GenesisBlock)}, blockchain:genesis_hash(Chain)),
-    ?assertEqual({ok, GenesisBlock}, blockchain:genesis_block(Chain)),
-    ?assertEqual({ok, 1}, blockchain:height(Chain)),
-
-    % Now this should match the chain
-    ?assertMatch({requesting, {data, Chain, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}}, sys:get_state(Statem)),
+    ok = gen_statem:stop(Statem),
     ok.
 
 %% ------------------------------------------------------------------
@@ -456,30 +406,26 @@ rcv_loop(Miner, I, Acc0) ->
             end
     end.
 
-get_submited_txn(Pid) ->
-    History = meck:history(blockchain_worker, Pid),
-    Filter =
-        fun({_, {blockchain_worker, submit_txn, [Txn]}, _}) ->
-            {true, Txn};
-        (_) ->
-            false
-        end,
-    lists:filtermap(Filter, History).
-
 add_block(Chain, ConsensusMembers, Txns) ->
-    B = create_block(ConsensusMembers, Txns),
+    SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
+    B = create_block(ConsensusMembers, SortedTxns),
     ok = blockchain:add_block(B, Chain).
 
-send_receipts(LatLongs) ->
+send_receipts(LatLongs, Challengees) ->
     lists:foreach(
         fun({_LatLong, {PrivKey, PubKey}}) ->
             Address = libp2p_crypto:pubkey_to_bin(PubKey),
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             {Mega, Sec, Micro} = os:timestamp(),
             Timestamp = Mega * 1000000 * 1000000 + Sec * 1000000 + Micro,
-            Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, <<>>, radio),
-            SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
-            miner_poc_statem:receipt(SignedReceipt)
+            case lists:keyfind(Address, 1, Challengees) of
+                {Address, LayerData} ->
+                    Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, LayerData, radio),
+                    SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
+                    miner_poc_statem:receipt(SignedReceipt);
+                _ ->
+                    ok
+            end
         end,
         LatLongs
     ).
@@ -492,8 +438,7 @@ build_asserts(LatLongs, {PrivKey, PubKey}) ->
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
             Index = h3:from_geo(LatLong, 12),
-
-            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1, 0),
+            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1, 1, 0),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
             SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
             [SignedAssertLocationTx|Acc]
@@ -511,7 +456,7 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
 
-            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway, 0, 0),
+            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway, 1, 0),
             SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
             SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
             [SignedGatewayAddGatewayTx|Acc]
