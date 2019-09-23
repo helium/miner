@@ -376,7 +376,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
     ok = inet:setopts(Socket, [{active, once}]),
     NewState.
 
-
+-spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
