@@ -71,26 +71,14 @@
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec send(binary()) -> ok.
 send(Data) ->
     gen_server:call(?MODULE, {send, Data}).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec decrypt(binary(), pid()) -> ok.
 decrypt(Onion, Stream) ->
     gen_server:cast(?MODULE, {decrypt, Onion, Stream}).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok | {error, any()}.
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
     ok = blockchain_event:add_handler(self()),
@@ -114,7 +102,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
         {ok, PoCs} ->
             Results = lists:foldl(
                 fun(PoC, Acc) ->
-                    Challenger = blockchain_ledger_poc_v1:challenger(PoC),
+                    Challenger = blockchain_ledger_poc_v2:challenger(PoC),
                     Address = blockchain_swarm:pubkey_bin(),
                     Receipt0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type),
                     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
@@ -150,10 +138,6 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
     end,
     ok.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
 send_witness(_Data, OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
@@ -177,7 +161,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             lists:foreach(
                 fun(PoC) ->
-                    Challenger = blockchain_ledger_poc_v1:challenger(PoC),
+                    Challenger = blockchain_ledger_poc_v2:challenger(PoC),
                     Witness0 = blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data),
                     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
                     Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
@@ -203,10 +187,6 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     end,
     ok.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec send_to_router(binary(), any()) -> ok.
 send_to_router(Name, #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{oui=OUI}}}=Resp) ->
     case blockchain_worker:blockchain() of
@@ -340,11 +320,6 @@ handle_info(_Msg, State) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec wait_until_next_block() -> ok.
 wait_until_next_block() ->
     receive
@@ -352,10 +327,6 @@ wait_until_next_block() ->
             ok
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun,
                                                                          udp_socket=Socket,
                                                                          udp_send_ip=IP,
@@ -363,7 +334,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                                                                          packet_id=ID}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
     NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
-        error ->
+        {error, _Reaon} ->
             _ = erlang:spawn(
                 ?MODULE,
                 send_witness,
@@ -371,7 +342,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p", [Type]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: ~p", [Type, _Reaon]),
             State;
         {ok, Data, NextPacket} ->
             lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
@@ -405,34 +376,29 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
     ok = inet:setopts(Socket, [{active, once}]),
     NewState.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
+
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    case blockchain_ledger_v1:find_poc(OnionCompactKey, Ledger) of
+    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, _}=Err ->
             Err;
         {ok, [PoC]} ->
             Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
             try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, Blockhash, Ledger) of
                 error ->
-                    error;
+                    {error, fail_decrypt};
                 {Payload, NextLayer} ->
                     {ok, Payload, NextLayer}
-            catch _:_ ->
-                    error
+            catch _A:_B ->
+                    {error, {_A, _B}}
             end;
         {ok, _} ->
             {error, too_many_pocs}
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
+
 % This is an onion packet cause oui/device_id = 0
 handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
     <<IV:2/binary,
@@ -459,10 +425,7 @@ handle_packet(#helium_LongFiResp_pb{id=_ID, kind=_Kind}, State) ->
     lager:warning("unknown (ID= ~p) (kind= ~p) packet ~p", [_ID, _Kind]),
     State.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
+
 -spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
 tx_params(_, true) ->
     {application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
