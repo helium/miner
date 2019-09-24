@@ -329,6 +329,11 @@ receiving(EventType, EventContent, Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+submitting(info, submit, #data{packet_hashes=[]}=Data) ->
+    %% Somehow we lost the packet hashes and cannot build the path
+    %% to submit the poc_receipt txn. Go back to requesting.
+    lager:error("no packet_hashes ~p", [lager:pr(Data, ?MODULE)]),
+    {next_state, requesting, Data};
 submitting(info, submit, #data{address=Challenger,
                                responses=Responses0,
                                secret=Secret,
