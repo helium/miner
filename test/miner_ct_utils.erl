@@ -18,7 +18,8 @@
          init_per_testcase/2,
          end_per_testcase/2,
          get_balance/2,
-         make_vars/1, make_vars/2, make_vars/3
+         make_vars/1, make_vars/2, make_vars/3,
+         tmp_dir/0, tmp_dir/1, nonl/1
         ]).
 
 pmap(F, L) ->
@@ -376,3 +377,13 @@ make_vars(Keys, Map, Mode) ->
                 [Txn]
 
         end.
+
+tmp_dir() ->
+    ?MODULE:nonl(os:cmd("mktemp -d")).
+
+tmp_dir(Dir) ->
+    filename:join(tmp_dir(), Dir).
+
+nonl([$\n|T]) -> nonl(T);
+nonl([H|T]) -> [H|nonl(T)];
+nonl([]) -> [].

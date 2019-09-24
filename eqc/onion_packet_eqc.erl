@@ -61,7 +61,7 @@ decrypt_onion(<<IV:2/binary,
                 Tag:4/binary,
                 CipherText/binary>>, [ECDHFun|Tail], Acc) ->
     case miner_onion_server:try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
-        error ->
+        {error, _} ->
             %io:format("unable to decrypt ~w~n", [CipherText]),
             lists:reverse(Acc);
         {ok, Data, Remainder} ->

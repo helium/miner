@@ -56,13 +56,25 @@ basic(_Config) ->
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
 
-    TestDir = test_utils:tmp_dir("miner_onion_suite_basic"),
+    TestDir = miner_ct_utils:tmp_dir("miner_onion_suite_basic"),
     Ledger = blockchain_ledger_v1:new(TestDir),
     BlockHash = crypto:strong_rand_bytes(32),
     Data1 = <<1, 2, 3>>,
     Data2 = <<4, 5, 6>>,
     Data3 = <<7, 8, 9>>,
     OnionKey = #{public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
+
+    % This is for `try_decrypt`
+    meck:new(blockchain_worker, [passthrough]),
+    meck:expect(blockchain_worker, blockchain, fun() -> ok end),
+    meck:new(blockchain, [passthrough]),
+    meck:expect(blockchain, ledger, fun(_) -> Ledger end),
+    meck:new(blockchain_ledger_v1, [passthrough]),
+    meck:expect(blockchain_ledger_v1, find_poc, fun(_, _) ->
+        PoC = blockchain_ledger_poc_v2:new(<<"SecretHash">>, <<"OnionKeyHash">>, <<"Challenger">>, BlockHash),
+        {ok, [PoC]}
+    end),
+
     {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, [{PubKey, Data1},
                                                               {PubKey2, Data2},
                                                               {PubKey3, Data3}], BlockHash, Ledger),
@@ -179,5 +191,11 @@ basic(_Config) ->
     meck:unload(miner_onion_server),
     ?assert(meck:validate(blockchain_swarm)),
     meck:unload(blockchain_swarm),
+    ?assert(meck:validate(blockchain_worker)),
+    meck:unload(blockchain_worker),
+    ?assert(meck:validate(blockchain)),
+    meck:unload(blockchain),
+    ?assert(meck:validate(blockchain_ledger_v1)),
+    meck:unload(blockchain_ledger_v1),
     gen_server:stop(Server1),
     ok.
