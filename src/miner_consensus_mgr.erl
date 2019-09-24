@@ -434,10 +434,17 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                             State#state{cancel_dkg = maps:remove(BlockHeight, CancelDKGs)}
                     end,
             {_, EpochStart} = blockchain_block_v1:election_info(Block),
-            Height = next_election(EpochStart, ElectionInterval),
-            Diff = BlockHeight - Height,
-            Delay = max(0, (Diff div RestartInterval) * RestartInterval),
-            ElectionRunning = Height /= 1 andalso BlockHeight >= Height,
+            case ElectionInterval of
+                infinity ->
+                    Height = 1,
+                    Delay = 0,
+                    ElectionRunning = false;
+                _ ->
+                    Height = next_election(EpochStart, ElectionInterval),
+                    Diff = BlockHeight - Height,
+                    Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+                    ElectionRunning = Height /= 1 andalso BlockHeight >= Height
+            end,
             State2 =
                 case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
                     true ->
