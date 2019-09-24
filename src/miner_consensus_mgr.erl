@@ -440,9 +440,9 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                                                        {1, 0, false};
                                                    H ->
                                                        Diff = BlockHeight - H,
-                                                       Delay = max(0, (Diff div RestartInterval) * RestartInterval),
+                                                       Delay0 = max(0, (Diff div RestartInterval) * RestartInterval),
                                                        ElectionRunning0 = H /= 1 andalso BlockHeight >= H,
-                                                       {H, Delay, ElectionRunning0}
+                                                       {H, Delay0, ElectionRunning0}
                                                end,
 
             State2 =
