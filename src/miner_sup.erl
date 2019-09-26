@@ -106,11 +106,11 @@ init(_Args) ->
                                                    GetPublicKey(KS+1)
                                            end;
                                        {error, _} ->
-                                           %% key is not present, generate one and lock it
+                                           %% key is not present, generate one
+                                           %%
                                            %% XXX this is really not the best thing to do here
                                            %% but deadlines rule everything around us
                                            ok = gen_compact_key(ECCPid, KS),
-                                           ecc508:lock(ECCPid, {slot, KS}),
                                            GetPublicKey(KS)
                                    end
                            end,
