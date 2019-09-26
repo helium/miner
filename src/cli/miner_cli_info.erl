@@ -91,7 +91,7 @@ info_height(["info", "height"], [], []) ->
         true ->
             [clique_status:text(Epoch ++ "\t\t" ++ integer_to_list(Height))];
         false ->
-            [clique_status:text([Epoch, "\t\t", integer_to_list(SyncHeight), "*"])]
+            [clique_status:text([Epoch, "\t\t", integer_to_list(Height), "\t\t", integer_to_list(SyncHeight), "*"])]
     end;
 info_height([_, _, _], [], []) ->
     usage.
