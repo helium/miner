@@ -143,7 +143,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       1,
                                       []],
                 [{create, true}]],
-    Name = consensus_group_name(1, Members),
+    Name = consensus_group_name(1, 0, Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name,
                                          libp2p_group_relcast, GroupArg),
     lager:info("started initial hbbft group: ~p~n", [Group]),
@@ -200,7 +200,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
                                       []], % gets filled later
                 [{create, true}]],
     %% while this won't reflect the actual height, it has to be deterministic
-    Name = consensus_group_name(max(0, Height), Members),
+    Name = consensus_group_name(max(0, Height), Delay, Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
@@ -239,7 +239,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
                                       Buf],
                 [{create, true}]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
-    Name = consensus_group_name(max(0, Height), Members),
+    Name = consensus_group_name(max(0, Height), 0, Members),
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
@@ -391,7 +391,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                                             lager:info("starting hbbft ~p+~p at block height ~p",
                                                        [ElectionHeight, ElectionDelay, BlockHeight]),
                                             {ok, HGrp} = start_hbbft(ElectionGroup, ElectionHeight,
-                                                                     State2#state.chain),
+                                                                     ElectionDelay, State2#state.chain),
                                             HGrp
                                     end,
                                 Round = blockchain_block:hbbft_round(Block),
@@ -458,7 +458,7 @@ handle_info(timeout, State) ->
                     {ok, Block} = blockchain:head_block(Chain),
                     BlockHeight = blockchain_block:height(Block),
                     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
-                    Name = consensus_group_name(ElectionHeight, ConsensusAddrs),
+                    Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
                     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
                     %% we intentionally don't use create here, because
                     %% this is a restore.
@@ -481,15 +481,28 @@ handle_info(timeout, State) ->
                             %% we already completed our election
                             {noreply, State#state{active_group = Group}};
                         {error, cannot_start} ->
-                            lager:info("didn't restore consensus group, missing"),
-                            ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
-                            State1 = case BlockHeight < (ElectionHeight+ElectionDelay+10) of
-                                         true ->
-                                             restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, Round, State);
-                                         _ ->
-                                             State
-                                     end,
-                            {noreply, State1};
+                            %% TODO: rip this out in a few versions
+                            FallbackName = consensus_group_name(ElectionHeight, fallback, ConsensusAddrs),
+                            {ok, FallbackGroup} =
+                                libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                                       FallbackName,
+                                                       libp2p_group_relcast, GroupArg),
+                            case wait_for_group(FallbackGroup) of
+                                started ->
+                                    lager:info("restored fallback group"),
+                                    activate_hbbft(FallbackGroup, undefined, Round),
+                                    {noreply, State#state{active_group = FallbackGroup}};
+                                {error, cannot_start} ->
+                                    lager:info("didn't restore consensus group, missing"),
+                                    ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
+                                    State1 = case BlockHeight < (ElectionHeight+ElectionDelay+10) of
+                                                 true ->
+                                                     restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, Round, State);
+                                                 _ ->
+                                                     State
+                                             end,
+                                    {noreply, State1}
+                            end;
                         {error, Reason} ->
                             lager:info("didn't restore consensus group: ~p", [Reason]),
                             ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
@@ -608,7 +621,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
                                                       []],
                                 [{create, true}]],
                     %% while this won't reflect the actual height, it has to be deterministic
-                    Name = consensus_group_name(max(0, Height), Members),
+                    Name = consensus_group_name(max(0, Height), Delay, Members),
                     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
@@ -707,7 +720,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
             {false, State#state{current_dkgs = DKGs#{{Height, Delay} => out}}}
     end.
 
-start_hbbft(DKG, Height, Chain) ->
+start_hbbft(DKG, Height, Delay, Chain) ->
     Ledger = blockchain:ledger(Chain),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
@@ -726,7 +739,7 @@ start_hbbft(DKG, Height, Chain) ->
                                               []], % gets filled later
                         [{create, true}]],
             %% while this won't reflect the actual height, it has to be deterministic
-            Name = consensus_group_name(max(0, Height), Members),
+            Name = consensus_group_name(max(0, Height), Delay, Members),
             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                                  Name,
                                                  libp2p_group_relcast, GroupArg),
@@ -751,8 +764,10 @@ activate_hbbft(Group, PrevGroup, Round) ->
     start_txn_handler(Group),
     miner:install_consensus(Group).
 
-consensus_group_name(Height, Members) ->
-    lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)])).
+consensus_group_name(Height, fallback, Members) ->
+    lists:flatten(io_lib:format("consensus_~b_~b", [Height, erlang:phash2(Members)]));
+consensus_group_name(Height, Delay, Members) ->
+    lists:flatten(io_lib:format("consensus_~b_~b_~b", [Height, Delay, erlang:phash2(Members)])).
 
 animalize(L) ->
     lists:map(fun(X0) ->
