@@ -6,6 +6,7 @@
 -module(miner_poc_statem).
 
 -behavior(gen_statem).
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
