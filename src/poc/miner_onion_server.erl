@@ -83,7 +83,7 @@ decrypt(Onion, Stream) ->
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
     ok = blockchain_event:add_handler(self()),
     <<ID:10/binary, _/binary>> = OnionCompactKey,
-    lager:md([{poc_id, ID}]),
+    lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
     send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
 
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok | {error, any()}.
@@ -142,7 +142,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
 send_witness(_Data, OnionCompactKey, Time, RSSI) ->
     ok = blockchain_event:add_handler(self()),
     <<ID:10/binary, _/binary>> = OnionCompactKey,
-    lager:md([{poc_id, ID}]),
+    lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
     send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
 
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
@@ -342,10 +342,10 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: ~p", [Type, _Reason]),
+            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: ~p", [Type, _Reason]),
             State;
         {ok, Data, NextPacket} ->
-            lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
+            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
             Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
@@ -357,7 +357,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                 payload=NextPacket
             },
             Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
-            lager:info([{poc_id, POCID}], "sending ~p", [Req]),
+            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
             erlang:spawn(
                 fun() ->
