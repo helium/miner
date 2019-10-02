@@ -125,6 +125,8 @@ dist_v1(Config0) ->
 
     ?assertNotEqual(undefined, GenesisBlock),
 
+    timer:sleep(5000),
+
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
@@ -140,7 +142,7 @@ dist_v1(Config0) ->
     ),
 
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
-    
+
     ReqsRecipts = lists:foldl(
         fun(A, Acc) ->
             maps:put(A, {0, 0}, Acc)
@@ -267,6 +269,8 @@ dist_v2(Config0) ->
 
     ?assertNotEqual(undefined, GenesisBlock),
 
+    timer:sleep(5000),
+
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
@@ -282,7 +286,7 @@ dist_v2(Config0) ->
     ),
 
     ok = ct_rpc:call(M, blockchain_event, add_handler, [Self], RPCTimeout),
-    
+
     ReqsRecipts = lists:foldl(
         fun(A, Acc) ->
             maps:put(A, {0, 0}, Acc)

@@ -477,7 +477,7 @@ election_test(Config) ->
                       hbbft_round => NewHeight,
                       time => erlang:system_time(seconds),
                       election_epoch => ElectionEpoch + 1,
-                      epoch_start => NewHeight + 1}),
+                      epoch_start => NewHeight}),
 
     EncodedBlock = blockchain_block:serialize(
                      blockchain_block_v1:set_signatures(RescueBlock, [])),
@@ -552,9 +552,13 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_until(
            fun() ->
                    true == lists:all(fun(Miner) ->
-                                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                             Epoch > ElectionEpoch + 1
+                                             try
+                                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                                 Epoch > ElectionEpoch + 1
+                                             catch _:_ ->
+                                                     false
+                                             end
                                      end, shuffle(Miners))
            end, 90, timer:seconds(1)),
     ok.
