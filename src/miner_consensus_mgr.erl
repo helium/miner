@@ -23,7 +23,9 @@
          %% info
          consensus_pos/0,
          in_consensus/0,
-         dkg_status/0
+         dkg_status/0,
+
+         group_predicate/1
         ]).
 
 %% gen_server callbacks
@@ -101,6 +103,57 @@ election_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
 rescue_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
     gen_server:call(?MODULE, {rescue_done, Artifact, Signatures,
                               Members, PrivKey, Height, Delay}, infinity).
+
+group_predicate("dkg" ++ _ = Name) ->
+    try einfo() of
+        #{election_height := ElectionHeight} ->
+            case string:tokens(Name, "-") of
+                [_Tag, _Hash, Height0, _Delay] ->
+                    lager:info("dkg pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    Height = list_to_integer(Height0),
+                    Height < ElectionHeight;
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    catch _:_ ->
+            false
+    end;
+group_predicate("consensus" ++ _ = Name) ->
+    try einfo() of
+        #{election_height := ElectionHeight} ->
+            case string:tokens(Name, "_") of
+                [_Tag, Height0, _Delay, _Hash] ->
+                    lager:info("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    Height = list_to_integer(Height0),
+                    Height < ElectionHeight;
+                [_Tag, Height0, _Hash] ->
+                    lager:info("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    Height = list_to_integer(Height0),
+                    Height < ElectionHeight;
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    catch _:_ ->
+            false
+    end;
+group_predicate(_) ->
+    false.
+
+einfo() ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            #{};
+        Chain ->
+            try
+                blockchain_election:election_info(blockchain:ledger(Chain), Chain)
+            catch _:_ ->
+                    #{}
+            end
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
