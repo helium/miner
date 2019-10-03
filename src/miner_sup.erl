@@ -144,7 +144,8 @@ init(_Args) ->
         {port, Port},
         {num_consensus_members, NumConsensusMembers},
         {base_dir, BaseDir},
-        {update_dir, application:get_env(miner, update_dir, undefined)}
+        {update_dir, application:get_env(miner, update_dir, undefined)},
+        {group_delete_predicate, fun miner_consensus_mgr:group_predicate/1}
     ],
 
     %% Miner Options
