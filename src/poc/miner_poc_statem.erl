@@ -6,7 +6,6 @@
 -module(miner_poc_statem).
 
 -behavior(gen_statem).
--include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -290,17 +289,12 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                         true ->
                             {keep_state, Data};
                         false ->
-                            Responses1 = case blockchain:config(?poc_version, Chain) of
-                                             {ok, V} when V > 1 ->
-                                                 %% Don't allow putting duplicate response in the witness list resp
-                                                 case lists:member(Witness, Witnesses) of
-                                                     false ->
-                                                         maps:put(PacketHash, [Witness|Witnesses], Responses0);
-                                                     true ->
-                                                         Responses0
-                                                 end;
-                                             _ ->
-                                                 maps:put(PacketHash, [Witness|Witnesses], Responses0)
+                            %% Don't allow putting duplicate response in the witness list resp
+                            Responses1 = case lists:member(Witness, Witnesses) of
+                                             false ->
+                                                 maps:put(PacketHash, [Witness|Witnesses], Responses0);
+                                             true ->
+                                                 Responses0
                                          end,
                             {keep_state, Data#data{responses=Responses1}}
                     end
