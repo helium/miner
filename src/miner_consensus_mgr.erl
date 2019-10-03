@@ -307,120 +307,131 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
+handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{current_dkgs = DKGs,
                    cancel_dkgs = CancelDKGs} = State)
   when State#state.chain /= undefined ->
     Ledger = blockchain:ledger(State#state.chain),
     {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
     {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
+    Now = erlang:system_time(seconds),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
-            BlockHeight = blockchain_block:height(Block),
-            lager:info("processing block height ~p", [BlockHeight]),
-            State1 = case maps:find(BlockHeight, CancelDKGs) of
-                        error ->
-                            State;
-                        {ok, Group} ->
-                            lager:info("canceling DKG ~p at height ~p", [Group, BlockHeight]),
-                            catch libp2p_group_relcast:handle_command(Group, {stop, 120000}),
-                            State#state{cancel_dkgs = maps:remove(BlockHeight, CancelDKGs)}
-                    end,
-            {_, EpochStart} = blockchain_block_v1:election_info(Block),
+            case Sync andalso (Now - blockchain_block:time(Block) > 3600) of
+                %% not sync, or recent sync
+                false ->
+                    BlockHeight = blockchain_block:height(Block),
+                    lager:info("processing block height ~p", [BlockHeight]),
+                    State1 = case maps:find(BlockHeight, CancelDKGs) of
+                                 error ->
+                                     State;
+                                 {ok, Group} ->
+                                     lager:info("canceling DKG ~p at height ~p", [Group, BlockHeight]),
+                                     catch libp2p_group_relcast:handle_command(Group, {stop, 120000}),
+                                     State#state{cancel_dkgs = maps:remove(BlockHeight, CancelDKGs)}
+                             end,
+                    {_, EpochStart} = blockchain_block_v1:election_info(Block),
 
-            {Height, Delay, ElectionRunning} = case next_election(EpochStart, ElectionInterval) of
-                                                   infinity ->
-                                                       {1, 0, false};
-                                                   H ->
-                                                       Diff = BlockHeight - H,
-                                                       Delay0 = max(0, (Diff div RestartInterval) * RestartInterval),
-                                                       ElectionRunning0 = H /= 1 andalso BlockHeight >= H,
-                                                       {H, Delay0, ElectionRunning0}
-                                               end,
-
-            State2 =
-                case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
-                    true ->
-                        %% start the election running here
-                        lager:info("starting new election at ~p+~p", [Height, Delay]),
-                        initiate_election(Hash, Height,
-                                          State1#state{delay = Delay,
-                                                       initial_height = Height});
-                    false ->
-                        State1#state{delay = Delay,
-                                     initial_height = Height}
-                end,
-            Txns = blockchain_block:transactions(Block),
-            NewGroup = blockchain_election:has_new_group(Txns),
-            case blockchain_block_v1:is_rescue_block(Block) of
-                true ->
-                    [Txn] =
-                        lists:filter(
-                          fun(T) ->
-                                  blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                          end, Txns),
-                    Members = blockchain_txn_consensus_group_v1:members(Txn),
-                    MyAddress = blockchain_swarm:pubkey_bin(),
-                    %% check if we're in the group
-                    case lists:member(MyAddress, Members) of
-                        true ->
-                            lager:info("Preparing to run rescue DKG: ~p", [Members]),
-                            State3 = rescue_dkg(Members, term_to_binary(Members), State2),
-                            {noreply, State3};
-                        false ->
-                            lager:info("Not in rescue DKG: ~p", [Members]),
-                            {noreply, State2}
-                    end;
-                false when NewGroup /= false andalso
-                           BlockHeight /= 1 ->
-                    %% if we got a new group
-                    {_, _, _Txn, {ElectionHeight, ElectionDelay} = EID} = NewGroup,
-                    State3 =
-                        case maps:find(EID, State#state.current_dkgs) of
-                            %% we're not in
-                            error ->
-                                State2;
-                            {ok, out} ->
-                                State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs)};
-                            {ok, ElectionGroup} ->
-                                HBBFTGroup =
-                                    case maps:find(EID, State#state.started_groups) of
-                                        {ok, HGrp} ->
-                                            HGrp;
-                                        error ->
-                                            lager:info("starting hbbft ~p+~p at block height ~p",
-                                                       [ElectionHeight, ElectionDelay, BlockHeight]),
-                                            {ok, HGrp} = start_hbbft(ElectionGroup, ElectionHeight,
-                                                                     ElectionDelay, State2#state.chain),
-                                            HGrp
-                                    end,
-                                Round = blockchain_block:hbbft_round(Block),
-                                activate_hbbft(HBBFTGroup, State#state.active_group, Round),
-                                State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
-                                             cancel_dkgs = CancelDKGs#{BlockHeight+2 => ElectionGroup},
-                                             started_groups = cleanup_groups(EID, State#state.started_groups),
-                                             active_group = HBBFTGroup}
+                    {Height, Delay, ElectionRunning} =
+                        case next_election(EpochStart, ElectionInterval) of
+                            infinity ->
+                                {1, 0, false};
+                            H ->
+                                Diff = BlockHeight - H,
+                                Delay0 = max(0, (Diff div RestartInterval) * RestartInterval),
+                                ElectionRunning0 = H /= 1 andalso BlockHeight >= H,
+                                {H, Delay0, ElectionRunning0}
                         end,
-                    {noreply, State3#state{delay = 0}};
-                false when ElectionRunning ->
-                    NextRestart = Height + RestartInterval + Delay,
-                    case BlockHeight of
-                        NewHeight when NewHeight >= NextRestart  ->
-                            lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
-                            %% restart the dkg
-                            State3 = restart_election(State2, Hash, Height),
-                            {LastGroup, DKGs1} = maps:take({Height, Delay}, State3#state.current_dkgs),
-                            {noreply, State3#state{current_dkgs = DKGs1,
-                                                   cancel_dkgs = CancelDKGs#{Height+Delay+2 =>
-                                                                                LastGroup}}};
-                        NewHeight ->
-                            lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
+
+                    State2 =
+                        case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
+                            true ->
+                                %% start the election running here
+                                lager:info("starting new election at ~p+~p", [Height, Delay]),
+                                initiate_election(Hash, Height,
+                                                  State1#state{delay = Delay,
+                                                               initial_height = Height});
+                            false ->
+                                State1#state{delay = Delay,
+                                             initial_height = Height}
+                        end,
+                    Txns = blockchain_block:transactions(Block),
+                    NewGroup = blockchain_election:has_new_group(Txns),
+                    case blockchain_block_v1:is_rescue_block(Block) of
+                        true ->
+                            [Txn] =
+                                lists:filter(
+                                  fun(T) ->
+                                          blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                                  end, Txns),
+                            Members = blockchain_txn_consensus_group_v1:members(Txn),
+                            MyAddress = blockchain_swarm:pubkey_bin(),
+                            %% check if we're in the group
+                            case lists:member(MyAddress, Members) of
+                                true ->
+                                    lager:info("Preparing to run rescue DKG: ~p", [Members]),
+                                    State3 = rescue_dkg(Members, term_to_binary(Members), State2),
+                                    {noreply, State3};
+                                false ->
+                                    lager:info("Not in rescue DKG: ~p", [Members]),
+                                    {noreply, State2}
+                            end;
+                        false when NewGroup /= false andalso
+                                   BlockHeight /= 1 ->
+                            %% if we got a new group
+                            {_, _, _Txn, {ElectionHeight, ElectionDelay} = EID} = NewGroup,
+                            State3 =
+                                case maps:find(EID, State#state.current_dkgs) of
+                                    %% we're not in
+                                    error ->
+                                        State2;
+                                    {ok, out} ->
+                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs)};
+                                    {ok, ElectionGroup} ->
+                                        HBBFTGroup =
+                                            case maps:find(EID, State#state.started_groups) of
+                                                {ok, HGrp} ->
+                                                    HGrp;
+                                                error ->
+                                                    lager:info("starting hbbft ~p+~p at block height ~p",
+                                                               [ElectionHeight, ElectionDelay, BlockHeight]),
+                                                    {ok, HGrp} = start_hbbft(ElectionGroup, ElectionHeight,
+                                                                             ElectionDelay, State2#state.chain),
+                                                    HGrp
+                                            end,
+                                        Round = blockchain_block:hbbft_round(Block),
+                                        activate_hbbft(HBBFTGroup, State#state.active_group, Round),
+                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
+                                                     cancel_dkgs = CancelDKGs#{BlockHeight+2 => ElectionGroup},
+                                                     started_groups = cleanup_groups(EID, State#state.started_groups),
+                                                     active_group = HBBFTGroup}
+                                end,
+                            {noreply, State3#state{delay = 0}};
+                        false when ElectionRunning ->
+                            NextRestart = Height + RestartInterval + Delay,
+                            case BlockHeight of
+                                NewHeight when NewHeight >= NextRestart  ->
+                                    lager:info("restart! h ~p next ~p", [NewHeight, NextRestart]),
+                                    %% restart the dkg
+                                    State3 = restart_election(State2, Hash, Height),
+                                    {LastGroup, DKGs1} = maps:take({Height, Delay}, State3#state.current_dkgs),
+                                    {noreply, State3#state{current_dkgs = DKGs1,
+                                                           cancel_dkgs = CancelDKGs#{Height+Delay+2 =>
+                                                                                         LastGroup}}};
+                                NewHeight ->
+                                    lager:info("restart? h ~p next ~p", [NewHeight, NextRestart]),
+                                    {noreply, State2}
+                            end;
+                        _ ->
                             {noreply, State2}
                     end;
-                _Error ->
-                    lager:warning("didn't get gossiped block: ~p", [_Error]),
-                    {noreply, State2}
-            end
+                %% non-recent sync block, ignore
+                true ->
+                    {noreply, State}
+            end;
+        _Error ->
+            lager:warning("didn't get gossiped block: ~p", [_Error]),
+            {noreply, State}
     end;
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
     case State#state.chain of
