@@ -556,6 +556,12 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     {noreply, State#state{blockchain = Chain}};
+handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref,
+                                                        onboarding_key = Key}) ->
+    State1 = #state{blockchain = NC,
+                    blockchain_ref = Ref,
+                    onboarding_key = Key},
+    {noreply, State1};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
     {noreply, State}.

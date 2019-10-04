@@ -532,6 +532,9 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
+handle_event(info, {blockchain_event, {new_chain, NC}},
+             #data{address = Address, poc_interval = Delay}) ->
+    {next_state, requesting, #data{blockchain=NC, address=Address, poc_interval=Delay}};
 handle_event(info, {blockchain_event, {add_block, _, _, _}}, Data) ->
     %% suppress the warning here
     {keep_state, Data};
