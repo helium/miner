@@ -494,6 +494,8 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
         _ ->
             {noreply, State}
     end;
+handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    {noreply, State#state{chain = NC}};
 %% we had a chain to start with, so check restore state
 handle_info(timeout, State) ->
     {ok, HeadBlock} = blockchain:head_block(State#state.chain),

@@ -497,7 +497,7 @@ election_test(Config) ->
     ct:pal("FirstNode Swarm: ~p", [Swarm]),
     N = length(Miners),
     ct:pal("N: ~p", [N]),
-     _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, N, self()]),
+     _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, self()]),
 
     ok =
         miner_ct_utils:wait_until(
