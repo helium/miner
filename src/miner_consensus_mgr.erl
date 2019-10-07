@@ -600,7 +600,14 @@ handle_info(_Info, State) ->
     lager:warning("unexpected message ~p", [_Info]),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{active_group = Active,
+                          started_groups = Started,
+                          current_dkgs = Current,
+                          cancel_dkgs = Cancel}) ->
+    stop_group(Active),
+    maps:map(fun(_, G) -> stop_group(G) end, Started),
+    maps:map(fun(_, G) -> stop_group(G) end, Current),
+    maps:map(fun(_, G) -> stop_group(G) end, Cancel),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
