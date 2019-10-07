@@ -3,7 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"14b64435b49ef707586b385532d4cee9a6100075"}},
+       {ref,"66556b7dd0bb0b7ec3bde2cee2297e0fd41085fc"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
@@ -111,7 +111,11 @@
  {<<"splicer">>,
   {git,"https://github.com/helium/erlang-splicer.git",
        {ref,"e1f47056786c76bf028b460e2a8cf70d7c31e7a6"}},
-  2}]}.
+  2},
+ {<<"vincenty">>,
+  {git,"https://github.com/helium/vincenty",
+       {ref,"b2b13fea367599d918359a2ac0071beefcd8e1b3"}},
+  1}]}.
 [
 {pkg_hash,[
  {<<"backoff">>, <<"83B72ED2108BA1EE8F7D1C22E0B4A00CFE3593A67DBC792799E8CCE9F42F796B">>},
