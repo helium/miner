@@ -122,46 +122,43 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
 handle_command(Txn, State=#state{chain=Chain}) ->
     Owner = self(),
     Attempt = make_ref(),
-    Pid = spawn(
-            fun() ->
-                    Ledger0 = blockchain:ledger(Chain),
-                    Ledger1 = blockchain_ledger_v1:new_context(Ledger0),
-                    Chain1 = blockchain:ledger(Ledger1, Chain),
-                    case blockchain_txn:is_valid(Txn, Chain1) of
-                        ok ->
-                            case blockchain_txn:absorb(Txn, Chain1) of
-                                ok ->
-                                    Owner ! {Attempt, ok};
-                                Error ->
-                                    lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
-                                    Owner ! {Attempt, {error, Error}}
-                            end;
-                        Error ->
-                            lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
-                            Owner ! {Attempt, {error, Error}}
-                    end,
-                    blockchain_ledger_v1:delete_context(Ledger1)
-            end),
-    Ref = erlang:monitor(process, Pid),
+    Timeout = application:get_env(miner, txn_validation_budget_ms, 1000),
+    {Pid, Ref} =
+        spawn_monitor(
+          fun() ->
+                  case blockchain_txn:is_valid(Txn, Chain) of
+                      ok ->
+                          Owner ! {Attempt, ok};
+                      Error ->
+                          lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                          Owner ! {Attempt, {error, Error}}
+                  end
+          end),
     receive
         {Attempt, ok} ->
             erlang:demonitor(Ref, [flush]),
-            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                {NewHBBFT, ok} ->
-                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
-                {_HBBFT, full} ->
-                    {reply, {error, full}, ignore};
-                {NewHBBFT, {send, Msgs}} ->
-                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+            case blockchain_txn:absorb(Txn, Chain) of
+                ok ->
+                    case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
+                        {NewHBBFT, ok} ->
+                            {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                        {_HBBFT, full} ->
+                            {reply, {error, full}, ignore};
+                        {NewHBBFT, {send, Msgs}} ->
+                            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+                    end;
+                Error ->
+                    lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                    {reply, Error, ignore}
             end;
         {Attempt, {error, Error}} ->
             lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
             erlang:demonitor(Ref, [flush]),
             {reply, Error, ignore};
-       {'DOWN', Ref, process, _Pid, Reason} ->
+        {'DOWN', Ref, process, _Pid, Reason} ->
             lager:error("hbbft_handler speculative absorb crashed on ~p, reason: ~p", [Txn, Reason]),
             {reply, Reason, ignore}
-    after 1000 ->
+    after Timeout ->
             erlang:demonitor(Ref, [flush]),
             erlang:exit(Pid, kill),
             lager:error("txn ~p could not be absorbed in 1s", [Txn]),
