@@ -122,7 +122,7 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
 handle_command(Txn, State=#state{chain=Chain}) ->
     Owner = self(),
     Attempt = make_ref(),
-    Timeout = application:get_env(miner, txn_validation_budget_ms, 1000),
+    Timeout = application:get_env(miner, txn_validation_budget_ms, 5000),
     {Pid, Ref} =
         spawn_monitor(
           fun() ->
@@ -161,7 +161,8 @@ handle_command(Txn, State=#state{chain=Chain}) ->
     after Timeout ->
             erlang:demonitor(Ref, [flush]),
             erlang:exit(Pid, kill),
-            lager:error("txn ~p could not be absorbed in 1s", [Txn]),
+            lager:error("txn ~p could not be absorbed in ~bs",
+                        [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
             {reply, deadline, ignore}
     end.
 
