@@ -214,13 +214,22 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
                                                                                 onion_keys=OnionKey,
                                                                                 poc_hash=BlockHash
                                                                                }=Data) ->
-    case blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger) of
-        {error, Reason} ->
+
+    Self = self(),
+    Attempt = make_ref(),
+    Timeout = application:get_env(miner, path_validation_budget_ms, 5000),
+    {Pid, Ref} =
+        spawn_monitor(fun() ->
+            Self ! {Attempt, blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger)}
+        end),
+    lager:info("staring blockchain_poc_path:build in ~p", [Pid]),
+    receive
+        {Attempt, {error, Reason}} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
             self() ! {target, Entropy, Height, Ledger},
             {next_state, targeting, Data#data{retry=Retry-1}};
-        {ok, Path} ->
+        {Attempt, {ok, Path}} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
@@ -239,7 +248,15 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
                     lager:info("selecting new target"),
                     self() ! {target, Entropy, Height, Ledger},
                     {next_state, targeting, Data#data{retry=Retry-1}}
-            end
+            end;
+        {'DOWN', Ref, process, _Pid, Reason} ->
+            lager:error("blockchain_poc_path went down ~p: ~p", [Reason, {Entropy, Target, Gateways, Height}]),
+            {next_state, targeting, Data#data{retry=Retry-1}}
+    after Timeout ->
+        erlang:demonitor(Ref, [flush]),
+        erlang:exit(Pid, kill),
+        lager:error("blockchain_poc_path took too long: ~p", [{Entropy, Target, Gateways, Height}]),
+        {next_state, targeting, Data#data{retry=Retry-1}}
     end;
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
