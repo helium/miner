@@ -255,8 +255,8 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger}, #data{
     after Timeout ->
         erlang:demonitor(Ref, [flush]),
         erlang:exit(Pid, kill),
-        lager:error("blockchain_poc_path took too long: ~p", [{Entropy, Target, Gateways, Height}]),
-        {next_state, targeting, Data#data{retry=Retry-1}}
+        lager:error("blockchain_poc_path took too long: Entropy ~p Target ~p Height ~p", [Entropy, Target, Height]),
+        {next_state, requesting, Data#data{retry=?CHALLENGE_RETRY}}
     end;
 challenging(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
