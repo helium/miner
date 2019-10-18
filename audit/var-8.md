@@ -31,3 +31,7 @@ None
 ## Acceptance block
 
 89232
+
+## Acceptance block time
+
+Thursday, 17-Oct-19 22:13:16 UTC

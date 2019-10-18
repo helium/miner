@@ -38,4 +38,4 @@ None
 
 ## Acceptance block time
 
-GMT: Wednesday, August 7, 2019 10:13:50 PM
+Wednesday, 07-Aug-19 22:13:50 UTC

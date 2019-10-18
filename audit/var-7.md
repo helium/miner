@@ -34,4 +34,4 @@ None
 
 ## Acceptance block time
 
-GMT: Saturday, October 12, 2019 2:11:04 AM
+Saturday, 12-Oct-19 02:11:04 UTC
