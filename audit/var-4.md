@@ -35,3 +35,7 @@ None
 ## Acceptance block
 
 10371 
+
+## Acceptance block time
+
+Wednesday, 07-Aug-19 22:13:50 UTC

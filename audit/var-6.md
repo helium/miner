@@ -29,3 +29,7 @@ None
 ## Acceptance block
 
 82251
+
+## Acceptance block time
+
+Friday, 11-Oct-19 06:21:33 UTC

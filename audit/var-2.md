@@ -30,3 +30,7 @@ None
 ## Acceptance block
 
 4816
+
+## Acceptance block time
+
+Friday, 02-Aug-19 17:07:18 UTC
