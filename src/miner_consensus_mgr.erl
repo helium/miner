@@ -454,7 +454,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                             end,
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, Round),
-                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
+                                        State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs)),
                                                      cancel_dkgs = CancelDKGs#{BlockHeight+2 => ElectionGroup},
                                                      started_groups = cleanup_groups(EID, State#state.started_groups),
                                                      active_group = HBBFTGroup}
