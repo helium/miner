@@ -372,11 +372,13 @@ make_vars(Keys, Map, Mode) ->
             legacy ->
                 %% ideally figure out a few more that are safe to
                 %% remove or bring back the splitting code
-                LegVars = maps:without([poc_path_limit, ?chain_vars_version, ?block_version],
+                LegVars = maps:without([?poc_version, ?poc_path_limit,
+                                        ?election_version, ?election_removal_pct, ?election_cluster_res,
+                                        ?chain_vars_version, ?block_version],
                                        Vars),
                 Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, LegVars),
                 Txn = blockchain_txn_vars_v1:new(LegVars, 1, #{master_key => BinPub,
-                                                            key_proof => Proof}),
+                                                               key_proof => Proof}),
 
                 [Txn]
 
