@@ -148,11 +148,11 @@ handle_command(Txn, State=#state{chain=Chain}) ->
                             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
                     end;
                 Error ->
-                    lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                    lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
                     {reply, Error, ignore}
             end;
         {Attempt, {error, Error}} ->
-            lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+            lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
             erlang:demonitor(Ref, [flush]),
             {reply, Error, ignore};
         {'DOWN', Ref, process, _Pid, Reason} ->
@@ -161,8 +161,8 @@ handle_command(Txn, State=#state{chain=Chain}) ->
     after Timeout ->
             erlang:demonitor(Ref, [flush]),
             erlang:exit(Pid, kill),
-            lager:error("txn ~p could not be absorbed in ~bs",
-                        [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
+            lager:warning("txn ~p could not be absorbed in ~bs",
+                          [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
             {reply, deadline, ignore}
     end.
 

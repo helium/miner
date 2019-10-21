@@ -339,6 +339,9 @@ make_vars(Keys, Map, Mode) ->
               ?poc_challengers_percent => 0.09 + 0.06,
               ?poc_witnesses_percent => 0.02 + 0.03,
               ?consensus_percent => 0.10,
+              ?election_version => 2,
+              ?election_cluster_res => 8,
+              ?election_removal_pct => 85,
               ?election_selection_pct => 60,
               ?election_replacement_factor => 4,
               ?election_replacement_slope => 20,
@@ -350,8 +353,9 @@ make_vars(Keys, Map, Mode) ->
               ?h3_neighbor_res => 12,
               ?h3_max_grid_distance => 13,
               ?h3_exclusion_ring_dist => 2,
-              ?poc_challenge_interval => 10%% ,
-              %% ?poc_path_limit => 7
+              ?poc_challenge_interval => 10,
+              ?poc_version => 3,
+              ?poc_path_limit => 7
              },
 
     #{secret := Priv, public := Pub} = Keys,
