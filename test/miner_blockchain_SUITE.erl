@@ -82,7 +82,7 @@ init_per_testcase(TestCase, Config0) ->
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
         fun(I, Acc) ->
-            [h3:from_geo({37.780586, -122.469470 + I/1000000}, 13)|Acc]
+            [h3:from_geo({37.780586, -122.469470 + I/100}, 13)|Acc]
         end,
         [],
         lists:seq(1, length(Addresses))
@@ -670,6 +670,10 @@ group_change_test(Config) ->
     ok = miner_ct_utils:wait_until(fun() ->
                                            CGroup = lists:filtermap(
                                                       fun(Miner) ->
+                                                              C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
+                                                              L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], 500),
+                                                              {ok, Sz} = ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], 500),
+                                                              ct:pal("size ~p", [Sz]),
                                                               true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
                                                       end, Miners),
                                            ct:pal("group size: ~p", [length(CGroup)]),

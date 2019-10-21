@@ -119,51 +119,57 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
-handle_command(Txn, State=#state{chain=Chain}) ->
-    Owner = self(),
-    Attempt = make_ref(),
-    Timeout = application:get_env(miner, txn_validation_budget_ms, 5000),
-    {Pid, Ref} =
-        spawn_monitor(
-          fun() ->
-                  case blockchain_txn:is_valid(Txn, Chain) of
-                      ok ->
-                          Owner ! {Attempt, ok};
-                      Error ->
-                          lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
-                          Owner ! {Attempt, {error, Error}}
-                  end
-          end),
-    receive
-        {Attempt, ok} ->
-            erlang:demonitor(Ref, [flush]),
-            case blockchain_txn:absorb(Txn, Chain) of
-                ok ->
-                    case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                        {NewHBBFT, ok} ->
-                            {reply, ok, [], State#state{hbbft=NewHBBFT}};
-                        {_HBBFT, full} ->
-                            {reply, {error, full}, ignore};
-                        {NewHBBFT, {send, Msgs}} ->
-                            {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
+    Buf = hbbft:buf(HBBFT),
+    case lists:member(blockchain_txn:serialize(Txn), Buf) of
+        true ->
+            {reply, ok, ignore};
+        false ->
+            Owner = self(),
+            Attempt = make_ref(),
+            Timeout = application:get_env(miner, txn_validation_budget_ms, 5000),
+            {Pid, Ref} =
+            spawn_monitor(
+              fun() ->
+                      case blockchain_txn:is_valid(Txn, Chain) of
+                          ok ->
+                              Owner ! {Attempt, ok};
+                          Error ->
+                              lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                              Owner ! {Attempt, {error, Error}}
+                      end
+              end),
+            receive
+                {Attempt, ok} ->
+                    erlang:demonitor(Ref, [flush]),
+                    case blockchain_txn:absorb(Txn, Chain) of
+                        ok ->
+                            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
+                                {NewHBBFT, ok} ->
+                                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                                {_HBBFT, full} ->
+                                    {reply, {error, full}, ignore};
+                                {NewHBBFT, {send, Msgs}} ->
+                                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+                            end;
+                        Error ->
+                            lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                            {reply, Error, ignore}
                     end;
-                Error ->
-                    lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
-                    {reply, Error, ignore}
-            end;
-        {Attempt, {error, Error}} ->
-            lager:error("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
-            erlang:demonitor(Ref, [flush]),
-            {reply, Error, ignore};
-        {'DOWN', Ref, process, _Pid, Reason} ->
-            lager:error("hbbft_handler speculative absorb crashed on ~p, reason: ~p", [Txn, Reason]),
-            {reply, Reason, ignore}
-    after Timeout ->
-            erlang:demonitor(Ref, [flush]),
-            erlang:exit(Pid, kill),
-            lager:error("txn ~p could not be absorbed in ~bs",
-                        [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
-            {reply, deadline, ignore}
+                {Attempt, {error, Error}} ->
+                    lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                    erlang:demonitor(Ref, [flush]),
+                    {reply, Error, ignore};
+                {'DOWN', Ref, process, _Pid, Reason} ->
+                    lager:error("hbbft_handler speculative absorb crashed on ~p, reason: ~p", [Txn, Reason]),
+                    {reply, Reason, ignore}
+            after Timeout ->
+                      erlang:demonitor(Ref, [flush]),
+                      erlang:exit(Pid, kill),
+                      lager:warning("txn ~p could not be absorbed in ~bs",
+                                    [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
+                      {reply, deadline, ignore}
+            end
     end.
 
 handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
