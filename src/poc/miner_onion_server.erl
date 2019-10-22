@@ -268,10 +268,9 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
     Fragmentation = application:get_env(miner, poc_fragmentation, true),
     {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
     Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-    UpLink = #helium_LongFiTxUplinkPacket_pb{
+    UpLink = #helium_LongFiTxPacket_pb{
                 oui = 0,
                 device_id = 1,
-                disable_fragmentation=Fragmentation == false,
                 spreading=Spreading,
                 payload=Data
                },
@@ -349,10 +348,9 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
             Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
-            UpLink = #helium_LongFiTxUplinkPacket_pb{
+            UpLink = #helium_LongFiTxPacket_pb{
                 oui=0,
                 device_id=1,
-                disable_fragmentation=Fragmentation == false,
                 spreading=Spreading,
                 payload=NextPacket
             },
