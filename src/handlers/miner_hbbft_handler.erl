@@ -98,19 +98,18 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
-            %% we've advanced to a new round, we need to destroy the old ledger context
+            %% we've advanced to a new round, we need to reset the old ledger context
             %% (with the old speculatively absorbed changes that may now be invalid/stale)
-            %% and create a new one, and then use that new context to filter the pending
+            %% and then use that reset context to filter the pending
             %% transactions to remove any that have become invalid
             Ledger0 = blockchain:ledger(Chain),
-            Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:reset_context(Ledger0)),
-            NewChain = blockchain:ledger(Ledger1, Chain),
+            ok = blockchain_ledger_v1:reset_context(Ledger0),
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
+            case hbbft:next_round(filter_txn_buf(HBBFT, Chain), NextRound, TxnsToRemove) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
+                    {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
