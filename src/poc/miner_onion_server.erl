@@ -274,7 +274,7 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
                 spreading=Spreading,
                 payload=Data
                },
-    Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
+    Req = #helium_LongFiReq_pb{id=ID, kind={tx, UpLink}},
     lager:info("sending ~p", [Req]),
     Packet = helium_longfi_pb:encode_msg(Req),
     spawn(fun() ->
@@ -354,7 +354,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                 spreading=Spreading,
                 payload=NextPacket
             },
-            Req = #helium_LongFiReq_pb{id=ID, kind={tx_uplink, UpLink}},
+            Req = #helium_LongFiReq_pb{id=ID, kind={tx, UpLink}},
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "sending ~p", [Req]),
             Packet = helium_longfi_pb:encode_msg(Req),
             erlang:spawn(

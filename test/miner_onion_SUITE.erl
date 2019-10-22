@@ -101,7 +101,7 @@ basic(_Config) ->
 
     Got0 = helium_longfi_pb:decode_msg(Packet1, helium_LongFiReq_pb),
     {_, Got0Uplink} = Got0#helium_LongFiReq_pb.kind,
-    X = Got0Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    X = Got0Uplink#helium_LongFiTxPacket_pb.payload,
 
     timer:sleep(2000),
     %% check that the packet size is the same
@@ -163,7 +163,7 @@ basic(_Config) ->
 
     Got1 = helium_longfi_pb:decode_msg(Packet4, helium_LongFiReq_pb),
     {_, Got1Uplink} = Got1#helium_LongFiReq_pb.kind,
-    Y = Got1Uplink#helium_LongFiTxUplinkPacket_pb.payload,
+    Y = Got1Uplink#helium_LongFiTxPacket_pb.payload,
 
     %% check we can't decrypt the next layer
     Rx5 = #helium_LongFiRxPacket_pb{
