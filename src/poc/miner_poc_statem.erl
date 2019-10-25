@@ -32,7 +32,6 @@
 -export([
     requesting/3,
     mining/3,
-    delaying/3,
     targeting/3,
     challenging/3,
     receiving/3,
@@ -46,7 +45,6 @@
 
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 5).
--define(MINING_DELAY, 10).
 -define(CHALLENGE_RETRY, 3).
 -define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
@@ -55,7 +53,7 @@
 -record(data, {
     base_dir :: file:filename_all() | undefined,
     blockchain :: blockchain:blockchain() | undefined,
-    address :: libp2p_crypto:pubkey_bin(),
+    address :: libp2p_crypto:pubkey_bin() | undefined,
     poc_interval :: non_neg_integer() | undefined,
 
     state = requesting :: state(),
@@ -67,14 +65,11 @@
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     poc_hash  :: binary() | undefined,
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
-    mining_delay = ?MINING_DELAY :: non_neg_integer(),
-    mining_hash :: undefined | binary(),
-    mining_ledger :: undefined | blockchain_ledger_v1:ledger(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer()
 }).
 
--type state() :: requesting | mining | delaying | targeting | challenging | receiving | submitting | waiting.
+-type state() :: requesting | mining | targeting | challenging | receiving | submitting | waiting.
 -type data() :: #data{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 
@@ -152,16 +147,16 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #dat
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
-mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{mining_timeout=MiningTimeout}=Data) ->
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
+       #data{blockchain = Chain, address = Challenger,
+             mining_timeout = MiningTimeout, secret = Secret} = Data) ->
     case find_request(BlockHash, Data) of
         ok ->
-            RandomDelay = rand:uniform(?MINING_DELAY),
-            lager:info("request was mined @ ~p delaying ~p blocks", [BlockHash, RandomDelay]),
-            {next_state, delaying, save_data(Data#data{state=delaying, 
-                                                       mining_timeout=?MINING_TIMEOUT,
-                                                       mining_hash=BlockHash,
-                                                       mining_delay=RandomDelay,
-                                                       mining_ledger=PinnedLedger})};
+            {ok, Block} = blockchain:get_block(BlockHash, Chain),
+            Height = blockchain_block:height(Block),
+            %% TODO: change this to an internal event
+            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger},
+            {next_state, targeting, save_data(Data#data{state = targeting, mining_timeout = ?MINING_TIMEOUT})};
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
@@ -172,23 +167,6 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, #data{
             end
     end;
 mining(EventType, EventContent, Data) ->
-    handle_event(EventType, EventContent, Data).
-
-delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{mining_delay=Delay}=Data0) when Delay > 0 ->
-    {keep_state, save_data(Data0#data{mining_delay=Delay-1})};
-delaying(info, {blockchain_event, {add_block, _, _, _}}, #data{blockchain=Chain,
-                                                               address=Challenger,
-                                                               secret=Secret,
-                                                               mining_delay=0,
-                                                               mining_hash=MiningHash,
-                                                               mining_ledger=PinnedLedger}=Data) ->
-    lager:info("delay over, moving to targeting"),
-    {ok, Block} = blockchain:get_block(MiningHash, Chain),
-    Height = blockchain_block:height(Block),
-    %% TODO: change this to an internal event
-    self() ! {target, <<Secret/binary, MiningHash/binary, Challenger/binary>>, Height, PinnedLedger},
-    {next_state, targeting, save_data(Data#data{state=targeting, mining_hash=undefined})};
-delaying(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 targeting(info, {target, _, _, _}, #data{retry=0}=Data) ->
@@ -387,25 +365,75 @@ waiting(EventType, EventContent, Data) ->
 -spec save_data(data()) -> data().
 save_data(#data{base_dir=undefined}=State) ->
     State;
-save_data(#data{base_dir=BaseDir}=State) ->
-    BinState = erlang:term_to_binary(State),
+save_data(#data{base_dir = BaseDir,
+                state = CurrState,
+                secret = Secret,
+                onion_keys = Keys,
+                challengees = Challengees,
+                packet_hashes = PacketHashes,
+                responses = Responses,
+                receiving_timeout = RecTimeout,
+                poc_hash = PoCHash,
+                mining_timeout = MiningTimeout,
+                retry = Retry,
+                receipts_timeout = ReceiptTimeout} = State) ->
+    StateMap = #{
+                 state => CurrState,
+                 secret => Secret,
+                 onion_keys => Keys,
+                 challengees => Challengees,
+                 packet_hashes => PacketHashes,
+                 responses => Responses,
+                 receiving_timeout => RecTimeout,
+                 poc_hash => PoCHash,
+                 mining_timeout => MiningTimeout,
+                 retry => Retry,
+                 receipts_timeout => ReceiptTimeout
+                },
+    BinState = erlang:term_to_binary(StateMap),
     File = filename:join([BaseDir, ?STATE_FILE]),
     ok = file:write_file(File, BinState),
     State.
 
 -spec load_data(file:filename_all()) -> {error, any()} | {ok, state(), data()}.
+load_data(undefined) ->
+    {error, base_dir_undefined};
 load_data(BaseDir) ->
     File = filename:join([BaseDir, ?STATE_FILE]),
-    case file:read_file(File) of
+    try file:read_file(File) of
         {error, _Reason}=Error ->
             Error;
         {ok, Binary} ->
             case erlang:binary_to_term(Binary) of
-                #data{state=State}=Data ->
-                     {ok, State, Data};
+                #{state := State,
+                  secret := Secret,
+                  onion_keys := Keys,
+                  challengees := Challengees,
+                  packet_hashes := PacketHashes,
+                  responses := Responses,
+                  receiving_timeout := RecTimeout,
+                  poc_hash := PoCHash,
+                  mining_timeout := MiningTimeout,
+                  retry := Retry,
+                  receipts_timeout := ReceiptTimeout} ->
+                    {ok, State,
+                     #data{base_dir = BaseDir,
+                           state = State,
+                           secret = Secret,
+                           onion_keys = Keys,
+                           challengees = Challengees,
+                           packet_hashes = PacketHashes,
+                           responses = Responses,
+                           receiving_timeout = RecTimeout,
+                           poc_hash = PoCHash,
+                           mining_timeout = MiningTimeout,
+                           retry = Retry,
+                           receipts_timeout = ReceiptTimeout}};
                 _ ->
                     {error, wrong_data}
             end
+    catch _:_ ->
+            {error, read_error}
     end.
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
@@ -456,7 +484,10 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                             true;
                         LastChallenge ->
                             lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
-                            (Height - LastChallenge) > POCInterval
+                            case (Height - LastChallenge) > POCInterval of
+                                true -> 1 == rand:uniform(trunc(POCInterval / 4));
+                                false -> false
+                            end
                     end
             end
     end.

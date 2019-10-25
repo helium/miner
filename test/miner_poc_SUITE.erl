@@ -419,17 +419,6 @@ basic(_Config) ->
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
-    % Passing the random delay
-    ?assertEqual(delaying,  erlang:element(1, sys:get_state(Statem))),
-    ?assertEqual(delaying, erlang:element(6, erlang:element(2, sys:get_state(Statem)))),
-    RandDelay = erlang:element(15, erlang:element(2, sys:get_state(Statem))),
-    lists:foreach(
-        fun(_) ->
-             ok = add_block(Chain, ConsensusMembers, [])
-        end,
-        lists:seq(1, RandDelay+1)
-    ),
-
     % Moving threw targeting and challenging
     ok = miner_ct_utils:wait_until(fun() ->
         case sys:get_state(Statem) of
@@ -583,17 +572,6 @@ restart(_Config) ->
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
-
-    % Passing the random delay
-    ?assertEqual(delaying,  erlang:element(1, sys:get_state(Statem0))),
-    ?assertEqual(delaying, erlang:element(6, erlang:element(2, sys:get_state(Statem0)))),
-    RandDelay = erlang:element(15, erlang:element(2, sys:get_state(Statem0))),
-    lists:foreach(
-        fun(_) ->
-             ok = add_block(Chain, ConsensusMembers, [])
-        end,
-        lists:seq(1, RandDelay+1)
-    ),
 
     %% Moving through targeting and challenging
     ok = miner_ct_utils:wait_until(
