@@ -167,21 +167,17 @@ In order to participate in mining and earning Helium tokens (HLM), the Gateway n
 
 ### Creating the sign_gateway transaction
 
-The `owner` is the address that receives mining rewards, and can make changes to the location of the gateway. In order to create the `sign_gateway` transaction, which has the owner sign the first half of the transaction, either a separate `miner` or `blockchain-api` instance needs to be running.
+The `owner` is the address that receives mining rewards, and can make changes to the location of the gateway. In order to create the `sign_gateway` transaction, which has the gateway sign the first half of the transaction, either a separate `miner` or `blockchain-api` instance needs to be running or for the purposes of this guide we will assume that the `owner` is running the Helium Hotspot mobile app on either iOS or Android.
 
-If you have created an address using the Helium mobile app the private key can be imported by running:
-
-```NO CLI OR TECHNOLOGY EXISTS FOR THIS PART```
-
-You can check what address your instance is running:
+First, get the address of the `gateway` via the CLI:
 
 ```_build/prod/rel/miner/bin/miner peer addr```
 
-Once you've got the correct owner CLI set up, it's time to craft the `sign_gateway` transaction, which can be done as follows:
+Then, craft the `sign_gateway` transaction as follows:
 
 ```_build/prod/rel/miner/bin/miner ledger sign_gateway -g <gateway_address> -s <stake> -f <fee>```
 
-Replacing `gateway_address` with the address of the miner running on the Pi, `stake` with the appropriate staking fee, and `fee` with the transaction fee.
+Replacing `gateway_address` with the address of the miner from the prior step, `stake` with the appropriate staking fee, and `fee` with the transaction fee.
 
 The output, a Base64 partially signed blockchain transaction, will be something similar to the following:
 
@@ -192,3 +188,6 @@ ok
 
 Copy and paste the Base64 string (the line before `ok`) into the Helium mobile app during the add hotspot process - you'll see an `Advanced` link that will allow you to paste this Base64 transaction into the app. After you've done that, the mobile app will re-sign the transaction via that owners address and submit it to the blockchain.
 
+### Creating the sign_location transaction
+
+TBD
