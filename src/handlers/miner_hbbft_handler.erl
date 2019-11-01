@@ -125,6 +125,7 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
         true ->
             {reply, ok, ignore};
         false ->
+            Before = erlang:monotonic_time(millisecond),
             Owner = self(),
             Attempt = make_ref(),
             Timeout = application:get_env(miner, txn_validation_budget_ms, 5000),
@@ -141,6 +142,8 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
               end),
             receive
                 {Attempt, ok} ->
+                    Duration = erlang:monotonic_time(millisecond) - Before,
+                    lager:info("txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
                     erlang:demonitor(Ref, [flush]),
                     case blockchain_txn:absorb(Txn, Chain) of
                         ok ->
@@ -157,6 +160,8 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
                             {reply, Error, ignore}
                     end;
                 {Attempt, {error, Error}} ->
+                    Duration = erlang:monotonic_time(millisecond) - Before,
+                    lager:info("failed txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
                     lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
                     erlang:demonitor(Ref, [flush]),
                     {reply, Error, ignore};
@@ -167,7 +172,8 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
                       erlang:demonitor(Ref, [flush]),
                       erlang:exit(Pid, kill),
                       lager:warning("txn ~p could not be absorbed in ~bs",
-                                    [Txn, erlang:convert_time_unit(Timeout, millisecond, second)]),
+                                    [blockchain_txn:type(Txn),
+                                     erlang:convert_time_unit(Timeout, millisecond, second)]),
                       {reply, deadline, ignore}
             end
     end.
@@ -242,9 +248,12 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
                     NewRound = hbbft:round(NewHBBFT),
+                    Before = erlang:monotonic_time(millisecond),
                     case miner:create_block(Stamps, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
+                            Duration = erlang:monotonic_time(millisecond) - Before,
+                            lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
                             BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
