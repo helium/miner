@@ -197,6 +197,7 @@ init(_Args) ->
         ECCWorker++
         [
          ?SUP(blockchain_sup, [BlockchainOpts]),
+         ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, [MinerOpts]),
          ?WORKER(miner_consensus_mgr, [ElectOpts])
         ] ++

@@ -385,11 +385,6 @@ handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                                         {libp2p_framed_stream, server,
-                                          [blockchain_txn_handler, self(),
-                                           ConsensusGroup]}),
-
     Ref = set_next_block_timer(Chain),
     {reply, ok, State#state{consensus_group = ConsensusGroup,
                             blockchain = Chain,
