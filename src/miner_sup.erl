@@ -168,7 +168,9 @@ init(_Args) ->
          {batch_size, BatchSize}
         ],
 
-    POCOpts = #{},
+    POCOpts = #{
+        base_dir => BaseDir
+    },
 
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
