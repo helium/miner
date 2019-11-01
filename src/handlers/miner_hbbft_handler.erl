@@ -143,7 +143,7 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
             receive
                 {Attempt, ok} ->
                     Duration = erlang:monotonic_time(millisecond) - Before,
-                    lager:info("txn validation for txn ~p took: ~p", [blockchain_txn:type(Txn), Duration]),
+                    lager:info("txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
                     erlang:demonitor(Ref, [flush]),
                     case blockchain_txn:absorb(Txn, Chain) of
                         ok ->
@@ -161,7 +161,7 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
                     end;
                 {Attempt, {error, Error}} ->
                     Duration = erlang:monotonic_time(millisecond) - Before,
-                    lager:info("failed txn validation for txn ~p took: ~p", [blockchain_txn:type(Txn), Duration]),
+                    lager:info("failed txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
                     lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
                     erlang:demonitor(Ref, [flush]),
                     {reply, Error, ignore};
@@ -253,7 +253,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
-                            lager:info("block creation for round ~p took: ~p", [NewRound, Duration]),
+                            lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
                             BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
