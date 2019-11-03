@@ -320,7 +320,7 @@ make_vars(Keys, Map) ->
 
 make_vars(Keys, Map, Mode) ->
     Vars1 = #{?chain_vars_version => 2,
-              ?block_time => 1,
+              ?block_time => 2,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
