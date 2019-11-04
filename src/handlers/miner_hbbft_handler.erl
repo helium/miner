@@ -163,18 +163,20 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
                     Duration = erlang:monotonic_time(millisecond) - Before,
                     lager:info("failed txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
                     lager:warning("hbbft_handler speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                    write_txn("failed", Txn),
                     erlang:demonitor(Ref, [flush]),
                     {reply, Error, ignore};
                 {'DOWN', Ref, process, _Pid, Reason} ->
                     lager:error("hbbft_handler speculative absorb crashed on ~p, reason: ~p", [Txn, Reason]),
                     {reply, Reason, ignore}
             after Timeout ->
-                      erlang:demonitor(Ref, [flush]),
-                      erlang:exit(Pid, kill),
-                      lager:warning("txn ~p could not be absorbed in ~bs",
-                                    [blockchain_txn:type(Txn),
-                                     erlang:convert_time_unit(Timeout, millisecond, second)]),
-                      {reply, deadline, ignore}
+                    erlang:demonitor(Ref, [flush]),
+                    erlang:exit(Pid, kill),
+                    lager:warning("txn ~p could not be absorbed in ~bs",
+                                  [blockchain_txn:type(Txn),
+                                   erlang:convert_time_unit(Timeout, millisecond, second)]),
+                    write_txn("timed out", Txn),
+                    {reply, deadline, ignore}
             end
     end.
 
@@ -416,3 +418,15 @@ filter_txn_buf(HBBFT, Chain) ->
                                   end
                           end, Buf),
     hbbft:buf(NewBuf, HBBFT).
+
+write_txn(Reason, Txn) ->
+    case application:get_env(miner, write_failed_txns, false) of
+        true ->
+            Name = ["/tmp/", io_lib:format("~b", [erlang:phash2(Txn)]), ".txn"],
+            {ok, F} = file:open(Name, [write, binary]),
+            ok = file:write(F, blockchain_txn:serialize(Txn)),
+            lager:info("~s txn written to disk as ~s", [Reason, Name]),
+            ok;
+        _ ->
+            ok
+    end.
