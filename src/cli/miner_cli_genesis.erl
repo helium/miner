@@ -329,7 +329,7 @@ make_vars() ->
       ?predicate_threshold => 0.95,
       ?monthly_reward => 50000 * 1000000,
       ?securities_percent => 0.35,
-      ?dc_percent => 0,
+      ?dc_percent => 0.0,
       ?poc_challengees_percent => 0.19 + 0.16,
       ?poc_challengers_percent => 0.09 + 0.06,
       ?poc_witnesses_percent => 0.02 + 0.03,

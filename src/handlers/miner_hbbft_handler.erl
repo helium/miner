@@ -128,7 +128,7 @@ handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
             Before = erlang:monotonic_time(millisecond),
             Owner = self(),
             Attempt = make_ref(),
-            Timeout = application:get_env(miner, txn_validation_budget_ms, 5000),
+            Timeout = application:get_env(miner, txn_validation_budget_ms, 10000),
             {Pid, Ref} =
             spawn_monitor(
               fun() ->
