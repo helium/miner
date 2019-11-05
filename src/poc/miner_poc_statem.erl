@@ -278,9 +278,9 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                             {keep_state, Data};
                         false ->
                             %% Don't allow putting duplicate response in the witness list resp
+                            Predicate = fun(W) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
                             Responses1 =
-                                Filter = fun(W) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
-                                case lists:any(Filter, Witnesses) of
+                                case lists:any(Predicate, Witnesses) of
                                     false ->
                                         maps:put(PacketHash, [Witness|Witnesses], Responses0);
                                     true ->
