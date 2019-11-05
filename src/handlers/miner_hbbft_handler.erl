@@ -428,8 +428,7 @@ write_txn(Reason, Height, Txn) ->
         true ->
             Name = ["/tmp/", io_lib:format("height-~b-hash-~b",
                                            [Height, erlang:phash2(Txn)]), ".txn"],
-            {ok, F} = file:open(Name, [write, binary]),
-            ok = file:write(F, blockchain_txn:serialize(Txn)),
+            ok = file:write_file(Name, blockchain_txn:serialize(Txn)),
             lager:info("~s txn written to disk as ~s", [Reason, Name]),
             ok;
         _ ->
