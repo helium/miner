@@ -41,7 +41,7 @@ dist_v1(Config0) ->
     Addresses = proplists:get_value(addresses, Config),
 
     N = proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
+    _BlockTime = proplists:get_value(block_time, Config),
     Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
@@ -49,7 +49,7 @@ dist_v1(Config0) ->
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
+    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => 5000, % BlockTime,
                                                    ?election_interval => Interval,
                                                    ?num_consensus_members => N,
                                                    ?batch_size => BatchSize,
@@ -349,7 +349,7 @@ basic(_Config) ->
                      || {Addr, _} <- ConsensusMembers],
     GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
     VarsKeys = libp2p_crypto:generate_keys(ecc_compact),
-    VarsTx = miner_ct_utils:make_vars(VarsKeys),
+    VarsTx = miner_ct_utils:make_vars(VarsKeys, #{?poc_challenge_interval => 20}),
 
     Txs = ConbaseTxns ++ ConbaseDCTxns ++ [GenConsensusGroupTx] ++ VarsTx,
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
@@ -501,7 +501,7 @@ restart(_Config) ->
                      || {Addr, _} <- ConsensusMembers],
     GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
     VarsKeys = libp2p_crypto:generate_keys(ecc_compact),
-    VarsTx = miner_ct_utils:make_vars(VarsKeys),
+    VarsTx = miner_ct_utils:make_vars(VarsKeys, #{?poc_challenge_interval => 20}),
 
     Txs = ConbaseTxns ++ ConbaseDCTxns ++ [GenConsensusGroupTx] ++ VarsTx,
     GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
@@ -797,8 +797,8 @@ create_block(ConsensusMembers, Txs) ->
                                        signatures => [],
                                        time => 0,
                                        hbbft_round => 0,
-                                       election_epoch => 0,
-                                       epoch_start => 0}),
+                                       election_epoch => 1,
+                                       epoch_start => 1}),
     BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
     Signatures = signatures(ConsensusMembers, BinBlock),
     Block1 = blockchain_block:set_signatures(Block0, Signatures),

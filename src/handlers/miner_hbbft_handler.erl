@@ -48,7 +48,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 members = Members,
                 signatures_required = N - F,
                 hbbft = HBBFT,
-                chain=Chain1}}.
+                chain = Chain1}}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -94,7 +94,7 @@ handle_command({skip, Ref, Worker}, State) ->
             {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT, chain=Chain}) ->
+handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
@@ -102,15 +102,25 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             %% (with the old speculatively absorbed changes that may now be invalid/stale)
             %% and create a new one, and then use that new context to filter the pending
             %% transactions to remove any that have become invalid
-            Ledger0 = blockchain:ledger(Chain),
-            Ledger1 = blockchain_ledger_v1:new_context(blockchain_ledger_v1:delete_context(Ledger0)),
-            NewChain = blockchain:ledger(Ledger1, Chain),
-            lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer", [PrevRound, NextRound]),
-            case hbbft:next_round(filter_txn_buf(HBBFT, NewChain), NextRound, TxnsToRemove) of
+            lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer",
+                       [PrevRound, NextRound]),
+            HBBFT1 =
+                case get(filtered) of
+                    Done when Done == NextRound ->
+                        HBBFT;
+                    _ ->
+                        Buf = hbbft:buf(HBBFT),
+                        BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
+                        Buf1 = miner_hbbft_sidecar:new_round(Buf, BinTxnsToRemove),
+                        hbbft:buf(Buf1, HBBFT)
+                end,
+            case hbbft:next_round(HBBFT1, NextRound, []) of
                 {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
+                    {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[],
+                                                           artifact=undefined, sig_phase=unsent}};
                 {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs), State#state{chain=NewChain, hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
+                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs),
+                     State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -119,68 +129,21 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             lager:warning("Cannot advance to NextRound: ~p from PrevRound: ~p", [NextRound, PrevRound]),
             {reply, error, ignore}
     end;
-handle_command(Txn, State=#state{chain=Chain, hbbft=HBBFT}) ->
+%% these are coming back from the sidecar, they don't need to be
+%% validated further.
+handle_command(Txn, State=#state{hbbft=HBBFT}) ->
     Buf = hbbft:buf(HBBFT),
     case lists:member(blockchain_txn:serialize(Txn), Buf) of
         true ->
             {reply, ok, ignore};
         false ->
-            {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
-            Before = erlang:monotonic_time(millisecond),
-            Owner = self(),
-            Attempt = make_ref(),
-            Timeout = application:get_env(miner, txn_validation_budget_ms, 10000),
-            {Pid, Ref} =
-            spawn_monitor(
-              fun() ->
-                      case blockchain_txn:is_valid(Txn, Chain) of
-                          ok ->
-                              Owner ! {Attempt, ok};
-                          Error ->
-                              lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
-                              Owner ! {Attempt, {error, Error}}
-                      end
-              end),
-            receive
-                {Attempt, ok} ->
-                    Duration = erlang:monotonic_time(millisecond) - Before,
-                    lager:info("txn validation for txn ~p took: ~p ms", [blockchain_txn:type(Txn), Duration]),
-                    erlang:demonitor(Ref, [flush]),
-                    case blockchain_txn:absorb(Txn, Chain) of
-                        ok ->
-                            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                                {NewHBBFT, ok} ->
-                                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
-                                {_HBBFT, full} ->
-                                    {reply, {error, full}, ignore};
-                                {NewHBBFT, {send, Msgs}} ->
-                                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
-                            end;
-                        Error ->
-                            lager:warning("hbbft_handler speculative absorb failed for ~p @ ~p, error: ~p",
-                                          [Txn, Height, Error]),
-                            {reply, Error, ignore}
-                    end;
-                {Attempt, {error, Error}} ->
-                    Duration = erlang:monotonic_time(millisecond) - Before,
-                    lager:info("failed txn validation for txn ~p took: ~p ms",
-                               [blockchain_txn:type(Txn), Duration]),
-                    lager:warning("hbbft_handler speculative validate failed for ~p @ ~p, error: ~p",
-                                  [Txn, Height, Error]),
-                    write_txn("failed", Height, Txn),
-                    erlang:demonitor(Ref, [flush]),
-                    {reply, Error, ignore};
-                {'DOWN', Ref, process, _Pid, Reason} ->
-                    lager:error("hbbft_handler speculative absorb crashed on ~p, reason: ~p", [Txn, Reason]),
-                    {reply, Reason, ignore}
-            after Timeout ->
-                    erlang:demonitor(Ref, [flush]),
-                    erlang:exit(Pid, kill),
-                    lager:warning("txn ~p could not be absorbed in ~bs",
-                                  [blockchain_txn:type(Txn),
-                                   erlang:convert_time_unit(Timeout, millisecond, second)]),
-                    write_txn("timed out", Height, Txn),
-                    {reply, deadline, ignore}
+            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
+                {NewHBBFT, ok} ->
+                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
+                {_HBBFT, full} ->
+                    {reply, {error, full}, ignore};
+                {NewHBBFT, {send, Msgs}} ->
+                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end.
 
@@ -262,8 +225,12 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
                             BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
+                            Buf = hbbft:buf(NewerHBBFT),
+                            Buf1 = miner_hbbft_sidecar:new_round(Buf, []),
+                            NewerHBBFT1 = hbbft:buf(Buf1, NewerHBBFT),
+                            put(filtered, NewRound),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
-                            {filter_signatures(State#state{hbbft=NewerHBBFT, sig_phase=sig, artifact=Artifact}), fixup_msgs(Msgs)};
+                            {filter_signatures(State#state{hbbft=NewerHBBFT1, sig_phase=sig, artifact=Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
@@ -332,9 +299,12 @@ deserialize(#{sk := SKSer,
 restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
     %% because we have non-serializable data in it (rocksdb refs)
+    HBBFT = OldState#state.hbbft,
     {M, F, A} = hbbft:get_stamp_fun(NewState#state.hbbft),
-    Chain = NewState#state.chain,
-    {ok, OldState#state{hbbft=filter_txn_buf(hbbft:set_stamp_fun(M, F, A, OldState#state.hbbft), Chain), chain=Chain}}.
+    Buf = hbbft:buf(HBBFT),
+    Buf1 = miner_hbbft_sidecar:new_round(Buf, []),
+    HBBFT1 = hbbft:buf(Buf1, HBBFT),
+    {ok, OldState#state{hbbft = hbbft:set_stamp_fun(M, F, A, HBBFT1)}}.
 
 %% helper functions
 fixup_msgs(Msgs) ->
@@ -402,35 +372,3 @@ map_ids(Sigs, Members0) ->
                     end,
                     Sigs),
     lists:usort(IDs).
-
-filter_txn_buf(HBBFT, Chain) ->
-    Buf = hbbft:buf(HBBFT),
-    NewBuf = lists:filter(fun(BinTxn) ->
-                                  Txn = blockchain_txn:deserialize(BinTxn),
-                                  case blockchain_txn:is_valid(Txn, Chain) of
-                                      ok ->
-                                          case blockchain_txn:absorb(Txn, Chain) of
-                                              ok ->
-                                                  true;
-                                              Other ->
-                                                  lager:info("Transaction ~p could not be re-absorbed ~p", [Txn, Other]),
-                                                  false
-                                          end;
-                                      Other ->
-                                          lager:info("Transaction ~p became invalid ~p", [Txn, Other]),
-                                          false
-                                  end
-                          end, Buf),
-    hbbft:buf(NewBuf, HBBFT).
-
-write_txn(Reason, Height, Txn) ->
-    case application:get_env(miner, write_failed_txns, false) of
-        true ->
-            Name = ["/tmp/", io_lib:format("height-~b-hash-~b",
-                                           [Height, erlang:phash2(Txn)]), ".txn"],
-            ok = file:write_file(Name, blockchain_txn:serialize(Txn)),
-            lager:info("~s txn written to disk as ~s", [Reason, Name]),
-            ok;
-        _ ->
-            ok
-    end.

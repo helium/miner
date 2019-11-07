@@ -201,6 +201,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                          libp2p_group_relcast, GroupArg),
     lager:info("started initial hbbft group: ~p~n", [Group]),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
+    miner_hbbft_sidecar:set_group(Group),
     miner:start_chain(Group, Chain),
 
     #{ {1,0} := DKGGroup} = State#state.current_dkgs,
@@ -302,8 +303,8 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
     ok = miner:install_consensus(Group),
     %% here the dkg has already been moved into the cancel state.
     stop_group(State#state.active_group),
+    miner_hbbft_sidecar:set_group(Group),
     libp2p_group_relcast:handle_input(Group, {next_round, Round + 1, [], false}),
-    start_txn_handler(Group),
 
     {reply, ok, State#state{active_group = Group}};
 handle_call(dkg_group, _From, #state{current_dkgs = DKGs} = State) ->
@@ -437,9 +438,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                 case maps:find(EID, State#state.current_dkgs) of
                                     %% we're not in
                                     error ->
-                                        State2;
+                                        stop_group(State2#state.active_group),
+                                        miner_hbbft_sidecar:set_group(undefined),
+                                        State2#state{active_group = undefined};
                                     {ok, out} ->
-                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs)};
+                                        stop_group(State2#state.active_group),
+                                        miner_hbbft_sidecar:set_group(undefined),
+                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
+                                                     active_group = undefined};
                                     {ok, ElectionGroup} ->
                                         HBBFTGroup =
                                             case maps:find(EID, State#state.started_groups) of
@@ -833,8 +839,8 @@ start_hbbft(DKG, Height, Delay, Chain) ->
 activate_hbbft(Group, PrevGroup, Round) ->
     Buf = get_buf(PrevGroup),
     set_buf(Group, Buf),
+    miner_hbbft_sidecar:set_group(Group),
     libp2p_group_relcast:handle_input(Group, {next_round, Round + 1, [], false}),
-    start_txn_handler(Group),
     miner:install_consensus(Group).
 
 consensus_group_name(Height, fallback, Members) ->
@@ -879,11 +885,6 @@ set_buf(ConsensusGroup, Buf) ->
         _ ->
             {error, no_group}
     end.
-
-start_txn_handler(Group) ->
-    ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
-                                         {libp2p_framed_stream, server,
-                                          [blockchain_txn_handler, self(), Group]}).
 
 stop_group(undefined) ->
     ok;
