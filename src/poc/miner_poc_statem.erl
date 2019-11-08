@@ -102,6 +102,12 @@ init(Args) ->
         {error, _} ->
             {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
                                    address=Address, poc_interval=Delay, state=requesting}};
+        %% drop these states for now, there is no possibility of a
+        %% sane restore from them.
+        {ok, State, _Data} when State == challenging orelse
+                                State == targeting ->
+            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting}};
         {ok, State, Data} ->
             {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                   address=Address, poc_interval=Delay, state=State}}
@@ -154,7 +160,8 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
         ok ->
             {ok, Block} = blockchain:get_block(BlockHash, Chain),
             Height = blockchain_block:height(Block),
-            %% TODO: change this to an internal event
+            %% TODO: remove targeting and challenging states, make
+            %% them into a function that is called here
             self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger},
             {next_state, targeting, save_data(Data#data{state = targeting, mining_timeout = ?MINING_TIMEOUT})};
         {error, _Reason} ->
