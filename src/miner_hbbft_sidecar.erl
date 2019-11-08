@@ -116,7 +116,9 @@ handle_call({submit, Txn}, From,
                 ok ->
                     case blockchain_txn:absorb(Txn, Chain) of
                         ok ->
-                            catch libp2p_group_relcast:handle_command(Group, Txn),
+                            spawn(fun() ->
+                                          catch libp2p_group_relcast:handle_command(Group, Txn)
+                                  end),
                             {reply, ok, State};
                         Error ->
                             lager:warning("speculative absorb failed for ~p, error: ~p", [Txn, Error]),
