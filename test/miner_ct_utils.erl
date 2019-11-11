@@ -233,16 +233,20 @@ init_per_testcase(TestCase, Config) ->
             %% give each miner its own log directory
             LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
             ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+            ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
             %% set blockchain configuration
             Key = {PubKey, ECDH, SigFun, undefined},
             BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+            %% set blockchain env
             ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
             ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
             ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
             ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
             ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
             ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
-
+            ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
             %% set miner configuration
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
             ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
@@ -299,7 +303,8 @@ init_per_testcase(TestCase, Config) ->
         {batch_size, BatchSize},
         {dkg_curve, Curve},
         {election_interval, Interval},
-        {num_consensus_members, NumConsensusMembers}
+        {num_consensus_members, NumConsensusMembers},
+        {rpc_timeout, timer:seconds(5)}
         | Config
     ].
 
