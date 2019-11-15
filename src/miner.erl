@@ -273,7 +273,11 @@ relcast_queue(Group) ->
                       blockchain_txn:txns()} |
                      {error, term()}.
 create_block(Stamps, Txns, HBBFTRound) ->
-    gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity).
+    try
+        gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity)
+    catch _:_ ->
+            {error, badness}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc

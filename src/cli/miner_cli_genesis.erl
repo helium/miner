@@ -317,7 +317,7 @@ make_vars() ->
     #{?chain_vars_version => 2,
       ?block_time => BlockTime,
       ?election_interval => Interval,
-      ?election_restart_interval => 10,
+      ?election_restart_interval => 50,
       ?num_consensus_members => N,
       ?batch_size => BatchSize,
       ?vars_commit_delay => 1,

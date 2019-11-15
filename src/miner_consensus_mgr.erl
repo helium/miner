@@ -719,6 +719,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
                                                                DKGGroup},
                                  current_dkgs = DKGs1};
                 {error, not_done} ->
+                    lager:info("no privkey, can't try to restore HBBFT"),
                     State1
             end;
         {error, _} ->

@@ -25,6 +25,7 @@ all() -> [
           %% genesis_load_test,
           %% growth_test,
           restart_test,
+          dkg_restart_test,
           election_test,
           group_change_test,
           master_key_test,
@@ -58,6 +59,8 @@ init_per_testcase(TestCase, Config0) ->
 
     Extras =
         case TestCase of
+            dkg_restart_test ->
+                #{?election_restart_interval => 99};
             _ ->
                 #{}
         end,
@@ -305,6 +308,62 @@ restart_test(Config) ->
 
     {comment, Heights}.
 
+
+dkg_restart_test(Config) ->
+    Miners = proplists:get_value(miners, Config),
+    Interval = proplists:get_value(election_interval, Config),
+
+    %% check consensus miners
+    {CMiners0, NCMiners0} =
+        lists:partition(fun(Miner) ->
+                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                        end, Miners),
+    %% get the first consensus miner
+    FirstCMiner0 = hd(CMiners0),
+    Blockchain = ct_rpc:call(FirstCMiner0, blockchain_worker, blockchain, []),
+    %% get the genesis block from first consensus miner
+    {ok, GenesisBlock} = ct_rpc:call(FirstCMiner0, blockchain, genesis_block, [Blockchain]),
+    %% check genesis load results for non consensus miners
+    _ = miner_ct_utils:pmap(
+          fun(M) ->
+                  ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+          end, NCMiners0),
+
+    %% stop the out of consensus miners and the last two consensus
+    %% members.  this should keep the dkg from completing
+    ok = epoch_gt(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    {CMiners, NCMiners} =
+        lists:partition(fun(Miner) ->
+                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                        end, Miners),
+    FirstCMiner = hd(CMiners),
+    Height = height(FirstCMiner),
+    Stoppers = lists:sublist(CMiners, 5, 2),
+    stop(NCMiners ++ Stoppers, 60),
+    ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
+
+    %% wait until we're sure that the election is running
+    ok = height_gt(lists:sublist(CMiners, 1, 4), 120, Height + (Interval * 2)),
+
+    %% stop half of the remaining miners
+    Restarters = lists:sublist(CMiners, 1, 2),
+    ct:pal("stopping restarters ~p", [Restarters]),
+    stop(Restarters, 60),
+
+    %% restore that half
+    ct:pal("starting restarters ~p", [Restarters]),
+    start(Restarters, 60),
+
+    %% restore the last two
+    ct:pal("starting blockers"),
+    start(NCMiners ++ Stoppers, 60),
+
+    %% make sure that we elect again
+    ok = epoch_gt(Miners, 40, 3),
+
+    %% make sure that we did the restore
+    EndHeight = height(FirstCMiner),
+    ?assert(EndHeight < (Height + Interval + 99)).
 
 election_test(Config) ->
     %% get all the miners
@@ -997,3 +1056,84 @@ version_change_test(Config) ->
                      end, shuffle(Miners))
            end, 40, timer:seconds(1)),
     ok.
+
+%%% utils
+
+epoch_gt(Miners, Seconds, Threshold) ->
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             try
+                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
+                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                 Epoch >= Threshold
+                             catch _:_ ->
+                                     false
+                             end
+                     end, shuffle(Miners))
+           end, Seconds, timer:seconds(1)).
+
+height(Miner) ->
+    C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
+    ct:pal("miner ~p height ~p", [Miner, Height]),
+    Height.
+
+height_gt(Miners, Seconds, Threshold) ->
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             try
+                                 C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
+                                 {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
+                                 ct:pal("miner ~p height ~p", [Miner, Height]),
+                                 Height >= Threshold
+                             catch _:_ ->
+                                     false
+                             end
+                     end, shuffle(Miners))
+           end, Seconds, timer:seconds(1)).
+
+stop(Miners, Seconds) ->
+    [begin
+          ct_rpc:call(Miner, application, stop, [miner], 300),
+          ct_rpc:call(Miner, application, stop, [blockchain], 300)
+     end
+     || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             case ct_rpc:call(Miner, application, which_applications, [], 300) of
+                                 {badrpc, _} ->
+                                     false;
+                                 Apps ->
+                                     not lists:keymember(miner, 1, Apps)
+                             end
+                     end, Miners)
+           end, Seconds * 2, 500).
+
+start(Miners, Seconds) ->
+    [begin
+          ct_rpc:call(Miner, application, start, [blockchain], 300),
+          ct_rpc:call(Miner, application, start, [miner], 300)
+     end
+     || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], 300) of
+                                 {badrpc, Res} ->
+                                     ct:pal("~p false ~p", [Miner, Res]),
+                                     false;
+                                 _Else ->
+                                     ct:pal("~p else ~p", [Miner, _Else]),
+                                     true
+                             end
+                     end, Miners)
+           end, Seconds * 2, 500).
