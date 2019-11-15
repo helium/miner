@@ -60,7 +60,8 @@ init_per_testcase(TestCase, Config0) ->
     Extras =
         case TestCase of
             dkg_restart_test ->
-                #{?election_restart_interval => 99};
+                #{?election_interval => 10,
+                  ?election_restart_interval => 99};
             _ ->
                 #{}
         end,
@@ -329,9 +330,25 @@ dkg_restart_test(Config) ->
                   ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
           end, NCMiners0),
 
+    %% wait for the consensus manager to boot
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   true == lists:all(
+                             fun(Miner) ->
+                                     case ct_rpc:call(Miner, erlang, whereis, [miner_consensus_mgr]) of
+                                         P when is_pid(P) ->
+                                             true;
+                                         Other ->
+                                             ct:pal("Other ~p~n", [Other]),
+                                             false
+                                     end
+                             end, Miners)
+           end, 90, timer:seconds(1)),
+
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
     ok = epoch_gt(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    timer:sleep(2000),
     {CMiners, NCMiners} =
         lists:partition(fun(Miner) ->
                                 true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
@@ -359,7 +376,7 @@ dkg_restart_test(Config) ->
     start(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = epoch_gt(Miners, 40, 3),
+    ok = epoch_gt(Miners, 90, 3),
 
     %% make sure that we did the restore
     EndHeight = height(FirstCMiner),
