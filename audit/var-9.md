@@ -7,7 +7,7 @@ Also updates `election_selection_pct` from 60 to 20 and updates `election_remova
 
 ## Rationale
 
-A fix to pro-rate non-consensus rewards when elections run long was merged in [blockchain-core#265](https://github.com/helium/blockchain-core/pull/265) and is now being activated. Essentially only the consensus group will see their rewards decline for not doing an election,all other rewards are adjusted from the ideal epoch length to the actual one.
+A fix to pro-rate non-consensus rewards when elections run long was merged in [blockchain-core#265](https://github.com/helium/blockchain-core/pull/265) and is now being activated. Essentially only the consensus group will see their rewards decline for not doing an election, all other rewards are adjusted from the ideal epoch length to the actual one.
 
 Along with this, we've changed the selection/deselection thresholds for adding and removing members from the consensus group. We've observed it's currently very hard to dislodge consensus members near the top of the list and that the same group of members are consistently being selected. These changes lower the chance that the removed member is at the end of the list, and decreases the chance of picking the absolute top scoring hotspot as the replacement.
 
