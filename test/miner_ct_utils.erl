@@ -19,7 +19,8 @@
          end_per_testcase/2,
          get_balance/2,
          make_vars/1, make_vars/2, make_vars/3,
-         tmp_dir/0, tmp_dir/1, nonl/1
+         tmp_dir/0, tmp_dir/1, nonl/1,
+         generate_keys/1
         ]).
 
 pmap(F, L) ->
@@ -393,3 +394,18 @@ tmp_dir(Dir) ->
 nonl([$\n|T]) -> nonl(T);
 nonl([H|T]) -> [H|nonl(T)];
 nonl([]) -> [].
+
+generate_keys(N) ->
+    lists:foldl(
+        fun(_, Acc) ->
+            {PrivKey, PubKey} = new_random_key(ecc_compact),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
+        end,
+        [],
+        lists:seq(1, N)
+    ).
+
+new_random_key(Curve) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
+    {PrivKey, PubKey}.

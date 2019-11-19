@@ -415,8 +415,9 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
                 LastBlockTimestamp = blockchain_block:time(CurrentBlock),
                 BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps,
                                                      X > LastBlockTimestamp]),
-                {ValidTransactions, InvalidTransactions} =
-                    blockchain_txn:validate(SortedTransactions, Chain),
+
+                {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, Chain),
+
                 %% is there some cheaper way to do this?  maybe it's
                 %% cheap enough?
                 {ElectionEpoch, EpochStart, TxnsToInsert} =

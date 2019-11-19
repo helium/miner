@@ -320,7 +320,7 @@ dist_v2(Config0) ->
 
 basic(_Config) ->
     BaseDir = "data/miner_poc_SUITE/basic",
-    {PrivKey, PubKey} = new_random_key(ecc_compact),
+    {PrivKey, PubKey} = miner_ct_utils:new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
@@ -335,7 +335,7 @@ basic(_Config) ->
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
-    RandomKeys = generate_keys(6),
+    RandomKeys = miner_ct_utils:generate_keys(6),
     Address = blockchain_swarm:pubkey_bin(),
     ConsensusMembers = [
         {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
@@ -367,13 +367,13 @@ basic(_Config) ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
         {{37.780586, -122.469471}, {PrivKey, PubKey}},
-        {{37.780959, -122.467496}, new_random_key(ecc_compact)},
-        {{37.78101, -122.465372}, new_random_key(ecc_compact)},
-        {{37.781179, -122.463226}, new_random_key(ecc_compact)},
-        {{37.781281, -122.461038}, new_random_key(ecc_compact)},
-        {{37.781349, -122.458892}, new_random_key(ecc_compact)},
-        {{37.781468, -122.456617}, new_random_key(ecc_compact)},
-        {{37.781637, -122.4543}, new_random_key(ecc_compact)}
+        {{37.780959, -122.467496}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.78101, -122.465372}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781179, -122.463226}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781281, -122.461038}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781349, -122.458892}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781468, -122.456617}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781637, -122.4543}, miner_ct_utils:new_random_key(ecc_compact)}
     ],
 
     % Add a Gateway
@@ -472,7 +472,7 @@ basic(_Config) ->
 
 restart(_Config) ->
     BaseDir = "data/miner_poc_SUITE/restart",
-    {PrivKey, PubKey} = new_random_key(ecc_compact),
+    {PrivKey, PubKey} = miner_ct_utils:new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
@@ -487,7 +487,7 @@ restart(_Config) ->
 
     % Now add genesis
     % Generate fake blockchains (just the keys)
-    RandomKeys = generate_keys(6),
+    RandomKeys = miner_ct_utils:generate_keys(6),
     Address = blockchain_swarm:pubkey_bin(),
     ConsensusMembers = [
         {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
@@ -519,13 +519,13 @@ restart(_Config) ->
     % All these point are in a line one after the other (except last)
     LatLongs = [
         {{37.780586, -122.469471}, {PrivKey, PubKey}},
-        {{37.780959, -122.467496}, new_random_key(ecc_compact)},
-        {{37.78101, -122.465372}, new_random_key(ecc_compact)},
-        {{37.781179, -122.463226}, new_random_key(ecc_compact)},
-        {{37.781281, -122.461038}, new_random_key(ecc_compact)},
-        {{37.781349, -122.458892}, new_random_key(ecc_compact)},
-        {{37.781468, -122.456617}, new_random_key(ecc_compact)},
-        {{37.781637, -122.4543}, new_random_key(ecc_compact)}
+        {{37.780959, -122.467496}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.78101, -122.465372}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781179, -122.463226}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781281, -122.461038}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781349, -122.458892}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781468, -122.456617}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781637, -122.4543}, miner_ct_utils:new_random_key(ecc_compact)}
     ],
 
     % Add a Gateway
@@ -775,17 +775,6 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
         LatLongs
     ).
 
-generate_keys(N) ->
-    lists:foldl(
-        fun(_, Acc) ->
-            {PrivKey, PubKey} = new_random_key(ecc_compact),
-            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
-        end
-        ,[]
-        ,lists:seq(1, N)
-    ).
-
 create_block(ConsensusMembers, Txs) ->
     Blockchain = blockchain_worker:blockchain(),
     {ok, PrevHash} = blockchain:head_hash(Blockchain),
@@ -813,7 +802,3 @@ signatures(ConsensusMembers, BinBlock) ->
         ,[]
         ,ConsensusMembers
     ).
-
-new_random_key(Curve) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
-    {PrivKey, PubKey}.
