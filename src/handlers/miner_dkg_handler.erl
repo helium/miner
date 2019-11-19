@@ -295,21 +295,6 @@ serialize(State) ->
     M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
     maps:merge(PreSer, M).
 
-deserialize(BinState) when is_binary(BinState) ->
-    State = binary_to_term(BinState),
-    %% get the fun used to sign things with our swarm key
-    {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-    Group = erlang_pbc:group_new(State#state.curve),
-    G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
-    G2 = erlang_pbc:binary_to_element(Group, State#state.g2),
-    DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1, ReadySigFun, mk_verification_fun(State#state.members)),
-    PrivKey = case State#state.privkey of
-        undefined ->
-            undefined;
-        Other ->
-            term_to_binary(tpke_privkey:deserialize(Other))
-    end,
-    State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey};
 deserialize(MapState0) when is_map(MapState0) ->
     MapState = maps:map(fun(g1, B) ->
                                 B;
