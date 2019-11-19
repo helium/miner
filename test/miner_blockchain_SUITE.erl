@@ -67,7 +67,7 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     Vars = #{garbage_value => totes_garb,
-             ?block_time => BlockTime,
+             ?block_time => max(1500, BlockTime),
              ?election_interval => Interval,
              ?num_consensus_members => NumConsensusMembers,
              ?batch_size => BatchSize,
@@ -216,41 +216,14 @@ restart_test(Config) ->
                                               end, NonConsensusMiners),
 
     %% wait till the chain reaches height 2 for all miners
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           %% do any to increase the chance of interesting outcomes
-                                           true == lists:any(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch == 2
-                                                             end, shuffle(Miners))
-                                   end, 90, timer:seconds(1)),
-
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, stop, [miner], 300),
-          ct_rpc:call(Miner, application, stop, [blockchain], 300)
-     end
-     || Miner <- lists:sublist(Miners, 1, 2)],
+    ok = epoch_gte(all, Miners, 60, 2),
+    ok = stop(lists:sublist(Miners, 1, 2)),
 
     [begin
          %%ct_slave:stop(Miner)
           ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
      end
      || Miner <- lists:sublist(Miners, 3, 4)],
-
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
-                             case ct_rpc:call(Miner, application, which_applications, [], 300) of
-                                 {badrpc, _} ->
-                                     false;
-                                 Apps ->
-                                     not lists:keymember(miner, 1, Apps)
-                             end
-                     end, lists:sublist(Miners, 1, 2))
-           end, 40, 500),
-
 
     Data = string:trim(os:cmd("pwd")),
     Dirs = filelib:wildcard(Data ++ "/data_*{1,2}*"),
@@ -263,43 +236,9 @@ restart_test(Config) ->
      end
      || Dir <- Dirs],
 
-    %% [ct_slave:start(Miner, Args) || Miner <- lists:sublist(Miners, 1, 4)],
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, start, [blockchain], 300),
-          ct_rpc:call(Miner, application, start, [miner], 300)
-     end
-     || Miner <- lists:sublist(Miners, 1, 2)],
+    ok = start(lists:sublist(Miners, 1, 2)),
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
-                             case ct_rpc:call(Miner, blockchain_worker, blockchain, [], 300) of
-                                 {badrpc, _} ->
-                                     false;
-                                 _Else ->
-                                     ct:pal("else ~p", [_Else]),
-                                     true
-                             end
-                     end, Miners)
-           end, 40, 500),
-
-    %% [begin
-    %%      %%ct_slave:stop(Miner)
-    %%       ct_rpc:call(Miner, miner, hbbft_skip, [], 300),
-    %%       MinerPid = ct_rpc:call(Miner, erlang, whereis, [miner], 300),
-    %%       MinerPid ! block_timeout
-    %%  end
-    %%  || Miner <- Miners],
-
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch >= 3
-                                                             end, shuffle(Miners))
-                                   end, 90, timer:seconds(1)),
+    ok = epoch_gte(all, Miners, 90, 2),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
                                   C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -314,11 +253,13 @@ dkg_restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Interval = proplists:get_value(election_interval, Config),
 
-    %% check consensus miners
+    %% check consensus miners.  this way is the safest/most accurate
+    %% right after bootstrapping
     {CMiners0, NCMiners0} =
-        lists:partition(fun(Miner) ->
-                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                        end, Miners),
+        lists:partition(
+          fun(Miner) ->
+                  true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+          end, Miners),
     %% get the first consensus miner
     FirstCMiner0 = hd(CMiners0),
     Blockchain = ct_rpc:call(FirstCMiner0, blockchain_worker, blockchain, []),
@@ -329,6 +270,8 @@ dkg_restart_test(Config) ->
           fun(M) ->
                   ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
           end, NCMiners0),
+
+    AddrList = addr_list(Miners),
 
     %% wait for the consensus manager to boot
     ok = miner_ct_utils:wait_until(
@@ -347,20 +290,22 @@ dkg_restart_test(Config) ->
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = epoch_gt(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
-    timer:sleep(2000),
-    {CMiners, NCMiners} =
-        lists:partition(fun(Miner) ->
-                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                        end, Miners),
+    ok = epoch_gte(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    Members = consensus_members(2, Miners),
+    %% there are issues with this.  if it's more of a problem than the
+    %% last time, we can either have the old list and reject it if we
+    %% get it again, or we get all of them and select the majority one?
+    {CMiners, NCMiners} = partition_miners(Members, AddrList),
     FirstCMiner = hd(CMiners),
     Height = height(FirstCMiner),
     Stoppers = lists:sublist(CMiners, 5, 2),
+    %% make sure that everyone has accepted the epoch block
+    ok = height_gte(Miners, 60, Height + 2),
     stop(NCMiners ++ Stoppers, 60),
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
-    ok = height_gt(lists:sublist(CMiners, 1, 4), 120, Height + (Interval * 2)),
+    ok = height_gte(lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
 
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
@@ -376,7 +321,7 @@ dkg_restart_test(Config) ->
     start(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = epoch_gt(Miners, 90, 3),
+    ok = epoch_gte(Miners, 90, 3),
 
     %% make sure that we did the restore
     EndHeight = height(FirstCMiner),
@@ -1076,10 +1021,13 @@ version_change_test(Config) ->
 
 %%% utils
 
-epoch_gt(Miners, Seconds, Threshold) ->
+epoch_gte(Miners, Seconds, Threshold) ->
+    epoch_gte(any, Miners, Seconds, Threshold).
+
+epoch_gte(Mod, Miners, Seconds, Threshold) ->
     ok = miner_ct_utils:wait_until(
            fun() ->
-                   lists:all(
+                   lists:Mod(
                      fun(Miner) ->
                              try
                                  {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
@@ -1097,10 +1045,13 @@ height(Miner) ->
     ct:pal("miner ~p height ~p", [Miner, Height]),
     Height.
 
-height_gt(Miners, Seconds, Threshold) ->
+height_gte(Miners, Seconds, Threshold) ->
+    height_gte(all, Miners, Seconds, Threshold).
+
+height_gte(Mod, Miners, Seconds, Threshold) ->
     ok = miner_ct_utils:wait_until(
            fun() ->
-                   lists:all(
+                   lists:Mod(
                      fun(Miner) ->
                              try
                                  C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
@@ -1112,6 +1063,9 @@ height_gt(Miners, Seconds, Threshold) ->
                              end
                      end, shuffle(Miners))
            end, Seconds, timer:seconds(1)).
+
+stop(Miners) ->
+    stop(Miners, 60).
 
 stop(Miners, Seconds) ->
     [begin
@@ -1132,6 +1086,9 @@ stop(Miners, Seconds) ->
                              end
                      end, Miners)
            end, Seconds * 2, 500).
+
+start(Miners) ->
+    start(Miners, 60).
 
 start(Miners, Seconds) ->
     [begin
@@ -1154,3 +1111,44 @@ start(Miners, Seconds) ->
                              end
                      end, Miners)
            end, Seconds * 2, 500).
+
+consensus_members(Epoch, []) ->
+    error({no_members_at_epoch, Epoch});
+consensus_members(Epoch, [M | Tail]) ->
+    try ct_rpc:call(M, miner_cli_info, get_info, [], 2000) of
+        {_, _, Epoch} ->
+            Blockchain = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
+            Ledger = ct_rpc:call(M, blockchain, ledger, [Blockchain], 2000),
+            {ok, Members} = ct_rpc:call(M, blockchain_ledger_v1, consensus_members, [Ledger], 2000),
+            Members;
+        Other ->
+            ct:pal("~p had Epoch ~p", [M, Other]),
+            timer:sleep(500),
+            consensus_members(Epoch, Tail)
+    catch C:E ->
+            ct:pal("~p threw error ~p:~p", [M, C, E]),
+            timer:sleep(500),
+            consensus_members(Epoch, Tail)
+    end.
+
+node2addr(Node, AddrList) ->
+    {_, Addr} = lists:keyfind(Node, 1, AddrList),
+    Addr.
+
+addr2node(Addr, AddrList) ->
+    {Node, _} = lists:keyfind(Addr, 2, AddrList),
+    Node.
+
+addr_list(Miners) ->
+    miner_ct_utils:pmap(
+      fun(M) ->
+              Addr = ct_rpc:call(M, blockchain_swarm, pubkey_bin, []),
+              {M, Addr}
+      end, Miners).
+
+partition_miners(Members, AddrList) ->
+    {Miners, _} = lists:unzip(AddrList),
+    lists:partition(fun(Miner) ->
+                            Addr = node2addr(Miner, AddrList),
+                            lists:member(Addr, Members)
+                    end, Miners).

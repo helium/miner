@@ -275,8 +275,9 @@ relcast_queue(Group) ->
 create_block(Stamps, Txns, HBBFTRound) ->
     try
         gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity)
-    catch _:_ ->
-            {error, badness}
+    catch exit:{noproc, _} ->
+            %% if the miner noprocs, we're likely shutting down
+            {error, no_miner}
     end.
 
 %%--------------------------------------------------------------------

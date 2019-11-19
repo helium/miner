@@ -371,10 +371,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
     Now = erlang:system_time(seconds),
     case blockchain:get_block(Hash, State#state.chain) of
         {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            lager:debug("got block at ~p sync ~p T ~p", [BlockHeight, Sync, (Now - blockchain_block:time(Block))]),
             case Sync andalso (Now - blockchain_block:time(Block) > 3600) of
                 %% not sync, or recent sync
                 false ->
-                    BlockHeight = blockchain_block:height(Block),
                     lager:info("processing block height ~p", [BlockHeight]),
                     State1 = case maps:find(BlockHeight, CancelDKGs) of
                                  error ->
@@ -398,7 +399,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         end,
 
                     State2 =
-                        case ElectionRunning andalso (not maps:is_key({Height, Delay}, DKGs)) of
+                        case ElectionRunning andalso
+                            (not maps:is_key({Height, Delay}, DKGs)) andalso
+                            BlockHeight == Height+Delay of
                             true ->
                                 %% start the election running here
                                 lager:info("starting new election at ~p+~p", [Height, Delay]),
@@ -575,16 +578,17 @@ handle_info(timeout, State) ->
             %% need to check if an election should already have been started
             case NextElection =< StartHeight of
                 true ->
-                    lager:info("try to start or restore the election group"),
-                    Diff = StartHeight - ElectionHeight,
+                    Diff = StartHeight - NextElection,
                     Delay = max(0, (Diff div RestartInterval) * RestartInterval),
-                    State1 = RestoreState#state{initial_height = ElectionHeight,
+                    lager:info("try to start or restore the election group next ~p start ~p delay ~p",
+                               [NextElection, StartHeight, Delay]),
+                    State1 = RestoreState#state{initial_height = NextElection,
                                                 delay = Delay},
 
-                    Election = ElectionHeight + Delay,
+                    Election = NextElection + Delay,
                     {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
                     Hash = blockchain_block:hash_block(ElectionBlock),
-                    State2 = initiate_election(Hash, StartHeight, State1),
+                    State2 = initiate_election(Hash, NextElection, State1),
                     {noreply, State2};
                 _ ->
                     {noreply, RestoreState}

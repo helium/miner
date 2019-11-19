@@ -137,7 +137,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
                     case enough_signatures(sig, NewState) of
                         {ok, Signatures} when State#state.sent_conf == false ->
-                            lager:info("enough 1 ~p", [length(Signatures)]),
+                            lager:debug("enough 1 ~p", [length(Signatures)]),
                             case length(Signatures) == length(Members) of
                                 true ->
                                     case State#state.done_called of
@@ -158,7 +158,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                      [{multicast, term_to_binary({conf, NewState#state.signatures})}]}
                             end;
                         {ok, Signatures} ->
-                            lager:info("enough 2 ~p", [length(Signatures)]),
+                            lager:debug("enough 2 ~p", [length(Signatures)]),
                             case length(Signatures) == length(Members) of
                                 true ->
                                     case State#state.done_called of
@@ -273,7 +273,6 @@ serialize(State) ->
             Other ->
                 tpke_privkey:serialize(Other)
         end,
-    lager:info("serialize pkey ~p", [PrivKey0]),
     M0 = #{dkg => SerializedDKG,
            privkey => PrivKey,
            n => N,
@@ -296,21 +295,21 @@ serialize(State) ->
     M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
     maps:merge(PreSer, M).
 
-%% deserialize(BinState) when is_binary(BinState) ->
-%%     State = binary_to_term(BinState),
-%%     %% get the fun used to sign things with our swarm key
-%%     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-%%     Group = erlang_pbc:group_new(State#state.curve),
-%%     G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
-%%     G2 = erlang_pbc:binary_to_element(Group, State#state.g2),
-%%     DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1, ReadySigFun, mk_verification_fun(State#state.members)),
-%%     PrivKey = case State#state.privkey of
-%%         undefined ->
-%%             undefined;
-%%         Other ->
-%%             term_to_binary(tpke_privkey:deserialize(Other))
-%%     end,
-%%     State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey};
+deserialize(BinState) when is_binary(BinState) ->
+    State = binary_to_term(BinState),
+    %% get the fun used to sign things with our swarm key
+    {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
+    Group = erlang_pbc:group_new(State#state.curve),
+    G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
+    G2 = erlang_pbc:binary_to_element(Group, State#state.g2),
+    DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1, ReadySigFun, mk_verification_fun(State#state.members)),
+    PrivKey = case State#state.privkey of
+        undefined ->
+            undefined;
+        Other ->
+            term_to_binary(tpke_privkey:deserialize(Other))
+    end,
+    State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey};
 deserialize(MapState0) when is_map(MapState0) ->
     MapState = maps:map(fun(g1, B) ->
                                 B;
@@ -353,7 +352,6 @@ deserialize(MapState0) when is_map(MapState0) ->
         Other ->
             tpke_privkey:deserialize(Other)
     end,
-    lager:info("deserialize pkey ~p", [PrivKey]),
     #state{dkg = DKG,
            g1 = G1, g2 = G2,
            privkey = PrivKey,
@@ -376,8 +374,8 @@ deserialize(MapState0) when is_map(MapState0) ->
            delay = Delay}.
 
 restore(OldState, _NewState) ->
-    lager:info("called restore with ~p ~p", [OldState#state.privkey,
-                                             _NewState#state.privkey]),
+    lager:debug("called restore with ~p ~p", [OldState#state.privkey,
+                                              _NewState#state.privkey]),
     {ok, OldState}.
 
 fixup_msgs(Msgs) ->

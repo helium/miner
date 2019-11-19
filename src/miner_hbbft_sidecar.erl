@@ -89,6 +89,9 @@ handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
             libp2p_swarm:remove_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL)
     end,
     {reply, ok, State#state{group = Group}};
+handle_call({submit, _}, _From, #state{chain = undefined} = State) ->
+    lager:debug("submission with no chain set"),
+    {reply, {error, no_chain}, State};
 handle_call({submit, _}, _From, #state{group = undefined} = State) ->
     lager:debug("submission with no group set"),
     {reply, {error, no_group}, State};
