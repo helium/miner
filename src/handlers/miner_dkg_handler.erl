@@ -295,6 +295,9 @@ serialize(State) ->
     M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
     maps:merge(PreSer, M).
 
+%% to make dialyzer happy till I fix the relcast typing
+deserialize(_Bin) when is_binary(_Bin) ->
+    {error, format_deprecated};
 deserialize(MapState0) when is_map(MapState0) ->
     MapState = maps:map(fun(g1, B) ->
                                 B;
