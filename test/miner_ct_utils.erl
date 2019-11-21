@@ -3,7 +3,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
--export([pmap/2, pmap/3,
+-export([
+         init_per_testcase/2,
+         end_per_testcase/2,
+         pmap/2, pmap/3,
          wait_until/1,
          wait_until/3,
          wait_until_disconnected/2,
@@ -15,13 +18,126 @@
          randname/1,
          get_config/2,
          random_n/2,
-         init_per_testcase/2,
-         end_per_testcase/2,
          get_balance/2,
          make_vars/1, make_vars/2, make_vars/3,
-         tmp_dir/0, tmp_dir/1, nonl/1
-        ]).
+         tmp_dir/0, tmp_dir/1, nonl/1,
+         epoch_gte/3,
+         epoch_gte/4,
+         height/1,
+         height_gte/3,
+         in_non_consensus_miners/1,
+         consensus_members/2,
+         consensus_miners/1,
+         non_consensus_miners/1,
+         election_check/3,
+         integrate_genesis_block/2,
+         shuffle/1,
+         partition_miners/2,
+         node2addr/2,
+         addr2node/2,
+         addr_list/1
 
+        ]).
+    
+
+epoch_gte(Miners, Seconds, Threshold) ->
+    epoch_gte(any, Miners, Seconds, Threshold).
+
+epoch_gte(Mod, Miners, Seconds, Threshold) ->
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:Mod(
+                     fun(Miner) ->
+                             try
+                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
+                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                 Epoch >= Threshold
+                             catch _:_ ->
+                                     false
+                             end
+                     end, miner_ct_utils:shuffle(Miners))
+           end, Seconds, timer:seconds(1)).
+
+height(Miner) ->
+    C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
+    ct:pal("miner ~p height ~p", [Miner, Height]),
+    Height.
+
+height_gte(Miners, Seconds, Threshold) ->
+    height_gte(all, Miners, Seconds, Threshold).
+
+height_gte(Mod, Miners, Seconds, Threshold) ->
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   lists:Mod(
+                     fun(Miner) ->
+                             try
+                                 C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
+                                 {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
+                                 ct:pal("miner ~p height ~p", [Miner, Height]),
+                                 Height >= Threshold
+                             catch _:_ ->
+                                     false
+                             end
+                     end, miner_ct_utils:shuffle(Miners))
+           end, Seconds, timer:seconds(1)).
+
+consensus_members(Epoch, []) ->
+    error({no_members_at_epoch, Epoch});
+consensus_members(Epoch, [M | Tail]) ->
+    try ct_rpc:call(M, miner_cli_info, get_info, [], 2000) of
+        {_, _, Epoch} ->
+            Blockchain = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
+            Ledger = ct_rpc:call(M, blockchain, ledger, [Blockchain], 2000),
+            {ok, Members} = ct_rpc:call(M, blockchain_ledger_v1, consensus_members, [Ledger], 2000),
+            Members;
+        Other ->
+            ct:pal("~p had Epoch ~p", [M, Other]),
+            timer:sleep(500),
+            consensus_members(Epoch, Tail)
+    catch C:E ->
+            ct:pal("~p threw error ~p:~p", [M, C, E]),
+            timer:sleep(500),
+            consensus_members(Epoch, Tail)
+    end.
+
+in_non_consensus_miners(Miners)->
+    lists:partition(
+            fun(Miner) ->
+                  true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+            end, Miners).
+
+consensus_miners(Miners)->
+    lists:filtermap(
+            fun(Miner) ->
+                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []) 
+            end, Miners).
+
+non_consensus_miners(Miners)->
+    lists:filtermap(
+            fun(Miner) ->
+                false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []) 
+            end, Miners).
+
+election_check([], _Miners, Owner) ->
+    Owner ! seen_all;
+election_check(NotSeen0, Miners, Owner) ->
+    timer:sleep(500),
+    ConsensusMiners = miner_ct_utils:consensus_miners(Miners), 
+    NotSeen = NotSeen0 -- ConsensusMiners,
+    Owner ! {not_seen, NotSeen},
+    election_check(NotSeen, Miners, Owner).
+
+integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
+    Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
+    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Blockchain]),
+    
+    %% TODO - do we need to assert here on results from genesis load ?
+    miner_ct_utils:pmap(fun(M) ->
+                            ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
+                        end, NonConsensusMiners).
+    
 pmap(F, L) ->
     pmap(F, L, timer:seconds(90)).
 
@@ -162,10 +278,40 @@ get_config(Arg, Default) ->
     end.
 
 random_n(N, List) ->
-    lists:sublist(shuffle(List), N).
+    lists:sublist(random_shuffle(List), N).
+
+random_shuffle(List) ->
+    [x || {_,x} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
 shuffle(List) ->
-    [x || {_,x} <- lists:sort([{rand:uniform(), N} || N <- List])].
+    R = [{rand:uniform(1000000), I} || I <- List],
+    O = lists:sort(R),
+    {_, S} = lists:unzip(O),
+    S.
+
+
+
+node2addr(Node, AddrList) ->
+    {_, Addr} = lists:keyfind(Node, 1, AddrList),
+    Addr.
+
+addr2node(Addr, AddrList) ->
+    {Node, _} = lists:keyfind(Addr, 2, AddrList),
+    Node.
+
+addr_list(Miners) ->
+    miner_ct_utils:pmap(
+      fun(M) ->
+              Addr = ct_rpc:call(M, blockchain_swarm, pubkey_bin, []),
+              {M, Addr}
+      end, Miners).
+
+partition_miners(Members, AddrList) ->
+    {Miners, _} = lists:unzip(AddrList),
+    lists:partition(fun(Miner) ->
+                            Addr = miner_ct_utils:node2addr(Miner, AddrList),
+                            lists:member(Addr, Members)
+                    end, Miners).
 
 init_per_testcase(TestCase, Config) ->
     os:cmd(os:find_executable("epmd")++" -daemon"),
@@ -288,6 +434,7 @@ init_per_testcase(TestCase, Config) ->
         Miners
     ),
     {ok, _} = ct_cover:add_nodes(Miners),
+    
     [
         {miners, Miners},
         {keys, Keys},

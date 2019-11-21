@@ -10,10 +10,8 @@
          end_per_suite/1,
          init_per_testcase/2,
          end_per_testcase/2,
-         all/0,
+         all/0
 
-         %% sigh
-         election_check/3
         ]).
 
 -compile([export_all]).
@@ -21,9 +19,6 @@
 %% common test callbacks
 
 all() -> [
-          %% consensus_test,
-          %% genesis_load_test,
-          %% growth_test,
           restart_test,
           dkg_restart_test,
           election_test,
@@ -99,128 +94,30 @@ init_per_testcase(TestCase, Config0) ->
                                        [Txns, Addresses, NumConsensusMembers, Curve], 120000)
                    end, Miners),
     ?assertEqual([ok], lists:usort(DKGResults)),
-    [{master_key, {Priv, Pub}} | Config].
+    
+    %% Get both consensus and non consensus miners
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
+    %% integrate genesis block    
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+    
+    [   {master_key, {Priv, Pub}},
+        {consensus_miners, ConsensusMiners},
+        {non_consensus_miners, NonConsensusMiners}
+        | Config].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
-consensus_test(Config) ->
-    NumConsensusMiners = proplists:get_value(num_consensus_members, Config),
-    Miners = proplists:get_value(miners, Config),
-    NumNonConsensusMiners = length(Miners) - NumConsensusMiners,
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-    ?assertEqual(NumConsensusMiners, length(ConsensusMiners)),
-    ?assertEqual(NumNonConsensusMiners, length(Miners) - NumConsensusMiners),
-    {comment, ConsensusMiners}.
-
-genesis_load_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
-    %% ensure that blockchain is undefined for non_consensus miners
-    true = lists:all(fun(Res) ->
-                             Res == undefined
-                     end,
-                     lists:foldl(fun(Miner, Acc) ->
-                                         R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                         [R | Acc]
-                                 end, [], NonConsensusMiners)),
-
-    %% get the genesis block from the first Consensus Miner
-    ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                        end, Miners)),
-
-    Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
-
-    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                     ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                             end, NonConsensusMiners),
-    {comment, GenesisLoadResults}.
-
-growth_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
-
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
-    %% wait till the chain reaches height 2 for all miners
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                                                     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-                                                                     ct:pal("miner ~p height ~p", [Miner, Height]),
-                                                                     Height >= 5
-                                                             end, Miners)
-                                   end, 30, timer:seconds(1)),
-
-    Heights = lists:foldl(fun(Miner, Acc) ->
-                                  C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                  [{Miner, H} | Acc]
-                          end, [], Miners),
-
-    {comment, Heights}.
 
 
 restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
 
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
     %% wait till the chain reaches height 2 for all miners
-    ok = epoch_gte(all, Miners, 60, 2),
+    ok = miner_ct_utils:epoch_gte(all, Miners, 60, 2),
     ok = stop(lists:sublist(Miners, 1, 2)),
 
     [begin
-         %%ct_slave:stop(Miner)
           ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
      end
      || Miner <- lists:sublist(Miners, 3, 4)],
@@ -238,7 +135,7 @@ restart_test(Config) ->
 
     ok = start(lists:sublist(Miners, 1, 2)),
 
-    ok = epoch_gte(all, Miners, 90, 2),
+    ok = miner_ct_utils:epoch_gte(all, Miners, 90, 2),
 
     Heights = lists:foldl(fun(Miner, Acc) ->
                                   C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -252,26 +149,8 @@ restart_test(Config) ->
 dkg_restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Interval = proplists:get_value(election_interval, Config),
-
-    %% check consensus miners.  this way is the safest/most accurate
-    %% right after bootstrapping
-    {CMiners0, NCMiners0} =
-        lists:partition(
-          fun(Miner) ->
-                  true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-          end, Miners),
-    %% get the first consensus miner
-    FirstCMiner0 = hd(CMiners0),
-    Blockchain = ct_rpc:call(FirstCMiner0, blockchain_worker, blockchain, []),
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstCMiner0, blockchain, genesis_block, [Blockchain]),
-    %% check genesis load results for non consensus miners
-    _ = miner_ct_utils:pmap(
-          fun(M) ->
-                  ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-          end, NCMiners0),
-
-    AddrList = addr_list(Miners),
+   
+    AddrList = miner_ct_utils:addr_list(Miners),
 
     %% wait for the consensus manager to boot
     ok = miner_ct_utils:wait_until(
@@ -290,22 +169,22 @@ dkg_restart_test(Config) ->
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = epoch_gte(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
-    Members = consensus_members(2, Miners),
+    ok = miner_ct_utils:epoch_gte(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    Members = miner_ct_utils:consensus_members(2, Miners),
     %% there are issues with this.  if it's more of a problem than the
     %% last time, we can either have the old list and reject it if we
     %% get it again, or we get all of them and select the majority one?
-    {CMiners, NCMiners} = partition_miners(Members, AddrList),
+    {CMiners, NCMiners} = miner_ct_utils:partition_miners(Members, AddrList),
     FirstCMiner = hd(CMiners),
-    Height = height(FirstCMiner),
+    Height = miner_ct_utils:height(FirstCMiner),
     Stoppers = lists:sublist(CMiners, 5, 2),
     %% make sure that everyone has accepted the epoch block
-    ok = height_gte(Miners, 60, Height + 2),
+    ok = miner_ct_utils:height_gte(Miners, 60, Height + 2),
     stop(NCMiners ++ Stoppers, 60),
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
-    ok = height_gte(lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
+    ok = miner_ct_utils:height_gte(lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
 
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
@@ -321,42 +200,20 @@ dkg_restart_test(Config) ->
     start(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = epoch_gte(Miners, 90, 3),
+    ok = miner_ct_utils:epoch_gte(Miners, 90, 3),
 
     %% make sure that we did the restore
-    EndHeight = height(FirstCMiner),
+    EndHeight = miner_ct_utils:height(FirstCMiner),
     ?assert(EndHeight < (Height + Interval + 99)).
 
 election_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
 
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
     Me = self(),
-    spawn(?MODULE, election_check, [Miners, Miners, Me]),
+    spawn(miner_ct_utils, election_check, [Miners, Miners, Me]),
 
+    %% TODO - this seems a lil flaky, sporadically hitting the timeouts during multiple test runs
     fun Loop(0) ->
             error(timeout);
         Loop(N) ->
@@ -380,25 +237,20 @@ election_test(Config) ->
             after timer:seconds(30) ->
                     error(timeout)
             end
-    end(120),
+    end(160),
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 1000),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch >= 3
-                                                             end, shuffle(Miners))
+                                                             end, miner_ct_utils:shuffle(Miners))
                                    end, 90, timer:seconds(1)),
     %% now to test rescue blocks.  first: kill the chain
 
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, stop, [miner], 300),
-          ct_rpc:call(Miner, application, stop, [blockchain], 300)
-     end
-     || Miner <- lists:sublist(Miners, 1, 4)],
-
+    stop(lists:sublist(Miners, 1, 4)),
+    
     ok = miner_ct_utils:wait_until(
            fun() ->
                    lists:all(
@@ -422,14 +274,9 @@ election_test(Config) ->
      end
      || Dir <- Dirs],
 
-    %% [ct_slave:start(Miner, Args) || Miner <- lists:sublist(Miners, 1, 4)],
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, start, [blockchain], 300),
-          ct_rpc:call(Miner, application, start, [miner], 300)
-     end
-     || Miner <- lists:sublist(Miners, 1, 4)],
-
+    %% start em back up again
+    start(lists:sublist(Miners, 1, 4)),
+    
     ok = miner_ct_utils:wait_until(
            fun() ->
                    lists:all(
@@ -463,7 +310,7 @@ election_test(Config) ->
                                             catch _:_ ->
                                                     false
                                             end
-                                    end, shuffle(Miners))
+                                    end, miner_ct_utils:shuffle(Miners))
           end, 10, timer:seconds(1)),
 
     %% third: mint and submit the rescue txn, shrinking the group at
@@ -525,7 +372,7 @@ election_test(Config) ->
           fun() ->
                   true == lists:all(fun(Miner) ->
                                             try
-                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 5000),
                                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
                                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
                                                 %% height might go up
@@ -535,40 +382,23 @@ election_test(Config) ->
                                             catch _:_ ->
                                                     false
                                             end
-                                    end, shuffle(Miners))
+                                    end, miner_ct_utils:shuffle(Miners))
           end, 60, timer:seconds(1)),
 
-    %% check consensus miners
-    NewConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], 500)
-                                      end, Miners),
+    %% check consensus and non consensus miners
+    {NewConsensusMiners, NewNonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
 
-    %% check non consensus miners
-    NewNonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], 500)
-                                         end, Miners),
-
-    StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
     %% stop some nodes and restart them to check group restore works
-
+    StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
     ct:pal("stop list ~p", [StopList]),
+    stop(StopList),
+    
 
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, stop, [miner], 300),
-          ct_rpc:call(Miner, application, stop, [blockchain], 300)
-     end
-     || Miner <- StopList],
-
+    %% sleel a lil then start the nodes back up again
     timer:sleep(5000),
 
-    [begin
-         %%ct_slave:stop(Miner)
-          ct_rpc:call(Miner, application, start, [miner], 300),
-          ct_rpc:call(Miner, application, start, [blockchain], 300)
-     end
-     || Miner <- StopList],
-
+    start(StopList),
+    
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_until(
            fun() ->
@@ -580,66 +410,26 @@ election_test(Config) ->
                                              catch _:_ ->
                                                      false
                                              end
-                                     end, shuffle(Miners))
+                                     end, miner_ct_utils:shuffle(Miners))
            end, 90, timer:seconds(1)),
     ok.
-
-election_check([], _Miners, Owner) ->
-    Owner ! seen_all;
-election_check(NotSeen0, Miners, Owner) ->
-    timer:sleep(500),
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-    NotSeen = NotSeen0 -- ConsensusMiners,
-    Owner ! {not_seen, NotSeen},
-    election_check(NotSeen, Miners, Owner).
-
-
-shuffle(List) ->
-    R = [{rand:uniform(1000000), I} || I <- List],
-    O = lists:sort(R),
-    {_, S} = lists:unzip(O),
-    S.
 
 
 group_change_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
-
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
+    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    
     ?assertNotEqual([], ConsensusMiners),
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
     ?assertEqual(4, length(ConsensusMiners)),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
+    
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
                                                                      {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
-                                                             end, shuffle(Miners))
+                                                             end, miner_ct_utils:shuffle(Miners))
                                    end, 60, timer:seconds(1)),
     %% submit the transaction
 
@@ -671,7 +461,7 @@ group_change_test(Config) ->
                                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
                                              ct:pal("miner ~p height ~p target ~p", [Miner, Ht, Height+20]),
                                              Ht > (Height + 20)
-                                     end, shuffle(Miners))
+                                     end, miner_ct_utils:shuffle(Miners))
            end, 80, timer:seconds(1)),
 
     %% make sure we still haven't executed it
@@ -717,40 +507,18 @@ group_change_test(Config) ->
 master_key_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
-
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
+    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    
     ?assertNotEqual([], ConsensusMiners),
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
     ?assertEqual(7, length(ConsensusMiners)),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
+    
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
                                            true == lists:all(fun(Miner) ->
                                                                      {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
-                                                             end, shuffle(Miners))
+                                                             end, miner_ct_utils:shuffle(Miners))
                                    end, 30, timer:seconds(1)),
 
 
@@ -774,7 +542,7 @@ master_key_test(Config) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
 
     %% bad master key
@@ -808,7 +576,7 @@ master_key_test(Config) ->
                              Ht > (Start2 + 15) andalso
                                  {ok, totes_goats_garb} ==
                                  ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 60, timer:seconds(1)),
 
     %% good master key
@@ -826,7 +594,7 @@ master_key_test(Config) ->
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_are_not_garb} == Val
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
 
 
@@ -853,7 +621,7 @@ master_key_test(Config) ->
                              Ht > (Start4 + 15) andalso
                                  {ok, goats_are_not_garb} ==
                                  ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 80, timer:seconds(1)),
 
     %% double check that new master key works
@@ -875,43 +643,21 @@ master_key_test(Config) ->
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_always_win} == Val
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
 
 
     ok.
 
 
-
 version_change_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
+    ConsensusMiners = proplists:get_value(consensus_miners, Config),
 
-    %% check consensus miners
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                      end, Miners),
-
-    %% check non consensus miners
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
+    
     ?assertNotEqual([], ConsensusMiners),
-    %% get the first consensus miner
-    FirstConsensusMiner = hd(ConsensusMiners),
-
     ?assertEqual(7, length(ConsensusMiners)),
-
-    Blockchain = ct_rpc:call(FirstConsensusMiner, blockchain_worker, blockchain, []),
-
-    %% get the genesis block from first consensus miner
-    {ok, GenesisBlock} = ct_rpc:call(FirstConsensusMiner, blockchain, genesis_block, [Blockchain]),
-
-    %% check genesis load results for non consensus miners
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
 
     %% make sure that elections are rolling
     ok = miner_ct_utils:wait_until(fun() ->
@@ -919,7 +665,7 @@ version_change_test(Config) ->
                                                                      {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
                                                                      ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
                                                                      Epoch > 1
-                                                             end, shuffle(Miners))
+                                                             end, miner_ct_utils:shuffle(Miners))
                                    end, 30, timer:seconds(1)),
 
 
@@ -943,7 +689,7 @@ version_change_test(Config) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
 
     %% switch chain version
@@ -966,7 +712,7 @@ version_change_test(Config) ->
                              {ok, 2} ==
                                  ct_rpc:call(Miner, blockchain, config, [?chain_vars_version,
                                                                          Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 60, timer:seconds(1)),
 
     %% try a new-style txn change
@@ -988,7 +734,7 @@ version_change_test(Config) ->
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_are_not_garb} == Val
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
 
 
@@ -1015,54 +761,15 @@ version_change_test(Config) ->
                              Ht > (Start4 + 15) andalso
                                  {ok, goats_are_not_garb} ==
                                  ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, shuffle(Miners))
+                     end, miner_ct_utils:shuffle(Miners))
            end, 40, timer:seconds(1)),
     ok.
 
-%%% utils
 
-epoch_gte(Miners, Seconds, Threshold) ->
-    epoch_gte(any, Miners, Seconds, Threshold).
 
-epoch_gte(Mod, Miners, Seconds, Threshold) ->
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:Mod(
-                     fun(Miner) ->
-                             try
-                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
-                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                 Epoch >= Threshold
-                             catch _:_ ->
-                                     false
-                             end
-                     end, shuffle(Miners))
-           end, Seconds, timer:seconds(1)).
 
-height(Miner) ->
-    C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-    ct:pal("miner ~p height ~p", [Miner, Height]),
-    Height.
+%%% local utils
 
-height_gte(Miners, Seconds, Threshold) ->
-    height_gte(all, Miners, Seconds, Threshold).
-
-height_gte(Mod, Miners, Seconds, Threshold) ->
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:Mod(
-                     fun(Miner) ->
-                             try
-                                 C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
-                                 {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-                                 ct:pal("miner ~p height ~p", [Miner, Height]),
-                                 Height >= Threshold
-                             catch _:_ ->
-                                     false
-                             end
-                     end, shuffle(Miners))
-           end, Seconds, timer:seconds(1)).
 
 stop(Miners) ->
     stop(Miners, 60).
@@ -1112,43 +819,5 @@ start(Miners, Seconds) ->
                      end, Miners)
            end, Seconds * 2, 500).
 
-consensus_members(Epoch, []) ->
-    error({no_members_at_epoch, Epoch});
-consensus_members(Epoch, [M | Tail]) ->
-    try ct_rpc:call(M, miner_cli_info, get_info, [], 2000) of
-        {_, _, Epoch} ->
-            Blockchain = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
-            Ledger = ct_rpc:call(M, blockchain, ledger, [Blockchain], 2000),
-            {ok, Members} = ct_rpc:call(M, blockchain_ledger_v1, consensus_members, [Ledger], 2000),
-            Members;
-        Other ->
-            ct:pal("~p had Epoch ~p", [M, Other]),
-            timer:sleep(500),
-            consensus_members(Epoch, Tail)
-    catch C:E ->
-            ct:pal("~p threw error ~p:~p", [M, C, E]),
-            timer:sleep(500),
-            consensus_members(Epoch, Tail)
-    end.
 
-node2addr(Node, AddrList) ->
-    {_, Addr} = lists:keyfind(Node, 1, AddrList),
-    Addr.
 
-addr2node(Addr, AddrList) ->
-    {Node, _} = lists:keyfind(Addr, 2, AddrList),
-    Node.
-
-addr_list(Miners) ->
-    miner_ct_utils:pmap(
-      fun(M) ->
-              Addr = ct_rpc:call(M, blockchain_swarm, pubkey_bin, []),
-              {M, Addr}
-      end, Miners).
-
-partition_miners(Members, AddrList) ->
-    {Miners, _} = lists:unzip(AddrList),
-    lists:partition(fun(Miner) ->
-                            Addr = node2addr(Miner, AddrList),
-                            lists:member(Addr, Members)
-                    end, Miners).
