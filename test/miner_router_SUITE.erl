@@ -62,9 +62,9 @@ init_per_testcase(_TestCase, Config0) ->
                    end, Miners),
     ?assertEqual([ok], lists:usort(DKGResults)),
 
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
+    %% Get both consensus and non consensus miners
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
+    
 
     %% ensure that blockchain is undefined for non_consensus miners
     true = lists:all(fun(Res) ->
@@ -75,18 +75,8 @@ init_per_testcase(_TestCase, Config0) ->
                                          [R | Acc]
                                  end, [], NonConsensusMiners)),
 
-    %% get the genesis block from the first Consensus Miner
-    ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                        end, Miners)),
-    Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
-    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Chain]),
-
-    ct:pal("non consensus nodes ~p", [NonConsensusMiners]),
-
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
+    %% integrate genesis block    
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     ok = miner_ct_utils:wait_until(fun() ->
                                            lists:all(fun(M) ->

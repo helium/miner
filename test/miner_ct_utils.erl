@@ -37,7 +37,8 @@
          partition_miners/2,
          node2addr/2,
          addr2node/2,
-         addr_list/1
+         addr_list/1,
+         blockchain_worker_check/1
 
         ]).
     
@@ -139,7 +140,18 @@ integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
     miner_ct_utils:pmap(fun(M) ->
                             ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
                         end, NonConsensusMiners).
-    
+
+blockchain_worker_check(Miners)->
+    lists:all(
+        fun(Res) ->
+            Res /= undefined
+        end,
+        lists:foldl(
+            fun(Miner, Acc) -> 
+                R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                [R | Acc]
+            end, [], Miners)).
+
 pmap(F, L) ->
     pmap(F, L, timer:seconds(90)).
 
