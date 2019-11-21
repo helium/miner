@@ -137,7 +137,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
                     case enough_signatures(sig, NewState) of
                         {ok, Signatures} when State#state.sent_conf == false ->
-                            lager:info("enough 1 ~p", [length(Signatures)]),
+                            lager:debug("enough 1 ~p", [length(Signatures)]),
                             case length(Signatures) == length(Members) of
                                 true ->
                                     case State#state.done_called of
@@ -158,7 +158,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                      [{multicast, term_to_binary({conf, NewState#state.signatures})}]}
                             end;
                         {ok, Signatures} ->
-                            lager:info("enough 2 ~p", [length(Signatures)]),
+                            lager:debug("enough 2 ~p", [length(Signatures)]),
                             case length(Signatures) == length(Members) of
                                 true ->
                                     case State#state.done_called of
@@ -242,34 +242,128 @@ callback_message(Actor, Message, _State) ->
 
 %% helper functions
 serialize(State) ->
-    SerializedDKG = dkg_hybriddkg:serialize(State#state.dkg),
-    G1 = erlang_pbc:element_to_binary(State#state.g1),
-    G2 = erlang_pbc:element_to_binary(State#state.g2),
-    PrivKey = case State#state.privkey of
-                  undefined ->
-                      undefined;
-                  Other ->
-                      tpke_privkey:serialize(Other)
-              end,
-    term_to_binary(State#state{dkg=SerializedDKG, g1=G1, g2=G2, privkey=PrivKey}, [compressed]).
+    #state{dkg = DKG0,
+           g1 = G1_0, g2 = G2_0,
+           privkey = PrivKey0,
+           n = N,
+           f = F,
+           t = T,
+           id = ID,
+           curve = Curve,
+           members = Members,
+           artifact = Artifact,
+           signatures = Sigs,
+           signatures_required = SigsRequired,
+           sigmod = SigMod,
+           sigfun = SigFun,
+           donemod = DoneMod,
+           donefun = DoneFun,
+           done_called = DoneCalled,
+           sent_conf = SentConf,
+           height = Height,
+           delay = Delay} = State,
+    SerializedDKG = dkg_hybriddkg:serialize(DKG0),
+    G1 = erlang_pbc:element_to_binary(G1_0),
+    G2 = erlang_pbc:element_to_binary(G2_0),
+    PreSer = #{g1 => G1, g2 => G2},
+    PrivKey =
+        case PrivKey0 of
+            undefined ->
+                undefined;
+            Other ->
+                tpke_privkey:serialize(Other)
+        end,
+    M0 = #{dkg => SerializedDKG,
+           privkey => PrivKey,
+           n => N,
+           f => F,
+           t => T,
+           id => ID,
+           curve => Curve,
+           members => Members,
+           artifact => Artifact,
+           signatures => Sigs,
+           signatures_required => SigsRequired,
+           sigmod => SigMod,
+           sigfun => SigFun,
+           donemod => DoneMod,
+           donefun => DoneFun,
+           done_called => DoneCalled,
+           sent_conf => SentConf,
+           height => Height,
+           delay => Delay},
+    M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
+    maps:merge(PreSer, M).
 
-deserialize(BinState) ->
-    State = binary_to_term(BinState),
-    %% get the fun used to sign things with our swarm key
+%% to make dialyzer happy till I fix the relcast typing
+deserialize(_Bin) when is_binary(_Bin) ->
+    {error, format_deprecated};
+deserialize(MapState0) when is_map(MapState0) ->
+    MapState = maps:map(fun(g1, B) ->
+                                B;
+                           (g2, B) ->
+                                B;
+                           (_K, undefined) ->
+                                undefined;
+                           (_K, B) ->
+                                binary_to_term(B)
+                        end, MapState0),
+    #{n := N,
+      f := F,
+      t := T,
+      id := ID,
+      dkg := DKG0,
+      curve := Curve,
+      g1 := G1_0,
+      g2 := G2_0,
+      members := Members,
+      artifact := Artifact,
+      signatures := Sigs,
+      signatures_required := SigsRequired,
+      sigmod := SigMod,
+      sigfun := SigFun,
+      donemod := DoneMod,
+      donefun := DoneFun,
+      done_called := DoneCalled,
+      sent_conf := SentConf,
+      height := Height,
+      delay := Delay} = MapState,
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-    Group = erlang_pbc:group_new(State#state.curve),
-    G1 = erlang_pbc:binary_to_element(Group, State#state.g1),
-    G2 = erlang_pbc:binary_to_element(Group, State#state.g2),
-    DKG = dkg_hybriddkg:deserialize(State#state.dkg, G1, ReadySigFun, mk_verification_fun(State#state.members)),
-    PrivKey = case State#state.privkey of
+    Group = erlang_pbc:group_new(Curve),
+    G1 = erlang_pbc:binary_to_element(Group, G1_0),
+    G2 = erlang_pbc:binary_to_element(Group, G2_0),
+    DKG = dkg_hybriddkg:deserialize(DKG0, G1, ReadySigFun,
+                                    mk_verification_fun(Members)),
+    PrivKey = case maps:get(privkey, MapState, undefined) of
         undefined ->
             undefined;
         Other ->
             tpke_privkey:deserialize(Other)
     end,
-    State#state{dkg=DKG, g1=G1, g2=G2, privkey=PrivKey}.
+    #state{dkg = DKG,
+           g1 = G1, g2 = G2,
+           privkey = PrivKey,
+           n = N,
+           f = F,
+           t = T,
+           id = ID,
+           curve = Curve,
+           members = Members,
+           artifact = Artifact,
+           signatures = Sigs,
+           signatures_required = SigsRequired,
+           sigmod = SigMod,
+           sigfun = SigFun,
+           donemod = DoneMod,
+           donefun = DoneFun,
+           done_called = DoneCalled,
+           sent_conf = SentConf,
+           height = Height,
+           delay = Delay}.
 
 restore(OldState, _NewState) ->
+    lager:debug("called restore with ~p ~p", [OldState#state.privkey,
+                                              _NewState#state.privkey]),
     {ok, OldState}.
 
 fixup_msgs(Msgs) ->
