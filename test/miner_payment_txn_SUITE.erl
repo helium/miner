@@ -61,31 +61,10 @@ init_per_testcase(_TestCase, Config0) ->
                    end, Miners),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
-
-    %% ensure that blockchain is undefined for non_consensus miners
-    true = lists:all(fun(Res) ->
-                             Res == undefined
-                     end,
-                     lists:foldl(fun(Miner, Acc) ->
-                                         R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                         [R | Acc]
-                                 end, [], NonConsensusMiners)),
-
-    %% get the genesis block from the first Consensus Miner
-    ConsensusMiner = hd(lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                        end, Miners)),
-    Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
-    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Chain]),
-
-    ct:pal("non consensus nodes ~p", [NonConsensusMiners]),
-
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
+    %% Get both consensus and non consensus miners
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
+    %% integrate genesis block    
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     ok = miner_ct_utils:wait_until(fun() ->
                                            lists:all(fun(M) ->
@@ -94,13 +73,18 @@ init_per_testcase(_TestCase, Config0) ->
                                                      end, Miners)
                                    end),
 
-    Config.
+    
+    [   {consensus_miners, ConsensusMiners},
+        {non_consensus_miners, NonConsensusMiners}
+        | Config].
+    
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 single_payment_test(Config) ->
     Miners = proplists:get_value(miners, Config),
+    ConsensusMiners = proplists:get_value(consensus_miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -152,9 +136,12 @@ single_payment_test(Config) ->
 
     %ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn2]),
 
-    [Candidate|_] = lists:filter(fun(Miner) ->
-                                         ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                 end, Miners),
+    Candidate = hd(ConsensusMiners),
+    
+%    [Candidate|_] = lists:filter(fun(Miner) ->
+%                                         ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+%                                 end, Miners),
+
     Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
     false = Group == undefined,
     ok = libp2p_group_relcast:handle_command(Group, SignedTxn2),
