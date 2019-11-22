@@ -17,7 +17,6 @@
          count/2,
          randname/1,
          get_config/2,
-         random_n/2,
          get_balance/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
@@ -47,7 +46,7 @@ epoch_gte(Miners, Seconds, Threshold) ->
     epoch_gte(any, Miners, Seconds, Threshold).
 
 epoch_gte(Mod, Miners, Seconds, Threshold) ->
-    ok = miner_ct_utils:wait_until(
+    Res = miner_ct_utils:wait_until(
            fun() ->
                    lists:Mod(
                      fun(Miner) ->
@@ -59,7 +58,11 @@ epoch_gte(Mod, Miners, Seconds, Threshold) ->
                                      false
                              end
                      end, miner_ct_utils:shuffle(Miners))
-           end, Seconds, timer:seconds(1)).
+           end, Seconds, timer:seconds(1)),
+    case Res of
+        true -> ok;
+        false -> {error, false}
+    end.
 
 height(Miner) ->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -71,7 +74,7 @@ height_gte(Miners, Seconds, Threshold) ->
     height_gte(all, Miners, Seconds, Threshold).
 
 height_gte(Mod, Miners, Seconds, Threshold) ->
-    ok = miner_ct_utils:wait_until(
+    Res = miner_ct_utils:wait_until(
            fun() ->
                    lists:Mod(
                      fun(Miner) ->
@@ -84,7 +87,11 @@ height_gte(Mod, Miners, Seconds, Threshold) ->
                                      false
                              end
                      end, miner_ct_utils:shuffle(Miners))
-           end, Seconds, timer:seconds(1)).
+           end, Seconds, timer:seconds(1)),
+    case Res of
+        true -> ok;
+        false -> {error, false}
+    end.
 
 consensus_members(Epoch, []) ->
     error({no_members_at_epoch, Epoch});
@@ -174,16 +181,16 @@ pmap(F, L, Timeout) ->
     erlang:cancel_timer(Ref),
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
-
+ 
 wait_until(Fun) ->
     wait_until(Fun, 40, 100).
 wait_until(Fun, Retry, Delay) when Retry > 0 ->
     Res = Fun(),
     try Res of
         true ->
-            ok;
+            true;
         _ when Retry == 1 ->
-            {fail, Res};
+            false;
         _ ->
             timer:sleep(Delay),
             wait_until(Fun, Retry-1, Delay)
@@ -218,7 +225,7 @@ start_node(Name, Config, Case) ->
 
     case ct_slave:start(Name, NodeConfig) of
         {ok, Node} ->
-            ok = wait_until(fun() ->
+            true = wait_until(fun() ->
                                     net_adm:ping(Node) == pong
                             end, 60, 500),
             Node;
@@ -237,7 +244,7 @@ partition_cluster(ANodes, BNodes) ->
     pmap(fun({Node1, Node2}) ->
                  true = rpc:call(Node1, erlang, set_cookie, [Node2, canttouchthis]),
                  true = rpc:call(Node1, erlang, disconnect_node, [Node2]),
-                 ok = wait_until_disconnected(Node1, Node2)
+                 true = wait_until_disconnected(Node1, Node2)
          end,
          [{Node1, Node2} || Node1 <- ANodes, Node2 <- BNodes]),
     ok.
@@ -246,7 +253,7 @@ heal_cluster(ANodes, BNodes) ->
     GoodCookie = erlang:get_cookie(),
     pmap(fun({Node1, Node2}) ->
                  true = rpc:call(Node1, erlang, set_cookie, [Node2, GoodCookie]),
-                 ok = wait_until_connected(Node1, Node2)
+                 true = wait_until_connected(Node1, Node2)
          end,
          [{Node1, Node2} || Node1 <- ANodes, Node2 <- BNodes]),
     ok.
@@ -290,12 +297,6 @@ get_config(Arg, Default) ->
         T when is_list(T) -> list_to_integer(T);
         T -> T
     end.
-
-random_n(N, List) ->
-    lists:sublist(random_shuffle(List), N).
-
-random_shuffle(List) ->
-    [x || {_,x} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
 shuffle(List) ->
     R = [{rand:uniform(1000000), I} || I <- List],

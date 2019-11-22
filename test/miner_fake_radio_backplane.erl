@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include("ct_macros.hrl").
 
 -export([start_link/2, init/1, handle_call/3, handle_cast/2, handle_info/2]).
 

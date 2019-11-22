@@ -2,8 +2,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include("ct_macros.hrl").
 
 -export([
     all/0

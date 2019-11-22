@@ -5,7 +5,7 @@
 -include_lib("kernel/include/inet.hrl").
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
-
+-include("ct_macros.hrl").
 
 -export([
     init_per_testcase/2,
@@ -67,13 +67,7 @@ init_per_testcase(_TestCase, Config0) ->
     
 
     %% ensure that blockchain is undefined for non_consensus miners
-    true = lists:all(fun(Res) ->
-                             Res == undefined
-                     end,
-                     lists:foldl(fun(Miner, Acc) ->
-                                         R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                         [R | Acc]
-                                 end, [], NonConsensusMiners)),
+    false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
     %% integrate genesis block    
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
@@ -131,18 +125,32 @@ basic(Config) ->
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),
 
-     ok = miner_ct_utils:wait_until(
-        fun() ->
-            Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
-            Ledger = blockchain:ledger(Chain),
-            case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
-                {ok, _} -> true;
-                _ -> false
-            end
-        end,
-        60,
-        timer:seconds(1)
-    ),
+    ?assertAsync(begin
+                        Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
+                        Ledger = blockchain:ledger(Chain),
+                        AsyncResult1 = 
+                            case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
+                                {ok, _} -> true;
+                                _ -> false
+                            end
+                        
+                         
+                 end,
+        AsyncResult1 == true, 60, timer:seconds(1)),
+                
+    
+%%     ok = miner_ct_utils:wait_until(
+%%        fun() ->
+%%            Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
+%%            Ledger = blockchain:ledger(Chain),
+%%            case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
+%%                {ok, _} -> true;
+%%                _ -> false
+%%            end
+%%        end,
+%%        60,
+%%        timer:seconds(1)
+%%    ),
 
     {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
     {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),

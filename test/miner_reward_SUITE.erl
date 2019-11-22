@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -60,28 +61,31 @@ init_per_testcase(_TestCase, Config0) ->
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
+    %% Get non consensus miners
+    NonConsensusMiners = miner_ct_utils:non_consensus_miners(Miners),
 
     %% ensure that blockchain is undefined for non_consensus miners
-    ?assertEqual(false, miner_ct_utils:blockchain_worker_check(NonConsensusMiners)),
+    false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
-    {_ConsensusMiners1, NonConsensusMiners1} = miner_ct_utils:in_non_consensus_miners(Miners),
+    %% Get consensus miners
+    ConsensusMiners = miner_ct_utils:consensus_miners(Miners),
     
     %% integrate genesis block    
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           lists:all(fun(M) ->
-                                                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-                                                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-                                                     end, Miners)
-                                   end),
 
-    [
-        {consensus_miners, ConsensusMiners}, 
-        {non_consensus_miners, NonConsensusMiners1} | Config].
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(M) ->
+                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
+                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
+                         end, Miners)
+                 end,
+        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+                
+    
+    [   {consensus_miners, ConsensusMiners}, 
+        {non_consensus_miners, NonConsensusMiners} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -120,21 +124,16 @@ basic_test(Config) ->
     {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
 
     %% Wait for an election (should happen at block 6 ideally)
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   true =:= lists:all(
-                              fun(Miner) ->
-                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 10
-                              end,
-                              Miners
-                             )
-           end,
-           60,
-           timer:seconds(1)
-          ),
-
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                              {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
+                              Height >= CurrentHeight + 10
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(1)),
+    
     %% Check that the election txn is in the same block as the rewards txn
     ok = lists:foreach(fun(Miner) ->
                                Chain0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
