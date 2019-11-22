@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("ct_macros.hrl").
 
 -export([
     all/0
@@ -81,29 +82,24 @@ dist_v1(Config0) ->
     [M|_] = Miners,
 
     %% wait until one node has a working chain
-    ok = miner_ct_utils:wait_until(
-        fun() ->
-            lists:any(
-                fun(Miner) ->
-                    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
-                        {badrpc, Reason} ->
-                            ct:fail(Reason),
-                            false;
-                        undefined ->
-                            false;
-                        Chain ->
-                            Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain], RPCTimeout),
-                            ActiveGteways = ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
-                            maps:size(ActiveGteways) == erlang:length(Addresses)
-                    end
-                end,
-                Miners
-            )
-        end,
-        10,
-        timer:seconds(6)
-    ),
-
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                            case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                                {badrpc, Reason} ->
+                                    ct:fail(Reason),
+                                    false;
+                                undefined ->
+                                    false;
+                                Chain ->
+                                    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain], RPCTimeout),
+                                    ActiveGteways = ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
+                                    maps:size(ActiveGteways) == erlang:length(Addresses)
+                            end
+                         end, Miners)
+                 end,
+        Result == true, 10, timer:seconds(6)),
+    
     %% obtain the genesis block
     GenesisBlock = lists:foldl(
         fun(Miner, undefined) ->
@@ -225,29 +221,24 @@ dist_v2(Config0) ->
     [M|_] = Miners,
 
     %% wait until one node has a working chain
-    ok = miner_ct_utils:wait_until(
-        fun() ->
-            lists:any(
-                fun(Miner) ->
-                    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
-                        {badrpc, Reason} ->
-                            ct:fail(Reason),
-                            false;
-                        undefined ->
-                            false;
-                        Chain ->
-                            Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain], RPCTimeout),
-                            ActiveGteways = ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
-                            maps:size(ActiveGteways) == erlang:length(Addresses)
-                    end
-                end,
-                Miners
-            )
-        end,
-        10,
-        timer:seconds(6)
-    ),
-
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                            case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+                                {badrpc, Reason} ->
+                                    ct:fail(Reason),
+                                    false;
+                                undefined ->
+                                    false;
+                                Chain ->
+                                    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain], RPCTimeout),
+                                    ActiveGteways = ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger], RPCTimeout),
+                                    maps:size(ActiveGteways) == erlang:length(Addresses)
+                            end
+                         end, Miners)
+                 end,
+        Result == true, 10, timer:seconds(6)),
+    
     %% obtain the genesis block
     GenesisBlock = lists:foldl(
         fun(Miner, undefined) ->
@@ -380,13 +371,13 @@ basic(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
     ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem))),
@@ -417,16 +408,18 @@ basic(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     % Moving threw targeting and challenging
-    ok = miner_ct_utils:wait_until(fun() ->
-        case sys:get_state(Statem) of
-            {receiving, _} -> true;
-            _Other -> false
-        end
-    end),
-
+    ?assertAsync(begin
+                    Result =
+                        case sys:get_state(Statem) of 
+                            {receiving, _} -> true;
+                            _Other -> false 
+                        end        
+                 end, 
+        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    
     % Send 7 receipts and add blocks to pass timeout
     ?assertEqual(0, maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem))))),
     Challengees = erlang:element(9, erlang:element(2, sys:get_state(Statem))),
@@ -449,15 +442,17 @@ basic(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ok = miner_ct_utils:wait_until(fun() ->
-        case sys:get_state(Statem) of
-            {waiting, _} -> true;
-            {submitting, _} -> true;
-            {requesting, _} -> true;
-            {_Other, _} -> false
-        end
-    end),
-
+    ?assertAsync(begin
+                    Result =
+                        case sys:get_state(Statem) of 
+                            {waiting, _} -> true;
+                            {submitting, _} -> true;
+                            {requesting, _} -> true;
+                            {_Other, _} -> false
+                        end        
+                 end, 
+        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
     ?assert(meck:validate(miner_onion)),
@@ -532,13 +527,13 @@ restart(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     {ok, Statem0} = miner_poc_statem:start_link(#{delay => 5,
                                                   base_dir => BaseDir}),
@@ -571,19 +566,20 @@ restart(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
+    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     %% Moving through targeting and challenging
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   case sys:get_state(Statem0) of
-                       {receiving, _} -> true;
-                       _Other ->
-                           ct:pal("other state ~p", [_Other]),
-                           false
-                   end
-           end),
-
+    ?assertAsync(begin
+                    Result =
+                       case sys:get_state(Statem0) of
+                           {receiving, _} -> true;
+                           _Other ->
+                               ct:pal("other state ~p", [_Other]),
+                               false
+                       end       
+                 end, 
+        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    
     % KILLING STATEM AND RESTARTING
     ok = gen_statem:stop(Statem0),
     {ok, Statem1} = miner_poc_statem:start_link(#{delay => 5,
@@ -615,18 +611,19 @@ restart(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem1)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   case sys:get_state(Statem1) of
-                       {waiting, _} -> true;
-                       {submitting, _} -> true;
-                       {requesting, _} -> true;
-                       {_Other, _} ->
-                           ct:pal("other state ~p", [_Other]),
-                           false
-                   end
-           end),
-
+    ?assertAsync(begin
+                    Result =
+                       case sys:get_state(Statem1) of
+                           {waiting, _} -> true;
+                           {submitting, _} -> true;
+                           {requesting, _} -> true;
+                           {_Other, _} ->
+                               ct:pal("other state ~p", [_Other]),
+                               false
+                       end
+                 end, 
+        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
     ?assert(meck:validate(miner_onion)),

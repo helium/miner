@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -153,19 +154,20 @@ dkg_restart_test(Config) ->
     AddrList = miner_ct_utils:addr_list(Miners),
 
     %% wait for the consensus manager to boot
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   true == lists:all(
-                             fun(Miner) ->
-                                     case ct_rpc:call(Miner, erlang, whereis, [miner_consensus_mgr]) of
-                                         P when is_pid(P) ->
-                                             true;
-                                         Other ->
-                                             ct:pal("Other ~p~n", [Other]),
-                                             false
-                                     end
-                             end, Miners)
-           end, 90, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             case ct_rpc:call(Miner, erlang, whereis, [miner_consensus_mgr]) of
+                                 P when is_pid(P) ->
+                                     true;
+                                 Other ->
+                                     ct:pal("Other ~p~n", [Other]),
+                                     false
+                             end
+                         end, Miners)
+                 end,
+        Result == true, 90, timer:seconds(1)),
+                
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
@@ -226,7 +228,7 @@ election_test(Config) ->
                     Miner = lists:nth(rand:uniform(length(Miners)), Miners),
                     try
                         C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                        {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                        {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
                         {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
                             ct:pal("not seen: ~p height ~p ~p", [Not, Epoch, Height])
                     catch _:_ ->
@@ -240,31 +242,31 @@ election_test(Config) ->
     end(160),
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 1000),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch >= 3
-                                                             end, miner_ct_utils:shuffle(Miners))
-                                   end, 90, timer:seconds(1)),
-    %% now to test rescue blocks.  first: kill the chain
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 1000),
+                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                             Epoch >= 3
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 90, timer:seconds(1)),
 
     stop(lists:sublist(Miners, 1, 4)),
-    
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              case ct_rpc:call(Miner, application, which_applications, [], 300) of
                                  {badrpc, _} ->
                                      false;
                                  Apps ->
                                      not lists:keymember(miner, 1, Apps)
                              end
-                     end, lists:sublist(Miners, 1, 4))
-           end, 120, 500),
-
-
+                         end, lists:sublist(Miners, 1, 4))
+                 end,
+        Result == true, 120, 500),
+    
     Data = string:trim(os:cmd("pwd")),
     Dirs = filelib:wildcard(Data ++ "/data_*{1,2,3,4}*"),
 
@@ -276,11 +278,10 @@ election_test(Config) ->
 
     %% start em back up again
     start(lists:sublist(Miners, 1, 4)),
-    
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              case ct_rpc:call(Miner, blockchain_worker, blockchain, [], 300) of
                                  {badrpc, _} ->
                                      false;
@@ -288,30 +289,31 @@ election_test(Config) ->
                                      ct:pal("else ~p", [_Else]),
                                      true
                              end
-                     end, Miners)
-           end, 120, 500),
+                         end, Miners)
+                 end,
+        Result == true, 120, 500),
 
     %% second: make sure we're not making blocks anymore
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
-    {fail, false} =
-        miner_ct_utils:wait_until(
-          fun() ->
-                  true == lists:all(fun(Miner) ->
-                                            try
-                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                                {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                                ct:pal("miner ~p height ~p", [Miner, Ht]),
-                                                %% height might go up
-                                                %% one, but it
-                                                %% shouldn't go up 5
-                                                Ht > (Height + 5)
-                                            catch _:_ ->
-                                                    false
-                                            end
-                                    end, miner_ct_utils:shuffle(Miners))
-          end, 10, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             try
+                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                 %% height might go up
+                                 %% one, but it
+                                 %% shouldn't go up 5
+                                 Ht > (Height + 5)
+                             catch _:_ ->
+                                 false
+                             end
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == false, 10, timer:seconds(1)),
 
     %% third: mint and submit the rescue txn, shrinking the group at
     %% the same time.
@@ -367,23 +369,23 @@ election_test(Config) ->
     ct:pal("N: ~p", [N]),
      _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, self()]),
 
-    ok =
-        miner_ct_utils:wait_until(
-          fun() ->
-                  true == lists:all(fun(Miner) ->
-                                            try
-                                                C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 5000),
-                                                {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                                ct:pal("miner ~p height ~p", [Miner, Ht]),
-                                                %% height might go up
-                                                %% one, but it
-                                                %% shouldn't go up 5
-                                                Ht > (NewHeight + 3)
-                                            catch _:_ ->
-                                                    false
-                                            end
-                                    end, miner_ct_utils:shuffle(Miners))
-          end, 60, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             try
+                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 5000),
+                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                 %% height might go up
+                                 %% one, but it
+                                 %% shouldn't go up 5
+                                 Ht > (NewHeight + 3)
+                             catch _:_ ->
+                                 false
+                             end
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 60, timer:seconds(1)),
 
     %% check consensus and non consensus miners
     {NewConsensusMiners, NewNonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
@@ -400,18 +402,20 @@ election_test(Config) ->
     start(StopList),
     
     %% fourth: confirm that blocks and elections are proceeding
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   true == lists:all(fun(Miner) ->
-                                             try
-                                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                 Epoch > ElectionEpoch + 1
-                                             catch _:_ ->
-                                                     false
-                                             end
-                                     end, miner_ct_utils:shuffle(Miners))
-           end, 90, timer:seconds(1)),
+
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             try
+                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                                 Epoch > ElectionEpoch + 1
+                             catch _:_ ->
+                                 false
+                             end
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 90, timer:seconds(1)),
     ok.
 
 
@@ -424,13 +428,16 @@ group_change_test(Config) ->
     ?assertEqual(4, length(ConsensusMiners)),
     
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 1
-                                                             end, miner_ct_utils:shuffle(Miners))
-                                   end, 60, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                             Epoch > 1
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 60, timer:seconds(1)),
+    
     %% submit the transaction
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -454,15 +461,16 @@ group_change_test(Config) ->
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   true == lists:all(fun(Miner) ->
-                                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
-                                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
-                                             ct:pal("miner ~p height ~p target ~p", [Miner, Ht, Height+20]),
-                                             Ht > (Height + 20)
-                                     end, miner_ct_utils:shuffle(Miners))
-           end, 80, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
+                             {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C], 500),
+                             ct:pal("miner ~p height ~p target ~p", [Miner, Ht, Height+20]),
+                             Ht > (Height + 20)
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 80, timer:seconds(1)),
 
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -478,18 +486,17 @@ group_change_test(Config) ->
       end, Miners),
 
     %% wait for the change to take effect
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           CGroup = lists:filtermap(
-                                                      fun(Miner) ->
-                                                              C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
-                                                              L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], 500),
-                                                              {ok, Sz} = ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], 500),
-                                                              ct:pal("size ~p", [Sz]),
-                                                              true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                                      end, Miners),
-                                           ct:pal("group size: ~p", [length(CGroup)]),
-                                           7 == length(CGroup)
-                                   end, 60, timer:seconds(1)),
+    ?assertAsync(begin
+                     Result = lists:filtermap(
+                         fun(Miner) ->
+                             C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
+                             L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], 500),
+                             {ok, Sz} = ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], 500),
+                             ct:pal("size ~p", [Sz]),
+                             true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                         end, Miners)
+                 end,
+        7 == length(Result), 60, timer:seconds(1)),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
@@ -513,15 +520,16 @@ master_key_test(Config) ->
     ?assertEqual(7, length(ConsensusMiners)),
     
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 1
-                                                             end, miner_ct_utils:shuffle(Miners))
-                                   end, 30, timer:seconds(1)),
-
-
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                             Epoch > 1
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 30, timer:seconds(1)),
+    
     %% baseline: chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -535,15 +543,15 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
 
     %% bad master key
 
@@ -565,19 +573,19 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2c])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                              Ht > (Start2 + 15) andalso
                                  {ok, totes_goats_garb} ==
-                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 60, timer:seconds(1)),
+                                     ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 60, timer:seconds(1)),
 
     %% good master key
 
@@ -585,18 +593,17 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_are_not_garb} == Val
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
-
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
 
     %% make sure old master key is no longer working
 
@@ -610,19 +617,19 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                              Ht > (Start4 + 15) andalso
                                  {ok, goats_are_not_garb} ==
-                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 80, timer:seconds(1)),
+                                     ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 80, timer:seconds(1)),
 
     %% double check that new master key works
 
@@ -634,19 +641,18 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_always_win} == Val
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
-
-
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
+    
     ok.
 
 
@@ -660,15 +666,16 @@ version_change_test(Config) ->
     ?assertEqual(7, length(ConsensusMiners)),
 
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           true == lists:all(fun(Miner) ->
-                                                                     {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
-                                                                     ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                                                     Epoch > 1
-                                                             end, miner_ct_utils:shuffle(Miners))
-                                   end, 30, timer:seconds(1)),
-
-
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 250),
+                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                             Epoch > 1
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 30, timer:seconds(1)),
+    
     %% baseline: old-style chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -682,15 +689,15 @@ version_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, totes_goats_garb} == ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
 
     %% switch chain version
 
@@ -703,17 +710,17 @@ version_change_test(Config) ->
          || Miner <- Miners],
 
     %% make sure that it has taken effect
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, 2} ==
                                  ct_rpc:call(Miner, blockchain, config, [?chain_vars_version,
-                                                                         Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 60, timer:seconds(1)),
+                                     Ledger])
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 60, timer:seconds(1)),
 
     %% try a new-style txn change
 
@@ -725,18 +732,17 @@ version_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              Val = ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger]),
                              ct:pal("val ~p", [Val]),
                              {ok, goats_are_not_garb} == Val
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
-
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
 
     %% make sure old style is now closed off.
 
@@ -750,19 +756,20 @@ version_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
                              ct:pal("miner ~p height ~p", [Miner, Ht]),
                              Ht > (Start4 + 15) andalso
                                  {ok, goats_are_not_garb} ==
-                                 ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
-                     end, miner_ct_utils:shuffle(Miners))
-           end, 40, timer:seconds(1)),
+                                     ct_rpc:call(Miner, blockchain, config, [garbage_value, Ledger])
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
+
     ok.
 
 
@@ -781,18 +788,18 @@ stop(Miners, Seconds) ->
      end
      || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              case ct_rpc:call(Miner, application, which_applications, [], 300) of
                                  {badrpc, _} ->
                                      false;
                                  Apps ->
                                      not lists:keymember(miner, 1, Apps)
                              end
-                     end, Miners)
-           end, Seconds * 2, 500).
+                         end, Miners)
+                 end,
+        Result == true, Seconds * 2, 500).
 
 start(Miners) ->
     start(Miners, 60).
@@ -804,10 +811,9 @@ start(Miners, Seconds) ->
      end
      || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   lists:all(
-                     fun(Miner) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
                              case ct_rpc:call(Miner, blockchain_worker, blockchain, [], 300) of
                                  {badrpc, Res} ->
                                      ct:pal("~p false ~p", [Miner, Res]),
@@ -816,8 +822,10 @@ start(Miners, Seconds) ->
                                      ct:pal("~p else ~p", [Miner, _Else]),
                                      true
                              end
-                     end, Miners)
-           end, Seconds * 2, 500).
+                         end, Miners)
+                 end,
+        Result == true, Seconds * 2, 500).
+
 
 
 
