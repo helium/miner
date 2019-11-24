@@ -3,7 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include("ct_macros.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
     all/0

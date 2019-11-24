@@ -14,7 +14,7 @@ clean:
 	$(REBAR) clean
 
 test: compile
-	$(REBAR) as test do eunit, ct --verbose
+	$(REBAR) as test do eunit, ct --suite=test/miner_blockchain_SUITE --verbose
 
 typecheck:
 	$(REBAR) dialyzer xref
