@@ -4,7 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include("ct_macros.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -20,12 +20,12 @@
 %% common test callbacks
 
 all() -> [
-          restart_test,
-          dkg_restart_test,
-          election_test,
-          group_change_test,
-          master_key_test,
-          version_change_test
+          %restart_test,
+          %dkg_restart_test,
+          %election_test,
+          group_change_test
+          %master_key_test,
+          %version_change_test
          ].
 
 init_per_suite(Config) ->
@@ -116,6 +116,7 @@ restart_test(Config) ->
 
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:epoch_gte(all, Miners, 60, 2),
+
     ok = stop(lists:sublist(Miners, 1, 2)),
 
     [begin
@@ -799,7 +800,8 @@ stop(Miners, Seconds) ->
                              end
                          end, Miners)
                  end,
-        Result == true, Seconds * 2, 500).
+        Result == true, Seconds * 2, 500),
+    ok.
 
 start(Miners) ->
     start(Miners, 60).
@@ -824,7 +826,8 @@ start(Miners, Seconds) ->
                              end
                          end, Miners)
                  end,
-        Result == true, Seconds * 2, 500).
+        Result == true, Seconds * 2, 500),
+    ok.
 
 
 

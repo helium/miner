@@ -3,16 +3,19 @@
 
 -define(assertAsync(Expr, BoolExpr, ExprRetry, ExprDelay),
     Res = miner_ct_utils:wait_until(fun() -> (Expr),(BoolExpr) end, ExprRetry, ExprDelay),
+    ct:pal("Res: ~p", [Res]),
     case Res of
-        true -> ok;
-        false -> erlang:error({assert,
+        false -> 
+            erlang:error({assert,
                     [{module, ?MODULE},
                       {line, ?LINE},
                       {expression, (??BoolExpr)},
                       {expected, true},
                       {value ,Res}
                     ]
-        })
+            });
+        _ -> 
+            Res
     end).
 
 

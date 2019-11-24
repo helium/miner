@@ -5,7 +5,7 @@
 -include_lib("kernel/include/inet.hrl").
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include("ct_macros.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
     init_per_testcase/2,

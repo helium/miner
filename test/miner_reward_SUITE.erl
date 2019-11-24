@@ -4,7 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include("ct_macros.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -72,8 +72,7 @@ init_per_testcase(_TestCase, Config0) ->
     
     %% integrate genesis block    
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-
-
+    
     ?assertAsync(begin
                      Result = lists:all(
                          fun(M) ->
