@@ -24,7 +24,8 @@
          full_circle_test/1,
          add_assert_test/1,
          invalid_add_assert_test/1,
-         single_txn_bundle_test/1
+         single_txn_bundle_test/1,
+         bundleception_test/1
         ]).
 
 %% common test callbacks
@@ -40,7 +41,8 @@ all() -> [
           full_circle_test,
           add_assert_test,
           invalid_add_assert_test,
-          single_txn_bundle_test
+          single_txn_bundle_test,
+          bundleception_test
          ].
 
 init_per_suite(Config) ->
@@ -607,6 +609,76 @@ single_txn_bundle_test(Config) ->
     ok = wait_until_height(Miners, 15),
 
     %% The bundle is invalid since it does not contain atleast two txns in it
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payee, PayeeAddr),
+
+    ok.
+
+bundleception_test(Config) ->
+    Miners = proplists:get_value(miners, Config),
+    [Payer, Payee | _Tail] = Miners,
+    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+
+    %% check initial balances
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
+
+    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
+
+    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+
+    %% Payer Sigfun
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+
+    %% --------------------------------------------------------------
+    %% Bundle 1 contents
+    %% Create first payment txn
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
+    ct:pal("SignedTxn1: ~p", [SignedTxn1]),
+
+    %% Create second payment txn
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+    SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+    ct:pal("SignedTxn2: ~p", [SignedTxn2]),
+
+    %% Create bundle
+    BundleTxn1 = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[SignedTxn1, SignedTxn2]]),
+    ct:pal("BundleTxn1: ~p", [BundleTxn1]),
+    %% --------------------------------------------------------------
+
+    %% --------------------------------------------------------------
+    %% Bundle 2 contents
+    %% Create third payment txn
+    Txn3 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 3]),
+    SignedTxn3 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn3, SigFun]),
+    ct:pal("SignedTxn3: ~p", [SignedTxn3]),
+
+    %% Create fourth payment txn
+    Txn4 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 4]),
+    SignedTxn4 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn4, SigFun]),
+    ct:pal("SignedTxn4: ~p", [SignedTxn4]),
+
+    %% Create bundle
+    BundleTxn2 = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[SignedTxn3, SignedTxn4]]),
+    ct:pal("BundleTxn2: ~p", [BundleTxn2]),
+    %% --------------------------------------------------------------
+
+
+    %% Do bundleception
+    BundleInBundleTxn = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[BundleTxn1, BundleTxn2]]),
+    ct:pal("BundleInBundleTxn: ~p", [BundleInBundleTxn]),
+
+    %% Submit the bundle txn
+    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleInBundleTxn]),
+
+    %% wait till height is 15, ideally should wait till the payment actually occurs
+    %% it should be plenty fast regardless
+    ok = wait_until_height(Miners, 15),
+
+    %% Balances should not have changed
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
