@@ -76,14 +76,6 @@ init_per_testcase(_TestCase, Config0) ->
                  end,
         Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
     
-%%    ok = miner_ct_utils:wait_until(fun() ->
-%%                                           lists:all(fun(M) ->
-%%                                                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-%%                                                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-%%                                                     end, Miners)
-%%                                   end),
-
-    
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
         | Config].
@@ -122,25 +114,12 @@ single_payment_test(Config) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                              4000 == miner_ct_utils:get_balance(Miner, PayerAddr) + Fee andalso
-                              6000 == miner_ct_utils:get_balance(Miner, PayeeAddr)
+                            4000 == miner_ct_utils:get_balance(Miner, PayerAddr) + Fee andalso
+                            6000 == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
                          end, Miners)
                  end,
         Result == true, 60, timer:seconds(1)),
     
-%%    ok = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   true =:= lists:all(
-%%                              fun(Miner) ->
-%%                                      4000 == miner_ct_utils:get_balance(Miner, PayerAddr) + Fee andalso
-%%                                      6000 == miner_ct_utils:get_balance(Miner, PayeeAddr)
-%%                              end,
-%%                              Miners
-%%                             )
-%%           end,
-%%           60,
-%%           timer:seconds(1)
-%%          ),
 
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
@@ -180,21 +159,6 @@ single_payment_test(Config) ->
                  end,
         Result == true, 20, timer:seconds(1)),
     
-%%    ok = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   true =:= lists:all(
-%%                              fun(Miner) ->
-%%                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-%%                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-%%                                      Height >= CurrentHeight2 + 1
-%%                              end,
-%%                              Miners -- [Candidate]
-%%                             )
-%%           end,
-%%           20,
-%%           timer:seconds(1)
-%%          ),
-
     %% the transaction should not have cleared
     PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance2 = miner_ct_utils:get_balance(Payee, PayeeAddr),
@@ -207,37 +171,17 @@ single_payment_test(Config) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                              %% the transaction should have cleared
-                              PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
-                              PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
-
-                              ct:pal("payer ~p payee ~p", [PayerBalance3, PayeeBalance3]),
-                              3000 == PayerBalance3 + Fee andalso
-                              7000 == PayeeBalance3
+                            %% the transaction should have cleared
+                            PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
+                            PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
+            
+                            ct:pal("payer ~p payee ~p", [PayerBalance3, PayeeBalance3]),
+                            3000 == PayerBalance3 + Fee andalso
+                            7000 == PayeeBalance3 
                          end, Miners)
                  end,
         Result == true, 20, timer:seconds(1)),
-    
-%%    ok = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   true =:= lists:all(
-%%                              fun(Miner) ->
-%%
-%%                                      %% the transaction should have cleared
-%%                                      PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
-%%                                      PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
-%%
-%%                                      ct:pal("payer ~p payee ~p", [PayerBalance3, PayeeBalance3]),
-%%                                      3000 == PayerBalance3 + Fee andalso
-%%                                      7000 == PayeeBalance3
-%%                              end,
-%%                              Miners
-%%                             )
-%%           end,
-%%           20,
-%%           timer:seconds(1)
-%%          ),
-    
+   
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
 
@@ -283,21 +227,6 @@ self_payment_test(Config) ->
                  end,
         Result == true, 60, timer:seconds(1)),
     
-%%    ok = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   true =:= lists:all(
-%%                              fun(Miner) ->
-%%                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-%%                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-%%                                      Height >= CurrentHeight + 2
-%%                              end,
-%%                              Miners
-%%                             )
-%%           end,
-%%           60,
-%%           timer:seconds(1)
-%%          ),
-
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 

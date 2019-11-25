@@ -20,12 +20,12 @@
 %% common test callbacks
 
 all() -> [
-          %restart_test,
-          %dkg_restart_test,
-          %election_test,
-          group_change_test
-          %master_key_test,
-          %version_change_test
+          restart_test,
+          dkg_restart_test,
+          election_test,
+          group_change_test,
+          master_key_test,
+          version_change_test
          ].
 
 init_per_suite(Config) ->
