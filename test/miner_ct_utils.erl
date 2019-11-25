@@ -20,7 +20,8 @@
          get_balance/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
-         generate_keys/1
+         generate_keys/1,
+         new_random_key/1
         ]).
 
 pmap(F, L) ->
