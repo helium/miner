@@ -60,19 +60,7 @@ epoch_gte(Mod, Miners, Seconds, Threshold) ->
                         end, miner_ct_utils:shuffle(Miners))
                  end,
         Result == true, Seconds, timer:seconds(1)),
-%%    Res = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   lists:Mod(
-%%                     fun(Miner) ->
-%%                             try
-%%                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
-%%                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-%%                                 Epoch >= Threshold
-%%                             catch _:_ ->
-%%                                     false
-%%                             end
-%%                     end, miner_ct_utils:shuffle(Miners))
-%%           end, Seconds, timer:seconds(1)),
+    
     case Res of
         true -> ok;
         false -> {error, false}
@@ -102,22 +90,7 @@ height_gte(Mod, Miners, Seconds, Threshold) ->
                         end, miner_ct_utils:shuffle(Miners))
                  end,
         Result == true, Seconds, timer:seconds(1)),
-    
-%%    Res = miner_ct_utils:wait_until(
-%%           fun() ->
-%%                   lists:Mod(
-%%                     fun(Miner) ->
-%%                             try
-%%                                 C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
-%%                                 {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-%%                                 ct:pal("miner ~p height ~p", [Miner, Height]),
-%%                                 Height >= Threshold
-%%                             catch _:_ ->
-%%                                     false
-%%                             end
-%%                     end, miner_ct_utils:shuffle(Miners))
-%%           end, Seconds, timer:seconds(1)),
-    
+
     case Res of
         true -> ok;
         false -> {error, false}
@@ -256,9 +229,6 @@ start_node(Name, Config, Case) ->
     case ct_slave:start(Name, NodeConfig) of
         {ok, Node} ->
             ?assertAsync(Result = net_adm:ping(Node), Result == pong, 60, 500),
-%%            true = wait_until(fun() ->
-%%                                    net_adm:ping(Node) == pong
-%%                            end, 60, 500),
             Node;
         {error, already_started, Node} ->
             ct_slave:stop(Name),
