@@ -67,6 +67,7 @@ poc_dist_v2_test(Config0) ->
     Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
+
     run_dist_with_params(TestCase,
                          Config,
                          #{?block_time => BlockTime,
@@ -334,13 +335,13 @@ restart_test(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     {ok, Statem0} = miner_poc_statem:start_link(#{delay => 5,
                                                   base_dir => BaseDir}),
@@ -373,7 +374,7 @@ restart_test(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
 
     %% Moving through targeting and challenging
     ?assertAsync(begin
