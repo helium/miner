@@ -52,10 +52,10 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns, 
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns,
                                             Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-    
+
     %% Get non consensus miners
     NonConsensusMiners = miner_ct_utils:non_consensus_miners(Miners),
 
@@ -64,14 +64,14 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% Get consensus miners
     ConsensusMiners = miner_ct_utils:consensus_miners(Miners),
-    
-    %% integrate genesis block    
+
+    %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-    
+
     %% confirm height is 1
     ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
-    
-    [   {consensus_miners, ConsensusMiners}, 
+
+    [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners} | Config].
 
 end_per_testcase(_TestCase, Config) ->
@@ -81,7 +81,7 @@ basic_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     ConsensusMiners = proplists:get_value(consensus_miners, Config),
     NonConsensusMiners = proplists:get_value(non_consensus_miners, Config),
-    
+
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -105,14 +105,16 @@ basic_test(Config) ->
 
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
-    %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
-    %% get the current height here
-    Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
-
     %% Wait for an election (should happen at block 6 ideally)
-    miner_ct_utils:wait_until_height(Miners, CurrentHeight + 10),
-    
+    miner_ct_utils:epoch_gte(Miners, 60, 2),
+
+    %% TODO: this code is currently a noop because assertions are
+    %% exceptions.  we should be using chain information to figure
+    %% this out: we don't need to do it for each miner, we just need
+    %% to make sure that 1) we know what the election block is and
+    %% that its txns looks correct and 2) and then not go to the
+    %% cluster for balances.
+
     %% Check that the election txn is in the same block as the rewards txn
     ok = lists:foreach(fun(Miner) ->
                                Chain0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -136,7 +138,7 @@ basic_test(Config) ->
                                          catch _:_ ->
                                                  false
                                          end
-                                 end, lists:seq(4, 10))
+                                 end, lists:seq(5, 15))
                        end,
                        Miners),
 
@@ -172,4 +174,3 @@ basic_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-

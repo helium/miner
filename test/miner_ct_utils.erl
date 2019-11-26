@@ -64,10 +64,10 @@
          confirm_balance_payer/3,
          confirm_balance_payee/3,
          confirm_balance_both_sides/5
-    
+
 
         ]).
-    
+
 
 stop_miners(Miners) ->
     stop_miners(Miners, 60).
@@ -110,7 +110,7 @@ epoch_gte(Mod, Miners, Seconds, Threshold) ->
                         end, miner_ct_utils:shuffle(Miners))
                  end,
         Result == true, Seconds, timer:seconds(1)),
-    
+
     case Res of
         true -> ok;
         false -> {error, false}
@@ -181,20 +181,20 @@ in_non_consensus_miners(Miners)->
 consensus_miners(Miners)->
     lists:filtermap(
             fun(Miner) ->
-                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []) 
+                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
             end, Miners).
 
 non_consensus_miners(Miners)->
     lists:filtermap(
             fun(Miner) ->
-                false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []) 
+                false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
             end, Miners).
 
 election_check([], _Miners, Owner) ->
     Owner ! seen_all;
 election_check(NotSeen0, Miners, Owner) ->
     timer:sleep(500),
-    ConsensusMiners = miner_ct_utils:consensus_miners(Miners), 
+    ConsensusMiners = miner_ct_utils:consensus_miners(Miners),
     NotSeen = NotSeen0 -- ConsensusMiners,
     Owner ! {not_seen, NotSeen},
     election_check(NotSeen, Miners, Owner).
@@ -202,7 +202,7 @@ election_check(NotSeen0, Miners, Owner) ->
 integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
     Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
     {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Blockchain]),
-    
+
     %% TODO - do we need to assert here on results from genesis load ?
     miner_ct_utils:pmap(fun(M) ->
                             ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
@@ -214,7 +214,7 @@ blockchain_worker_check(Miners)->
             Res /= undefined
         end,
         lists:foldl(
-            fun(Miner, Acc) -> 
+            fun(Miner, Acc) ->
                 R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                 [R | Acc]
             end, [], Miners)).
@@ -259,7 +259,7 @@ confirm_balance_payer(Miners, PayerAddr, PayerBal) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                            PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr)                                          
+                            PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr)
                          end, Miners)
                  end,
         Result == true, 60, timer:seconds(1)),
@@ -269,7 +269,7 @@ confirm_balance_payee(Miners, PayeeAddr, PayeeBal) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
+                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)
                          end, Miners)
                  end,
         Result == true, 60, timer:seconds(1)),
@@ -280,13 +280,13 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
                      Result = lists:all(
                          fun(Miner) ->
                             PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr) andalso
-                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
+                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)
                          end, Miners)
                  end,
         Result == true, 60, timer:seconds(1)),
     ok.
 
-    
+
 wait_for_epoch(Miners, Epoch) ->
     wait_for_epoch(Miners, Epoch, 1000).
 wait_for_epoch(Miners, Epoch, Timeout) ->
@@ -300,7 +300,7 @@ wait_for_epoch(Miners, Epoch, Timeout) ->
                  end,
         Result == true, 90, timer:seconds(1)),
     ok.
-    
+
 wait_for_module(Miners, Mod) ->
     wait_for_module(Miners, Mod, 300).
 wait_for_module(Miners, Mod, Timeout) ->
@@ -385,7 +385,7 @@ wait_for_txn_key_update(Miners, Key, Value, Timeout)->
         Result == true, 40, timer:seconds(1)),
     ok.
 
-delete_dirs(DirWildcard, SubDir)-> 
+delete_dirs(DirWildcard, SubDir)->
     Data = string:trim(os:cmd("pwd")),
     Dirs = filelib:wildcard(Data ++ DirWildcard),
     [begin
@@ -405,7 +405,7 @@ inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
                    end, Miners),
     DKGResults.
 
-    
+
 
 pmap(F, L) ->
     pmap(F, L, timer:seconds(90)).
@@ -429,7 +429,7 @@ pmap(F, L, Timeout) ->
     erlang:cancel_timer(Ref),
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
- 
+
 wait_until(Fun) ->
     wait_until(Fun, 40, 100).
 wait_until(Fun, Retry, Delay) when Retry > 0 ->
@@ -699,7 +699,7 @@ init_per_testcase(TestCase, Config) ->
         Miners
     ),
     {ok, _} = ct_cover:add_nodes(Miners),
-    
+
     [
         {miners, Miners},
         {keys, Keys},
