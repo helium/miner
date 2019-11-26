@@ -65,3 +65,8 @@ handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPS
 handle_info(Msg, State) ->
     ct:pal("unhandled info ~p", [Msg]),
     {noreply, State}.
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------
+

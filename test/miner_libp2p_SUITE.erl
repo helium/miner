@@ -58,3 +58,8 @@ p2p_addr_test(Config) ->
                            end, [], Miners),
     ?assertEqual(length(Miners), length(P2PAddrs)),
     {comment, P2PAddrs}.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------

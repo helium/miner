@@ -23,9 +23,14 @@
          tmp_dir/0, tmp_dir/1, nonl/1,
          generate_keys/1,
          new_random_key/1,
+         stop_miners/1,
+         stop_miners/2,
+         start_miners/1,
+         start_miners/2,
          epoch_gte/3,
          epoch_gte/4,
          height/1,
+         heights/1,
          height_gte/3,
          in_non_consensus_miners/1,
          consensus_members/2,
@@ -38,10 +43,55 @@
          node2addr/2,
          addr2node/2,
          addr_list/1,
-         blockchain_worker_check/1
+         blockchain_worker_check/1,
+         wait_until_height/2,
+         wait_until_height_exactly/2,
+         wait_for_module/2,
+         wait_for_module/3,
+         wait_for_epoch/2,
+         wait_for_epoch/3,
+         wait_for_app_start/2,
+         wait_for_app_start/3,
+         wait_for_app_stop/2,
+         wait_for_app_stop/3,
+         wait_for_in_consensus/2,
+         wait_for_in_consensus/3,
+         wait_for_txn_key_update/3,
+         wait_for_txn_key_update/4,
+         delete_dirs/2,
+         inital_dkg/5,
+         inital_dkg/6,
+         confirm_balance_payer/3,
+         confirm_balance_payee/3,
+         confirm_balance_both_sides/5
+    
 
         ]).
     
+
+stop_miners(Miners) ->
+    stop_miners(Miners, 60).
+
+stop_miners(Miners, Retries) ->
+    [begin
+          ct_rpc:call(Miner, application, stop, [miner], 300),
+          ct_rpc:call(Miner, application, stop, [blockchain], 300)
+     end
+     || Miner <- Miners],
+    ok = miner_ct_utils:wait_for_app_stop(Miners, miner, Retries),
+    ok.
+
+start_miners(Miners) ->
+    start_miners(Miners, 60).
+
+start_miners(Miners, Retries) ->
+    [begin
+          ct_rpc:call(Miner, application, start, [blockchain], 300),
+          ct_rpc:call(Miner, application, start, [miner], 300)
+     end
+     || Miner <- Miners],
+    ok = miner_ct_utils:wait_for_module(Miners, blockchain_worker, Retries),
+    ok.
 
 epoch_gte(Miners, Seconds, Threshold) ->
     epoch_gte(any, Miners, Seconds, Threshold).
@@ -71,6 +121,13 @@ height(Miner) ->
     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
     ct:pal("miner ~p height ~p", [Miner, Height]),
     Height.
+
+heights(Miners) ->
+    lists:foldl(fun(Miner, Acc) ->
+                                  C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                  [{Miner, H} | Acc]
+                          end, [], Miners).
 
 height_gte(Miners, Seconds, Threshold) ->
     height_gte(all, Miners, Seconds, Threshold).
@@ -161,6 +218,194 @@ blockchain_worker_check(Miners)->
                 R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                 [R | Acc]
             end, [], Miners)).
+
+%% height must be exactly that specified
+wait_until_height_exactly(Miners, Height) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             try
+                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                 Ht == Height
+                             catch _:_ ->
+                                 false
+                             end
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(5)),
+    ok.
+
+%% height can be that specified or greater
+wait_until_height(Miners, Height) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             try
+                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
+                                 Ht >= Height
+                             catch _:_ ->
+                                 false
+                             end
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(5)),
+    ok.
+
+confirm_balance_payer(Miners, PayerAddr, PayerBal) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                            PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr)                                          
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(1)),
+    ok.
+
+confirm_balance_payee(Miners, PayeeAddr, PayeeBal) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(1)),
+    ok.
+
+confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                            PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr) andalso
+                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
+                         end, Miners)
+                 end,
+        Result == true, 60, timer:seconds(1)),
+    ok.
+
+    
+wait_for_epoch(Miners, Epoch) ->
+    wait_for_epoch(Miners, Epoch, 1000).
+wait_for_epoch(Miners, Epoch, Timeout) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             {_, _, MinerEpoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], Timeout),
+                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+                             MinerEpoch >= Epoch
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 90, timer:seconds(1)),
+    ok.
+    
+wait_for_module(Miners, Mod) ->
+    wait_for_module(Miners, Mod, 300).
+wait_for_module(Miners, Mod, Timeout) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             case ct_rpc:call(Miner, erlang, whereis, [Mod], Timeout) of
+                                 P when is_pid(P) ->
+                                     true;
+                                 Other ->
+                                     ct:pal("Other ~p~n", [Other]),
+                                     false
+                             end
+                         end, Miners)
+                 end,
+        Result == true, 90, timer:seconds(1)),
+    ok.
+
+wait_for_app_start(Miners, App) ->
+    wait_for_app_start(Miners, App, 60).
+wait_for_app_start(Miners, App, Retries) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             case ct_rpc:call(Miner, application, which_applications, []) of
+                                 {badrpc, _} ->
+                                     false;
+                                 Apps ->
+                                     lists:keymember(App, 1, Apps)
+                             end
+                         end, Miners)
+                 end,
+        Result == true, Retries, 500),
+    ok.
+
+wait_for_app_stop(Miners, App) ->
+    wait_for_app_stop(Miners, App, 60).
+wait_for_app_stop(Miners, App, Retries) ->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             case ct_rpc:call(Miner, application, which_applications, []) of
+                                 {badrpc, _} ->
+                                     false;
+                                 Apps ->
+                                     not lists:keymember(App, 1, Apps)
+                             end
+                         end, Miners)
+                 end,
+        Result == true, Retries, 500),
+    ok.
+
+
+
+wait_for_in_consensus(Miners, NumInConsensus)->
+    wait_for_in_consensus(Miners, NumInConsensus, 500).
+wait_for_in_consensus(Miners, NumInConsensus, Timeout)->
+    ?assertAsync(begin
+                     Result = lists:filtermap(
+                         fun(Miner) ->
+                             C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                             L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
+                             {ok, Sz} = ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout),
+                             ct:pal("size ~p", [Sz]),
+                             true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                         end, Miners)
+                 end,
+        NumInConsensus == length(Result), 60, timer:seconds(1)),
+    ok.
+
+wait_for_txn_key_update(Miners, Key, Value)->
+    wait_for_txn_key_update(Miners, Key, Value, 1000).
+wait_for_txn_key_update(Miners, Key, Value, Timeout)->
+    ?assertAsync(begin
+                     Result = lists:all(
+                         fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             {ok, Value} == ct_rpc:call(Miner, blockchain, config, [Key, Ledger], Timeout)
+                         end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, 40, timer:seconds(1)),
+    ok.
+
+delete_dirs(DirWildcard, SubDir)-> 
+    Data = string:trim(os:cmd("pwd")),
+    Dirs = filelib:wildcard(Data ++ DirWildcard),
+    [begin
+         ct:pal("rm dir ~s", [Dir]),
+         os:cmd("rm -r " ++ Dir ++ SubDir)
+     end
+     || Dir <- Dirs],
+    ok.
+
+inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
+    inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
+inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
+    DKGResults = miner_ct_utils:pmap(
+                   fun(Miner) ->
+                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
+                                       [Txns, Addresses, NumConsensusMembers, Curve], Timeout)
+                   end, Miners),
+    DKGResults.
+
+    
 
 pmap(F, L) ->
     pmap(F, L, timer:seconds(90)).

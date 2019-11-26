@@ -40,7 +40,7 @@ init_per_testcase(_TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    N = proplists:get_value(num_consensus_members, Config),
+    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
@@ -51,30 +51,21 @@ init_per_testcase(_TestCase, Config0) ->
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    %% rule out rewards
                                                    ?election_interval => infinity,
-                                                   ?num_consensus_members => N,
+                                                   ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialVars ++ InitialPaymentTransactions ++ AddGwTxns, Addresses,
-                                        N, Curve])
-                   end, Miners),
+    
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns, 
+                                             Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-
+    
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
     %% integrate genesis block    
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(M) ->
-                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-                         end, Miners)
-                 end,
-        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    %% confirm we have a height of 1
+    ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
     
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
@@ -100,7 +91,8 @@ single_payment_test(Config) ->
     Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
 
     {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
+    ct:pal("Fee: ~p", [Fee]),
+    
     %% send some helium tokens from payer to payee
     Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
 
@@ -111,16 +103,9 @@ single_payment_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
     %% wait until all the nodes agree the payment has happened
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                            4000 == miner_ct_utils:get_balance(Miner, PayerAddr) + Fee andalso
-                            6000 == miner_ct_utils:get_balance(Miner, PayeeAddr)                                           
-                         end, Miners)
-                 end,
-        Result == true, 60, timer:seconds(1)),
+    %% NOTE: Fee is zero
+    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 4000 + Fee, 6000),
     
-
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
@@ -136,10 +121,6 @@ single_payment_test(Config) ->
 
     Candidate = hd(ConsensusMiners),
     
-%    [Candidate|_] = lists:filter(fun(Miner) ->
-%                                         ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-%                                 end, Miners),
-
     Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
     false = Group == undefined,
     ok = libp2p_group_relcast:handle_command(Group, SignedTxn2),
@@ -148,16 +129,7 @@ single_payment_test(Config) ->
     {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 1 block
-    
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                              {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                              Height >= CurrentHeight2 + 1
-                         end, Miners -- [Candidate])
-                 end,
-        Result == true, 20, timer:seconds(1)),
+    miner_ct_utils:wait_until_height(Miners -- [Candidate], CurrentHeight2 + 1),
     
     %% the transaction should not have cleared
     PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -167,21 +139,16 @@ single_payment_test(Config) ->
     ?assertEqual(6000, PayeeBalance2),
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
-
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                            %% the transaction should have cleared
-                            PayerBalance3 = miner_ct_utils:get_balance(Miner, PayerAddr),
-                            PayeeBalance3 = miner_ct_utils:get_balance(Miner, PayeeAddr),
-            
-                            ct:pal("payer ~p payee ~p", [PayerBalance3, PayeeBalance3]),
-                            3000 == PayerBalance3 + Fee andalso
-                            7000 == PayeeBalance3 
-                         end, Miners)
-                 end,
-        Result == true, 20, timer:seconds(1)),
-   
+    
+    %% check balances again - transaction should have cleared
+    %% NOTE: Fee is zero
+    %% NOTE to self: The old balances of 4000 and 6000 also work here as these are the starting values
+    %%               the assertAsyc will pick these up initialy and assert true
+    %%               If we pass in the new expected balances from after the txns clear, these too work
+    %%               as the assertAsync will retry N times until it gets returns for these balances
+    %%               ( assuming of course the txns do clear )
+    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 3000 + Fee, 7000),
+       
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
 
@@ -217,16 +184,9 @@ self_payment_test(Config) ->
 
     %% XXX: wait till the blockchain grows by 2 blocks
     %% assuming that the transaction makes it within 2 blocks
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                              {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                              Height >= CurrentHeight + 2
-                         end, Miners)
-                 end,
-        Result == true, 60, timer:seconds(1)),
+    miner_ct_utils:wait_until_height(Miners, CurrentHeight + 2),
     
+   
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
@@ -236,3 +196,9 @@ self_payment_test(Config) ->
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
+
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------

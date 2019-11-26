@@ -39,7 +39,7 @@ init_per_testcase(_TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    N = proplists:get_value(num_consensus_members, Config),
+    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
     Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
@@ -50,17 +50,13 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    ?election_interval => Interval,
-                                                   ?num_consensus_members => N,
+                                                   ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns, Addresses,
-                                        N, Curve])
-                   end, Miners),
-    ?assertEqual([ok], lists:usort(DKGResults)),
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns, 
+                                             Addresses, NumConsensusMembers, Curve),
+    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
@@ -72,12 +68,8 @@ init_per_testcase(_TestCase, Config0) ->
     %% integrate genesis block    
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           lists:all(fun(M) ->
-                                                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-                                                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-                                                     end, Miners)
-                                   end),
+    %% confirm height has grown to 1
+    ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
 
     Config.
 
@@ -125,33 +117,18 @@ basic(Config) ->
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),
 
+    Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
+    Ledger = blockchain:ledger(Chain),
+
     ?assertAsync(begin
-                        Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
-                        Ledger = blockchain:ledger(Chain),
-                        AsyncResult1 = 
+                        Result = 
                             case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
                                 {ok, _} -> true;
                                 _ -> false
                             end
-                        
-                         
                  end,
-        AsyncResult1 == true, 60, timer:seconds(1)),
-                
+        Result == true, 60, timer:seconds(1)),
     
-%%     ok = miner_ct_utils:wait_until(
-%%        fun() ->
-%%            Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
-%%            Ledger = blockchain:ledger(Chain),
-%%            case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
-%%                {ok, _} -> true;
-%%                _ -> false
-%%            end
-%%        end,
-%%        60,
-%%        timer:seconds(1)
-%%    ),
-
     {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
     {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),
 

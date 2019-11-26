@@ -446,7 +446,7 @@ restart_test(_Config) ->
 
 
 %% ------------------------------------------------------------------
-%% Internal Function Definitions
+%% Local Helper functions
 %% ------------------------------------------------------------------
 
 add_block(Chain, ConsensusMembers, Txns) ->
