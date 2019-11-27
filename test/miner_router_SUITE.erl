@@ -54,22 +54,22 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns, 
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
-    
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+
 
     %% ensure that blockchain is undefined for non_consensus miners
     false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
-    %% integrate genesis block    
+    %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     %% confirm height has grown to 1
-    ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
 
     Config.
 
@@ -77,7 +77,7 @@ end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 %%--------------------------------------------------------------------
-%% TEST CASES 
+%% TEST CASES
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
@@ -121,14 +121,14 @@ basic(Config) ->
     Ledger = blockchain:ledger(Chain),
 
     ?assertAsync(begin
-                        Result = 
+                        Result =
                             case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
                                 {ok, _} -> true;
                                 _ -> false
                             end
                  end,
         Result == true, 60, timer:seconds(1)),
-    
+
     {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
     {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),
 
@@ -143,7 +143,7 @@ basic(Config) ->
     Packet = helium_longfi_pb:encode_msg(Resp, helium_LongFiResp_pb),
     ok = gen_udp:send(Sock, "127.0.0.1", P1, Packet),
     ct:pal("SENT ~p", [{Resp, Packet}]),
-    receive 
+    receive
         {simple_http_stream_test, Got} ->
             {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
             Resp2 = Resp#helium_LongFiResp_pb{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},

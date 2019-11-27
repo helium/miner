@@ -78,16 +78,16 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns, 
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns,
                                     Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-    
+
     %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
-    
-    %% integrate genesis block    
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+
+    %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-    [   
+    [
         {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
         | NewConfig].
@@ -127,7 +127,7 @@ basic_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     3000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     7000 = miner_ct_utils:get_balance(Payee, PayeeAddr),
@@ -170,7 +170,7 @@ negative_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% the balances should not have changed since the bundle was invalid
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -216,7 +216,7 @@ double_spend_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% the balances should not have changed since the bundle was invalid
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -267,7 +267,7 @@ successive_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the successive transactions should go through
     0 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -318,7 +318,7 @@ invalid_successive_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the invalid successive transactions should not go through
     5000 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -368,7 +368,7 @@ single_payer_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the payments should go through
     0 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -418,7 +418,7 @@ single_payer_invalid_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the payments should not go through
     %% because A is trying to over-spend
@@ -479,7 +479,7 @@ full_circle_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the full payment circle should complete
     15000 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -519,7 +519,7 @@ add_assert_test(Config) ->
     ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
 
     %% wait till height 20, should be long enough I believe
-    ok = miner_ct_utils:wait_until_height(Miners, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
 
     %% Get active gateways
     Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
@@ -567,7 +567,7 @@ invalid_add_assert_test(Config) ->
     ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
 
     %% wait till height 20, should be long enough I believe
-    ok = miner_ct_utils:wait_until_height(Miners, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
 
     %% Get active gateways
     Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
@@ -607,7 +607,7 @@ single_txn_bundle_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = miner_ct_utils:wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% The bundle is invalid since it does not contain atleast two txns in it
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -690,5 +690,5 @@ bundleception_test(Config) ->
 %% ------------------------------------------------------------------
 
 
-    
-    
+
+

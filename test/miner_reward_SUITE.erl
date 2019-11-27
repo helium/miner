@@ -69,7 +69,7 @@ init_per_testcase(_TestCase, Config0) ->
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     %% confirm height is 1
-    ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
 
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners} | Config].
@@ -106,7 +106,7 @@ basic_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
     %% Wait for an election (should happen at block 6 ideally)
-    miner_ct_utils:epoch_gte(Miners, 60, 2),
+    miner_ct_utils:wait_for_gte(epoch, Miners, 2),
 
     %% TODO: this code is currently a noop because assertions are
     %% exceptions.  we should be using chain information to figure

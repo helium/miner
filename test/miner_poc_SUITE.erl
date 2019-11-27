@@ -3,7 +3,6 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include("miner_ct_macros.hrl").
 
 -export([
     all/0
@@ -179,13 +178,13 @@ basic_test(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
     ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem))),
@@ -216,17 +215,15 @@ basic_test(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ?assertAsync(Result = blockchain:height(Chain), Result == {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
     % Moving threw targeting and challenging
-    ?assertAsync(begin
-                    Result =
-                        case sys:get_state(Statem) of
-                            {receiving, _} -> true;
-                            _Other -> false
-                        end
-                 end,
-        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() ->
+        case sys:get_state(Statem) of
+            {receiving, _} -> true;
+            _Other -> false
+        end
+    end),
 
     % Send 7 receipts and add blocks to pass timeout
     ?assertEqual(0, maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem))))),
@@ -250,16 +247,14 @@ basic_test(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ?assertAsync(begin
-                    Result =
-                        case sys:get_state(Statem) of
-                            {waiting, _} -> true;
-                            {submitting, _} -> true;
-                            {requesting, _} -> true;
-                            {_Other, _} -> false
-                        end
-                 end,
-        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() ->
+        case sys:get_state(Statem) of
+            {waiting, _} -> true;
+            {submitting, _} -> true;
+            {requesting, _} -> true;
+            {_Other, _} -> false
+        end
+    end),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
@@ -335,13 +330,13 @@ restart_test(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 2}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 3}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
     {ok, Statem0} = miner_poc_statem:start_link(#{delay => 5,
                                                   base_dir => BaseDir}),
@@ -374,19 +369,18 @@ restart_test(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ?assertAsync(Result = blockchain:height(Chain), Result =:= {ok, 5}, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
     %% Moving through targeting and challenging
-    ?assertAsync(begin
-                    Result =
-                       case sys:get_state(Statem0) of
-                           {receiving, _} -> true;
-                           _Other ->
-                               ct:pal("other state ~p", [_Other]),
-                               false
-                       end
-                 end,
-        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   case sys:get_state(Statem0) of
+                       {receiving, _} -> true;
+                       _Other ->
+                           ct:pal("other state ~p", [_Other]),
+                           false
+                   end
+           end),
 
     % KILLING STATEM AND RESTARTING
     ok = gen_statem:stop(Statem0),
@@ -419,18 +413,17 @@ restart_test(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem1)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ?assertAsync(begin
-                    Result =
-                       case sys:get_state(Statem1) of
-                           {waiting, _} -> true;
-                           {submitting, _} -> true;
-                           {requesting, _} -> true;
-                           {_Other, _} ->
-                               ct:pal("other state ~p", [_Other]),
-                               false
-                       end
-                 end,
-        Result == true, ?ASYNC_RETRIES, ?ASYNC_DELAY),
+    ok = miner_ct_utils:wait_until(
+           fun() ->
+                   case sys:get_state(Statem1) of
+                       {waiting, _} -> true;
+                       {submitting, _} -> true;
+                       {requesting, _} -> true;
+                       {_Other, _} ->
+                           ct:pal("other state ~p", [_Other]),
+                           false
+                   end
+           end),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
@@ -446,8 +439,9 @@ restart_test(_Config) ->
 
 
 %% ------------------------------------------------------------------
-%% Local Helper functions
+%% Internal Function Definitions
 %% ------------------------------------------------------------------
+
 
 add_block(Chain, ConsensusMembers, Txns) ->
     SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),

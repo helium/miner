@@ -89,17 +89,17 @@ init_per_testcase(TestCase, Config0) ->
     ),
     InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     Txns = InitialVars ++ InitialPayment ++ InitGen,
-    
+
     DKGResults = miner_ct_utils:inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-    
+
     %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
-    %% integrate genesis block    
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+    %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-    
-    ok = miner_ct_utils:wait_until_height_exactly(Miners, 1),
-    
+
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
+
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
@@ -114,7 +114,7 @@ restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
 
     %% wait till the chain reaches height 2 for all miners
-    ok = miner_ct_utils:epoch_gte(all, Miners, 60, 2),
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2),
 
     ok = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
 
@@ -125,10 +125,10 @@ restart_test(Config) ->
 
     %% just kill the consensus groups, we should be able to restore them
     ok = miner_ct_utils:delete_dirs("/data_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
-    
+
     ok = miner_ct_utils:start_miners(lists:sublist(Miners, 1, 2)),
 
-    ok = miner_ct_utils:epoch_gte(all, Miners, 90, 2),
+    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 2),
 
     Heights =  miner_ct_utils:heights(Miners),
 
@@ -138,17 +138,14 @@ restart_test(Config) ->
 dkg_restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     Interval = proplists:get_value(election_interval, Config),
-   
+
     AddrList = miner_ct_utils:addr_list(Miners),
 
-    %% wait for the consensus manager to boot
-    ok = miner_ct_utils:wait_for_module(Miners, miner_consensus_mgr),
-    
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = miner_ct_utils:epoch_gte(Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
     Members = miner_ct_utils:consensus_members(2, Miners),
-    
+
     %% there are issues with this.  if it's more of a problem than the
     %% last time, we can either have the old list and reject it if we
     %% get it again, or we get all of them and select the majority one?
@@ -157,13 +154,13 @@ dkg_restart_test(Config) ->
     Height = miner_ct_utils:height(FirstCMiner),
     Stoppers = lists:sublist(CMiners, 5, 2),
     %% make sure that everyone has accepted the epoch block
-    ok = miner_ct_utils:height_gte(Miners, 60, Height + 2),
-    
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 2),
+
     miner_ct_utils:stop_miners(NCMiners ++ Stoppers, 60),
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
-    ok = miner_ct_utils:height_gte(lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
+    ok = miner_ct_utils:wait_for_gte(height, all, lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
 
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
@@ -179,7 +176,7 @@ dkg_restart_test(Config) ->
     miner_ct_utils:start_miners(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = miner_ct_utils:epoch_gte(Miners, 90, 3),
+    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 3),
 
     %% make sure that we did the restore
     EndHeight = miner_ct_utils:height(FirstCMiner),
@@ -217,33 +214,31 @@ election_test(Config) ->
                     error(timeout)
             end
     end(160),
-    
+
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
-    ok = miner_ct_utils:wait_for_epoch(Miners, 3),
-    
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3),
+
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),
     miner_ct_utils:stop_miners(TargetMiners),
-    
-    %% confirm miner is stopped 
+
+    %% confirm miner is stopped
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
-    
+
     %% delete the groups
     ok = miner_ct_utils:delete_dirs("/data_*{1,2,3,4}*", "/blockchain_swarm/groups/*"),
 
     %% start the stopped miners back up again
     miner_ct_utils:start_miners(TargetMiners),
 
-    ok = miner_ct_utils:wait_for_module(TargetMiners, blockchain_worker),
-
     %% second: make sure we're not making blocks anymore
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
     %% wait until height has increased by 5
-    ok = miner_ct_utils:wait_until_height(Miners, 5),
-    
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
+
     %% third: mint and submit the rescue txn, shrinking the group at
     %% the same time.
 
@@ -299,25 +294,25 @@ election_test(Config) ->
      _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, self()]),
 
     %% wait until height has increased by 5
-    ok = miner_ct_utils:wait_until_height(Miners, 5),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
 
     %% check consensus and non consensus miners
-    {NewConsensusMiners, NewNonConsensusMiners} = miner_ct_utils:in_non_consensus_miners(Miners),
+    {NewConsensusMiners, NewNonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
 
     %% stop some nodes and restart them to check group restore works
     StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
     ct:pal("stop list ~p", [StopList]),
     miner_ct_utils:stop_miners(StopList),
-    
+
 
     %% sleel a lil then start the nodes back up again
     timer:sleep(5000),
 
     miner_ct_utils:start_miners(StopList),
-    
+
     %% fourth: confirm that blocks and elections are proceeding
-    ok = miner_ct_utils:wait_for_epoch(Miners, ElectionEpoch + 1),
-    
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1),
+
     ok.
 
 
@@ -325,13 +320,13 @@ group_change_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
     ConsensusMiners = proplists:get_value(consensus_miners, Config),
-    
+
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(4, length(ConsensusMiners)),
-    
+
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_for_epoch(Miners, 1),
-    
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
+
     %% submit the transaction
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -341,12 +336,12 @@ group_change_test(Config) ->
     Vars = #{num_consensus_members => 7},
 
     {Priv, _Pub} = proplists:get_value(master_key, Config),
-    
+
     Txn = blockchain_txn_vars_v1:new(Vars, 2, #{version_predicate => 2,
                                                 unsets => [garbage_value]}),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
     Txn1 = blockchain_txn_vars_v1:proof(Txn, Proof),
-    
+
     %% wait for it to take effect
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
          || Miner <- Miners],
@@ -355,8 +350,8 @@ group_change_test(Config) ->
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
     %% wait until height has increased by 20
-    ok = miner_ct_utils:wait_until_height(Miners, Height + 20),
-    
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20),
+
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     L = ct_rpc:call(hd(Miners), blockchain, ledger, [C]),
@@ -390,13 +385,13 @@ master_key_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
     ConsensusMiners = proplists:get_value(consensus_miners, Config),
-    
+
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(7, length(ConsensusMiners)),
-    
+
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_for_epoch(Miners, 1),
-    
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
+
     %% baseline: chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -409,9 +404,8 @@ master_key_test(Config) ->
 
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
          || Miner <- Miners],
-    
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, totes_goats_garb),
-    
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
+
     %% bad master key
 
     #{secret := Priv2, public := Pub2} =
@@ -433,9 +427,9 @@ master_key_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_until_height(Miners, Start2 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Start2 + 15),
     %% and then confirm the transaction took hold
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, totes_goats_garb),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
 
     %% good master key
 
@@ -443,8 +437,8 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, goats_are_not_garb),
-    
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
+
     %% make sure old master key is no longer working
 
     Vars4 = #{garbage_value => goats_are_too_garb},
@@ -458,9 +452,9 @@ master_key_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_until_height(Miners, Start4 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Start4 + 15),
     %% and then confirm the transaction took hold
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, goats_are_not_garb),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
     %% double check that new master key works
 
@@ -472,8 +466,8 @@ master_key_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, goats_always_win),
-    
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_always_win),
+
     ok.
 
 
@@ -482,13 +476,13 @@ version_change_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     ConsensusMiners = proplists:get_value(consensus_miners, Config),
 
-    
+
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(7, length(ConsensusMiners)),
-    
+
     %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_for_epoch(Miners, 1),
-    
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
+
     %% baseline: old-style chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -502,7 +496,7 @@ version_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, totes_goats_garb),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
 
     %% switch chain version
 
@@ -515,7 +509,7 @@ version_change_test(Config) ->
          || Miner <- Miners],
 
     %% make sure that it has taken effect
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, ?chain_vars_version, 2),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?chain_vars_version, 2),
 
     %% try a new-style txn change
 
@@ -527,7 +521,7 @@ version_change_test(Config) ->
     _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
          || Miner <- Miners],
 
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, goats_are_not_garb),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
     %% make sure old style is now closed off.
 
@@ -542,9 +536,9 @@ version_change_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_until_height(Miners, Start4 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Start4 + 15),
     %% and then confirm the transaction took hold
-    ok = miner_ct_utils:wait_for_txn_key_update(Miners, garbage_value, goats_are_not_garb),
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
     ok.
 

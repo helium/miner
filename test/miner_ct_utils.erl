@@ -8,8 +8,7 @@
          init_per_testcase/2,
          end_per_testcase/2,
          pmap/2, pmap/3,
-         wait_until/1,
-         wait_until/3,
+         wait_until/1, wait_until/3,
          wait_until_disconnected/2,
          start_node/3,
          partition_cluster/2,
@@ -23,18 +22,13 @@
          tmp_dir/0, tmp_dir/1, nonl/1,
          generate_keys/1,
          new_random_key/1,
-         stop_miners/1,
-         stop_miners/2,
-         start_miners/1,
-         start_miners/2,
-         epoch_gte/3,
-         epoch_gte/4,
+         stop_miners/1, stop_miners/2,
+         start_miners/1, start_miners/2,
          height/1,
          heights/1,
-         height_gte/3,
-         in_non_consensus_miners/1,
          consensus_members/2,
-         consensus_miners/1,
+         miners_by_consensus_state/1,
+         in_consensus_miners/1,
          non_consensus_miners/1,
          election_check/3,
          integrate_genesis_block/2,
@@ -44,26 +38,16 @@
          addr2node/2,
          addr_list/1,
          blockchain_worker_check/1,
-         wait_until_height/2,
-         wait_until_height_exactly/2,
-         wait_for_module/2,
-         wait_for_module/3,
-         wait_for_epoch/2,
-         wait_for_epoch/3,
-         wait_for_app_start/2,
-         wait_for_app_start/3,
-         wait_for_app_stop/2,
-         wait_for_app_stop/3,
-         wait_for_in_consensus/2,
-         wait_for_in_consensus/3,
-         wait_for_txn_key_update/3,
-         wait_for_txn_key_update/4,
+         wait_for_registration/2, wait_for_registration/3,
+         wait_for_app_start/2, wait_for_app_start/3,
+         wait_for_app_stop/2, wait_for_app_stop/3,
+         wait_for_in_consensus/2, wait_for_in_consensus/3,
+         wait_for_chain_var_update/3, wait_for_chain_var_update/4,
          delete_dirs/2,
-         inital_dkg/5,
-         inital_dkg/6,
-         confirm_balance_payer/3,
-         confirm_balance_payee/3,
-         confirm_balance_both_sides/5
+         inital_dkg/5, inital_dkg/6,
+         confirm_balance_payer/3, confirm_balance_payee/3,
+         confirm_balance_both_sides/5,
+         wait_for_gte/3, wait_for_gte/5
 
 
         ]).
@@ -90,31 +74,8 @@ start_miners(Miners, Retries) ->
           ct_rpc:call(Miner, application, start, [miner], 300)
      end
      || Miner <- Miners],
-    ok = miner_ct_utils:wait_for_module(Miners, blockchain_worker, Retries),
+    ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker, Retries),
     ok.
-
-epoch_gte(Miners, Seconds, Threshold) ->
-    epoch_gte(any, Miners, Seconds, Threshold).
-
-epoch_gte(Mod, Miners, Seconds, Threshold) ->
-    Res = ?assertAsync(begin
-                     Result = lists:Mod(
-                        fun(Miner) ->
-                             try
-                                 {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
-                                 ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                                 Epoch >= Threshold
-                             catch _:_ ->
-                                     false
-                             end
-                        end, miner_ct_utils:shuffle(Miners))
-                 end,
-        Result == true, Seconds, timer:seconds(1)),
-
-    case Res of
-        true -> ok;
-        false -> {error, false}
-    end.
 
 height(Miner) ->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -128,30 +89,6 @@ heights(Miners) ->
                                   {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
                                   [{Miner, H} | Acc]
                           end, [], Miners).
-
-height_gte(Miners, Seconds, Threshold) ->
-    height_gte(all, Miners, Seconds, Threshold).
-
-height_gte(Mod, Miners, Seconds, Threshold) ->
-    Res = ?assertAsync(begin
-                     Result = lists:Mod(
-                        fun(Miner) ->
-                             try
-                                 C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
-                                 {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-                                 ct:pal("miner ~p height ~p", [Miner, Height]),
-                                 Height >= Threshold
-                             catch _:_ ->
-                                     false
-                             end
-                        end, miner_ct_utils:shuffle(Miners))
-                 end,
-        Result == true, Seconds, timer:seconds(1)),
-
-    case Res of
-        true -> ok;
-        false -> {error, false}
-    end.
 
 consensus_members(Epoch, []) ->
     error({no_members_at_epoch, Epoch});
@@ -172,13 +109,13 @@ consensus_members(Epoch, [M | Tail]) ->
             consensus_members(Epoch, Tail)
     end.
 
-in_non_consensus_miners(Miners)->
+miners_by_consensus_state(Miners)->
     lists:partition(
             fun(Miner) ->
                   true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
             end, Miners).
 
-consensus_miners(Miners)->
+in_consensus_miners(Miners)->
     lists:filtermap(
             fun(Miner) ->
                 true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
@@ -190,11 +127,12 @@ non_consensus_miners(Miners)->
                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
             end, Miners).
 
+
 election_check([], _Miners, Owner) ->
     Owner ! seen_all;
 election_check(NotSeen0, Miners, Owner) ->
     timer:sleep(500),
-    ConsensusMiners = miner_ct_utils:consensus_miners(Miners),
+    ConsensusMiners = miner_ct_utils:in_consensus_miners(Miners),
     NotSeen = NotSeen0 -- ConsensusMiners,
     Owner ! {not_seen, NotSeen},
     election_check(NotSeen, Miners, Owner).
@@ -219,41 +157,7 @@ blockchain_worker_check(Miners)->
                 [R | Acc]
             end, [], Miners)).
 
-%% height must be exactly that specified
-wait_until_height_exactly(Miners, Height) ->
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                             try
-                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
-                                 Ht == Height
-                             catch _:_ ->
-                                 false
-                             end
-                         end, Miners)
-                 end,
-        Result == true, 60, timer:seconds(5)),
-    ok.
 
-%% height can be that specified or greater
-wait_until_height(Miners, Height) ->
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                             try
-                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                 {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                 ct:pal("miner ~p height ~p", [Miner, Ht]),
-                                 Ht >= Height
-                             catch _:_ ->
-                                 false
-                             end
-                         end, Miners)
-                 end,
-        Result == true, 60, timer:seconds(5)),
-    ok.
 
 confirm_balance_payer(Miners, PayerAddr, PayerBal) ->
     ?assertAsync(begin
@@ -287,23 +191,35 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
     ok.
 
 
-wait_for_epoch(Miners, Epoch) ->
-    wait_for_epoch(Miners, Epoch, 1000).
-wait_for_epoch(Miners, Epoch, Timeout) ->
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                             {_, _, MinerEpoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], Timeout),
-                             ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
-                             MinerEpoch >= Epoch
-                         end, miner_ct_utils:shuffle(Miners))
-                 end,
-        Result == true, 90, timer:seconds(1)),
-    ok.
 
-wait_for_module(Miners, Mod) ->
-    wait_for_module(Miners, Mod, 300).
-wait_for_module(Miners, Mod, Timeout) ->
+wait_for_gte(height = Type, Miners, Threshold)->
+    wait_for_gte(Type, all, Miners, 60, Threshold);
+wait_for_gte(epoch = Type, Miners, Threshold)->
+    wait_for_gte(Type, all, Miners, 60, Threshold);
+wait_for_gte(height_exactly = Type, Miners, Threshold)->
+    wait_for_gte(Type, all, Miners, 60, Threshold).
+
+wait_for_gte(Type, Mod, Miners, Retries, Threshold)->
+    Res = ?assertAsync(begin
+                     Result = lists:Mod(
+                        fun(Miner) ->
+                             try
+                                 handle_gte_type(Type, Miner, Threshold)
+                             catch _:_ ->
+                                     false
+                             end
+                        end, miner_ct_utils:shuffle(Miners))
+                 end,
+        Result == true, Retries, timer:seconds(1)),
+
+    case Res of
+        true -> ok;
+        false -> {error, false}
+    end.
+
+wait_for_registration(Miners, Mod) ->
+    wait_for_registration(Miners, Mod, 300).
+wait_for_registration(Miners, Mod, Timeout) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
@@ -371,9 +287,9 @@ wait_for_in_consensus(Miners, NumInConsensus, Timeout)->
         NumInConsensus == length(Result), 60, timer:seconds(1)),
     ok.
 
-wait_for_txn_key_update(Miners, Key, Value)->
-    wait_for_txn_key_update(Miners, Key, Value, 1000).
-wait_for_txn_key_update(Miners, Key, Value, Timeout)->
+wait_for_chain_var_update(Miners, Key, Value)->
+    wait_for_chain_var_update(Miners, Key, Value, 1000).
+wait_for_chain_var_update(Miners, Key, Value, Timeout)->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
@@ -700,6 +616,12 @@ init_per_testcase(TestCase, Config) ->
     ),
     {ok, _} = ct_cover:add_nodes(Miners),
 
+    %% wait until we get confirmation the miners are fully up
+    %% which we are determining by the miner_consensus_mgr being registered
+    %% QUESTION: is there a better process to use to determine things are healthy
+    %%           and which works for both in consensus and non consensus miners?
+    ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
+
     [
         {miners, Miners},
         {keys, Keys},
@@ -821,3 +743,24 @@ generate_keys(N) ->
 new_random_key(Curve) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
     {PrivKey, PubKey}.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------
+
+handle_gte_type(height, Miner, Threshold)->
+    C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
+    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
+    ct:pal("miner ~p height ~p", [Miner, Height]),
+    Height >= Threshold;
+handle_gte_type(epoch, Miner, Threshold)->
+    {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
+    ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+    Epoch >= Threshold;
+handle_gte_type(height_exactly, Miner, Threshold)->
+    C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
+    ct:pal("miner ~p height ~p", [Miner, Ht]),
+    Ht == Threshold.
+
