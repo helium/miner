@@ -59,14 +59,12 @@ poc_dist_v1_test(Config0) ->
 
 poc_dist_v2_test(Config0) ->
     TestCase = poc_dist_v2_test,
-
     Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
     N = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
     Interval = proplists:get_value(election_interval, Config),
     BatchSize = proplists:get_value(batch_size, Config),
     Curve = proplists:get_value(dkg_curve, Config),
-
     run_dist_with_params(TestCase,
                          Config,
                          #{?block_time => BlockTime,
@@ -118,7 +116,6 @@ poc_dist_v4_partitioned_test(Config0) ->
 basic_test(_Config) ->
     BaseDir = "data/miner_poc_SUITE/basic_test",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
-
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
     Opts = [
@@ -441,7 +438,6 @@ restart_test(_Config) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
 
 add_block(Chain, ConsensusMembers, Txns) ->
     SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
