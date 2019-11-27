@@ -129,7 +129,7 @@ single_payment_test(Config) ->
     {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain]),
 
     %% XXX: wait till the blockchain grows by 1 block
-    miner_ct_utils:wait_until_height(Miners -- [Candidate], CurrentHeight2 + 1),
+    miner_ct_utils:wait_for_gte(height, Miners -- [Candidate], CurrentHeight2 + 1),
 
     %% the transaction should not have cleared
     PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -184,7 +184,7 @@ self_payment_test(Config) ->
 
     %% XXX: wait till the blockchain grows by 2 blocks
     %% assuming that the transaction makes it within 2 blocks
-    miner_ct_utils:wait_until_height(Miners, CurrentHeight + 2),
+    miner_ct_utils:wait_for_gte(height, Miners, CurrentHeight + 2),
 
 
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),

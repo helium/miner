@@ -63,7 +63,7 @@ init_per_testcase(_TestCase, Config0) ->
     false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
     %% Get consensus miners
-    ConsensusMiners = miner_ct_utils:consensus_miners(Miners),
+    ConsensusMiners = miner_ct_utils:in_consensus_miners(Miners),
 
     %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),

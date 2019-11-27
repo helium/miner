@@ -427,7 +427,7 @@ master_key_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_for_gte(height, Start2 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Start2 + 15),
     %% and then confirm the transaction took hold
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
 
@@ -536,7 +536,7 @@ version_change_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_for_gte(height, Start4 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Start4 + 15),
     %% and then confirm the transaction took hold
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
