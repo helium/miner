@@ -95,6 +95,8 @@ init_per_testcase(TestCase, Config0) ->
 
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+    ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
+
     %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
@@ -114,7 +116,7 @@ restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
 
     %% wait till the chain reaches height 2 for all miners
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2),
+    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 60, 2),
 
     ok = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
 
@@ -143,7 +145,8 @@ dkg_restart_test(Config) ->
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+
     Members = miner_ct_utils:consensus_members(2, Miners),
 
     %% there are issues with this.  if it's more of a problem than the
@@ -176,7 +179,7 @@ dkg_restart_test(Config) ->
     miner_ct_utils:start_miners(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 3),
+    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 3),
 
     %% make sure that we did the restore
     EndHeight = miner_ct_utils:height(FirstCMiner),
@@ -185,9 +188,10 @@ dkg_restart_test(Config) ->
 election_test(Config) ->
     %% get all the miners
     Miners = proplists:get_value(miners, Config),
+    AddrList = miner_ct_utils:addr_list(Miners),
 
     Me = self(),
-    spawn(miner_ct_utils, election_check, [Miners, Miners, Me]),
+    spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
     %% TODO - review this as it seems a lil flaky, sporadically hitting the timeouts during multiple test runs
     fun Loop(0) ->
@@ -201,10 +205,12 @@ election_test(Config) ->
                 {not_seen, Not} ->
                     Miner = lists:nth(rand:uniform(length(Miners)), Miners),
                     try
-                        C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                        Height = miner_ct_utils:height(Miner),
                         {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
-                        {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
-                            ct:pal("not seen: ~p height ~p ~p", [Not, Epoch, Height])
+                        %C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                        %{_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
+                        %{ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
+                        ct:pal("not seen: ~p height ~p epoch ~p", [Not, Height, Epoch])
                     catch _:_ ->
                             ct:pal("not seen: ~p ", [Not]),
                             ok
@@ -213,7 +219,7 @@ election_test(Config) ->
             after timer:seconds(30) ->
                     error(timeout)
             end
-    end(160),
+    end(120),
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
@@ -350,7 +356,7 @@ group_change_test(Config) ->
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
     %% wait until height has increased by 20
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20),
+    ok = miner_ct_utils:wait_for_gte(height, all, Miners, 80, Height + 20),
 
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -452,7 +458,7 @@ master_key_test(Config) ->
          || Miner <- Miners],
 
     %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_for_gte(height, Start4 + 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Start4 + 15),
     %% and then confirm the transaction took hold
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 

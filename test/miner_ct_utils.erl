@@ -26,11 +26,11 @@
          start_miners/1, start_miners/2,
          height/1,
          heights/1,
-         consensus_members/2,
+         consensus_members/1, consensus_members/2,
          miners_by_consensus_state/1,
          in_consensus_miners/1,
          non_consensus_miners/1,
-         election_check/3,
+         election_check/4,
          integrate_genesis_block/2,
          shuffle/1,
          partition_miners/2,
@@ -45,7 +45,7 @@
          wait_for_chain_var_update/3, wait_for_chain_var_update/4,
          delete_dirs/2,
          inital_dkg/5, inital_dkg/6,
-         confirm_balance_payer/3, confirm_balance_payee/3,
+         confirm_balance/3,
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5
 
@@ -90,14 +90,23 @@ heights(Miners) ->
                                   [{Miner, H} | Acc]
                           end, [], Miners).
 
+consensus_members([]) ->
+    error(no_members);
+consensus_members([M | Tail]) ->
+    case handle_get_consensus_miners(M) of
+        {ok, Members} ->
+            Members;
+        {error, _} ->
+            timer:sleep(500),
+            consensus_members(Tail)
+    end.
+
 consensus_members(Epoch, []) ->
     error({no_members_at_epoch, Epoch});
 consensus_members(Epoch, [M | Tail]) ->
     try ct_rpc:call(M, miner_cli_info, get_info, [], 2000) of
         {_, _, Epoch} ->
-            Blockchain = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
-            Ledger = ct_rpc:call(M, blockchain, ledger, [Blockchain], 2000),
-            {ok, Members} = ct_rpc:call(M, blockchain_ledger_v1, consensus_members, [Ledger], 2000),
+            {ok, Members} = handle_get_consensus_miners(M),
             Members;
         Other ->
             ct:pal("~p had Epoch ~p", [M, Other]),
@@ -110,32 +119,23 @@ consensus_members(Epoch, [M | Tail]) ->
     end.
 
 miners_by_consensus_state(Miners)->
-    lists:partition(
-            fun(Miner) ->
-                  true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-            end, Miners).
+    handle_miners_by_consensus(partition, true, Miners).
 
 in_consensus_miners(Miners)->
-    lists:filtermap(
-            fun(Miner) ->
-                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-            end, Miners).
+    handle_miners_by_consensus(filtermap, true, Miners).
 
 non_consensus_miners(Miners)->
-    lists:filtermap(
-            fun(Miner) ->
-                false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-            end, Miners).
+    handle_miners_by_consensus(filtermap, false, Miners).
 
-
-election_check([], _Miners, Owner) ->
+election_check([], _Miners, AddrList, Owner) ->
     Owner ! seen_all;
-election_check(NotSeen0, Miners, Owner) ->
+election_check(NotSeen0, Miners, AddrList, Owner) ->
     timer:sleep(500),
-    ConsensusMiners = miner_ct_utils:in_consensus_miners(Miners),
-    NotSeen = NotSeen0 -- ConsensusMiners,
+    Members = miner_ct_utils:consensus_members(Miners),
+    MinerNames = lists:map(fun(Member)-> miner_ct_utils:addr2node(Member, AddrList) end, Members),
+    NotSeen = NotSeen0 -- MinerNames,
     Owner ! {not_seen, NotSeen},
-    election_check(NotSeen, Miners, Owner).
+    election_check(NotSeen, Miners, AddrList, Owner).
 
 integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
     Blockchain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
@@ -157,23 +157,11 @@ blockchain_worker_check(Miners)->
                 [R | Acc]
             end, [], Miners)).
 
-
-
-confirm_balance_payer(Miners, PayerAddr, PayerBal) ->
+confirm_balance(Miners, Addr, Bal) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                            PayerBal == miner_ct_utils:get_balance(Miner, PayerAddr)
-                         end, Miners)
-                 end,
-        Result == true, 60, timer:seconds(1)),
-    ok.
-
-confirm_balance_payee(Miners, PayeeAddr, PayeeBal) ->
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                            PayeeBal == miner_ct_utils:get_balance(Miner, PayeeAddr)
+                            Bal == miner_ct_utils:get_balance(Miner, Addr)
                          end, Miners)
                  end,
         Result == true, 60, timer:seconds(1)),
@@ -195,7 +183,7 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
 wait_for_gte(height = Type, Miners, Threshold)->
     wait_for_gte(Type, all, Miners, 60, Threshold);
 wait_for_gte(epoch = Type, Miners, Threshold)->
-    wait_for_gte(Type, all, Miners, 60, Threshold);
+    wait_for_gte(Type, any, Miners, 60, Threshold);
 wait_for_gte(height_exactly = Type, Miners, Threshold)->
     wait_for_gte(Type, all, Miners, 60, Threshold).
 
@@ -621,6 +609,7 @@ init_per_testcase(TestCase, Config) ->
     %% QUESTION: is there a better process to use to determine things are healthy
     %%           and which works for both in consensus and non consensus miners?
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
+    %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
     [
         {miners, Miners},
@@ -748,6 +737,23 @@ new_random_key(Curve) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
+
+handle_get_consensus_miners(Miner)->
+    try
+        Blockchain = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
+        Ledger = ct_rpc:call(Miner, blockchain, ledger, [Blockchain], 2000),
+        {ok, Members} = ct_rpc:call(Miner, blockchain_ledger_v1, consensus_members, [Ledger], 2000),
+        {ok, Members}
+    catch
+        _:_  -> {error, miner_down}
+
+    end.
+
+handle_miners_by_consensus(Mod, Bool, Miners)->
+    lists:Mod(
+            fun(Miner) ->
+                Bool == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+            end, Miners).
 
 handle_gte_type(height, Miner, Threshold)->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),

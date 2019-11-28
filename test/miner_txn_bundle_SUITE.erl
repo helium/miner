@@ -677,7 +677,7 @@ bundleception_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Balances should not have changed
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
