@@ -207,9 +207,6 @@ election_test(Config) ->
                     try
                         Height = miner_ct_utils:height(Miner),
                         {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
-                        %C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                        %{_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
-                        %{ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0]),
                         ct:pal("not seen: ~p height ~p epoch ~p", [Not, Height, Epoch])
                     catch _:_ ->
                             ct:pal("not seen: ~p ", [Not]),
@@ -223,7 +220,7 @@ election_test(Config) ->
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3),
+    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 3),
 
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),

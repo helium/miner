@@ -127,7 +127,7 @@ in_consensus_miners(Miners)->
 non_consensus_miners(Miners)->
     handle_miners_by_consensus(filtermap, false, Miners).
 
-election_check([], _Miners, AddrList, Owner) ->
+election_check([], _Miners, _AddrList, Owner) ->
     Owner ! seen_all;
 election_check(NotSeen0, Miners, AddrList, Owner) ->
     timer:sleep(500),
