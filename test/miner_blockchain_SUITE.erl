@@ -116,7 +116,7 @@ restart_test(Config) ->
     Miners = proplists:get_value(miners, Config),
 
     %% wait till the chain reaches height 2 for all miners
-    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 60, 2),
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 60),
 
     ok = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
 
@@ -130,7 +130,7 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:start_miners(lists:sublist(Miners, 1, 2)),
 
-    ok = miner_ct_utils:wait_for_gte(epoch, all, Miners, 90, 2),
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
     Heights =  miner_ct_utils:heights(Miners),
 
@@ -145,7 +145,7 @@ dkg_restart_test(Config) ->
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 2), % wait up to 90s for epoch to or exceed 2
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, any, 90), % wait up to 90s for epoch to or exceed 2
 
     Members = miner_ct_utils:consensus_members(2, Miners),
 
@@ -163,7 +163,7 @@ dkg_restart_test(Config) ->
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
-    ok = miner_ct_utils:wait_for_gte(height, all, lists:sublist(CMiners, 1, 4), 180, Height + (Interval * 2)),
+    ok = miner_ct_utils:wait_for_gte(height, lists:sublist(CMiners, 1, 4), Height + (Interval * 2), all, 180),
 
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
@@ -179,7 +179,7 @@ dkg_restart_test(Config) ->
     miner_ct_utils:start_miners(NCMiners ++ Stoppers, 60),
 
     %% make sure that we elect again
-    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 3),
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3, any, 90),
 
     %% make sure that we did the restore
     EndHeight = miner_ct_utils:height(FirstCMiner),
@@ -220,7 +220,7 @@ election_test(Config) ->
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
-    ok = miner_ct_utils:wait_for_gte(epoch, any, Miners, 90, 3),
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3, any, 90),
 
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),
@@ -353,7 +353,7 @@ group_change_test(Config) ->
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
     %% wait until height has increased by 20
-    ok = miner_ct_utils:wait_for_gte(height, all, Miners, 80, Height + 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20, all, 80),
 
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),

@@ -181,13 +181,13 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
 
 
 wait_for_gte(height = Type, Miners, Threshold)->
-    wait_for_gte(Type, all, Miners, 60, Threshold);
+    wait_for_gte(Type, Miners, Threshold, all, 60);
 wait_for_gte(epoch = Type, Miners, Threshold)->
-    wait_for_gte(Type, any, Miners, 60, Threshold);
+    wait_for_gte(Type, Miners, Threshold, any, 60);
 wait_for_gte(height_exactly = Type, Miners, Threshold)->
-    wait_for_gte(Type, all, Miners, 60, Threshold).
+    wait_for_gte(Type, Miners, Threshold, all, 60).
 
-wait_for_gte(Type, Mod, Miners, Retries, Threshold)->
+wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
     Res = ?assertAsync(begin
                      Result = lists:Mod(
                         fun(Miner) ->
