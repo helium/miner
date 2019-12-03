@@ -52,6 +52,12 @@
 -define(RECEIPTS_TIMEOUT, 10).
 -define(STATE_FILE, "miner_poc_statem.state").
 
+-ifdef(TEST).
+-define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
+-else.
+-define(BLOCK_PROPOGATION_TIME, timer:seconds(120)).
+-endif.
+
 -record(data, {
     base_dir :: file:filename_all() | undefined,
     blockchain :: blockchain:blockchain() | undefined,
@@ -164,7 +170,10 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             Height = blockchain_block:height(Block),
             %% TODO: remove targeting and challenging states, make
             %% them into a function that is called here
-            self() ! {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger},
+            %%
+            %% Allow the block to propogate a bit so that everyone online can see the PoC challenge on chain
+            %% TODO discuss making this delay verifiable so you can't punish a hotspot by intentionally fast-challenging them before they have the block
+            erlang:send_after(?BLOCK_PROPOGATION_TIME, self(), {target, <<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger}),
             {next_state, targeting, save_data(Data#data{state = targeting, mining_timeout = ?MINING_TIMEOUT})};
         {error, _Reason} ->
              case MiningTimeout > 0 of
