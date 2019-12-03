@@ -172,6 +172,7 @@ handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group =
                     deadline ->
                         erlang:exit(Pid, kill),
                         write_txn("timed out", Height, Txn),
+                        lager:warning("validation timed out for ~p", [Txn]),
                         {error, validation_deadline};
                     {error, Error} ->
                         write_txn("failed", Height, Txn),
