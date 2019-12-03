@@ -121,12 +121,12 @@ handle_call({submit, Txn}, From,
                                   end),
                             {reply, ok, State};
                         Error ->
-                            lager:warning("speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                            lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                             {reply, Error, State}
                     end;
                 Error ->
                     write_txn("failed", Height, Txn),
-                    lager:debug("is_valid failed for ~p, error: ~p", [Txn, Error]),
+                    lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                     {reply, Error, State}
             end
     end;
@@ -166,17 +166,17 @@ handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group =
                                       end),
                                 ok;
                             Error ->
-                                lager:warning("speculative absorb failed for ~p, error: ~p", [Txn, Error]),
+                                lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                                 Error
                         end;
                     deadline ->
                         erlang:exit(Pid, kill),
                         write_txn("timed out", Height, Txn),
-                        lager:warning("validation timed out for ~p", [Txn]),
+                        lager:warning("validation timed out for ~s", [blockchain_txn:print(Txn)]),
                         {error, validation_deadline};
                     {error, Error} ->
                         write_txn("failed", Height, Txn),
-                        lager:warning("is_valid failed for ~p, error: ~p", [Txn, Error]),
+                        lager:warning("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                         Error
                 end,
             erlang:demonitor(MRef, [flush]),
@@ -229,12 +229,12 @@ filter_txn_buffer(Buf, Chain) ->
                                      ok ->
                                          true;
                                      Other ->
-                                         lager:info("Transaction ~p could not be re-absorbed ~p",
-                                                    [Txn, Other]),
+                                         lager:info("Transaction ~s could not be re-absorbed ~p",
+                                                    [blockchain_txn:print(Txn), Other]),
                                          false
                                  end;
                              Other ->
-                                 lager:info("Transaction ~p became invalid ~p", [Txn, Other]),
+                                 lager:info("Transaction ~s became invalid ~p", [blockchain_txn:print(Txn), Other]),
                                  false
                          end
                  end, Buf).
@@ -273,7 +273,7 @@ start_validation(Txn, From, Chain) ->
                       ok ->
                           Owner ! {Attempt, ok};
                       Error ->
-                          lager:debug("hbbft_handler is_valid failed for ~p, error: ~p", [Txn, Error]),
+                          lager:debug("hbbft_handler is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                           Owner ! {Attempt, {error, Error}}
                   end
           end),
