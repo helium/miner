@@ -189,7 +189,6 @@ basic(_Config) ->
 
     % ?assert(meck:validate(miner_onion_server)), we won't do this because of error timeout
     meck:unload(miner_onion_server),
-    ?assert(meck:validate(blockchain_swarm)),
     meck:unload(blockchain_swarm),
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
