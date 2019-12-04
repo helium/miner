@@ -16,6 +16,7 @@
     start_link/1,
     send/1,
     decrypt/2,
+    retry_decrypt/7,
     send_receipt/6,
     send_witness/4,
     send_to_router/2
@@ -79,9 +80,11 @@ send(Data) ->
 decrypt(Onion, Stream) ->
     gen_server:cast(?MODULE, {decrypt, Onion, Stream}).
 
+retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream) ->
+    gen_server:cast(?MODULE, {retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}).
+
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok | {error, any()}.
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
-    ok = blockchain_event:add_handler(self()),
     <<ID:10/binary, _/binary>> = OnionCompactKey,
     lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
     send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
@@ -94,53 +97,45 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
-        {error, _Reason} ->
-            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
-            ok = wait_until_next_block(),
-            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1);
-        {ok, PoCs} ->
-            Results = lists:foldl(
-                fun(PoC, Acc) ->
-                    Challenger = blockchain_ledger_poc_v2:challenger(PoC),
-                    Address = blockchain_swarm:pubkey_bin(),
-                    Receipt0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type),
-                    {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
-                    Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
-                    EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
+    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
+    Results = lists:foldl(
+        fun(PoC, Acc) ->
+            Challenger = blockchain_ledger_poc_v2:challenger(PoC),
+            Address = blockchain_swarm:pubkey_bin(),
+            Receipt0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type),
+            {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
+            Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
+            EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
 
-                    case erlang:is_pid(Stream) of
-                        true ->
-                            Stream ! {send, EncodedReceipt},
-                            Acc;
-                        false ->
-                            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
-                                {error, _Reason} ->
-                                    lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
-                                    [error|Acc];
-                                {ok, NewStream} ->
-                                    _ = miner_poc_handler:send(NewStream, EncodedReceipt),
-                                    Acc
-                            end
-                    end
-                end,
-                [],
-                PoCs
-            ),
-            case Results == [] of
+            case erlang:is_pid(Stream) of
                 true ->
-                    ok;
+                    Stream ! {send, EncodedReceipt},
+                    Acc;
                 false ->
-                    ok = wait_until_next_block(),
-                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1)
+                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                    case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                        {error, _Reason} ->
+                            lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
+                            [error|Acc];
+                        {ok, NewStream} ->
+                            _ = miner_poc_handler:send(NewStream, EncodedReceipt),
+                            Acc
+                    end
             end
-    end,
-    ok.
+        end,
+        [],
+        PoCs
+    ),
+    case Results == [] of
+        true ->
+            ok;
+        false ->
+            timer:sleep(timer:seconds(30)),
+            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1)
+    end.
 
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
 send_witness(_Data, OnionCompactKey, Time, RSSI) ->
-    ok = blockchain_event:add_handler(self()),
     <<ID:10/binary, _/binary>> = OnionCompactKey,
     lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
     send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
@@ -152,39 +147,33 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
-        {error, _Reason} ->
-            lager:warning("no gateway found with onion ~p (~p)", [OnionCompactKey, _Reason]),
-            ok = wait_until_next_block(),
-            send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
-        {ok, PoCs} ->
-            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-            lists:foreach(
-                fun(PoC) ->
-                    Challenger = blockchain_ledger_poc_v2:challenger(PoC),
-                    Witness0 = blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data),
-                    {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
-                    Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
-                    case SelfPubKeyBin =:= Challenger of
-                        true ->
-                            lager:info("challenger is ourself so sending directly to poc statem"),
-                            miner_poc_statem:witness(Witness1);
-                        false ->
-                            EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
-                            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
-                                {error, _Reason} ->
-                                    lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
-                                    ok = wait_until_next_block(),
-                                    send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
-                                {ok, Stream} ->
-                                    _ = miner_poc_handler:send(Stream, EncodedWitness)
-                            end
+    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
+    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+    lists:foreach(
+        fun(PoC) ->
+            Challenger = blockchain_ledger_poc_v2:challenger(PoC),
+            Witness0 = blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data),
+            {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
+            Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
+            case SelfPubKeyBin =:= Challenger of
+                true ->
+                    lager:info("challenger is ourself so sending directly to poc statem"),
+                    miner_poc_statem:witness(Witness1);
+                false ->
+                    EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
+                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                    case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+                        {error, _Reason} ->
+                            lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
+                            timer:sleep(timer:seconds(30)),
+                            send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
+                        {ok, Stream} ->
+                            _ = miner_poc_handler:send(Stream, EncodedWitness)
                     end
-                end,
-                PoCs
-            )
-    end,
+            end
+        end,
+        PoCs
+    ),
     ok.
 
 -spec send_to_router(binary(), any()) -> ok.
@@ -292,6 +281,9 @@ handle_cast({decrypt, <<IV:2/binary,
                         CipherText/binary>>, Pid}, State) ->
     NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, Pid, State),
     {noreply, NewState};
+handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}, State) ->
+    NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, State),
+    {noreply, NewState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -326,14 +318,45 @@ wait_until_next_block() ->
             ok
     end.
 
+wait_for_block(Fun, Count) when Count > 0 ->
+    ok = blockchain_event:add_handler(self()),
+    wait_for_block_(Fun, Count).
+
+wait_for_block_(_, 0) ->
+    {error, no_matching_block_found};
+wait_for_block_(Fun, Count) ->
+    wait_until_next_block(),
+    case Fun() of
+        true ->
+            ok;
+        false ->
+            wait_for_block_(Fun, Count - 1)
+    end.
+
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun,
                                                                          udp_socket=Socket,
                                                                          udp_send_ip=IP,
                                                                          udp_send_port=Port,
                                                                          packet_id=ID}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
-    NewState = case try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) of
-        {error, _Reason} ->
+    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    Chain = blockchain_worker:blockchain(),
+    NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
+        poc_not_found ->
+            Ledger = blockchain:ledger(Chain),
+            _ = erlang:spawn(fun() ->
+                                     ok = wait_for_block(fun() ->
+                                                            case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+                                                                {ok, _} ->
+                                                                    true;
+                                                                _ ->
+                                                                    false
+                                                            end
+                                                    end, 10),
+                                     ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream)
+                             end),
+            State;
+        {error, fail_decrypt} ->
             _ = erlang:spawn(
                 ?MODULE,
                 send_witness,
@@ -341,7 +364,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI]
             ),
-            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: ~p", [Type, _Reason]),
+            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: treating as a witness", [Type]),
             State;
         {ok, Data, NextPacket} ->
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
@@ -369,19 +392,28 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                     end
                 end
             ),
-            State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]}
+            State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]};
+        {error, Reason} ->
+            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
+            State
     end,
     ok = inet:setopts(Socket, [{active, once}]),
     NewState.
 
+-ifdef(EQC).
 -spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
     Chain = blockchain_worker:blockchain(),
-    Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain).
+-endif.
+
+-spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
+try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
+    Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
-        {error, _}=Err ->
-            Err;
+        {error, not_found} ->
+            poc_not_found;
         {ok, [PoC]} ->
             Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
             try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, Blockhash, Ledger) of
@@ -393,6 +425,7 @@ try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
                     {error, {_A, _B}}
             end;
         {ok, _} ->
+            %% TODO we might want to try all the PoCs here
             {error, too_many_pocs}
     end.
 
