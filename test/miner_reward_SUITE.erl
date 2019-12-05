@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -37,7 +38,7 @@ init_per_testcase(_TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    N = proplists:get_value(num_consensus_members, Config),
+    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
     Interval = 5,
     BatchSize = proplists:get_value(batch_size, Config),
@@ -47,54 +48,31 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    ?election_interval => Interval,
-                                                   ?num_consensus_members => N,
+                                                   ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns, Addresses,
-                                        N, Curve])
-                   end, Miners),
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns,
+                                            Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    NonConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                 false == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                         end, Miners),
+    %% Get non consensus miners
+    NonConsensusMiners = miner_ct_utils:non_consensus_miners(Miners),
 
     %% ensure that blockchain is undefined for non_consensus miners
-    true = lists:all(fun(Res) ->
-                             Res == undefined
-                     end,
-                     lists:foldl(fun(Miner, Acc) ->
-                                         R = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                         [R | Acc]
-                                 end, [], NonConsensusMiners)),
+    false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
-    ConsensusMiners = lists:filtermap(fun(Miner) ->
-                                                true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
-                                        end, Miners),
+    %% Get consensus miners
+    ConsensusMiners = miner_ct_utils:in_consensus_miners(Miners),
 
-    %% get the genesis block from the first Consensus Miner
-    ConsensusMiner = hd(ConsensusMiners),
-    Chain = ct_rpc:call(ConsensusMiner, blockchain_worker, blockchain, []),
-    {ok, GenesisBlock} = ct_rpc:call(ConsensusMiner, blockchain, genesis_block, [Chain]),
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ct:pal("non consensus nodes ~p", [NonConsensusMiners]),
+    %% confirm height is 1
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
 
-    _GenesisLoadResults = miner_ct_utils:pmap(fun(M) ->
-                                                      ct_rpc:call(M, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-                                              end, NonConsensusMiners),
-
-    ok = miner_ct_utils:wait_until(fun() ->
-                                           lists:all(fun(M) ->
-                                                             C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-                                                             {ok, 1} == ct_rpc:call(M, blockchain, height, [C])
-                                                     end, Miners)
-                                   end),
-
-    [{consensus_miners, ConsensusMiners}, {non_consensus_miners, NonConsensusMiners} | Config].
+    [   {consensus_miners, ConsensusMiners},
+        {non_consensus_miners, NonConsensusMiners} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -103,6 +81,7 @@ basic_test(Config) ->
     Miners = proplists:get_value(miners, Config),
     ConsensusMiners = proplists:get_value(consensus_miners, Config),
     NonConsensusMiners = proplists:get_value(non_consensus_miners, Config),
+
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -126,26 +105,15 @@ basic_test(Config) ->
 
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
 
-    %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
-    %% get the current height here
-    Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
-
     %% Wait for an election (should happen at block 6 ideally)
-    ok = miner_ct_utils:wait_until(
-           fun() ->
-                   true =:= lists:all(
-                              fun(Miner) ->
-                                      C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                      {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                      Height >= CurrentHeight + 10
-                              end,
-                              Miners
-                             )
-           end,
-           60,
-           timer:seconds(1)
-          ),
+    miner_ct_utils:wait_for_gte(epoch, Miners, 2),
+
+    %% TODO: this code is currently a noop because assertions are
+    %% exceptions.  we should be using chain information to figure
+    %% this out: we don't need to do it for each miner, we just need
+    %% to make sure that 1) we know what the election block is and
+    %% that its txns looks correct and 2) and then not go to the
+    %% cluster for balances.
 
     %% Check that the election txn is in the same block as the rewards txn
     ok = lists:foreach(fun(Miner) ->
@@ -170,7 +138,7 @@ basic_test(Config) ->
                                          catch _:_ ->
                                                  false
                                          end
-                                 end, lists:seq(4, 10))
+                                 end, lists:seq(5, 15))
                        end,
                        Miners),
 
@@ -201,3 +169,8 @@ basic_test(Config) ->
                        Miners),
 
     ok.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------

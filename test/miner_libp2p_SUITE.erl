@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1
@@ -57,3 +58,8 @@ p2p_addr_test(Config) ->
                            end, [], Miners),
     ?assertEqual(length(Miners), length(P2PAddrs)),
     {comment, P2PAddrs}.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------

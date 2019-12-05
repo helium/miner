@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([start_link/2, init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -64,3 +65,8 @@ handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPS
 handle_info(Msg, State) ->
     ct:pal("unhandled info ~p", [Msg]),
     {noreply, State}.
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------
+

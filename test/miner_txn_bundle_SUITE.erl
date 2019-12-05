@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -62,7 +63,7 @@ init_per_testcase(_TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    N = proplists:get_value(num_consensus_members, Config),
+    NumConsensusMembers= proplists:get_value(num_consensus_members, Config),
     BlockTime = proplists:get_value(block_time, Config),
     %% Don't want an election to happen, messes up checking the balances later
     Interval = 100,
@@ -73,23 +74,23 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    ?election_interval => Interval,
-                                                   ?num_consensus_members => N,
+                                                   ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns, Addresses,
-                                        N, Curve])
-                   end, Miners),
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns,
+                                    Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    GenesisBlock = get_genesis_block(Miners, NewConfig),
+    %% Get both consensus and non consensus miners
+    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
 
-    ok = load_genesis_block(GenesisBlock, Miners, NewConfig),
-
-    NewConfig.
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+    [
+        {consensus_miners, ConsensusMiners},
+        {non_consensus_miners, NonConsensusMiners}
+        | NewConfig].
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -126,7 +127,7 @@ basic_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     3000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     7000 = miner_ct_utils:get_balance(Payee, PayeeAddr),
@@ -169,7 +170,7 @@ negative_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% the balances should not have changed since the bundle was invalid
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -215,7 +216,7 @@ double_spend_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% the balances should not have changed since the bundle was invalid
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -266,7 +267,7 @@ successive_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the successive transactions should go through
     0 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -317,7 +318,7 @@ invalid_successive_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the invalid successive transactions should not go through
     5000 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -367,7 +368,7 @@ single_payer_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the payments should go through
     0 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -417,7 +418,7 @@ single_payer_invalid_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the payments should not go through
     %% because A is trying to over-spend
@@ -478,7 +479,7 @@ full_circle_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Expectation is that the full payment circle should complete
     15000 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
@@ -518,7 +519,7 @@ add_assert_test(Config) ->
     ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
 
     %% wait till height 20, should be long enough I believe
-    ok = wait_until_height(Miners, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
 
     %% Get active gateways
     Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
@@ -566,7 +567,7 @@ invalid_add_assert_test(Config) ->
     ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
 
     %% wait till height 20, should be long enough I believe
-    ok = wait_until_height(Miners, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
 
     %% Get active gateways
     Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
@@ -606,7 +607,7 @@ single_txn_bundle_test(Config) ->
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% The bundle is invalid since it does not contain atleast two txns in it
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -676,7 +677,7 @@ bundleception_test(Config) ->
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
-    ok = wait_until_height(Miners, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
 
     %% Balances should not have changed
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
@@ -685,68 +686,9 @@ bundleception_test(Config) ->
     ok.
 
 %% ------------------------------------------------------------------
-%% Helper functions
+%% Local Helper functions
 %% ------------------------------------------------------------------
 
-wait_until_height(Miners, Height) ->
-    miner_ct_utils:wait_until(
-      fun() ->
-              Heights = lists:map(fun(Miner) ->
-                                          case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
-                                              undefined -> -1;
-                                              {badrpc, _} -> -1;
-                                              C ->
-                                                  {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
-                                                  H
-                                          end
-                                  end,
-                                  Miners),
-              ct:pal("Heights: ~w", [Heights]),
 
-              true == lists:all(fun(H) ->
-                                        H >= Height
-                                end,
-                                Heights)
-      end,
-      60,
-      timer:seconds(5)).
 
-get_genesis_block(Miners, Config) ->
-    RPCTimeout = proplists:get_value(rpc_timeout, Config),
-    %% obtain the genesis block
-    GenesisBlock = get_genesis_block_(Miners, RPCTimeout),
-    ?assertNotEqual(undefined, GenesisBlock),
-    GenesisBlock.
 
-get_genesis_block_([Miner|Miners], RPCTimeout) ->
-    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
-        {badrpc, Reason} ->
-            ct:fail(Reason),
-            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
-        undefined ->
-            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
-        Chain ->
-            {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain], RPCTimeout),
-            GBlock
-    end.
-
-load_genesis_block(GenesisBlock, Miners, Config) ->
-    RPCTimeout = proplists:get_value(rpc_timeout, Config),
-    %% load the genesis block on all the nodes
-    lists:foreach(
-        fun(Miner) ->
-                case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
-                    true ->
-                        ok;
-                    false ->
-                        Res = ct_rpc:call(Miner, blockchain_worker,
-                                          integrate_genesis_block, [GenesisBlock], RPCTimeout),
-                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res])
-                end
-        end,
-        Miners
-    ),
-
-    timer:sleep(5000),
-
-    ok = wait_until_height(Miners, 1).

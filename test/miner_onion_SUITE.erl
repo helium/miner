@@ -2,8 +2,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
 -include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include("miner_ct_macros.hrl").
 
 -export([
     all/0
@@ -199,3 +199,8 @@ basic(_Config) ->
     meck:unload(blockchain_ledger_v1),
     gen_server:stop(Server1),
     ok.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------
