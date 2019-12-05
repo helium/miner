@@ -197,13 +197,13 @@ basic_test(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
 
     ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem))),
@@ -234,15 +234,15 @@ basic_test(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
     % Moving threw targeting and challenging
-    ok = miner_ct_utils:wait_until(fun() ->
-        case sys:get_state(Statem) of
-            {receiving, _} -> true;
-            _Other -> false
-        end
-    end),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             case sys:get_state(Statem) of
+                                                 {receiving, _} -> true;
+                                                 _Other -> false
+                                             end
+                                     end),
 
     % Send 7 receipts and add blocks to pass timeout
     ?assertEqual(0, maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem))))),
@@ -266,14 +266,14 @@ basic_test(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ok = miner_ct_utils:wait_until(fun() ->
-        case sys:get_state(Statem) of
-            {waiting, _} -> true;
-            {submitting, _} -> true;
-            {requesting, _} -> true;
-            {_Other, _} -> false
-        end
-    end),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             case sys:get_state(Statem) of
+                                                 {waiting, _} -> true;
+                                                 {submitting, _} -> true;
+                                                 {requesting, _} -> true;
+                                                 {_Other, _} -> false
+                                             end
+                                     end),
 
     ?assert(meck:validate(blockchain_worker)),
     meck:unload(blockchain_worker),
@@ -349,13 +349,13 @@ restart_test(_Config) ->
     AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
     AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
     ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
     {ok, Statem0} = miner_poc_statem:start_link(#{delay => 5,
                                                   base_dir => BaseDir}),
@@ -388,10 +388,10 @@ restart_test(_Config) ->
     ok = add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
-    ok = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
+    true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
 
     %% Moving through targeting and challenging
-    ok = miner_ct_utils:wait_until(
+    true = miner_ct_utils:wait_until(
            fun() ->
                    case sys:get_state(Statem0) of
                        {receiving, _} -> true;
@@ -432,7 +432,7 @@ restart_test(_Config) ->
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem1)))), % Get receiving_timeout
     ok = add_block(Chain, ConsensusMembers, []),
 
-    ok = miner_ct_utils:wait_until(
+    true = miner_ct_utils:wait_until(
            fun() ->
                    case sys:get_state(Statem1) of
                        {waiting, _} -> true;
@@ -627,9 +627,10 @@ setup_dist_test(TestCase, Config, VarMap) ->
     GenesisBlock = get_genesis_block(Miners, Config),
     miner_fake_radio_backplane:start_link(45000, lists:zip(lists:seq(46001, 46000 + MinerCount), Locations)),
     timer:sleep(5000),
-    ok = load_genesis_block(GenesisBlock, Miners, Config),
+    true = load_genesis_block(GenesisBlock, Miners, Config),
     %% wait till height 50
-    ok = wait_until_height(Miners, 50).
+    true = wait_until_height(Miners, 50),
+    ok.
 
 gen_locations(poc_dist_v4_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
@@ -715,7 +716,7 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
 
     timer:sleep(5000),
 
-    ok = wait_until_height(Miners, 1).
+    true = wait_until_height(Miners, 1).
 
 wait_until_height(Miners, Height) ->
     miner_ct_utils:wait_until(
@@ -814,7 +815,7 @@ check_all_miners_can_challenge(Miners) ->
             ct:pal("Not every miner has issued a challenge...waiting..."),
             %% wait 50 more blocks?
             NewHeight = get_current_height(Miners),
-            ok = wait_until_height(Miners, NewHeight + 50),
+            true = wait_until_height(Miners, NewHeight + 50),
             check_all_miners_can_challenge(Miners);
         true ->
             ct:pal("Got a challenge from each miner atleast once!"),
@@ -836,7 +837,7 @@ check_eventual_path_growth(Miners) ->
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
             %% wait 50 more blocks?
             Height = get_current_height(Miners),
-            ok = wait_until_height(Miners, Height + 50),
+            true = wait_until_height(Miners, Height + 50),
             check_eventual_path_growth(Miners);
         true ->
             ct:pal("Every poc eventually grows in path length!"),
@@ -853,7 +854,7 @@ check_partitioned_path_growth(Miners) ->
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
             %% wait 50 more blocks?
             Height = get_current_height(Miners),
-            ok = wait_until_height(Miners, Height + 50),
+            true = wait_until_height(Miners, Height + 50),
             check_partitioned_path_growth(Miners);
         true ->
             ct:pal("Every poc eventually grows in path length!"),
@@ -935,7 +936,7 @@ check_multiple_requests(Miners) ->
             %% wait more
             ct:pal("Don't have multiple requests yet..."),
             ct:pal("RequestCounter: ~p", [RequestCounter]),
-            ok = wait_until_height(Miners, get_current_height(Miners) + 50),
+            true = wait_until_height(Miners, get_current_height(Miners) + 50),
             check_multiple_requests(Miners);
         true ->
             true
@@ -954,7 +955,7 @@ check_atleast_k_receipts(Miners, K) ->
             %% wait more
             ct:pal("Don't have receipts from each miner yet..."),
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
-            ok = wait_until_height(Miners, get_current_height(Miners) + 50),
+            true = wait_until_height(Miners, get_current_height(Miners) + 50),
             check_atleast_k_receipts(Miners, K);
         true ->
             true
