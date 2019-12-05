@@ -555,7 +555,19 @@ new_random_key(Curve) ->
 
 run_dist_with_params(TestCase, Config, VarMap) ->
     ok = setup_dist_test(TestCase, Config, VarMap),
+    %% Print scores before we begin the test
+    InitialScores = gateway_scores(Config),
+    ct:pal("InitialScores: ~p", [InitialScores]),
+    %% Execute the test
     ok = exec_dist_test(TestCase, Config, VarMap),
+    %% show the final receipt counter
+    Miners = proplists:get_value(miners, Config),
+    FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
+    ct:pal("FinalReceiptCounter: ~p", [receipt_counter(FinalReceiptMap)]),
+    %% Print scores after execution
+    FinalScores = gateway_scores(Config),
+    ct:pal("FinalScores: ~p", [FinalScores]),
+    %% The test endeth here
     miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
 
@@ -977,3 +989,15 @@ active_gateways([Miner | _]=_Miners) ->
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger]).
+
+gateway_scores(Config) ->
+    [Miner | _] = proplists:get_value(miners, Config),
+    Addresses = proplists:get_value(addresses, Config),
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
+    lists:foldl(fun(Address, Acc) ->
+                        {ok, S} = ct_rpc:call(Miner, blockchain_ledger_v1, gateway_score, [Address, Ledger]),
+                        [{Address, S} | Acc]
+                end,
+                [],
+                Addresses).
