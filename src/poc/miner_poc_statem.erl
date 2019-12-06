@@ -208,7 +208,7 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
             %% Create tagged score map
             GatewayScoreMap = blockchain_utils:score_gateways(Ledger),
             %% Get Vars
-            Vars = blockchain_ledger_v1:all_vars(Ledger),
+            Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
             %% Challenger details
             ChallengerAddr = blockchain_swarm:pubkey_bin(),
             ChallengerGw = maps:get(ChallengerAddr, ActiveGateways),
