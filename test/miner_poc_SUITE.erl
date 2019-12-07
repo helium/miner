@@ -622,7 +622,7 @@ gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(_TestCase, Addresses, VarMap) ->
     LocationJitter = case maps:get(?poc_version, VarMap, 1) of
-                         4 ->
+                         V when V > 3 ->
                              100;
                          _ ->
                              1000000
