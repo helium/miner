@@ -382,14 +382,9 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Packet = helium_longfi_pb:encode_msg(Req),
             erlang:spawn(
                 fun() ->
-                    Resp = ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream),
-                    case Resp of
-                        {error, Reason} ->
-                            lager:error("not sending RF because we could not deliver receipt: ~p", [Reason]);
-                        ok ->
-                            timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-                            _ = gen_udp:send(Socket, IP, Port, Packet)
-                    end
+                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream),
+                    timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
+                    _ = gen_udp:send(Socket, IP, Port, Packet)
                 end
             ),
             State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]};
