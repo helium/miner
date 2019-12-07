@@ -567,24 +567,21 @@ new_random_key(Curve) ->
 
 run_dist_with_params(TestCase, Config, VarMap) ->
     ok = setup_dist_test(TestCase, Config, VarMap),
-    %% Print scores before we begin the test
-    InitialScores = gateway_scores(Config),
-    ct:pal("InitialScores: ~p", [InitialScores]),
     %% Execute the test
     ok = exec_dist_test(TestCase, Config, VarMap),
     %% show the final receipt counter
     Miners = proplists:get_value(miners, Config),
     FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
     ct:pal("FinalReceiptCounter: ~p", [receipt_counter(FinalReceiptMap)]),
-    %% Print scores after execution
-    FinalScores = gateway_scores(Config),
-    ct:pal("FinalScores: ~p", [FinalScores]),
     %% The test endeth here
     miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
 
 exec_dist_test(poc_dist_v4_partitioned_lying_test, Config, _VarMap) ->
     Miners = proplists:get_value(miners, Config),
+    %% Print scores before we begin the test
+    InitialScores = gateway_scores(Config),
+    ct:pal("InitialScores: ~p", [InitialScores]),
     %% Check that every miner has issued a challenge
     ?assert(check_all_miners_can_challenge(Miners)),
     %% Check that we have atleast more than one request
@@ -598,6 +595,11 @@ exec_dist_test(poc_dist_v4_partitioned_lying_test, Config, _VarMap) ->
     %% both are lying about their distances, the paths should
     %% never get longer than 1
     ?assert(check_partitioned_lying_path_growth(Miners)),
+    %% Print scores after execution
+    FinalScores = gateway_scores(Config),
+    ct:pal("FinalScores: ~p", [FinalScores]),
+    %% also check that the scores have not changed at all
+    ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok;
 exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
     Miners = proplists:get_value(miners, Config),
@@ -1009,7 +1011,8 @@ gateway_scores(Config) ->
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     lists:foldl(fun(Address, Acc) ->
                         {ok, S} = ct_rpc:call(Miner, blockchain_ledger_v1, gateway_score, [Address, Ledger]),
-                        [{Address, S} | Acc]
+                        {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(Address)),
+                        maps:put(Name, S, Acc)
                 end,
-                [],
+                #{},
                 Addresses).
