@@ -1001,4 +1001,5 @@ common_poc_vars(Config) ->
       ?poc_v4_target_exclusion_cells => 6000,
       ?poc_v4_target_prob_edge_wt => 0.2,
       ?poc_v4_target_prob_score_wt => 0.8,
-      ?poc_v4_target_score_curve => 5}.
+      ?poc_v4_target_score_curve => 5,
+      ?poc_v5_target_prob_randomness_wt => 0.0}.
