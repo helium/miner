@@ -23,10 +23,14 @@
 %% in hours
 -define(days(N), 24 * 60 * N).
 
+%% ideal HNT / s in bones
+-define(bones_per_sec, 192901234).
+
 -record(stats,
         {
          times = [] :: [integer()],
          tlens = [] :: [integer()],
+         last_rewards = 0 :: integer(),
          delay = 0 :: integer()
         }).
 
@@ -101,10 +105,11 @@ handle_info(timeout, _) ->
                      stats = Stats,
                      height = CurrHeight,
                      fd = File}};
-handle_info({blockchain_event, {add_block, Hash, _, Ledger}}, #state{chain = Chain,
-                                                                height = CurrHeight,
-                                                                fd = File,
-                                                                stats = Stats} = State) ->
+handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
+            #state{chain = Chain,
+                   height = CurrHeight,
+                   fd = File,
+                   stats = Stats} = State) ->
     {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
     case blockchain:get_block(Hash, Chain) of
@@ -192,10 +197,11 @@ process_line({0, _Txns, _Epoch, _Height, _Interval}, Acc) ->
     {[], Acc};
 process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
              #stats{times = Times0,
+                    last_rewards = Last,
                     tlens = TLens1}) ->
     TLen = length(Txns),
     TLens0 = TLens1 ++ [TLen],
-    Times = truncate(Time, Times0, 24 * 60 * 10), % two days in minutes
+    Times = truncate(Time, Times0, 24 * 60 * 3), % two days in minutes
     {_, TLens} = lists:split(length(TLens0) - length(Times), TLens0),
     Interval =
         case Times0 of
@@ -208,6 +214,23 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
     MedInterval = median_interval(Times),
     Delay = max(0, Height - (EpochStart + Int)),
     AvgTxns = lists:sum(TLens) div length(TLens),
+
+    ConsensusDelay = extract_delay(Txns),
+    {HNTRatio, Last1}  =
+        case ConsensusDelay of
+            "" ->
+                {"", Last};
+            _ ->
+                Rwds = extract_rewards(Txns),
+                %% count up the tokens generated
+                Bones = get_bones(Rwds),
+                EpochSecs = Time - Last,
+                Ideal = ?bones_per_sec * EpochSecs,
+
+                {integer_to_list(trunc( (Bones/Ideal) * 100 )),
+                 Time}
+        end,
+
     {[integer_to_list(Time), "\t",
       integer_to_list(Interval), "\t",
       integer_to_list(TLen), "\t",
@@ -217,8 +240,9 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
       integer_to_list(Height), "\t",
       float_to_list(Height / Epoch), "\t",
       integer_to_list(Delay), "\t",
-      extract_delay(Txns), "\n"],
-     #stats{times = Times, tlens = TLens}}.
+      ConsensusDelay, "\t",
+      HNTRatio, "\n"],
+     #stats{times = Times, last_rewards = Last1, tlens = TLens}}.
 
 extract_delay(Txns) ->
     case lists:filter(fun(T) ->
@@ -230,3 +254,16 @@ extract_delay(Txns) ->
         _ ->
             ""
     end.
+
+extract_rewards(Txns) ->
+    case lists:filter(fun(T) ->
+                              %% TODO: ideally move to versionless types?
+                              blockchain_txn:type(T) == blockchain_txn_rewards_v1
+                      end, Txns) of
+        [Txn] ->
+            Txn
+    end.
+
+get_bones(T) ->
+    Rewards = blockchain_txn_rewards_v1:rewards(T),
+    lists:sum([blockchain_txn_reward_v1:amount(R) || R <- Rewards]).

@@ -20,7 +20,8 @@ plot "/tmp/miner-chain-stats" using 1:2 with lines title "interval", \
      "/tmp/miner-chain-stats" using 1:6 with lines title "avg txns", \
      "/tmp/miner-chain-stats" using 1:8 with lines lw 2 axes x1y2 title "avg election interval", \
      "/tmp/miner-chain-stats" using 1:9 with lines lw 2  axes x1y2 title "election delay", \
-     "/tmp/miner-chain-stats" using 1:10 with points pt 7 lt rgb "red" ps 2 axes x1y2 title "delay at election"
+     "/tmp/miner-chain-stats" using 1:10 with points pt 7 lt rgb "red" ps 2 axes x1y2 title "delay at election", \
+     "/tmp/miner-chain-stats" using 1:11 with lines lw 2 lt rgb "orange" axes x1y2  title "HNT production ratio"
 
 pause 15
 reread
