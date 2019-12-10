@@ -545,28 +545,10 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok;
+exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
+    do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
-    Miners = proplists:get_value(miners, Config),
-    %% Print scores before we begin the test
-    InitialScores = gateway_scores(Config),
-    ct:pal("InitialScores: ~p", [InitialScores]),
-    %% Check that every miner has issued a challenge
-    ?assert(check_all_miners_can_challenge(Miners)),
-    %% Check that we have atleast more than one request
-    %% If we have only one request, there's no guarantee
-    %% that the paths would eventually grow
-    ?assert(check_multiple_requests(Miners)),
-    %% We also wait for N*3 receipts here just to be triply certain.
-    %% The extra receipt should have multi element path
-    ?assert(check_atleast_k_receipts(Miners, 3*length(Miners))),
-    %% Since we have two static location partitioned networks, we
-    %% can assert that the subsequent path lengths must never be greater
-    %% than 4.
-    ?assert(check_partitioned_path_growth(Miners)),
-    %% Print scores after execution
-    FinalScores = gateway_scores(Config),
-    ct:pal("FinalScores: ~p", [FinalScores]),
-    ok;
+    do_common_partition_checks(Config);
 exec_dist_test(_, Config, VarMap) ->
     Miners = proplists:get_value(miners, Config),
     %% Print scores before we begin the test
@@ -617,6 +599,9 @@ setup_dist_test(TestCase, Config, VarMap) ->
 
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v5_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
@@ -1003,3 +988,26 @@ common_poc_vars(Config) ->
       ?poc_v4_target_prob_score_wt => 0.8,
       ?poc_v4_target_score_curve => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
+
+do_common_partition_checks(Config) ->
+    Miners = proplists:get_value(miners, Config),
+    %% Print scores before we begin the test
+    InitialScores = gateway_scores(Config),
+    ct:pal("InitialScores: ~p", [InitialScores]),
+    %% Check that every miner has issued a challenge
+    ?assert(check_all_miners_can_challenge(Miners)),
+    %% Check that we have atleast more than one request
+    %% If we have only one request, there's no guarantee
+    %% that the paths would eventually grow
+    ?assert(check_multiple_requests(Miners)),
+    %% We also wait for N*3 receipts here just to be triply certain.
+    %% The extra receipt should have multi element path
+    ?assert(check_atleast_k_receipts(Miners, 3*length(Miners))),
+    %% Since we have two static location partitioned networks, we
+    %% can assert that the subsequent path lengths must never be greater
+    %% than 4.
+    ?assert(check_partitioned_path_growth(Miners)),
+    %% Print scores after execution
+    FinalScores = gateway_scores(Config),
+    ct:pal("FinalScores: ~p", [FinalScores]),
+    ok.
