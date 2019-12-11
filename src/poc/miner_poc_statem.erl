@@ -203,15 +203,13 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
                     {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
             end;
         {ok, V} ->
-            %% Get all gateways
-            ActiveGateways = blockchain_ledger_v1:active_gateways(Ledger),
             %% Create tagged score map
             GatewayScoreMap = blockchain_utils:score_gateways(Ledger),
             %% Get Vars
             Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
             %% Challenger details
             ChallengerAddr = blockchain_swarm:pubkey_bin(),
-            ChallengerGw = maps:get(ChallengerAddr, ActiveGateways),
+            {ChallengerGw, _} = maps:get(ChallengerAddr, GatewayScoreMap),
             case blockchain_ledger_gateway_v2:location(ChallengerGw) of
                 undefined ->
                     lager:warning("poc_v4 no challenger location, back to requesting"),
