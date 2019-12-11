@@ -231,7 +231,7 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
                             lager:warning("POCVersion: ~p~n", [V]),
                             lager:warning("GatewayScores: ~p~n", [GatewayScores]),
                             lager:info("poc_v4 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
-                            self() ! {challenge, Entropy, TargetPubkeyBin, ActiveGateways, Height, Ledger, Vars},
+                            self() ! {challenge, Entropy, TargetPubkeyBin, GatewayScores, Height, Ledger, Vars},
                             {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})}
                     end
             end
