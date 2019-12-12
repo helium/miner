@@ -104,10 +104,7 @@
   {git,"https://github.com/helium/relcast.git",
        {ref,"8b7b81084bf861ceb77d7e044fb9b47305238a2f"}},
   2},
- {<<"rocksdb">>,
-  {git,"https://gitlab.com/evanmcc/erlang-rocksdb.git",
-       {ref,"271f781700bf559525ecbfd21a8d21329852df6a"}},
-  0},
+ {<<"rocksdb">>,{pkg,<<"rocksdb">>,<<"1.1.0">>},3},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
  {<<"splicer">>,
   {git,"https://github.com/helium/erlang-splicer.git",
@@ -136,5 +133,6 @@
  {<<"ranch">>, <<"F04166F456790FEE2AC1AA05A02745CC75783C2BFB26D39FAF6AEFC9A3D3A58A">>},
  {<<"rand_compat">>, <<"011646BC1F0B0C432FE101B816F25B9BBB74A085713CEE1DAFD2D62E9415EAD3">>},
  {<<"recon">>, <<"2F7FCBEC2C35034BADE2F9717F77059DC54EB4E929A3049CA7BA6775C0BD66CD">>},
+ {<<"rocksdb">>, <<"635F7D52C2B3E5399617C080BA5FE30AB255FD5D9D8180FFDD298E11EA1D62F4">>},
  {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>}]}
 ].
