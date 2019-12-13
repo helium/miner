@@ -551,6 +551,8 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print balances after execution
     FinalBalances = balances(Config),
     ct:pal("FinalBalances: ~p", [FinalBalances]),
+    %% There should be no poc_witness or poc_challengees rewards
+    ?assert(check_no_poc_rewards(Rewards)),
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok;
@@ -1044,3 +1046,17 @@ get_rewards(Config) ->
               end,
               [],
               Blocks).
+
+check_no_poc_rewards(RewardsTxns) ->
+    %% Get all rewards types
+    RewardTypes = lists:foldl(fun(RewardTxn, Acc) ->
+                                      Types = [blockchain_txn_reward_v1:type(R) || R <- blockchain_txn_rewards_v1:rewards(RewardTxn)],
+                                      lists:flatten([Types | Acc])
+                              end,
+                              [],
+                              RewardsTxns),
+    %% none of the reward types should be poc_challengees or poc_witnesses
+    not lists:any(fun(T) ->
+                          T == poc_challengees orelse T == poc_witnesses
+                  end,
+                  RewardTypes).
