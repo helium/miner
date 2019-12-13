@@ -545,6 +545,9 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
+    %% Print rewards
+    Rewards = get_rewards(Config),
+    ct:pal("Rewards: ~p", [Rewards]),
     %% Print balances after execution
     FinalBalances = balances(Config),
     ct:pal("FinalBalances: ~p", [FinalBalances]),
@@ -1022,3 +1025,22 @@ balances(Config) ->
     [Miner | _] = proplists:get_value(miners, Config),
     Addresses = proplists:get_value(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
+
+get_rewards(Config) ->
+    [Miner | _] = proplists:get_value(miners, Config),
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Blocks = ct_rpc:call(Miner, blockchain, blocks, [Chain]),
+    maps:fold(fun(_, Block, Acc) ->
+                      case blockchain_block:transactions(Block) of
+                          [] ->
+                              Acc;
+                          Ts ->
+                              Rewards = lists:filter(fun(T) ->
+                                                             blockchain_txn:type(T) == blockchain_txn_rewards_v1
+                                                     end,
+                                                     Ts),
+                              lists:flatten([Rewards | Acc])
+                      end
+              end,
+              [],
+              Blocks).
