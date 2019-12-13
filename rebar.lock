@@ -3,7 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"98d51b377ba365a74edfb3cfa2f91a303963796e"}},
+       {ref,"e4d9edc17cc5eafbf774d93b5cec64a4ca55c75a"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
