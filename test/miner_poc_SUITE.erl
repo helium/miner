@@ -526,6 +526,9 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
+    %% Print scores before we begin the test
+    InitialBalances = balances(Config),
+    ct:pal("InitialBalances: ~p", [InitialBalances]),
     %% Check that every miner has issued a challenge
     ?assert(check_all_miners_can_challenge(Miners)),
     %% Check that we have atleast more than one request
@@ -542,6 +545,9 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
+    %% Print balances after execution
+    FinalBalances = balances(Config),
+    ct:pal("FinalBalances: ~p", [FinalBalances]),
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok;
@@ -1011,3 +1017,8 @@ do_common_partition_checks(Config) ->
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
     ok.
+
+balances(Config) ->
+    [Miner | _] = proplists:get_value(miners, Config),
+    Addresses = proplists:get_value(addresses, Config),
+    [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
