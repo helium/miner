@@ -526,6 +526,9 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
+    %% Print scores before we begin the test
+    InitialBalances = balances(Config),
+    ct:pal("InitialBalances: ~p", [InitialBalances]),
     %% Check that every miner has issued a challenge
     ?assert(check_all_miners_can_challenge(Miners)),
     %% Check that we have atleast more than one request
@@ -542,6 +545,14 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
+    %% Print rewards
+    Rewards = get_rewards(Config),
+    ct:pal("Rewards: ~p", [Rewards]),
+    %% Print balances after execution
+    FinalBalances = balances(Config),
+    ct:pal("FinalBalances: ~p", [FinalBalances]),
+    %% There should be no poc_witness or poc_challengees rewards
+    ?assert(check_no_poc_rewards(Rewards)),
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok;
@@ -1011,3 +1022,41 @@ do_common_partition_checks(Config) ->
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
     ok.
+
+balances(Config) ->
+    [Miner | _] = proplists:get_value(miners, Config),
+    Addresses = proplists:get_value(addresses, Config),
+    [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
+
+get_rewards(Config) ->
+    [Miner | _] = proplists:get_value(miners, Config),
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Blocks = ct_rpc:call(Miner, blockchain, blocks, [Chain]),
+    maps:fold(fun(_, Block, Acc) ->
+                      case blockchain_block:transactions(Block) of
+                          [] ->
+                              Acc;
+                          Ts ->
+                              Rewards = lists:filter(fun(T) ->
+                                                             blockchain_txn:type(T) == blockchain_txn_rewards_v1
+                                                     end,
+                                                     Ts),
+                              lists:flatten([Rewards | Acc])
+                      end
+              end,
+              [],
+              Blocks).
+
+check_no_poc_rewards(RewardsTxns) ->
+    %% Get all rewards types
+    RewardTypes = lists:foldl(fun(RewardTxn, Acc) ->
+                                      Types = [blockchain_txn_reward_v1:type(R) || R <- blockchain_txn_rewards_v1:rewards(RewardTxn)],
+                                      lists:flatten([Types | Acc])
+                              end,
+                              [],
+                              RewardsTxns),
+    %% none of the reward types should be poc_challengees or poc_witnesses
+    not lists:any(fun(T) ->
+                          T == poc_challengees orelse T == poc_witnesses
+                  end,
+                  RewardTypes).
