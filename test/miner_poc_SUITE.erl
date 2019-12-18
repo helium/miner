@@ -1153,4 +1153,4 @@ do_common_partition_lying_checks(Config) ->
     ?assert(check_no_poc_rewards(Rewards)),
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
-    ok;
+    ok.
