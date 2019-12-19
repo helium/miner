@@ -116,6 +116,11 @@ init(Args) ->
                                 State == targeting ->
             {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
                                    address=Address, poc_interval=Delay, state=requesting}};
+        {ok, submitting, Data} ->
+            %% submitting needs a message to kick it to do something
+            self() ! submit,
+            {ok, submitting, Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                                  address=Address, poc_interval=Delay, state=submitting}};
         {ok, State, Data} ->
             {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                   address=Address, poc_interval=Delay, state=State}}
