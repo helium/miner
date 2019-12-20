@@ -109,13 +109,11 @@ init(Args) ->
     case load_data(BaseDir) of
         {error, _} ->
             {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting,
-                                   poc_restarts = ?POC_RESTARTS}};
+                                   address=Address, poc_interval=Delay, state=requesting}};
         %% we have attempted to unsuccessfully restart this POC too many times, give up and revert to default state
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
             {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting,
-                                   poc_restarts = ?POC_RESTARTS}};
+                                   address=Address, poc_interval=Delay, state=requesting}};
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                   address=Address, poc_interval=Delay, state=State,
@@ -143,9 +141,16 @@ terminate(_Reason, _State) ->
 %% When starting a POC, we submit a new poc request txn and then transition to mining state
 %%
 requesting(enter, _State, Data)->
-    {keep_state, Data};
-requesting(info, Msg, #data{blockchain=undefined}=Data) ->
-    handle_event(info, Msg, Data);
+    %% each time we enter requesting state we assume we are starting a new POC and thus we reset our restart count allocation
+    {keep_state, Data#data{poc_restarts = ?POC_RESTARTS}};
+requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
+            {keep_state, Data};
+        NewChain ->
+            {keep_state, Data#data{blockchain=NewChain}, [{next_event, info, Msg}]}
+    end;
 requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
@@ -202,7 +207,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
                 true ->
                     {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
-                    lager:error("did not see PoC request in last ~p block, retrying", [?MINING_TIMEOUT]),
+                    lager:error("did not see PoC request in last ~p block, giving up on this POC", [?MINING_TIMEOUT]),
                     {next_state, requesting, save_data(Data#data{state=requesting, mining_timeout=?MINING_TIMEOUT})}
             end
     end;
@@ -320,7 +325,8 @@ waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
-            {next_state, requesting, save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+            {next_state, requesting, save_data(Data#data{state=requesting,
+                                                         receipts_timeout=?RECEIPTS_TIMEOUT})};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
             {keep_state, save_data(Data#data{receipts_timeout=Timeout-1})}
@@ -333,21 +339,6 @@ waiting(EventType, EventContent, Data) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-handle_event(info, Msg, #data{blockchain = Chain} = Data)
-    when Chain =:= undefined ->
-    case blockchain_worker:blockchain() of
-        undefined ->
-            %% do we really want to drop msgs here, what if the blockchain worker is taking time to start ?
-            %% if blockchain was undefined when we received the msg but comes up post receive of the msg
-            %% its a very short window...kinda makes this function pointless??
-            %% and why do we only handle undefined in requesting state
-            %% if we load state from file we risk jumping to that state with an undefined chain
-            lager:warning("dropped ~p cause chain is still undefined", [Msg]),
-            {keep_state,  Data};
-        NewChain ->
-            {keep_state, Data#data{blockchain=NewChain}, [{next_event, info, Msg}]}
-    end;
-
 handle_event(info, {blockchain_event, {new_chain, NC}},
              #data{address = Address, poc_interval = Delay}) ->
     {next_state, requesting, save_data(#data{state = requesting, blockchain=NC,
