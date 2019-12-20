@@ -10,7 +10,6 @@
 
 -export([
     basic_test/1,
-    poc_dist_v1_test/1,
     poc_dist_v2_test/1,
     poc_dist_v4_test/1,
     poc_dist_v4_partitioned_test/1,
@@ -38,10 +37,6 @@
 %%--------------------------------------------------------------------
 all() ->
     [basic_test,
-     poc_dist_v1_test,
-     poc_dist_v2_test,
-     poc_dist_v4_test,
-     poc_dist_v4_partitioned_test,
      poc_dist_v5_test,
      poc_dist_v5_partitioned_test,
      poc_dist_v5_partitioned_lying_test,
@@ -50,32 +45,6 @@ all() ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
-poc_dist_v1_test(Config0) ->
-    TestCase = poc_dist_v1_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
-    %% Dont think it matters if v1 takes all the other common vars
-    %% Just don't set any poc_version here
-    CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, CommonPOCVars).
-
-poc_dist_v2_test(Config0) ->
-    TestCase = poc_dist_v2_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
-    CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 2, CommonPOCVars)).
-
-poc_dist_v4_test(Config0) ->
-    TestCase = poc_dist_v4_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
-    CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 4, CommonPOCVars)).
-
-poc_dist_v4_partitioned_test(Config0) ->
-    TestCase = poc_dist_v4_partitioned_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
-    CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 4, CommonPOCVars)).
-
 poc_dist_v5_test(Config0) ->
     TestCase = poc_dist_v5_test,
     Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
@@ -615,8 +584,6 @@ exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
 exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
-exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(_, Config, VarMap) ->
     Miners = proplists:get_value(miners, Config),
