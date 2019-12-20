@@ -77,7 +77,7 @@
     poc_restarts = ?POC_RESTARTS :: non_neg_integer()
 }).
 
--type state() :: requesting | mining | running | receiving | submitting | waiting.
+-type state() :: requesting | mining | receiving | waiting.
 -type data() :: #data{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 
