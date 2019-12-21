@@ -187,11 +187,10 @@ mining(enter, _State, Data)->
 mining(info, Msg, #data{blockchain=undefined}=Data) ->
     handle_event(info, Msg, Data);
 mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
-       #data{blockchain = Chain, address = Challenger,
+       #data{blockchain = _Chain, address = Challenger,
              mining_timeout = MiningTimeout, secret = Secret} = Data) ->
     case find_request(BlockHash, Data) of
-        ok ->
-            {ok, Block} = blockchain:get_block(BlockHash, Chain),
+        {ok, Block} ->
             Height = blockchain_block:height(Block),
             %% TODO discuss making this delay verifiable so you can't punish a hotspot by
             %% intentionally fast-challenging them before they have the block
@@ -633,7 +632,7 @@ find_request(BlockHash, #data{blockchain=Blockchain,
                 end,
             case lists:filter(Filter, Txns) of
                 [_POCReq] ->
-                    ok;
+                    {ok, Block};
                 _ ->
                     lager:info("request not found in block ~p", [BlockHash]),
                     {error, not_found}
