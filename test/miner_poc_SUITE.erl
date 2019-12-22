@@ -57,7 +57,8 @@ end_per_testcase(basic_test, Config) ->
     case proplists:get_value(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            BaseDir = "data/miner_poc_SUITE/basic_test",
+            PrivDir = proplists:get_value(priv_dir, Config),
+            BaseDir = PrivDir++ "/data_miner_poc_SUITE_basic_test",
             os:cmd("rm -rf "++BaseDir),
             ok;
         _ ->
@@ -69,7 +70,8 @@ end_per_testcase(restart_test, Config) ->
     case proplists:get_value(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            BaseDir = "data/miner_poc_SUITE/restart_test",
+            PrivDir = proplists:get_value(priv_dir, Config),
+            BaseDir = PrivDir ++ "/data_miner_poc_SUITE_restart_test",
             os:cmd("rm -rf "++BaseDir),
             ok;
         _ ->
@@ -113,8 +115,9 @@ poc_dist_v5_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     run_dist_with_params(poc_dist_v5_partitioned_lying_test, Config, maps:put(?poc_version, 5, CommonPOCVars)).
 
-basic_test(_Config) ->
-    BaseDir = "data/miner_poc_SUITE/basic_test",
+basic_test(Config) ->
+    PrivDir = proplists:get_value(priv_dir, Config),
+    BaseDir = PrivDir ++ "/data_miner_poc_SUITE_basic_test",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
@@ -265,8 +268,9 @@ basic_test(_Config) ->
     ok = gen_statem:stop(Statem),
     ok.
 
-restart_test(_Config) ->
-    BaseDir = "data/miner_poc_SUITE/restart_test",
+restart_test(Config) ->
+    PrivDir = proplists:get_value(priv_dir, Config),
+    BaseDir = PrivDir ++ "/data_miner_poc_SUITE_restart_test",
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),

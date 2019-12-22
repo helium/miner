@@ -532,6 +532,8 @@ init_per_testcase(TestCase, Config) ->
                      {Miner, Ports, GECDH, GPub, GAddr, GSigFun}
              end, MinersAndPorts),
 
+    PrivDir = proplists:get_value(priv_dir, Config),
+
     ConfigResult = miner_ct_utils:pmap(
         fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
                 ct:pal("Miner ~p", [Miner]),
@@ -541,12 +543,12 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, load, [blockchain]),
             ct_rpc:call(Miner, application, load, [libp2p]),
             %% give each miner its own log directory
-            LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
+            LogRoot = PrivDir ++ "/log_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
             ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
             %% set blockchain configuration
             Key = {PubKey, ECDH, SigFun, undefined},
-            BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+            BaseDir = PrivDir ++ "/data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
             %% set blockchain env
             ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
             ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
@@ -641,11 +643,12 @@ end_per_testcase(TestCase, Config) ->
 
 cleanup_per_testcase(TestCase, Config) ->
     Miners = proplists:get_value(miners, Config),
+    PrivDir = proplists:get_value(priv_dir, Config),
     lists:foreach(fun(Miner) ->
-                          LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
+                          LogRoot = PrivDir ++ "/log_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                           Res = os:cmd("rm -rf " ++ LogRoot),
                           ct:pal("rm -rf ~p -> ~p", [LogRoot, Res]),
-                          BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+                          BaseDir = PrivDir ++ "/data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                           Res2 = os:cmd("rm -rf " ++ BaseDir),
                           ct:pal("rm -rf ~p -> ~p", [BaseDir, Res2]),
                           ok
