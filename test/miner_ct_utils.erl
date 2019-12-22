@@ -523,17 +523,18 @@ init_per_testcase(TestCase, Config) ->
 
     Keys = miner_ct_utils:pmap(
              fun({Miner, Ports}) ->
-                     Pid = miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
+                     miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
                      #{secret := GPriv, public := GPub} =
                      libp2p_crypto:generate_keys(ecc_compact),
                      GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
                      GAddr = libp2p_crypto:pubkey_to_bin(GPub),
                      GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
-                     {Miner, Ports, Pid, GECDH, GPub, GAddr, GSigFun}
+                     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}
              end, MinersAndPorts),
 
     ConfigResult = miner_ct_utils:pmap(
-        fun({_MinerName, {TCPPort, UDPPort}, Miner, ECDH, PubKey, _Addr, SigFun}) ->
+        fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
+                ct:pal("Miner ~p", [Miner]),
             ct_rpc:call(Miner, cover, start, []),
             ct_rpc:call(Miner, application, load, [lager]),
             ct_rpc:call(Miner, application, load, [miner]),
@@ -625,10 +626,30 @@ init_per_testcase(TestCase, Config) ->
         | Config
     ].
 
-end_per_testcase(_TestCase, Config) ->
+end_per_testcase(TestCase, Config) ->
     Miners = proplists:get_value(miners, Config),
     miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
+    case proplists:get_value(tc_status, Config) of
+        ok ->
+            %% test passed, we can cleanup
+            cleanup_per_testcase(TestCase, Config);
+        _ ->
+            %% leave results alone for analysis
+            ok
+    end,
     {comment, done}.
+
+cleanup_per_testcase(TestCase, Config) ->
+    Miners = proplists:get_value(miners, Config),
+    lists:foreach(fun(Miner) ->
+                          LogRoot = "log/" ++ atom_to_list(TestCase) ++ "/" ++ atom_to_list(Miner),
+                          Res = os:cmd("rm -rf " ++ LogRoot),
+                          ct:pal("rm -rf ~p -> ~p", [LogRoot, Res]),
+                          BaseDir = "data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+                          Res2 = os:cmd("rm -rf " ++ BaseDir),
+                          ct:pal("rm -rf ~p -> ~p", [BaseDir, Res2]),
+                          ok
+                  end, Miners).
 
 get_balance(Miner, Addr) ->
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),

@@ -9,6 +9,8 @@
 ]).
 
 -export([
+    init_per_testcase/2,
+    end_per_testcase/2,
     basic_test/1,
     poc_dist_v1_test/1,
     poc_dist_v2_test/1,
@@ -44,52 +46,72 @@ all() ->
      poc_dist_v5_partitioned_lying_test,
      restart_test].
 
+init_per_testcase(basic_test, Config) -> Config;
+init_per_testcase(restart_test, Config) -> Config;
+init_per_testcase(TestCase, Config0) ->
+    Config = miner_ct_utils:init_per_testcase(TestCase, Config0),
+    Config.
+
+end_per_testcase(basic_test, Config) ->
+    catch gen_statem:stop(miner_poc_statem),
+    case proplists:get_value(tc_status, Config) of
+        ok ->
+            %% test passed, we can cleanup
+            BaseDir = "data/miner_poc_SUITE/basic_test",
+            os:cmd("rm -rf "++BaseDir),
+            ok;
+        _ ->
+            %% leave results alone for analysis
+            ok
+    end;
+end_per_testcase(restart_test, Config) ->
+    catch gen_statem:stop(miner_poc_statem),
+    case proplists:get_value(tc_status, Config) of
+        ok ->
+            %% test passed, we can cleanup
+            BaseDir = "data/miner_poc_SUITE/restart_test",
+            os:cmd("rm -rf "++BaseDir),
+            ok;
+        _ ->
+            %% leave results alone for analysis
+            ok
+    end;
+end_per_testcase(TestCase, Config) ->
+    miner_ct_utils:end_per_testcase(TestCase, Config).
+
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
-poc_dist_v1_test(Config0) ->
-    TestCase = poc_dist_v1_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v1_test(Config) ->
+    ct:pal("Config ~p", [Config]),
     %% Dont think it matters if v1 takes all the other common vars
     %% Just don't set any poc_version here
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, CommonPOCVars).
+    run_dist_with_params(poc_dist_v1_test, Config, CommonPOCVars).
 
-poc_dist_v2_test(Config0) ->
-    TestCase = poc_dist_v2_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v2_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 2, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v2_test, Config, maps:put(?poc_version, 2, CommonPOCVars)).
 
-poc_dist_v4_test(Config0) ->
-    TestCase = poc_dist_v4_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v4_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 4, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v4_test, Config, maps:put(?poc_version, 4, CommonPOCVars)).
 
-poc_dist_v4_partitioned_test(Config0) ->
-    TestCase = poc_dist_v4_partitioned_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v4_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 4, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v4_partitioned_test, Config, maps:put(?poc_version, 4, CommonPOCVars)).
 
-poc_dist_v5_test(Config0) ->
-    TestCase = poc_dist_v5_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v5_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 5, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v5_test, Config, maps:put(?poc_version, 5, CommonPOCVars)).
 
-poc_dist_v5_partitioned_test(Config0) ->
-    TestCase = poc_dist_v5_partitioned_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v5_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 5, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v5_partitioned_test, Config, maps:put(?poc_version, 5, CommonPOCVars)).
 
-poc_dist_v5_partitioned_lying_test(Config0) ->
-    TestCase = poc_dist_v5_partitioned_lying_test,
-    Config = miner_ct_utils:init_per_testcase(TestCase, [{}, Config0]),
+poc_dist_v5_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(TestCase, Config, maps:put(?poc_version, 5, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v5_partitioned_lying_test, Config, maps:put(?poc_version, 5, CommonPOCVars)).
 
 basic_test(_Config) ->
     BaseDir = "data/miner_poc_SUITE/basic_test",
@@ -518,7 +540,6 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
     ct:pal("FinalReceiptCounter: ~p", [receipt_counter(FinalReceiptMap)]),
     %% The test endeth here
-    miner_ct_utils:end_per_testcase(TestCase, Config),
     ok.
 
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
