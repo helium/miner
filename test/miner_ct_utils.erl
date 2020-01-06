@@ -553,6 +553,7 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
             ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
             ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
             ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
             ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
             ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
@@ -759,15 +760,15 @@ handle_miners_by_consensus(Mod, Bool, Miners)->
 handle_gte_type(height, Miner, Threshold)->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-    ct:pal("miner ~p height ~p", [Miner, Height]),
+    ct:pal("miner ~p height ~p  Threshold ~p", [Miner, Height, Threshold]),
     Height >= Threshold;
 handle_gte_type(epoch, Miner, Threshold)->
-    {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
-    ct:pal("miner ~p Epoch ~p", [Miner, Epoch]),
+    {Height, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
+    ct:pal("miner ~p Height ~p Epoch ~p Threshold ~p", [Miner, Height, Epoch, Threshold]),
     Epoch >= Threshold;
 handle_gte_type(height_exactly, Miner, Threshold)->
     C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
-    ct:pal("miner ~p height ~p", [Miner, Ht]),
+    ct:pal("miner ~p height ~p Exact Threshold ~p", [Miner, Ht, Threshold]),
     Ht == Threshold.
 
