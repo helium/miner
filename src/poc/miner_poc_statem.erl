@@ -251,7 +251,8 @@ challenging(info, {challenge, Entropy, Target, Gateways, Height, Ledger, Vars}, 
     Self = self(),
     Attempt = make_ref(),
     Timeout = application:get_env(miner, path_validation_budget_ms, 5000),
-    {ok, B} = blockchain:get_block(BlockHash, Chain),
+    {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
+    {ok, B} = blockchain:get_block(LastChallenge, Chain),
     Time = blockchain_block:time(B),
     {Pid, Ref} =
     spawn_monitor(fun() ->
