@@ -630,6 +630,11 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
+    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v6_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_test, _, _) ->
