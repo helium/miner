@@ -10,9 +10,6 @@
 
 -export([
     basic_test/1,
-    poc_dist_v2_test/1,
-    poc_dist_v4_test/1,
-    poc_dist_v4_partitioned_test/1,
     poc_dist_v5_test/1,
     poc_dist_v5_partitioned_test/1,
     poc_dist_v5_partitioned_lying_test/1,
@@ -636,9 +633,6 @@ setup_dist_test(TestCase, Config, VarMap) ->
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_test, _, _) ->
-    %% These are taken from the ledger
-    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
-gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(_TestCase, Addresses, VarMap) ->
