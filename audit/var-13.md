@@ -7,13 +7,10 @@ Also introudces `poc_typo_fixes` chain variable and sets it to `true`.
 
 ## Rationale
 
-|-------------------------------|-----------|-------|---------------------------------------------------------------------------------------|
-|Var                            | Old       | New   | Rationale                                                                             |
-|-------------------------------|-----------|-------|---------------------------------------------------------------------------------------|
-|poc_version                    |5          |6      |Update poc version to disallow pathing with known impossible RSSI values               |
-|poc_typo_fixes                 |undefined  |true   |Ensure we mask the typo fixes behind this chain variable to not break consensus        |
-|-------------------------------|-----------|-------|---------------------------------------------------------------------------------------|
-
+| Var            | Old       | New  | Rationale                                                                       |
+|----------------|-----------|------|---------------------------------------------------------------------------------|
+| poc_version    | 5         | 6    | Update poc version to disallow pathing with known impossible RSSI values        |
+| poc_typo_fixes | undefined | true | Ensure we mask the typo fixes behind this chain variable to not break consensus |
 
 ## Version threshold
 
