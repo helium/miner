@@ -3,7 +3,7 @@
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
   {git,"git@github.com:helium/blockchain-core.git",
-       {ref,"32e62ef2ab53bc100a14e3561037994c2144eab3"}},
+       {ref,"c7dd37c021c91aed151ef316e2c6e6a84f40ab6f"}},
   0},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
@@ -87,7 +87,7 @@
   1},
  {<<"libp2p">>,
   {git,"https://github.com/helium/erlang-libp2p.git",
-       {ref,"e63c9686e71eeea87951210aa434fc17aef236a6"}},
+       {ref,"176671055f0e684bed2c7ac52e6d181e8aac2108"}},
   1},
  {<<"libp2p_crypto">>,{pkg,<<"libp2p_crypto">>,<<"1.0.1">>},2},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},1},
@@ -110,6 +110,7 @@
   {git,"https://github.com/helium/erlang-splicer.git",
        {ref,"e1f47056786c76bf028b460e2a8cf70d7c31e7a6"}},
   2},
+ {<<"throttle">>,{pkg,<<"lambda_throttle">>,<<"0.2.0">>},2},
  {<<"vincenty">>,
   {git,"https://github.com/helium/vincenty",
        {ref,"b2b13fea367599d918359a2ac0071beefcd8e1b3"}},
@@ -134,5 +135,6 @@
  {<<"rand_compat">>, <<"011646BC1F0B0C432FE101B816F25B9BBB74A085713CEE1DAFD2D62E9415EAD3">>},
  {<<"recon">>, <<"2F7FCBEC2C35034BADE2F9717F77059DC54EB4E929A3049CA7BA6775C0BD66CD">>},
  {<<"rocksdb">>, <<"635F7D52C2B3E5399617C080BA5FE30AB255FD5D9D8180FFDD298E11EA1D62F4">>},
- {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>}]}
+ {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>},
+ {<<"throttle">>, <<"E881B46D9836AFB70F3E2FA3BE9B0140805BA324ED26AA734FF6C5C1568C6CA7">>}]}
 ].
