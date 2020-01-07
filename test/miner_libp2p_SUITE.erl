@@ -32,11 +32,11 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(_TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(_TestCase, Config).
+init_per_testcase(TestCase, Config) ->
+    miner_ct_utils:init_per_testcase(TestCase, Config).
 
-end_per_testcase(_TestCase, Config) ->
-    miner_ct_utils:end_per_testcase(_TestCase, Config).
+end_per_testcase(TestCase, Config) ->
+    miner_ct_utils:end_per_testcase(TestCase, Config).
 
 %% test cases
 listen_addr_test(Config) ->
