@@ -185,15 +185,11 @@ info_p2p_status_usage() ->
      ]
     ].
 
-get_p2p_info() ->
+info_p2p_status(["info", "p2p_status"], [], []) ->
     StatusResults = miner:p2p_status(),
     FormatResult = fun({Name, Result}) ->
                            [{name, Name}, {result, Result}]
                    end,
-    {FormatResult, StatusResults}.
-
-info_p2p_status(["info", "p2p_status"], [], []) ->
-    {FormatResult, StatusResults} = get_p2p_info(),
     [clique_status:table(lists:map(FormatResult, StatusResults))];
 info_p2p_status([_, _, _], [], []) ->
     usage.
@@ -287,7 +283,7 @@ do_info_summary(ErrorCount, ScanRange) ->
         clique_status:table(lists:map(GeneralFormat, GeneralInfo)),
         clique_status:text("\n********************\nMiner P2P Info\n********************\n"),
         hd(info_p2p_status(["info", "p2p_status"], [], [])),
-        clique_status:text("\n********************\nMiner error log entries\n********************\n"),
+        clique_status:text("\n********************\nMiner log errors\n********************\n"),
         clique_status:list(  "***** Transaction related errors *****\n\n", TxnErrorInfo),
         clique_status:list(  "***** POC related errors         *****\n\n", POCErrorInfo),
         clique_status:list(  "***** General errors             *****\n\n", GenErrorInfo)
