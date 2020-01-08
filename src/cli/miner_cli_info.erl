@@ -6,9 +6,14 @@
 
 -behavior(clique_handler).
 
+
 -export([register_cli/0]).
 
 -export([get_info/0]).
+
+
+-define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
+-define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
 
 register_cli() ->
     register_all_usage(),
@@ -214,12 +219,13 @@ info_summary_usage() ->
     [["info", "summary"],
      ["info summary \n\n",
       "  Get a collection of key data points for this miner.\n\n"
-      "  Also returns the last 5 error log entries across 3 categories: Transactions, POCs and Other errors.  By default the latest 500 log entries are scanned and the most recent 5 hits for each category returned\n\n"
+      "  Also returns the last " ++ ?DEFAULT_LOG_HIT_COUNT ++ " error log entries across 3 categories: Transactions, POCs and Other errors.\n"
+      "  By default the latest " ++ ?DEFAULT_LOG_SCAN_RANGE ++ " log entries are scanned and the most recent " ++ ?DEFAULT_LOG_HIT_COUNT ++ " hits for each category returned\n\n"
       "Options\n\n"
       "  -e, --error_count <count> "
-      "    Set the count of log entries to return per category ( default=5 )\n"
+      "    Set the count of log entries to return per category)\n"
       "  -s, --scan_range <range> "
-      "    Set the maximum number of log entries to scan ( default=500 )\n\n"
+      "    Set the maximum number of log entries to scan\n\n"
 
      ]
     ].
@@ -268,8 +274,8 @@ get_summary_info(ErrorCount, ScanRange)->
     {GeneralInfo, POCErrors, TxnErrors, GenErrors}.
 
 info_summary(["info", "summary"], _Keys, Flags) ->
-    ErrorCount = proplists:get_value(error_count, Flags, "5"),
-    ScanRange = proplists:get_value(scan_range, Flags, "500"),
+    ErrorCount = proplists:get_value(error_count, Flags, ?DEFAULT_LOG_HIT_COUNT),
+    ScanRange = proplists:get_value(scan_range, Flags, ?DEFAULT_LOG_SCAN_RANGE),
     do_info_summary(ErrorCount, ScanRange).
 
 do_info_summary(ErrorCount, ScanRange) ->
