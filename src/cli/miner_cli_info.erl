@@ -208,7 +208,9 @@ info_summary_cmd() ->
      [["info", "summary"], [], [], fun info_summary/3],
      [["info", "summary"], [],
       [{error_count, [  {shortname, "e"},
-                        {longname, "error_count"}]}
+                        {longname, "error_count"}]},
+       {scan_range, [   {shortname, "s"},
+                        {longname, "scan_range"}]}
       ], fun info_summary/3]
     ].
 
@@ -216,35 +218,44 @@ info_summary_usage() ->
     [["info", "summary"],
      ["info summary \n\n",
       "  Get a collection of key data points for this miner.\n\n"
-      "  Included is the last 5 error log entries for 3 categories: Transactions, POCs and Other errors\n\n"
+      "  Also returns the last 5 error log entries across 3 categories: Transactions, POCs and Other errors.  By default the latest 500 log entries are scanned and the most recent 5 hits for each category returned\n\n"
       "Options\n\n"
       "  -e, --error_count <count> "
-      "    Override the default count of 5 log entries per category\n\n"
+      "    Set the count of log entries to return per category ( default=5 )\n"
+      "  -s, --scan_range <range> "
+      "    Set the maximum number of log entries to scan ( default=500 )\n\n"
+
      ]
     ].
 
-get_summary_info(ErrorCount)->
+get_summary_info(ErrorCount, ScanRange)->
     PubKey = blockchain_swarm:pubkey_bin(),
+    Chain = blockchain_worker:blockchain(),
+
+    %% get gateway info
     {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(PubKey)),
-    {ok, Macs} = get_mac_addrs(),
+    Macs = get_mac_addrs(),
     BlockAge = miner:block_age(),
     Uptime = get_uptime(),
-    {ok, POCErrors, TxnErrors, GenErrors} = get_log_errors(ErrorCount),
+    FirmwareVersion = get_firmware_version(),
+    GWInfo = get_gateway_info(Chain, PubKey),
 
-    Chain = blockchain_worker:blockchain(),
+    % get height data
     {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
     SyncHeight0 = format_sync_height(SyncHeight, Height),
 
+    %% get epoch
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+
+    %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
     Peerbook = libp2p_swarm:peerbook(Swarm),
     PeerBookEntryCount = length(libp2p_peerbook:values(Peerbook)),
 
-    FirmwareVersion = get_firmware_version(),
-
-    GWInfo = get_gateway_info(Chain, PubKey),
+    %% get recent error log entries
+    {POCErrors, TxnErrors, GenErrors} = get_log_errors(ErrorCount, ScanRange),
 
     GeneralInfo =
         [   {"miner name", MinerName},
@@ -260,15 +271,14 @@ get_summary_info(ErrorCount)->
         ],
     {GeneralInfo, POCErrors, TxnErrors, GenErrors}.
 
-info_summary(["info", "summary"], [], []) ->
-    do_info_summary("5");
-info_summary(["info", "summary"], _Keys, [{error_count, Count}]) ->
-    do_info_summary(Count);
-info_summary(_CmdBase, _Keys, _Flags) ->
-    usage.
+info_summary(["info", "summary"], _Keys, Flags) ->
+    ErrorCount = proplists:get_value(error_count, Flags, "5"),
+    ScanRange = proplists:get_value(scan_range, Flags, "500"),
+    do_info_summary(ErrorCount, ScanRange).
 
-do_info_summary(ErrorCount) ->
-    {GeneralInfo, POCErrorInfo, TxnErrorInfo, GenErrorInfo} = get_summary_info(ErrorCount),
+do_info_summary(ErrorCount, ScanRange) ->
+    {GeneralInfo, POCErrorInfo,
+        TxnErrorInfo, GenErrorInfo} = get_summary_info(ErrorCount, ScanRange),
 
     GeneralFormat =   fun({Name, Result}) ->
                             [{name, Name}, {result, Result}]
@@ -278,9 +288,9 @@ do_info_summary(ErrorCount) ->
         clique_status:text("\n********************\nMiner P2P Info\n********************\n"),
         hd(info_p2p_status(["info", "p2p_status"], [], [])),
         clique_status:text("\n********************\nMiner error log entries\n********************\n"),
-        clique_status:list("***** Transaction related errors *****\n\n", TxnErrorInfo),
-        clique_status:list( "***** POC related errors         *****\n\n", POCErrorInfo),
-        clique_status:list( "***** General errors             *****\n\n", GenErrorInfo)
+        clique_status:list(  "***** Transaction related errors *****\n\n", TxnErrorInfo),
+        clique_status:list(  "***** POC related errors         *****\n\n", POCErrorInfo),
+        clique_status:list(  "***** General errors             *****\n\n", GenErrorInfo)
 
     ].
 
@@ -288,18 +298,29 @@ do_info_summary(ErrorCount) ->
 get_mac_addrs()->
     {ok, IFs} = inet:getifaddrs(),
     Macs = format_macs_from_interfaces(IFs),
-    {ok, Macs}.
+    Macs.
 
 get_firmware_version()->
-    os:cmd("cat /etc/lsb_release").  %% TODO - make platform agnostic
+    os:cmd("cat /etc/lsb_release").
 
-get_log_errors(Count)->
-    %% TODO - allow log path to be overridden rather than force script to be run from miner dir
-    %% TODO - finalise grep search terms
-    POCErrors = os:cmd("grep -E \"error.*miner_poc|miner_poc.*error\" ./log/console.log | tail -n" ++ Count),
-    TxnErrors = os:cmd("grep -E \"error.*blockchain_txn|blockchain_txn.*error\" ./log/console.log | tail -n" ++ Count),
-    GenErrors = os:cmd("grep -E \"error\" | grep -Eiv \"blockchain_txn|miner_poc\" ./log/console.log | tail -n" ++ Count),
-    {ok, [POCErrors], [TxnErrors], [GenErrors]}.
+get_log_errors(ErrorCount, ScanRange)->
+    {ok, BaseDir} = file:get_cwd(),
+    LogPath = lists:concat([BaseDir, "/log/console.log"]),
+
+    TxnErrors = os:cmd(          "tail -n" ++ ScanRange ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error.*blockchain_txn|blockchain_txn.*error\""
+                                 ),
+
+    POCErrors = os:cmd(          "tail -n" ++ ScanRange ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error.*miner_poc|miner_poc.*error|error.*blockchain_poc|blockchain_poc.*error\""
+                                 ),
+
+    GenErrors = os:cmd(          "tail -n" ++ ScanRange  ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error\" | "
+                                 "grep -Ev \"blockchain_txn|miner_poc|blockchain_poc|absorbing\""
+                                 ),
+
+    {[POCErrors], [TxnErrors], [GenErrors]}.
 
 get_uptime()->
     {UpTimeMS, _} = statistics(wall_clock),
@@ -313,7 +334,9 @@ get_gateway_info(Chain, PubKey)->
         {error, _} ->
             "gateway not found in ledger";
         {ok, {GatewayAddr, Gateway}} ->
-            lists:concat("gateway found in ledger, location: ", GatewayAddr:location(Gateway))
+            GWLoc = GatewayAddr:location(Gateway),
+            GWOwnAddr = GatewayAddr:owner_address(Gateway),
+            lists:concat(["Gateway location: ", GWLoc, "Ownder address: ", GWOwnAddr])
     end.
 
 format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
