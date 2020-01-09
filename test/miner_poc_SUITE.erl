@@ -16,6 +16,9 @@
     poc_dist_v2_test/1,
     poc_dist_v4_test/1,
     poc_dist_v4_partitioned_test/1,
+    poc_dist_v6_test/1,
+    poc_dist_v6_partitioned_test/1,
+    poc_dist_v6_partitioned_lying_test/1,
     poc_dist_v5_test/1,
     poc_dist_v5_partitioned_test/1,
     poc_dist_v5_partitioned_lying_test/1,
@@ -44,6 +47,9 @@ all() ->
      poc_dist_v5_test,
      poc_dist_v5_partitioned_test,
      poc_dist_v5_partitioned_lying_test,
+     poc_dist_v6_test,
+     poc_dist_v6_partitioned_test,
+     poc_dist_v6_partitioned_lying_test,
      restart_test].
 
 init_per_testcase(basic_test, Config) -> Config;
@@ -114,6 +120,18 @@ poc_dist_v5_partitioned_test(Config) ->
 poc_dist_v5_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     run_dist_with_params(poc_dist_v5_partitioned_lying_test, Config, maps:put(?poc_version, 5, CommonPOCVars)).
+
+poc_dist_v6_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v6_test, Config, maps:put(?poc_version, 6, CommonPOCVars)).
+
+poc_dist_v6_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v6_partitioned_test, Config, maps:put(?poc_version, 6, CommonPOCVars)).
+
+poc_dist_v6_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v6_partitioned_lying_test, Config, maps:put(?poc_version, 6, CommonPOCVars)).
 
 basic_test(Config) ->
     PrivDir = proplists:get_value(priv_dir, Config),
@@ -546,41 +564,12 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap) ->
+    do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
-    Miners = proplists:get_value(miners, Config),
-    %% Print scores before we begin the test
-    InitialScores = gateway_scores(Config),
-    ct:pal("InitialScores: ~p", [InitialScores]),
-    %% Print scores before we begin the test
-    InitialBalances = balances(Config),
-    ct:pal("InitialBalances: ~p", [InitialBalances]),
-    %% Check that every miner has issued a challenge
-    ?assert(check_all_miners_can_challenge(Miners)),
-    %% Check that we have atleast more than one request
-    %% If we have only one request, there's no guarantee
-    %% that the paths would eventually grow
-    ?assert(check_multiple_requests(Miners)),
-    %% We also wait for N*3 receipts here just to be triply certain.
-    %% The extra receipt should not have multi element path
-    ?assert(check_atleast_k_receipts(Miners, 3*length(Miners))),
-    %% Since we have two static location partitioned networks, where
-    %% both are lying about their distances, the paths should
-    %% never get longer than 1
-    ?assert(check_partitioned_lying_path_growth(Miners)),
-    %% Print scores after execution
-    FinalScores = gateway_scores(Config),
-    ct:pal("FinalScores: ~p", [FinalScores]),
-    %% Print rewards
-    Rewards = get_rewards(Config),
-    ct:pal("Rewards: ~p", [Rewards]),
-    %% Print balances after execution
-    FinalBalances = balances(Config),
-    ct:pal("FinalBalances: ~p", [FinalBalances]),
-    %% There should be no poc_witness or poc_challengees rewards
-    ?assert(check_no_poc_rewards(Rewards)),
-    %% also check that the scores have not changed at all
-    ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
-    ok;
+    do_common_partition_lying_checks(Config);
+exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
+    do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
@@ -633,8 +622,13 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
+    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v6_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v5_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
@@ -1085,3 +1079,39 @@ check_no_poc_rewards(RewardsTxns) ->
                           T == poc_challengees orelse T == poc_witnesses
                   end,
                   RewardTypes).
+
+do_common_partition_lying_checks(Config) ->
+    Miners = proplists:get_value(miners, Config),
+    %% Print scores before we begin the test
+    InitialScores = gateway_scores(Config),
+    ct:pal("InitialScores: ~p", [InitialScores]),
+    %% Print scores before we begin the test
+    InitialBalances = balances(Config),
+    ct:pal("InitialBalances: ~p", [InitialBalances]),
+    %% Check that every miner has issued a challenge
+    ?assert(check_all_miners_can_challenge(Miners)),
+    %% Check that we have atleast more than one request
+    %% If we have only one request, there's no guarantee
+    %% that the paths would eventually grow
+    ?assert(check_multiple_requests(Miners)),
+    %% We also wait for N*3 receipts here just to be triply certain.
+    %% The extra receipt should not have multi element path
+    ?assert(check_atleast_k_receipts(Miners, 3*length(Miners))),
+    %% Since we have two static location partitioned networks, where
+    %% both are lying about their distances, the paths should
+    %% never get longer than 1
+    ?assert(check_partitioned_lying_path_growth(Miners)),
+    %% Print scores after execution
+    FinalScores = gateway_scores(Config),
+    ct:pal("FinalScores: ~p", [FinalScores]),
+    %% Print rewards
+    Rewards = get_rewards(Config),
+    ct:pal("Rewards: ~p", [Rewards]),
+    %% Print balances after execution
+    FinalBalances = balances(Config),
+    ct:pal("FinalBalances: ~p", [FinalBalances]),
+    %% There should be no poc_witness or poc_challengees rewards
+    ?assert(check_no_poc_rewards(Rewards)),
+    %% also check that the scores have not changed at all
+    ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
+    ok.
