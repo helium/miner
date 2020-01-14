@@ -201,7 +201,7 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
     {ok, ChallengerGw} = blockchain_ledger_v1:find_gateway_info(ChallengerAddr, Ledger),
     case blockchain_ledger_gateway_v2:location(ChallengerGw) of
         undefined ->
-            lager:warning("poc_v4 no challenger location, back to requesting"),
+            lager:warning("poc no challenger location, back to requesting"),
             {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
         ChallengerLoc ->
             Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),

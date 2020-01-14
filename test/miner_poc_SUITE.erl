@@ -966,9 +966,9 @@ check_multiple_requests(Miners) ->
                 N when N > 200 ->
                     false;
                 N ->
-                    true = wait_until_height(Miners, N)
-            end,
-            check_multiple_requests(Miners);
+                    true = wait_until_height(Miners, N),
+                    check_multiple_requests(Miners)
+            end;
         true ->
             true
     end.
@@ -990,9 +990,9 @@ check_atleast_k_receipts(Miners, K) ->
                 N when N > 200 ->
                     false;
                 N ->
-                    true = wait_until_height(Miners, N)
-            end,
-            check_atleast_k_receipts(Miners, K);
+                    true = wait_until_height(Miners, N),
+                    check_atleast_k_receipts(Miners, K)
+            end;
         true ->
             true
     end.
