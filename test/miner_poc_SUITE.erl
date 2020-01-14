@@ -962,7 +962,12 @@ check_multiple_requests(Miners) ->
             %% wait more
             ct:pal("Don't have multiple requests yet..."),
             ct:pal("RequestCounter: ~p", [RequestCounter]),
-            true = wait_until_height(Miners, get_current_height(Miners) + 50),
+            case get_current_height(Miners) + 10 of
+                N when N > 200 ->
+                    false;
+                N ->
+                    true = wait_until_height(Miners, N)
+            end,
             check_multiple_requests(Miners);
         true ->
             true
@@ -981,7 +986,12 @@ check_atleast_k_receipts(Miners, K) ->
             %% wait more
             ct:pal("Don't have receipts from each miner yet..."),
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
-            true = wait_until_height(Miners, get_current_height(Miners) + 50),
+            case get_current_height(Miners) + 10 of
+                N when N > 200 ->
+                    false;
+                N ->
+                    true = wait_until_height(Miners, N)
+            end,
             check_atleast_k_receipts(Miners, K);
         true ->
             true
