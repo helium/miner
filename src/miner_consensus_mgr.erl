@@ -48,7 +48,10 @@
 %%%===================================================================
 
 start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
+    %% The consensus manager can generate quite a bunch of garbage and then go to sleep
+    %% which leaves the garbage uncollected. This option tells the gen_server to hibernate
+    %% after 5 seconds of not receiving a message, which triggers a memory compaction.
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Args, [{hibernate_after, 5000}]).
 
 dkg_status() ->
     case gen_server:call(?MODULE, dkg_group, 60000) of
