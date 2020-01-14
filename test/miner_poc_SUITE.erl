@@ -142,15 +142,15 @@ poc_dist_v6_partitioned_lying_test(Config) ->
 
 poc_dist_v7_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(poc_dist_v6_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v7_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
 
 poc_dist_v7_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(poc_dist_v6_partitioned_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v7_partitioned_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
 
 poc_dist_v7_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    run_dist_with_params(poc_dist_v6_partitioned_lying_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+    run_dist_with_params(poc_dist_v7_partitioned_lying_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
 
 basic_test(Config) ->
     PrivDir = proplists:get_value(priv_dir, Config),
@@ -645,10 +645,15 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
+    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v7_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v6_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
