@@ -238,17 +238,10 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
                             {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})}
                     end;
                 {ok, V} ->
-                    case blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars) of
-                        {error, no_target} ->
-                            lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
-                            lager:info("POCVersion: ~p~n", [V]),
-                            lager:info("poc_v7 no target found, back to requesting"),
-                            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
-                        {ok, TargetPubkeyBin} ->
-                            lager:info("poc_v7 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
-                            self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
-                            {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})}
-                    end
+                    {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
+                    lager:info("poc_v7 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
+                    self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
+                    {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})}
             end
     end;
 targeting(EventType, EventContent, Data) ->
