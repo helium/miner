@@ -239,7 +239,7 @@ targeting(info, {target, Entropy, Height, Ledger}, Data) ->
                     end;
                 {ok, V} ->
                     {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
-                    lager:info("poc_v7 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
+                    lager:info("poc_v7 (~p) target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
                     self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                     {next_state, challenging, save_data(Data#data{state=challenging, challengees=[]})}
             end
