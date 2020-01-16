@@ -85,7 +85,7 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 start_link(Args) ->
-    gen_statem:start_link({local, ?SERVER}, ?SERVER, Args, []).
+    gen_statem:start_link({local, ?SERVER}, ?SERVER, Args, [{hibernate_after, 5000}]).
 
 receipt(Data) ->
     gen_statem:cast(?SERVER, {receipt, Data}).

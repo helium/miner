@@ -95,7 +95,7 @@ inc_tv(Incr) ->
 %% ------------------------------------------------------------------
 
 start_link(Args) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Args, [{hibernate_after, 5000}]).
 
 %%--------------------------------------------------------------------
 %% @doc
