@@ -16,12 +16,15 @@
     poc_dist_v2_test/1,
     poc_dist_v4_test/1,
     poc_dist_v4_partitioned_test/1,
-    poc_dist_v6_test/1,
-    poc_dist_v6_partitioned_test/1,
-    poc_dist_v6_partitioned_lying_test/1,
     poc_dist_v5_test/1,
     poc_dist_v5_partitioned_test/1,
     poc_dist_v5_partitioned_lying_test/1,
+    poc_dist_v6_test/1,
+    poc_dist_v6_partitioned_test/1,
+    poc_dist_v6_partitioned_lying_test/1,
+    poc_dist_v7_test/1,
+    poc_dist_v7_partitioned_test/1,
+    poc_dist_v7_partitioned_lying_test/1,
     restart_test/1
 ]).
 
@@ -39,17 +42,21 @@
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [basic_test,
-     poc_dist_v1_test,
-     poc_dist_v2_test,
-     poc_dist_v4_test,
-     poc_dist_v4_partitioned_test,
-     poc_dist_v5_test,
-     poc_dist_v5_partitioned_test,
-     poc_dist_v5_partitioned_lying_test,
+    [
+     basic_test,
+     %% poc_dist_v1_test,
+     %% poc_dist_v2_test,
+     %% poc_dist_v4_test,
+     %% poc_dist_v4_partitioned_test,
+     %% poc_dist_v5_test,
+     %% poc_dist_v5_partitioned_test,
+     %% poc_dist_v5_partitioned_lying_test,
      poc_dist_v6_test,
      poc_dist_v6_partitioned_test,
      poc_dist_v6_partitioned_lying_test,
+     poc_dist_v7_test,
+     poc_dist_v7_partitioned_test,
+     poc_dist_v7_partitioned_lying_test,
      restart_test].
 
 init_per_testcase(basic_test, Config) -> Config;
@@ -132,6 +139,18 @@ poc_dist_v6_partitioned_test(Config) ->
 poc_dist_v6_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     run_dist_with_params(poc_dist_v6_partitioned_lying_test, Config, maps:put(?poc_version, 6, CommonPOCVars)).
+
+poc_dist_v7_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v7_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+
+poc_dist_v7_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v7_partitioned_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+
+poc_dist_v7_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    run_dist_with_params(poc_dist_v7_partitioned_lying_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
 
 basic_test(Config) ->
     PrivDir = proplists:get_value(priv_dir, Config),
@@ -564,10 +583,14 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap) ->
+    do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap) ->
     do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     do_common_partition_lying_checks(Config);
+exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap) ->
+    do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
@@ -622,10 +645,15 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
+    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v7_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v6_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
@@ -934,8 +962,13 @@ check_multiple_requests(Miners) ->
             %% wait more
             ct:pal("Don't have multiple requests yet..."),
             ct:pal("RequestCounter: ~p", [RequestCounter]),
-            true = wait_until_height(Miners, get_current_height(Miners) + 50),
-            check_multiple_requests(Miners);
+            case get_current_height(Miners) + 10 of
+                N when N > 200 ->
+                    false;
+                N ->
+                    true = wait_until_height(Miners, N),
+                    check_multiple_requests(Miners)
+            end;
         true ->
             true
     end.
@@ -953,8 +986,13 @@ check_atleast_k_receipts(Miners, K) ->
             %% wait more
             ct:pal("Don't have receipts from each miner yet..."),
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
-            true = wait_until_height(Miners, get_current_height(Miners) + 50),
-            check_atleast_k_receipts(Miners, K);
+            case get_current_height(Miners) + 10 of
+                N when N > 200 ->
+                    false;
+                N ->
+                    true = wait_until_height(Miners, N),
+                    check_atleast_k_receipts(Miners, K)
+            end;
         true ->
             true
     end.
@@ -1017,6 +1055,7 @@ common_poc_vars(Config) ->
       ?poc_v4_target_prob_edge_wt => 0.2,
       ?poc_v4_target_prob_score_wt => 0.8,
       ?poc_v4_target_score_curve => 5,
+      ?poc_target_hex_parent_res => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
 do_common_partition_checks(Config) ->
