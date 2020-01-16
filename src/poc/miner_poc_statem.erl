@@ -606,7 +606,7 @@ create_request(Address, BlockHash, Ledger) ->
     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     {blockchain_txn:sign(Tx, SigFun), Keys, Secret}.
 
--spec find_request(binary(), data()) -> ok | {error, any()}.
+-spec find_request(binary(), data()) -> {ok, blockchain_block:block()} | {error, any()}.
 find_request(BlockHash, #data{blockchain=Blockchain,
                               address=Challenger,
                               secret=Secret,
