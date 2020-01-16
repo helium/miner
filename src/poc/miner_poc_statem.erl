@@ -387,13 +387,10 @@ handle_targetting(Entropy, Height, Ledger, Data) ->
                                 lager:info("POCVersion: ~p~n", [V]),
                                 lager:info("GatewayScores: ~p~n", [GatewayScores]),
                                 lager:info("poc_v4 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
-                                handle_challenging(Entropy, TargetPubkeyBin, GatewayScores, Height, Ledger, Vars, Data#data{challengees=[]});
-                            {ok, V} ->
-                                {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
-                                lager:info("poc_v7 (~p) target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
-                                handle_challenging(Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
+                                handle_challenging(Entropy, TargetPubkeyBin, GatewayScores, Height, Ledger, Vars, Data#data{challengees=[]})
                         end
-                end.
+                end
+    end.
 
 handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retry=Retry,
                                                                             onion_keys=OnionKey,
