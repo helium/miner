@@ -359,7 +359,7 @@ handle_targetting(Entropy, Height, Ledger, Data) ->
         ChallengerLoc ->
             Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
 
-                case blockchain:config(poc_version, Ledger) of
+                case blockchain:config(?poc_version, Ledger) of
                     {ok, V} when V < 4 ->
                         case blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()) of
                             {Target, Gateways} ->
@@ -406,7 +406,7 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
     %% spawn of the path building and have it return a response when its ready
     {Pid, Ref} =
     spawn_monitor(fun() ->
-                          case blockchain:config(poc_version, Ledger) of
+                          case blockchain:config(?poc_version, Ledger) of
                               {ok, V} when V < 4 ->
                                   Self ! {Attempt, blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger)};
                               {ok, V} when V < 7 ->
