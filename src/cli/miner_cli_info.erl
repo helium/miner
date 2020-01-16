@@ -6,9 +6,14 @@
 
 -behavior(clique_handler).
 
+
 -export([register_cli/0]).
 
 -export([get_info/0]).
+
+
+-define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
+-define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
 
 register_cli() ->
     register_all_usage(),
@@ -24,7 +29,8 @@ register_all_usage() ->
                    info_in_consensus_usage(),
                    info_name_usage(),
                    info_block_age_usage(),
-                   info_p2p_status_usage()
+                   info_p2p_status_usage(),
+                   info_summary_usage()
                   ]).
 
 register_all_cmds() ->
@@ -37,7 +43,8 @@ register_all_cmds() ->
                    info_in_consensus_cmd(),
                    info_name_cmd(),
                    info_block_age_cmd(),
-                   info_p2p_status_cmd()
+                   info_p2p_status_cmd(),
+                   info_summary_cmd()
                   ]).
 %%
 %% info
@@ -51,6 +58,7 @@ info_usage() ->
       "  name - Shows the name of this miner.\n"
       "  block_age - Get age of the latest block in the chain, in seconds.\n"
       "  p2p_status - Shows key peer connectivity status of this miner.\n"
+      "  summary - Get a collection of key data points for this miner.\n"
      ]
     ].
 
@@ -190,3 +198,169 @@ info_p2p_status(["info", "p2p_status"], [], []) ->
     [clique_status:table(lists:map(FormatResult, StatusResults))];
 info_p2p_status([_, _, _], [], []) ->
     usage.
+
+
+%%
+%% info summary
+%%
+
+info_summary_cmd() ->
+    [
+     [["info", "summary"], [], [], fun info_summary/3],
+     [["info", "summary"], [],
+      [{error_count, [  {shortname, "e"},
+                        {longname, "error_count"}]},
+       {scan_range, [   {shortname, "s"},
+                        {longname, "scan_range"}]}
+      ], fun info_summary/3]
+    ].
+
+info_summary_usage() ->
+    [["info", "summary"],
+     ["info summary \n\n",
+      "  Get a collection of key data points for this miner.\n\n"
+      "  Also returns the last " ++ ?DEFAULT_LOG_HIT_COUNT ++ " error log entries across 3 categories: Transactions, POCs and Other errors.\n"
+      "  By default the latest " ++ ?DEFAULT_LOG_SCAN_RANGE ++ " log entries are scanned and the most recent " ++ ?DEFAULT_LOG_HIT_COUNT ++ " hits for each category returned\n\n"
+      "Options\n\n"
+      "  -e, --error_count <count> "
+      "    Set the count of log entries to return per category)\n"
+      "  -s, --scan_range <range> "
+      "    Set the maximum number of log entries to scan\n\n"
+
+     ]
+    ].
+
+get_summary_info(ErrorCount, ScanRange)->
+    PubKey = blockchain_swarm:pubkey_bin(),
+    Chain = blockchain_worker:blockchain(),
+
+    %% get gateway info
+    {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(PubKey)),
+    Macs = get_mac_addrs(),
+    BlockAge = miner:block_age(),
+    Uptime = get_uptime(),
+    FirmwareVersion = get_firmware_version(),
+    GWInfo = get_gateway_info(Chain, PubKey),
+
+    % get height data
+    {ok, Height} = blockchain:height(Chain),
+    {ok, SyncHeight} = blockchain:sync_height(Chain),
+    SyncHeight0 = format_sync_height(SyncHeight, Height),
+
+    %% get epoch
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+
+    %% get peerbook count
+    Swarm = blockchain_swarm:swarm(),
+    Peerbook = libp2p_swarm:peerbook(Swarm),
+    PeerBookEntryCount = length(libp2p_peerbook:values(Peerbook)),
+
+    %% get recent error log entries
+    {POCErrors, TxnErrors, GenErrors} = get_log_errors(ErrorCount, ScanRange),
+
+    GeneralInfo =
+        [   {"miner name", MinerName},
+            {"mac addresses", Macs},
+            {"block age", BlockAge},
+            {"epoch", Epoch},
+            {"height", Height},
+            {"sync height", SyncHeight0},
+            {"uptime", Uptime},
+            {"peer book size", PeerBookEntryCount },
+            {"firmware version", FirmwareVersion},
+            {"gateway details", GWInfo}
+        ],
+    {GeneralInfo, POCErrors, TxnErrors, GenErrors}.
+
+info_summary(["info", "summary"], _Keys, Flags) ->
+    ErrorCount = proplists:get_value(error_count, Flags, ?DEFAULT_LOG_HIT_COUNT),
+    ScanRange = proplists:get_value(scan_range, Flags, ?DEFAULT_LOG_SCAN_RANGE),
+    do_info_summary(ErrorCount, ScanRange).
+
+do_info_summary(ErrorCount, ScanRange) ->
+    {GeneralInfo, POCErrorInfo,
+        TxnErrorInfo, GenErrorInfo} = get_summary_info(ErrorCount, ScanRange),
+
+    GeneralFormat =   fun({Name, Result}) ->
+                            [{name, Name}, {result, Result}]
+                      end,
+    [   clique_status:text("\n********************\nMiner General Info\n********************\n"),
+        clique_status:table(lists:map(GeneralFormat, GeneralInfo)),
+        clique_status:text("\n********************\nMiner P2P Info\n********************\n"),
+        hd(info_p2p_status(["info", "p2p_status"], [], [])),
+        clique_status:text("\n********************\nMiner log errors\n********************\n"),
+        clique_status:list(  "***** Transaction related errors *****\n\n", TxnErrorInfo),
+        clique_status:list(  "***** POC related errors         *****\n\n", POCErrorInfo),
+        clique_status:list(  "***** General errors             *****\n\n", GenErrorInfo)
+
+    ].
+
+
+get_mac_addrs()->
+    {ok, IFs} = inet:getifaddrs(),
+    Macs = format_macs_from_interfaces(IFs),
+    Macs.
+
+get_firmware_version()->
+    os:cmd("cat /etc/lsb_release").
+
+get_log_errors(ErrorCount, ScanRange)->
+    {ok, BaseDir} = file:get_cwd(),
+    LogPath = lists:concat([BaseDir, "/log/console.log"]),
+
+    TxnErrors = os:cmd(          "tail -n" ++ ScanRange ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error.*blockchain_txn|blockchain_txn.*error\""
+                                 ),
+
+    POCErrors = os:cmd(          "tail -n" ++ ScanRange ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error.*miner_poc|miner_poc.*error|error.*blockchain_poc|blockchain_poc.*error\""
+                                 ),
+
+    GenErrors = os:cmd(          "tail -n" ++ ScanRange  ++ " " ++ LogPath ++ " | sort -rn |"
+                                 "grep -m" ++ ErrorCount ++ " -E \"error\" | "
+                                 "grep -Ev \"blockchain_txn|miner_poc|blockchain_poc|absorbing\""
+                                 ),
+
+    {[POCErrors], [TxnErrors], [GenErrors]}.
+
+get_uptime()->
+    {UpTimeMS, _} = statistics(wall_clock),
+    UpTimeSec = (UpTimeMS div 1000) rem 1000000,
+    DaysTime = calendar:seconds_to_daystime(UpTimeSec),
+    format_days_time(DaysTime).
+
+get_gateway_info(Chain, PubKey)->
+    Ledger = blockchain:ledger(Chain),
+    case blockchain_ledger_v1:find_gateway_info(PubKey, Ledger) of
+        {error, _} ->
+            "gateway not found in ledger";
+        {ok, {GatewayAddr, Gateway}} ->
+            GWLoc = GatewayAddr:location(Gateway),
+            GWOwnAddr = GatewayAddr:owner_address(Gateway),
+            lists:concat(["Gateway location: ", GWLoc, "Ownder address: ", GWOwnAddr])
+    end.
+
+format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
+    integer_to_list(SyncHeight);
+format_sync_height(SyncHeight, _Height) ->
+    integer_to_list(SyncHeight) ++ "*".
+
+format_days_time({Days, {H, M, S}}) when Days < 0 ->
+    format_days_time({0, {H, M, S}});
+format_days_time({Days, {H, M, S}})->
+    lists:concat([Days, " Days, ",H, " Hours, ", M, " Minutes, ", S, " Seconds"]).
+
+format_macs_from_interfaces(IFs)->
+    lists:foldl(
+        fun({IFName, Prop}, Acc) ->
+            case proplists:get_value(hwaddr, Prop) of
+                undefined -> Acc;
+                HWAddr -> [IFName ++ " : " ++ format_hwaddr(HWAddr) ++ "\n" | Acc]
+            end
+        end,
+    [], IFs).
+
+format_hwaddr(HWAddr)->
+    HWAddr0 = [integer_to_list(B,16) || B <- HWAddr ],
+    lists:concat(HWAddr0).
