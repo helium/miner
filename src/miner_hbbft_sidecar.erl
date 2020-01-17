@@ -61,6 +61,7 @@ new_round(Buf, Txns) ->
 %%%===================================================================
 
 init([]) ->
+    erlang:process_flag(trap_exit, true),
     init(#state{});
 init(State) ->
     erlang:process_flag(trap_exit, true),
