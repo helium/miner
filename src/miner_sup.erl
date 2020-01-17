@@ -182,7 +182,8 @@ init(_Args) ->
                     radio_udp_send_port => RadioSendPort,
                     ecdh_fun => ECDHFun
                 },
-                [?WORKER(miner_onion_server, [OnionOpts])];
+                [?WORKER(miner_onion_server, [OnionOpts]),
+                 ?WORKER(miner_lora, [OnionOpts])];
             _ ->
                 []
         end,

@@ -55,8 +55,9 @@ init(client, _Conn, _Args) ->
     lager:info("init client with ~p", [_Args]),
     {ok, #state{}}.
 
-handle_data(_Type, _Bin, State) ->
-    lager:warning("~p got data ~p", [_Type, _Bin]),
+handle_data(_Type, Bin, State) ->
+    lager:warning("~p got data ~p", [_Type, Bin]),
+    miner_lora ! {send, Bin},
     {noreply, State}.
 
 handle_info(_Type, {send, Data}, State) ->
