@@ -138,7 +138,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    lager:debug("terminating...",[]),
+    lager:debug("terminating with reason ~p", [_Reason]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
