@@ -1,12 +1,5 @@
 -module(miner_router_SUITE).
 
--include_lib("common_test/include/ct.hrl").
--include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/inet.hrl").
--include_lib("helium_proto/src/pb/longfi_pb.hrl").
--include_lib("blockchain/include/blockchain_vars.hrl").
--include("miner_ct_macros.hrl").
-
 -export([
     init_per_testcase/2,
     end_per_testcase/2,
@@ -17,6 +10,13 @@
     basic/1
 ]).
 
+-include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/inet.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+-include("miner_ct_macros.hrl").
+-include("lora.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -90,6 +90,7 @@ basic(Config) ->
     [Owner| _Tail] = Miners,
     OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
 
+    application:ensure_all_started(throttle),
     application:ensure_all_started(ranch),
     application:set_env(lager, error_logger_flush_queue, false),
     application:ensure_all_started(lager),
@@ -132,22 +133,33 @@ basic(Config) ->
     {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
     {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),
 
-    Rx = #'LongFiRxPacket_pb'{
-        crc_check=true,
-        spreading= 'SF8',
-        oui=1,
-        device_id=1,
-        payload= <<"some data">>
-    },
-    Resp = #'LongFiResp_pb'{id=0, kind={rx, Rx}},
-    Packet = longfi_pb:encode_msg(Resp, 'LongFiResp_pb'),
-    ok = gen_udp:send(Sock, "127.0.0.1", P1, Packet),
-    ct:pal("SENT ~p", [{Resp, Packet}]),
+    Token = <<0, 0>>,
+    %% set up the gateway
+    gen_udp:send(Sock, {127, 0, 0, 1}, P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, 16#deadbeef:64/integer>>),
+    {ok, {{127,0,0,1}, P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
+
+
+    Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 1, 1, 0, <<"some data">>, #{})),
+    ok = gen_udp:send(Sock, "127.0.0.1",  P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
+                                                (jsx:encode(#{<<"rxpk">> =>
+                                                              [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
+                                                                 <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                 <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
+
+    ct:pal("SENT ~p", [Packet]),
     receive
         {simple_http_stream_test, Got} ->
-            {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
-            Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
-            ?assertMatch(Resp2, longfi_pb:decode_msg(Got, 'LongFiResp_pb')),
+            ct:pal("Got ~p", [Got]),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(Pubkey),
+            Thing = blockchain_state_channel_v1_pb:decode_msg(Got, blockchain_state_channel_message_v1_pb),
+            ct:pal("Thing ~p", [Thing]),
+            #blockchain_state_channel_message_v1_pb{msg={packet,
+                                                         #blockchain_state_channel_packet_v1_pb{hotspot=PubKeyBin,
+                                                                                                packet=#helium_packet_pb{oui=1,
+                                                                                                                         type=longfi,
+                                                                                                                         payload= Packet}}}} = Thing,
+            %{ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
+            %Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
             ok;
         _Other ->
             ct:pal("wrong data ~p", [_Other]),
