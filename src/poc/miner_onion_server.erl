@@ -40,7 +40,8 @@
     init/1,
     handle_call/3,
     handle_cast/2,
-    handle_info/2
+    handle_info/2,
+    terminate/2
 ]).
 
 
@@ -168,6 +169,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
+    erlang:process_flag(trap_exit, true),
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
     MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
     State = #state{
@@ -204,6 +206,10 @@ handle_cast(_Msg, State) ->
 handle_info(_Msg, State) ->
     lager:warning("unhandled Msg: ~p", [_Msg]),
     {noreply, State}.
+
+terminate(_Reason, _Pid) ->
+    lager:info("terminating ~p", [_Reason]),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

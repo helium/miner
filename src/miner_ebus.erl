@@ -43,6 +43,7 @@ send_signal(Signal, Status) ->
     gen_server:cast(?SERVER, {send_signal, Signal, Status}).
 
 init(_Args) ->
+    erlang:process_flag(trap_exit, true),
     erlang:register(?SERVER, self()),
     {ok, #state{}}.
 

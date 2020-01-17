@@ -57,6 +57,8 @@ stop() ->
 %%%===================================================================
 
 init([]) ->
+    erlang:process_flag(trap_exit, true),
+    lager:debug("starting...",[]),
     %% timeout for async startup
     {ok, #state{}, 0}.
 
@@ -136,6 +138,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    lager:debug("terminating...",[]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
