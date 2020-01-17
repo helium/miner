@@ -25,6 +25,9 @@
     poc_dist_v7_test/1,
     poc_dist_v7_partitioned_test/1,
     poc_dist_v7_partitioned_lying_test/1,
+    poc_dist_v8_test/1,
+    poc_dist_v8_partitioned_test/1,
+    poc_dist_v8_partitioned_lying_test/1,
     restart_test/1
 ]).
 
@@ -57,6 +60,9 @@ all() ->
      poc_dist_v7_test,
      poc_dist_v7_partitioned_test,
      poc_dist_v7_partitioned_lying_test,
+     poc_dist_v8_test,
+     poc_dist_v8_partitioned_test,
+     poc_dist_v8_partitioned_lying_test,
      restart_test].
 
 init_per_testcase(basic_test = TestCase, Config) ->
@@ -151,6 +157,21 @@ poc_dist_v7_partitioned_test(Config) ->
 poc_dist_v7_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     run_dist_with_params(poc_dist_v7_partitioned_lying_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
+
+poc_dist_v8_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v8),
+    run_dist_with_params(poc_dist_v8_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v8_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v8),
+    run_dist_with_params(poc_dist_v8_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v8_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v8),
+    run_dist_with_params(poc_dist_v8_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -582,12 +603,16 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap) ->
+    do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap) ->
     do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap) ->
     do_common_partition_lying_checks(Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
     do_common_partition_lying_checks(Config);
+exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap) ->
+    do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
@@ -645,12 +670,17 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
+    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v8_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v7_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
@@ -1154,3 +1184,15 @@ do_common_partition_lying_checks(Config) ->
     %% also check that the scores have not changed at all
     ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
     ok.
+
+extra_vars(poc_v8) ->
+    #{?poc_version => 8,
+      ?poc_good_bucket_low => -140,
+      ?poc_good_bucket_high => -90,
+      ?poc_v4_prob_rssi_wt => 0.1,
+      ?poc_v4_prob_time_wt => 0.1,
+      ?poc_v4_randomness_wt => 0.2,
+      ?poc_v4_prob_count_wt => 0.1,
+      ?poc_centrality_wt => 0.5};
+extra_vars(_) ->
+    {error, poc_v8_and_above_only}.
