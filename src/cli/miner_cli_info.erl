@@ -333,12 +333,12 @@ get_uptime()->
 get_gateway_info(Chain, PubKey)->
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_gateway_info(PubKey, Ledger) of
-        {error, _} ->
-            "gateway not found in ledger";
-        {ok, {GatewayAddr, Gateway}} ->
-            GWLoc = GatewayAddr:location(Gateway),
-            GWOwnAddr = GatewayAddr:owner_address(Gateway),
-            lists:concat(["Gateway location: ", GWLoc, "Ownder address: ", GWOwnAddr])
+        {ok, Gateway} ->
+            GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
+            GWOwnAddr = blockchain_ledger_gateway_v2:owner_address(Gateway),
+            lists:concat(["Gateway location: ", GWLoc, "Ownder address: ", GWOwnAddr]);
+        _ ->
+            "gateway not found in ledger"
     end.
 
 format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
