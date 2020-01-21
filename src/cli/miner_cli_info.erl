@@ -306,8 +306,8 @@ get_firmware_version()->
     os:cmd("cat /etc/lsb_release").
 
 get_log_errors(ErrorCount, ScanRange)->
-    {ok, BaseDir} = file:get_cwd(),
-    LogPath = lists:concat([BaseDir, "/log/console.log"]),
+    {ok, BaseDir} = application:get_env(lager, log_root),
+    LogPath = lists:concat([BaseDir, "/console.log"]),
 
     TxnErrors = os:cmd(          "tail -n" ++ ScanRange ++ " " ++ LogPath ++ " | sort -rn |"
                                  "grep -m" ++ ErrorCount ++ " -E \"error.*blockchain_txn|blockchain_txn.*error\""
