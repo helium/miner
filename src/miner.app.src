@@ -26,7 +26,8 @@
     xmerl,  %% nat_upnp has a missing dep
     helium_proto,
     jsx,
-    kvc
+    kvc,
+    longfi
    ]},
   {included_applications, [blockchain]},
   {env,[]},

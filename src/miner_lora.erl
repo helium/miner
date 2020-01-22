@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/1]).
+-export([start_link/1, send/5]).
 
 -export([init/1,
          handle_call/3,
@@ -48,6 +48,9 @@
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
+send(Payload, When, Freq, DataRate, Power) ->
+    gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power}, 11000).
+
 init(Args) ->
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
     MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
@@ -57,24 +60,45 @@ init(Args) ->
                 miner_name = unicode:characters_to_binary(MinerName, utf8)
                }}.
 
+handle_call({send, Payload, When, Freq, DataRate, Power}, From, State) ->
+    Token = mk_token(State),
+    %% TODO we should check this for regulatory compliance
+    Packet = jsx:encode(#{<<"txpk">> => #{
+                              <<"imme">> => When == immediate,
+                              <<"powe">> => Power,
+                              %% TODO gps time?
+                              <<"tmst">> => When,
+                              <<"freq">> => Freq,
+                              <<"modu">> => <<"LORA">>,
+                              <<"datr">> => DataRate,
+                              <<"size">> => byte_size(Payload),
+                              <<"data">> => base64:encode(Payload)
+                             }}),
+    Gateway = element(2, hd(maps:to_list(State#state.gateways))),
+    ok = gen_udp:send(State#state.socket, Gateway#gateway.ip, Gateway#gateway.port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, Packet/binary>>),
+    %% TODO a better timeout would be good here
+    Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+    {noreply, State#state{packet_timers = maps:put(Token, {send, Ref, From}, State#state.packet_timers)}};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info({tx_timeout, Token}, State) ->
+    case maps:find(Token, State#state.packet_timers) of
+        {ok, {send, _Ref, From}} ->
+            gen_server:reply(From, {error, timeout});
+        error ->
+            ok
+    end,
+    {noreply, State#state{packet_timers = maps:remove(Token, State#state.packet_timers)}};
 handle_info({udp, Socket, IP, Port, Packet}, State = #state{socket=Socket}) ->
     State2 = handle(Packet, IP, Port, State),
     {noreply, State2};
 handle_info({udp_passive, Socket}, State = #state{socket=Socket}) ->
     inet:setopts(Socket, [{active, 100}]),
     {noreply, State};
-handle_info({send, Packet}, State) ->
-    Token = crypto:strong_rand_bytes(2),
-    Gateway = element(2, hd(maps:to_list(State#state.gateways))),
-    ok = gen_udp:send(State#state.socket, Gateway#gateway.ip, Gateway#gateway.port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, Packet/binary>>),
-    Ref = make_ref(),
-    {noreply, State#state{packet_timers = maps:put(Token, {send, Ref, join1_window, Packet, <<>>}, State#state.packet_timers)}};
 handle_info(Msg, State) ->
     lager:debug("unexpected message ~p", [Msg]),
     {noreply, State}.
@@ -109,44 +133,48 @@ handle(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-un
                       #gateway{mac=MAC, ip=IP, port=Port, received=1}
               end,
     State#state{gateways = maps:put(MAC, Gateway, State#state.gateways)};
-handle(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?TX_ACK:8/integer-unsigned, MAC:64/integer, MaybeJSON/binary>>, _IP, _Port, State0) ->
+handle(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?TX_ACK:8/integer-unsigned, _MAC:64/integer, MaybeJSON/binary>>, _IP, _Port, State) ->
     lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
-    case maps:find(Token, State0#state.packet_timers) of
-        {ok, {Ref, Timestamp, _Count}} ->
-            RTT = timer:now_diff(os:timestamp(), Timestamp),
-            lager:info("RTT is ~p ", [RTT/1000.0]),
+    case maps:find(Token, State#state.packet_timers) of
+        {ok, {send, Ref, From}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
             erlang:cancel_timer(Ref),
-            State = State0#state{packet_timers = maps:remove(Token, State0#state.packet_timers)},
-            Gateway0 = maps:get(MAC, State#state.gateways),
-            Gateway1 = Gateway0#gateway{rtt_samples = [RTT|Gateway0#gateway.rtt_samples]},
-            %% don't let the RTT go lower than 50ms
-            Gateway2 = Gateway1#gateway{rtt = max(50000, trunc(lists:sum(Gateway1#gateway.rtt_samples)/length(Gateway1#gateway.rtt_samples)))},
-            State#state{gateways = maps:put(MAC, Gateway2, State#state.gateways)};
-        {ok, {send, Ref, _Window, _, _}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
-            erlang:cancel_timer(Ref),
-            State0;
-        {ok, {send, Ref, _Window, _InPkt, _OutPkt}} ->
+            gen_server:reply(From, ok),
+            State#state{packet_timers = maps:remove(Token, State#state.packet_timers)};
+        {ok, {send, Ref, From}} ->
             %% likely some kind of error here
             erlang:cancel_timer(Ref),
-            State = State0#state{packet_timers = maps:remove(Token, State0#state.packet_timers)},
-            case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
+            Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
-                    lager:info("packet sent ok");
+                    lager:info("packet sent ok"),
+                    ok;
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
-                    lager:info("collision");
-                    %retry_packet(MAC, get_next_window(Window), InPkt, OutPkt, State);
+                    lager:info("collision"),
+                    {error, collision};
                 <<"TOO_LATE">> ->
-                    lager:info("too late");
-                    %% check if join2/rx2 is OK
-                    %retry_packet(MAC, get_next_window(Window), InPkt, OutPkt, State);
+                    lager:info("too late"),
+                    {error, too_late};
+                <<"TOO_EARLY">> ->
+                    lager:info("too early"),
+                    {error, too_early};
+                <<"TX_FREQ">> ->
+                    lager:info("tx frequency not supported"),
+                    {error, bad_tx_frequency};
+                <<"TX_POWER">> ->
+                    lager:info("tx power not supported"),
+                    {error, bad_tx_power};
+                <<"GPL_UNLOCKED">> ->
+                    lager:info("transmitting on GPS time not supported because no GPS lock"),
+                    {error, no_gps_lock};
                 Error ->
                     %% any other errors are pretty severe
-                    lager:error("Failure enqueing packet for gateway ~p", [Error])
+                    lager:error("Failure enqueing packet for gateway ~p", [Error]),
+                    {error, {unknown, Error}}
             end,
-            State;
+            gen_server:reply(From, Reply),
+            State#state{packet_timers = maps:remove(Token, State#state.packet_timers)};
         error ->
-            State0
+            State
     end;
 handle(Packet, _IP, _Port, State) ->
     lager:info("unhandled packet ~p", [Packet]),
@@ -167,8 +195,21 @@ handle_packet([], _Gateway, State) ->
     State;
 handle_packet([Packet|Tail], Gateway, State) ->
     Data = base64:decode(proplists:get_value(<<"data">>, Packet)),
-    lager:notice("Routing ~p", [route(Data)]),
-    erlang:spawn(fun() -> send_to_router(State#state.miner_name, {route(Data), Packet})  end),
+    case route(Data) of
+        error ->
+            ok;
+        {onion, Payload} ->
+            %% onion server
+            miner_onion_server:decrypt_radio(Payload, proplists:get_value(<<"rssi">>, Packet),
+                                            proplists:get_value(<<"lsnr">>, Packet),
+                                            %% TODO we might want to send GPS time here, if available
+                                            proplists:get_value(<<"tmst">>, Packet),
+                                            proplists:get_value(<<"freq">>, Packet),
+                                            proplists:get_value(<<"datr">>, Packet));
+        OUI ->
+            lager:notice("Routing ~p", [OUI]),
+            erlang:spawn(fun() -> send_to_router(State#state.miner_name, {OUI, Packet})  end)
+    end,
     handle_packet(Tail, Gateway, State).
 
 
@@ -189,9 +230,24 @@ route(<<_MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, F
             OUI
     end;
 route(Pkt) ->
-    lager:info("Unknown packet ~w", [Pkt]),
-    %% TODO longfi
-    error.
+    case longfi:deserialize(Pkt) of
+        {ok, LongFiPkt} ->
+            %% hello longfi, my old friend
+            case longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
+                true ->
+                    %<<IV:2/binary,
+                    %OnionCompactKey:33/binary,
+                    %Tag:4/binary,
+                    %CipherText/binary>> = Payload,
+                    %decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
+                    %miner_onion_server:decrypt_radio(Payload, 
+                    {onion, longfi:payload(LongFiPkt)};
+                false ->
+                    longfi:oui(LongFiPkt)
+            end;
+        error ->
+            error
+    end.
 
 reverse(Bin) -> reverse(Bin, <<>>).
 reverse(<<>>, Acc) -> Acc;
@@ -204,8 +260,6 @@ sort_packets(Packets) ->
                end, Packets),
     R.
 
-send_to_router(_Name, {error, _Packet}) ->
-    ok;
 send_to_router(_Name, {OUI, Packet}) ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -254,5 +308,12 @@ send_to_router(Swarm, Address, Packet) ->
                 {error, _Reason} ->
                     lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
             end
+    end.
+
+mk_token(State) ->
+    Token = crypto:strong_rand_bytes(2),
+    case maps:is_key(Token, State#state.packet_timers) of
+        true -> mk_token(State);
+        false -> Token
     end.
 

@@ -7,19 +7,16 @@
 
 -behavior(gen_server).
 
--include_lib("helium_proto/src/pb/longfi_pb.hrl").
-
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    send/1,
-    decrypt/2,
+    decrypt_p2p/2,
+    decrypt_radio/6,
     retry_decrypt/7,
     send_receipt/6,
-    send_witness/4,
-    send_to_router/2
+    send_witness/4
 ]).
 
 -ifdef(TEST).
@@ -51,19 +48,14 @@
 -define(BLOCK_RETRY_COUNT, 10).
 
 -record(state, {
-    udp_socket :: gen_udp:socket(),
-    udp_send_port :: pos_integer(),
-    udp_send_ip :: inet:address(),
     compact_key :: ecc_compact:compact_key(),
     ecdh_fun,
     miner_name :: binary(),
     sender :: undefined | {pid(), term()},
-    packet_id = 0 :: non_neg_integer(),
-    pending_transmits = [] ::  [{non_neg_integer(), reference()}],
-    ciphertexts = [] :: [binary()]
+    packet_id = 0 :: non_neg_integer()
 }).
 
--define(CHANNELS, [916.2e6, 916.4e6, 916.6e6, 916.8e6, 917.0e6, 920.2e6, 920.4e6, 920.6e6]).
+-define(CHANNELS, [911.9e6, 912.1e6, 912.3e6, 912.5e6, 912.7e6, 912.9e6, 913.1e6, 913.3e6]).
 -define(TX_POWER, 28). %% 28 db
 
 %% ------------------------------------------------------------------
@@ -72,13 +64,13 @@
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
--spec send(binary()) -> ok.
-send(Data) ->
-    gen_server:call(?MODULE, {send, Data}).
+-spec decrypt_p2p(binary(), pid()) -> ok.
+decrypt_p2p(Onion, Stream) ->
+    gen_server:cast(?MODULE, {decrypt_p2_p2pp, Onion, Stream}).
 
--spec decrypt(binary(), pid()) -> ok.
-decrypt(Onion, Stream) ->
-    gen_server:cast(?MODULE, {decrypt, Onion, Stream}).
+%-spec decrypt_radio(binary()) -> ok.
+decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Spreading) ->
+    gen_server:cast(?MODULE, {decrypt_radio, Packet, RSSI, SNR, Timestamp, Freq, Spreading}).
 
 retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream) ->
     gen_server:cast(?MODULE, {retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}).
@@ -176,74 +168,14 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     ),
     ok.
 
--spec send_to_router(binary(), any()) -> ok.
-send_to_router(Name, #'LongFiResp_pb'{kind={rx, #'LongFiRxPacket_pb'{oui=OUI}}}=Resp) ->
-    case blockchain_worker:blockchain() of
-        undefined ->
-            lager:warning("ingnored packet chain is undefined");
-        Chain ->
-            Ledger = blockchain:ledger(Chain),
-            Swarm = blockchain_swarm:swarm(),
-            Packet = longfi_pb:encode_msg(Resp#'LongFiResp_pb'{miner_name=Name}),
-            case blockchain_ledger_v1:find_routing(OUI, Ledger) of
-                {error, _Reason} ->
-                    case application:get_env(miner, default_router, undefined) of
-                        undefined ->
-                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
-                        Address ->
-                            send_to_router(Swarm, Address, Packet)
-                    end;
-                {ok, Routing} ->
-                    Addresses = blockchain_ledger_routing_v1:addresses(Routing),
-                    lager:debug("found addresses ~p", [Addresses]),
-                    lists:foreach(
-                        fun(BinAddress) ->
-                            Address = erlang:binary_to_list(BinAddress),
-                            send_to_router(Swarm, Address, Packet)
-                        end,
-                        Addresses
-                    )
-            end
-    end.
-
-send_to_router(Swarm, Address, Packet) ->
-    RegName = erlang:list_to_atom(Address),
-    case erlang:whereis(RegName) of
-        Stream when is_pid(Stream) ->
-            Stream ! {send, Packet},
-            lager:info("sent packet ~p to ~p", [Packet, Address]);
-        undefined ->
-            Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                                     Address,
-                                                     router_handler:version(),
-                                                     router_handler,
-                                                     []),
-            case Result of
-                {ok, Stream} ->
-                    Stream ! {send, Packet},
-                    catch erlang:register(RegName, Stream),
-                    lager:info("sent packet ~p to ~p", [Packet, Address]);
-                {error, _Reason} ->
-                    lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
-            end
-    end.
-
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
-    UDPPort = maps:get(radio_udp_bind_port, Args),
-    UDPIP = maps:get(radio_udp_bind_ip, Args),
-    UDPSendPort = maps:get(radio_udp_send_port, Args),
-    UDPSendIP = maps:get(radio_udp_send_ip, Args),
-    {ok, UDP} = gen_udp:open(UDPPort, [{ip, UDPIP}, {port, UDPPort}, binary, {active, once}, {reuseaddr, true}]),
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
     MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
     State = #state{
         compact_key = blockchain_swarm:pubkey_bin(),
-        udp_socket = UDP,
-        udp_send_port = UDPSendPort,
-        udp_send_ip = UDPSendIP,
         ecdh_fun = maps:get(ecdh_fun, Args),
         miner_name = unicode:characters_to_binary(MinerName, utf8)
     },
@@ -252,34 +184,20 @@ init(Args) ->
 
 handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefined ->
     {reply, {ok, CK}, State};
-handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_send_port=Port,
-                                        packet_id=ID, pending_transmits=Pendings }=State) ->
-    Fragmentation = application:get_env(miner, poc_fragmentation, true),
-    {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
-    Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-    UpLink = #'LongFiTxPacket_pb'{
-                oui = 0,
-                device_id = 1,
-                spreading=Spreading,
-                payload=Data
-               },
-    Req = #'LongFiReq_pb'{id=ID, kind={tx, UpLink}},
-    lager:info("sending ~p", [Req]),
-    Packet = longfi_pb:encode_msg(Req),
-    spawn(fun() ->
-                  %% sleep from 3-13 seconds before sending
-                  timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-                  gen_udp:send(Socket, IP, Port, Packet)
-          end),
-    {reply, ok, State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|Pendings]}};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({decrypt, <<IV:2/binary,
+handle_cast({decrypt_p2p, <<IV:2/binary,
                         OnionCompactKey:33/binary,
                         Tag:4/binary,
                         CipherText/binary>>, Pid}, State) ->
     NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, Pid, State),
+    {noreply, NewState};
+handle_cast({decrypt_radio, <<IV:2/binary,
+                        OnionCompactKey:33/binary,
+                        Tag:4/binary,
+                        CipherText/binary>>, RSSI, _SNR, _Timestamp, _Frequency, _Spreading}, State) ->
+    NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, undefined, State),
     {noreply, NewState};
 handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}, State) ->
     NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, State),
@@ -287,23 +205,6 @@ handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, St
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
-    lager:debug("got packet ~p", [Packet]),
-    NewState =
-        try longfi_pb:decode_msg(Packet, 'LongFiResp_pb') of
-            Resp ->
-                lager:debug("decoded packet ~p", [Resp]),
-                handle_packet(Resp, State)
-        catch
-            What:Why ->
-                lager:warning("Failed to handle radio packet ~p -- ~p:~p", [Packet, What, Why]),
-                State
-        end,
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, NewState};
-handle_info({tx_timeout, ID}, State=#state{pending_transmits=Pending}) ->
-    lager:warning("TX timeout for ~p", [ID]),
-    {noreply, State#state{pending_transmits=lists:keydelete(ID, 1, Pending)}};
 handle_info(_Msg, State) ->
     lager:warning("unhandled Msg: ~p", [_Msg]),
     {noreply, State}.
@@ -333,11 +234,7 @@ wait_for_block_(Fun, Count) ->
             wait_for_block_(Fun, Count - 1)
     end.
 
-decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun,
-                                                                         udp_socket=Socket,
-                                                                         udp_send_ip=IP,
-                                                                         udp_send_port=Port,
-                                                                         packet_id=ID}=State) ->
+decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     Chain = blockchain_worker:blockchain(),
@@ -368,31 +265,25 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             State;
         {ok, Data, NextPacket} ->
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
-            Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-            Fragmentation = application:get_env(miner, poc_fragmentation, true),
-            {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
-            UpLink = #'LongFiTxPacket_pb'{
-                oui=0,
-                device_id=1,
-                spreading=Spreading,
-                payload=NextPacket
-            },
-            Req = #'LongFiReq_pb'{id=ID, kind={tx, UpLink}},
-            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "sending ~p", [Req]),
-            Packet = longfi_pb:encode_msg(Req),
+            %Fragmentation = application:get_env(miner, poc_fragmentation, true),
+            %{Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
+            %% fingerprint with a blank key
+            Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 0, 1, 0, NextPacket, #{})),
+            %% deterministally pick a channel based on the layerdata
+            <<IntData:16/integer-unsigned-little>> = Data,
+            Freq = lists:nth((IntData rem 8) + 1, ?CHANNELS),
+            %timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
+            spawn(fun() -> miner_lora:send(Packet, immediate, Freq, 'SF10BW125', ?TX_POWER) end),
             erlang:spawn(
                 fun() ->
-                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream),
-                    timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-                    _ = gen_udp:send(Socket, IP, Port, Packet)
+                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)
                 end
             ),
-            State#state{packet_id=((ID+1) band 16#ffffffff), pending_transmits=[{ID, Ref}|State#state.pending_transmits]};
+            State;
         {error, Reason} ->
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
             State
     end,
-    ok = inet:setopts(Socket, [{active, once}]),
     NewState.
 
 -ifdef(EQC).
@@ -423,33 +314,6 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             %% TODO we might want to try all the PoCs here
             {error, too_many_pocs}
     end.
-
-
-% This is an onion packet cause oui/device_id = 0
-handle_packet(#'LongFiResp_pb'{id=_ID, kind={rx, #'LongFiRxPacket_pb'{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
-    <<IV:2/binary,
-      OnionCompactKey:33/binary,
-      Tag:4/binary,
-      CipherText/binary>> = Payload,
-    decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
-handle_packet(Resp = #'LongFiResp_pb'{kind={rx, _}}, #state{miner_name=Name}=State) ->
-    erlang:spawn(?MODULE, send_to_router, [Name, Resp]),
-    State;
-handle_packet(#'LongFiResp_pb'{id=ID, kind={tx_status, #'LongFiTxStatus_pb'{success=Success}}}, #state{pending_transmits=Pending}=State) ->
-    case lists:keyfind(ID, 1, Pending) of
-        {ID, Ref} ->
-            lager:info("packet transmission ~p completed with success ~p", [ID, Success]),
-            erlang:cancel_timer(Ref);
-        false ->
-            lager:info("got unknown packet transmission response ~p with success ~p", [ID, Success])
-    end,
-    State#state{pending_transmits=lists:keydelete(ID, 1, Pending)};
-handle_packet(#'LongFiResp_pb'{id=_ID, kind={parse_err, Error}}, State) ->
-    lager:warning("parse error (ID= ~p): ~p", [_ID, Error]),
-    State;
-handle_packet(#'LongFiResp_pb'{id=_ID, kind=_Kind}, State) ->
-    lager:warning("unknown (ID= ~p) (kind= ~p) packet ~p", [_ID, _Kind]),
-    State.
 
 
 -spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
