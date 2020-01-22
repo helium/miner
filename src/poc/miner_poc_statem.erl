@@ -154,7 +154,7 @@ requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined
 requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
     case allow_request(BlockHash, Data) of
         false ->
-            lager:info("request not allowed @ ~p", [BlockHash]),
+            lager:debug("request not allowed @ ~p", [BlockHash]),
             {keep_state, Data};
         true ->
             {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
@@ -199,7 +199,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% NOTE: if we crash out whilst handling targetting, effectively the POC is abandoned
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
-            handle_targetting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
+            handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
                                 Data#data{mining_timeout = ?MINING_TIMEOUT});
         {error, _Reason} ->
              case MiningTimeout > 0 of
@@ -348,7 +348,7 @@ handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
-handle_targetting(Entropy, Height, Ledger, Data) ->
+handle_targeting(Entropy, Height, Ledger, Data) ->
     %% Challenger details
     ChallengerAddr = blockchain_swarm:pubkey_bin(),
     {ok, ChallengerGw} = blockchain_ledger_v1:find_gateway_info(ChallengerAddr, Ledger),
@@ -429,7 +429,7 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
         {Attempt, {error, Reason}} ->
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
-            handle_targetting(Entropy, Height, Ledger, Data#data{retry=Retry-1});
+            handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1});
         {Attempt, {ok, Path}} ->
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
@@ -449,11 +449,11 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                     lager:info("selecting new target"),
-                    handle_targetting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
+                    handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
             end;
         {'DOWN', Ref, process, _Pid, Reason} ->
             lager:error("blockchain_poc_path went down ~p: ~p", [Reason, {Entropy, Target, Gateways, Height}]),
-            handle_targetting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
+            handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
     after Timeout ->
         erlang:demonitor(Ref, [flush]),
         erlang:exit(Pid, kill),
