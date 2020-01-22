@@ -20,6 +20,8 @@
 -define(FREQUENCY, 915).
 -define(TRANSMIT_POWER, 28).
 -define(MAX_ANTENNA_GAIN, 6).
+-define(ETA, 2).
+-define(ABS_RSSI, -50).
 
 start_link(MyPort, UDPPorts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [MyPort, UDPPorts], []).
@@ -58,8 +60,9 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
                         ct:pal("NOT sending from ~p to ~p -> ~p km", [OriginLocation, Location, Distance]),
                         ok;
                     false ->
-                        NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => FreeSpacePathLoss, <<"snr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
-                        ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, OriginLocation, Location, Distance, FreeSpacePathLoss]),
+                        ApproxRSSI = approx_rssi(Distance),
+                        NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ApproxRSSI, <<"snr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
+                        ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, OriginLocation, Location, Distance, ApproxRSSI]),
                         gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
                 end
         end,
@@ -74,3 +77,10 @@ handle_info(Msg, State) ->
 %% Local Helper functions
 %% ------------------------------------------------------------------
 
+%% dBm_to_mW(Power) ->
+%%     math:pow(10, Power/10).
+%% 
+%% mW_to_dBm(Power) ->
+%%     10 * math:log10(Power).
+approx_rssi(Distance) ->
+    ?ABS_RSSI - ?ETA * (10 * math:log10(Distance * 1000)).

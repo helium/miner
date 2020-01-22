@@ -33,6 +33,9 @@
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
 -define(NYLOCS, [631243922668565503, 631243922671147007, 631243922895615999, 631243922665907711]).
+-define(AUSTINLOCS1, [631781084745290239, 631781089167934463, 631781054839691775, 631781050465723903]).
+-define(AUSTINLOCS2, [631781452049762303, 631781453390764543, 631781452924144639, 631781452838965759]).
+-define(LALOCS, [631236297173835263, 631236292179769855, 631236329165333503, 631236328049271807]).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -670,8 +673,6 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
-gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
-    {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
@@ -680,7 +681,7 @@ gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v8_partitioned_test, _, _) ->
     %% These are taken from the ledger
-    {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
+    {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
 gen_locations(poc_dist_v7_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
@@ -693,6 +694,9 @@ gen_locations(poc_dist_v5_partitioned_test, _, _) ->
 gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
+gen_locations(poc_dist_v8_test, _, _) ->
+    %% Actual locations are the same as the claimed locations for the dist test
+    {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
 gen_locations(_TestCase, Addresses, VarMap) ->
     LocationJitter = case maps:get(?poc_version, VarMap, 1) of
                          V when V > 3 ->
@@ -1188,7 +1192,7 @@ do_common_partition_lying_checks(Config) ->
 extra_vars(poc_v8) ->
     #{?poc_version => 8,
       ?poc_good_bucket_low => -140,
-      ?poc_good_bucket_high => -90,
+      ?poc_good_bucket_high => -70,
       ?poc_v4_prob_rssi_wt => 0.1,
       ?poc_v4_prob_time_wt => 0.1,
       ?poc_v4_randomness_wt => 0.2,
