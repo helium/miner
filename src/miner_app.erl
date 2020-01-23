@@ -17,10 +17,12 @@
 start(_StartType, _StartArgs) ->
 
     GlobalOpts = application:get_env(rocksdb, global_opts, []),
-    {ok, Cache} = rocksdb:new_cache(lru, 32 * 1024 * 1024),
+    {ok, Cache} = rocksdb:new_cache(lru, 4 * 1024 * 1024),
+    {ok, BufferMgr} = rocksdb:new_write_buffer_manager(4 * 1024 * 1024, Cache),
     BBOpts = proplists:get_value(block_based_table_options, GlobalOpts, []),
     Opts1 = proplists:delete(block_based_table_options, GlobalOpts),
-    Opts = Opts1 ++ [{block_based_table_options,
+    Opts = Opts1 ++ [{write_buffer_manager, BufferMgr},
+                     {block_based_table_options,
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
