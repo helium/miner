@@ -7,7 +7,7 @@
 
 -behavior(gen_server).
 
--include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include_lib("helium_proto/src/pb/longfi_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -177,14 +177,14 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     ok.
 
 -spec send_to_router(binary(), any()) -> ok.
-send_to_router(Name, #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{oui=OUI}}}=Resp) ->
+send_to_router(Name, #'LongFiResp_pb'{kind={rx, #'LongFiRxPacket_pb'{oui=OUI}}}=Resp) ->
     case blockchain_worker:blockchain() of
         undefined ->
             lager:warning("ingnored packet chain is undefined");
         Chain ->
             Ledger = blockchain:ledger(Chain),
             Swarm = blockchain_swarm:swarm(),
-            Packet = helium_longfi_pb:encode_msg(Resp#helium_LongFiResp_pb{miner_name=Name}),
+            Packet = longfi_pb:encode_msg(Resp#'LongFiResp_pb'{miner_name=Name}),
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
                     case application:get_env(miner, default_router, undefined) of
@@ -257,15 +257,15 @@ handle_call({send, Data}, _From, #state{udp_socket=Socket, udp_send_ip=IP, udp_s
     Fragmentation = application:get_env(miner, poc_fragmentation, true),
     {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
     Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
-    UpLink = #helium_LongFiTxPacket_pb{
+    UpLink = #'LongFiTxPacket_pb'{
                 oui = 0,
                 device_id = 1,
                 spreading=Spreading,
                 payload=Data
                },
-    Req = #helium_LongFiReq_pb{id=ID, kind={tx, UpLink}},
+    Req = #'LongFiReq_pb'{id=ID, kind={tx, UpLink}},
     lager:info("sending ~p", [Req]),
-    Packet = helium_longfi_pb:encode_msg(Req),
+    Packet = longfi_pb:encode_msg(Req),
     spawn(fun() ->
                   %% sleep from 3-13 seconds before sending
                   timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
@@ -290,7 +290,7 @@ handle_cast(_Msg, State) ->
 handle_info({udp, Socket, IP, Port, Packet}, State = #state{udp_send_ip=IP, udp_send_port=Port}) ->
     lager:debug("got packet ~p", [Packet]),
     NewState =
-        try helium_longfi_pb:decode_msg(Packet, helium_LongFiResp_pb) of
+        try longfi_pb:decode_msg(Packet, 'LongFiResp_pb') of
             Resp ->
                 lager:debug("decoded packet ~p", [Resp]),
                 handle_packet(Resp, State)
@@ -371,15 +371,15 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Ref = erlang:send_after(15000, self(), {tx_timeout, ID}),
             Fragmentation = application:get_env(miner, poc_fragmentation, true),
             {Spreading, _CodeRate} = tx_params(erlang:byte_size(Data), Fragmentation),
-            UpLink = #helium_LongFiTxPacket_pb{
+            UpLink = #'LongFiTxPacket_pb'{
                 oui=0,
                 device_id=1,
                 spreading=Spreading,
                 payload=NextPacket
             },
-            Req = #helium_LongFiReq_pb{id=ID, kind={tx, UpLink}},
+            Req = #'LongFiReq_pb'{id=ID, kind={tx, UpLink}},
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "sending ~p", [Req]),
-            Packet = helium_longfi_pb:encode_msg(Req),
+            Packet = longfi_pb:encode_msg(Req),
             erlang:spawn(
                 fun() ->
                     ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream),
@@ -426,16 +426,16 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
 
 
 % This is an onion packet cause oui/device_id = 0
-handle_packet(#helium_LongFiResp_pb{id=_ID, kind={rx, #helium_LongFiRxPacket_pb{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
+handle_packet(#'LongFiResp_pb'{id=_ID, kind={rx, #'LongFiRxPacket_pb'{oui=0, device_id=1, rssi=RSSI, payload=Payload}}}, State) ->
     <<IV:2/binary,
       OnionCompactKey:33/binary,
       Tag:4/binary,
       CipherText/binary>> = Payload,
     decrypt(radio, IV, OnionCompactKey, Tag, CipherText, erlang:trunc(RSSI), undefined, State);
-handle_packet(Resp = #helium_LongFiResp_pb{kind={rx, _}}, #state{miner_name=Name}=State) ->
+handle_packet(Resp = #'LongFiResp_pb'{kind={rx, _}}, #state{miner_name=Name}=State) ->
     erlang:spawn(?MODULE, send_to_router, [Name, Resp]),
     State;
-handle_packet(#helium_LongFiResp_pb{id=ID, kind={tx_status, #helium_LongFiTxStatus_pb{success=Success}}}, #state{pending_transmits=Pending}=State) ->
+handle_packet(#'LongFiResp_pb'{id=ID, kind={tx_status, #'LongFiTxStatus_pb'{success=Success}}}, #state{pending_transmits=Pending}=State) ->
     case lists:keyfind(ID, 1, Pending) of
         {ID, Ref} ->
             lager:info("packet transmission ~p completed with success ~p", [ID, Success]),
@@ -444,10 +444,10 @@ handle_packet(#helium_LongFiResp_pb{id=ID, kind={tx_status, #helium_LongFiTxStat
             lager:info("got unknown packet transmission response ~p with success ~p", [ID, Success])
     end,
     State#state{pending_transmits=lists:keydelete(ID, 1, Pending)};
-handle_packet(#helium_LongFiResp_pb{id=_ID, kind={parse_err, Error}}, State) ->
+handle_packet(#'LongFiResp_pb'{id=_ID, kind={parse_err, Error}}, State) ->
     lager:warning("parse error (ID= ~p): ~p", [_ID, Error]),
     State;
-handle_packet(#helium_LongFiResp_pb{id=_ID, kind=_Kind}, State) ->
+handle_packet(#'LongFiResp_pb'{id=_ID, kind=_Kind}, State) ->
     lager:warning("unknown (ID= ~p) (kind= ~p) packet ~p", [_ID, _Kind]),
     State.
 
