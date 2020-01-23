@@ -2,7 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include_lib("helium_proto/src/pb/longfi_pb.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -87,21 +87,21 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    Rx0 = #helium_LongFiRxPacket_pb{
+    Rx0 = #'LongFiRxPacket_pb'{
         oui=0,
         device_id=1,
         crc_check=true,
         spreading= 'SF8',
         payload= Onion
     },
-    Resp0 = #helium_LongFiResp_pb{id=0, kind={rx, Rx0}},
-    Packet0 = helium_longfi_pb:encode_msg(Resp0, helium_LongFiResp_pb),
+    Resp0 = #'LongFiResp_pb'{id=0, kind={rx, Rx0}},
+    Packet0 = longfi_pb:encode_msg(Resp0, 'LongFiResp_pb'),
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet0),
     {ok, {{127,0,0,1}, 5678, Packet1}} = gen_udp:recv(Sock, 0, 5000),
 
-    Got0 = helium_longfi_pb:decode_msg(Packet1, helium_LongFiReq_pb),
-    {_, Got0Uplink} = Got0#helium_LongFiReq_pb.kind,
-    X = Got0Uplink#helium_LongFiTxPacket_pb.payload,
+    Got0 = longfi_pb:decode_msg(Packet1, 'LongFiReq_pb'),
+    {_, Got0Uplink} = Got0#'LongFiReq_pb'.kind,
+    X = Got0Uplink#'LongFiTxPacket_pb'.payload,
 
     timer:sleep(2000),
     %% check that the packet size is the same
@@ -136,45 +136,45 @@ basic(_Config) ->
     }),
 
     %% check we can't decrypt the original
-    Rx2 = #helium_LongFiRxPacket_pb{
+    Rx2 = #'LongFiRxPacket_pb'{
         oui=0,
         device_id=1,
         crc_check=true,
         spreading= 'SF8',
         payload= Onion
     },
-    Resp2 = #helium_LongFiResp_pb{id=0, kind={rx, Rx2}},
-    Packet2 = helium_longfi_pb:encode_msg(Resp2, helium_LongFiResp_pb),
+    Resp2 = #'LongFiResp_pb'{id=0, kind={rx, Rx2}},
+    Packet2 = longfi_pb:encode_msg(Resp2, 'LongFiResp_pb'),
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet2),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
-    Rx3 = #helium_LongFiRxPacket_pb{
+    Rx3 = #'LongFiRxPacket_pb'{
         oui = 0,
         device_id=1,
         crc_check=true,
         spreading= 'SF8',
         payload= X
     },
-    Resp3 = #helium_LongFiResp_pb{id=0, kind={rx, Rx3}},
-    Packet3 = helium_longfi_pb:encode_msg(Resp3, helium_LongFiResp_pb),
+    Resp3 = #'LongFiResp_pb'{id=0, kind={rx, Rx3}},
+    Packet3 = longfi_pb:encode_msg(Resp3, 'LongFiResp_pb'),
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet3),
     {ok, {{127,0,0,1}, 5678, Packet4}} = gen_udp:recv(Sock, 0, 5000),
 
 
-    Got1 = helium_longfi_pb:decode_msg(Packet4, helium_LongFiReq_pb),
-    {_, Got1Uplink} = Got1#helium_LongFiReq_pb.kind,
-    Y = Got1Uplink#helium_LongFiTxPacket_pb.payload,
+    Got1 = longfi_pb:decode_msg(Packet4, 'LongFiReq_pb'),
+    {_, Got1Uplink} = Got1#'LongFiReq_pb'.kind,
+    Y = Got1Uplink#'LongFiTxPacket_pb'.payload,
 
     %% check we can't decrypt the next layer
-    Rx5 = #helium_LongFiRxPacket_pb{
+    Rx5 = #'LongFiRxPacket_pb'{
         oui=0,
         device_id=1,
         crc_check=true,
         spreading= 'SF8',
         payload= Y
     },
-    Resp5 = #helium_LongFiResp_pb{id=0, kind={rx, Rx5}},
-    Packet5 = helium_longfi_pb:encode_msg(Resp5, helium_LongFiResp_pb),
+    Resp5 = #'LongFiResp_pb'{id=0, kind={rx, Rx5}},
+    Packet5 = longfi_pb:encode_msg(Resp5, 'LongFiResp_pb'),
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet5),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 

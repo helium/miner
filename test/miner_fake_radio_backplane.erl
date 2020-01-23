@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include_lib("helium_proto/src/pb/longfi_pb.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([start_link/2, init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -38,11 +38,11 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPSock, udp_ports=Ports}) ->
-    Decoded = helium_longfi_pb:decode_msg(InPacket, helium_LongFiReq_pb),
-    {_, Uplink} = Decoded#helium_LongFiReq_pb.kind,
-    Payload = Uplink#helium_LongFiTxPacket_pb.payload,
-    OUI = Uplink#helium_LongFiTxPacket_pb.oui,
-    DeviceID = Uplink#helium_LongFiTxPacket_pb.device_id,
+    Decoded = longfi_pb:decode_msg(InPacket, 'LongFiReq_pb'),
+    {_, Uplink} = Decoded#'LongFiReq_pb'.kind,
+    Payload = Uplink#'LongFiTxPacket_pb'.payload,
+    OUI = Uplink#'LongFiTxPacket_pb'.oui,
+    DeviceID = Uplink#'LongFiTxPacket_pb'.device_id,
     ct:pal("Source port ~p, Ports ~p", [SrcPort, Ports]),
     {SrcPort, OriginLocation} = lists:keyfind(SrcPort, 1, Ports),
     lists:foreach(
@@ -55,8 +55,8 @@ handle_info({udp, UDPSock, _IP, SrcPort, InPacket}, State = #state{udp_sock=UDPS
                         ok;
                     false ->
                         ct:pal("sending from ~p to ~p -> ~p km RSSI ~p", [OriginLocation, Location, Distance, FreeSpacePathLoss]),
-                        Resp = #helium_LongFiResp_pb{kind={rx, #helium_LongFiRxPacket_pb{payload=Payload, crc_check=true, oui=OUI, rssi=FreeSpacePathLoss, device_id=DeviceID}}},
-                        gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, helium_longfi_pb:encode_msg(Resp))
+                        Resp = #'LongFiResp_pb'{kind={rx, #'LongFiRxPacket_pb'{payload=Payload, crc_check=true, oui=OUI, rssi=FreeSpacePathLoss, device_id=DeviceID}}},
+                        gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, longfi_pb:encode_msg(Resp))
                 end
         end,
         lists:keydelete(SrcPort, 1, Ports)

@@ -8,8 +8,6 @@
 
 -behavior(libp2p_framed_stream).
 
--include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
-
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------

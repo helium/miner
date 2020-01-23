@@ -3,7 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
--include_lib("helium_proto/src/pb/helium_longfi_pb.hrl").
+-include_lib("helium_proto/src/pb/longfi_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include("miner_ct_macros.hrl").
 
@@ -132,22 +132,22 @@ basic(Config) ->
     {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
     {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),
 
-    Rx = #helium_LongFiRxPacket_pb{
+    Rx = #'LongFiRxPacket_pb'{
         crc_check=true,
         spreading= 'SF8',
         oui=1,
         device_id=1,
         payload= <<"some data">>
     },
-    Resp = #helium_LongFiResp_pb{id=0, kind={rx, Rx}},
-    Packet = helium_longfi_pb:encode_msg(Resp, helium_LongFiResp_pb),
+    Resp = #'LongFiResp_pb'{id=0, kind={rx, Rx}},
+    Packet = longfi_pb:encode_msg(Resp, 'LongFiResp_pb'),
     ok = gen_udp:send(Sock, "127.0.0.1", P1, Packet),
     ct:pal("SENT ~p", [{Resp, Packet}]),
     receive
         {simple_http_stream_test, Got} ->
             {ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
-            Resp2 = Resp#helium_LongFiResp_pb{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
-            ?assertMatch(Resp2, helium_longfi_pb:decode_msg(Got, helium_LongFiResp_pb)),
+            Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
+            ?assertMatch(Resp2, longfi_pb:decode_msg(Got, 'LongFiResp_pb')),
             ok;
         _Other ->
             ct:pal("wrong data ~p", [_Other]),
