@@ -607,24 +607,24 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     ok.
 
 exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap) ->
-    do_common_partition_lying_checks(Config);
+    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap) ->
-    do_common_partition_lying_checks(Config);
+    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap) ->
-    do_common_partition_lying_checks(Config);
+    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
-    do_common_partition_lying_checks(Config);
+    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
+    do_common_partition_checks(poc_dist_v8_partitioned_test, Config);
 exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
+    do_common_partition_checks(poc_dist_v7_partitioned_test, Config);
 exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
+    do_common_partition_checks(poc_dist_v6_partitioned_test, Config);
 exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
+    do_common_partition_checks(poc_dist_v5_partitioned_test, Config);
 exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
-    do_common_partition_checks(Config);
-exec_dist_test(_, Config, VarMap) ->
+    do_common_partition_checks(poc_dist_v4_partitioned_test, Config);
+exec_dist_test(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -646,7 +646,7 @@ exec_dist_test(_, Config, VarMap) ->
             %% The extra receipt should have multi element path
             ?assert(check_atleast_k_receipts(Miners, length(Miners) + 1)),
             %% Now we can check whether we have path growth
-            ?assert(check_eventual_path_growth(Miners)),
+            ?assert(check_eventual_path_growth(TestCase, Miners)),
             %% Now we check whether the scores have grown
             FinalScores = gateway_scores(Config),
             ct:pal("FinalScores: ~p", [FinalScores]),
@@ -673,6 +673,8 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = wait_until_height(Miners, 50),
     ok.
 
+gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
+    {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
@@ -888,9 +890,9 @@ get_current_height(Miners) ->
     {ok, Height} = ct_rpc:call(M, blockchain, height, [Chain]),
     Height.
 
-check_eventual_path_growth(Miners) ->
+check_eventual_path_growth(TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    case check_growing_paths(ReceiptMap, active_gateways(Miners), false) of
+    case check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), false) of
         false ->
             ct:pal("Not every poc appears to be growing...waiting..."),
             ct:pal("RequestCounter: ~p", [request_counter(find_requests(Miners))]),
@@ -898,16 +900,16 @@ check_eventual_path_growth(Miners) ->
             %% wait 50 more blocks?
             Height = get_current_height(Miners),
             true = wait_until_height(Miners, Height + 50),
-            check_eventual_path_growth(Miners);
+            check_eventual_path_growth(TestCase, Miners);
         true ->
             ct:pal("Every poc eventually grows in path length!"),
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
             true
     end.
 
-check_partitioned_path_growth(Miners) ->
+check_partitioned_path_growth(TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    case check_growing_paths(ReceiptMap, active_gateways(Miners), true) of
+    case check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), true) of
         false ->
             ct:pal("Not every poc appears to be growing...waiting..."),
             ct:pal("RequestCounter: ~p", [request_counter(find_requests(Miners))]),
@@ -915,24 +917,24 @@ check_partitioned_path_growth(Miners) ->
             %% wait 50 more blocks?
             Height = get_current_height(Miners),
             true = wait_until_height(Miners, Height + 50),
-            check_partitioned_path_growth(Miners);
+            check_partitioned_path_growth(TestCase, Miners);
         true ->
             ct:pal("Every poc eventually grows in path length!"),
             ct:pal("ReceiptCounter: ~p", [receipt_counter(ReceiptMap)]),
             true
     end.
 
-check_partitioned_lying_path_growth(Miners) ->
+check_partitioned_lying_path_growth(TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    not check_growing_paths(ReceiptMap, active_gateways(Miners), true).
+    not check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), true).
 
-check_growing_paths(ReceiptMap, ActiveGateways, PartitionFlag) ->
+check_growing_paths(TestCase, ReceiptMap, ActiveGateways, PartitionFlag) ->
     Results = lists:foldl(fun({_Challenger, TaggedReceipts}, Acc) ->
                                   [{_, FirstReceipt} | Rest] = TaggedReceipts,
                                   %% It's possible that the first receipt itself has multiple elements path, I think
                                   RemainingGrowthCond = case PartitionFlag of
                                                             true ->
-                                                                check_remaining_partitioned_grow(Rest, ActiveGateways);
+                                                                check_remaining_partitioned_grow(TestCase, Rest, ActiveGateways);
                                                             false ->
                                                                 check_remaining_grow(Rest)
                                                         end,
@@ -954,20 +956,20 @@ check_remaining_grow(TaggedReceipts) ->
     %% but there should eventually be some which have multi element paths
     lists:any(fun(R) -> R == true end, Res).
 
-check_remaining_partitioned_grow([], _ActiveGateways) ->
+check_remaining_partitioned_grow(_TestCase, [], _ActiveGateways) ->
     true;
-check_remaining_partitioned_grow(TaggedReceipts, ActiveGateways) ->
+check_remaining_partitioned_grow(TestCase, TaggedReceipts, ActiveGateways) ->
     Res = lists:map(fun({_, Receipt}) ->
                             Path = blockchain_txn_poc_receipts_v1:path(Receipt),
                             PathLength = length(Path),
-                            PathLength > 1 andalso PathLength =< 4 andalso check_partitions(Path, ActiveGateways)
+                            PathLength > 1 andalso PathLength =< 4 andalso check_partitions(TestCase, Path, ActiveGateways)
                     end,
                     TaggedReceipts),
     %% It's possible that even some of the remaining receipts have single path
     %% but there should eventually be some which have multi element paths
     lists:any(fun(R) -> R == true end, Res).
 
-check_partitions(Path, ActiveGateways) ->
+check_partitions(TestCase, Path, ActiveGateways) ->
     PathLocs = sets:from_list(lists:foldl(fun(Element, Acc) ->
                                                   Challengee = blockchain_poc_path_element_v1:challengee(Element),
                                                   ChallengeeGw = maps:get(Challengee, ActiveGateways),
@@ -977,15 +979,14 @@ check_partitions(Path, ActiveGateways) ->
                                           [],
                                           Path)),
     ct:pal("PathLocs: ~p", [sets:to_list(PathLocs)]),
-    SFSet = sets:from_list(?SFLOCS),
-    NYSet = sets:from_list(?NYLOCS),
-    case sets:is_subset(PathLocs, SFSet) of
+    {LocSet1, LocSet2} = location_sets(TestCase),
+    case sets:is_subset(PathLocs, LocSet1) of
         true ->
-            %% Path is in SF, check that it's not in NY
-            sets:is_disjoint(PathLocs, NYSet);
+            %% Path is in LocSet1, check that it's not in LocSet2
+            sets:is_disjoint(PathLocs, LocSet2);
         false ->
-            %% Path is not in SF, check that it's only in NY
-            sets:is_subset(PathLocs, NYSet) andalso sets:is_disjoint(PathLocs, SFSet)
+            %% Path is not in LocSet1, check that it's only in LocSet2
+            sets:is_subset(PathLocs, LocSet2) andalso sets:is_disjoint(PathLocs, LocSet1)
     end.
 
 check_multiple_requests(Miners) ->
@@ -1092,7 +1093,7 @@ common_poc_vars(Config) ->
       ?poc_target_hex_parent_res => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
-do_common_partition_checks(Config) ->
+do_common_partition_checks(TestCase, Config) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -1109,7 +1110,7 @@ do_common_partition_checks(Config) ->
     %% Since we have two static location partitioned networks, we
     %% can assert that the subsequent path lengths must never be greater
     %% than 4.
-    ?assert(check_partitioned_path_growth(Miners)),
+    ?assert(check_partitioned_path_growth(TestCase, Miners)),
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
@@ -1153,7 +1154,7 @@ check_no_poc_rewards(RewardsTxns) ->
                   end,
                   RewardTypes).
 
-do_common_partition_lying_checks(Config) ->
+do_common_partition_lying_checks(TestCase, Config) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -1173,7 +1174,7 @@ do_common_partition_lying_checks(Config) ->
     %% Since we have two static location partitioned networks, where
     %% both are lying about their distances, the paths should
     %% never get longer than 1
-    ?assert(check_partitioned_lying_path_growth(Miners)),
+    ?assert(check_partitioned_lying_path_growth(TestCase, Miners)),
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
@@ -1191,8 +1192,8 @@ do_common_partition_lying_checks(Config) ->
 
 extra_vars(poc_v8) ->
     #{?poc_version => 8,
-      ?poc_good_bucket_low => -140,
-      ?poc_good_bucket_high => -70,
+      ?poc_good_bucket_low => -115,
+      ?poc_good_bucket_high => -80,
       ?poc_v4_prob_rssi_wt => 0.1,
       ?poc_v4_prob_time_wt => 0.1,
       ?poc_v4_randomness_wt => 0.2,
@@ -1200,3 +1201,8 @@ extra_vars(poc_v8) ->
       ?poc_centrality_wt => 0.5};
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
+
+location_sets(poc_dist_v8_partitioned_test) ->
+    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
+location_sets(_TestCase) ->
+    {sets:from_list(?SFLOCS), sets:from_list(?NYLOCS)}.
