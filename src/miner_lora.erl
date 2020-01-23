@@ -4,7 +4,7 @@
 
 -include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
 
--export([start_link/1, send/5]).
+-export([start_link/1, send/1, send/5]).
 
 -export([init/1,
          handle_call/3,
@@ -50,6 +50,9 @@
 
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
+
+send(#helium_packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequency=Freq, datarate=DataRate}) ->
+    gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power}, 11000).
 
 send(Payload, When, Freq, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power}, 11000).
@@ -275,7 +278,6 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
             %% TODO we might want to send GPS time here, if available
             Time = proplists:get_value(<<"tmst">>, Packet),
             Freq = proplists:get_value(<<"freq">>, Packet),
-            %% TODO
             DataRate = proplists:get_value(<<"datr">>, Packet),
             PbPacket = #blockchain_state_channel_packet_v1_pb{
                           packet = #helium_packet_pb{
@@ -289,6 +291,7 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
                                       datarate = DataRate
                                      },
                           hotspot = PubkeyBin},
+            %% TODO we probably need an ephemeral key for the state channel to take the load off the ECC
             Sig = SigFun(blockchain_state_channel_v1_pb:encode_msg(PbPacket)),
             SignedPBPacket = PbPacket#blockchain_state_channel_packet_v1_pb{signature=Sig},
             StateChannelMsg = blockchain_state_channel_v1_pb:encode_msg(#blockchain_state_channel_message_v1_pb{msg = {packet, SignedPBPacket}}),

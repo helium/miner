@@ -7,6 +7,8 @@
 
 -behavior(libp2p_framed_stream).
 
+-include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -56,8 +58,24 @@ init(client, _Conn, _Args) ->
     {ok, #state{}}.
 
 handle_data(_Type, Bin, State) ->
-    lager:warning("~p got data ~p", [_Type, Bin]),
-    miner_lora ! {send, Bin},
+    case blockchain_state_channel_v1_pb:decode_msg(Bin, blockchain_state_channel_message_v1_pb) of
+        {ok, #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=false}}}} ->
+            ok;
+        {ok, #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=true, downlink=Downlink}}}} ->
+            case Downlink of
+                undefined ->
+                    ok;
+                #helium_packet_pb{}=Packet ->
+                    %% ok, try to send this out
+                    spawn(fun() -> miner_lora:send(Packet) end),
+                    ok
+            end;
+        {ok, Msg} ->
+            lager:info("Got unhandled message ~p", [Msg]),
+            ok;
+        {error, _} ->
+            ok
+    end,
     {noreply, State}.
 
 handle_info(_Type, {send, Data}, State) ->
