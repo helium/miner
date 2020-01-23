@@ -2,6 +2,8 @@
 
 -behaviour(gen_server).
 
+-include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+
 -export([start_link/1, send/5]).
 
 -export([init/1,
@@ -42,7 +44,8 @@
           socket,
           gateways = #{}, %% keyed by MAC
           packet_timers = #{}, %% keyed by token
-          miner_name
+          sig_fun,
+          pubkey_bin
          }).
 
 start_link(Args) ->
@@ -52,12 +55,11 @@ send(Payload, When, Freq, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power}, 11000).
 
 init(Args) ->
-    {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
-    MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     {ok, Socket} = gen_udp:open(1680, [binary, {active, 100}, {ip, UDPIP}]),
     {ok, #state{socket=Socket,
-                miner_name = unicode:characters_to_binary(MinerName, utf8)
+                sig_fun = maps:get(sig_fun, Args),
+                pubkey_bin = blockchain_swarm:pubkey_bin()
                }}.
 
 handle_call({send, Payload, When, Freq, DataRate, Power}, From, State) ->
@@ -206,16 +208,16 @@ handle_packet([Packet|Tail], Gateway, State) ->
                                             proplists:get_value(<<"tmst">>, Packet),
                                             proplists:get_value(<<"freq">>, Packet),
                                             proplists:get_value(<<"datr">>, Packet));
-        OUI ->
+        {Type, OUI} ->
             lager:notice("Routing ~p", [OUI]),
-            erlang:spawn(fun() -> send_to_router(State#state.miner_name, {OUI, Packet})  end)
+            erlang:spawn(fun() -> send_to_router(State#state.pubkey_bin, State#state.sig_fun, {Type, OUI, Packet})  end)
     end,
     handle_packet(Tail, Gateway, State).
 
 
 route(<<2#000:3, _:5, AppEUI0:8/binary, _DevEUI0:8/binary, _DevNonce:2/binary, _MIC:4/binary>>) ->
     <<OUI:32/integer-unsigned-big, _DID:32/integer-unsigned-big>> = reverse(AppEUI0),
-    OUI;
+    {lorawan, OUI};
 route(<<_MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) ->
     Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
     {FPort, _FRMPayload} = case Body of
@@ -227,7 +229,7 @@ route(<<_MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, F
             error;
         _ ->
             <<OUI:32/integer-unsigned-big>> = reverse(DevAddr0),
-            OUI
+            {lorawan, OUI}
     end;
 route(Pkt) ->
     case longfi:deserialize(Pkt) of
@@ -243,7 +245,7 @@ route(Pkt) ->
                     %miner_onion_server:decrypt_radio(Payload, 
                     {onion, longfi:payload(LongFiPkt)};
                 false ->
-                    longfi:oui(LongFiPkt)
+                    {longfi, longfi:oui(LongFiPkt)}
             end;
         error ->
             error
@@ -260,20 +262,44 @@ sort_packets(Packets) ->
                end, Packets),
     R.
 
-send_to_router(_Name, {OUI, Packet}) ->
+send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
     case blockchain_worker:blockchain() of
         undefined ->
             lager:warning("ingnored packet chain is undefined");
         Chain ->
+            Data = base64:decode(proplists:get_value(<<"data">>, Packet)),
             Ledger = blockchain:ledger(Chain),
             Swarm = blockchain_swarm:swarm(),
+            RSSI = proplists:get_value(<<"rssi">>, Packet),
+            SNR = proplists:get_value(<<"lsnr">>, Packet),
+            %% TODO we might want to send GPS time here, if available
+            Time = proplists:get_value(<<"tmst">>, Packet),
+            Freq = proplists:get_value(<<"freq">>, Packet),
+            %% TODO
+            DataRate = proplists:get_value(<<"datr">>, Packet),
+            PbPacket = #blockchain_state_channel_packet_v1_pb{
+                          packet = #helium_packet_pb{
+                                      oui = OUI,
+                                      type = Type,
+                                      payload = Data,
+                                      timestamp = Time,
+                                      signal_strength = RSSI,
+                                      frequency = Freq,
+                                      snr = SNR,
+                                      datarate = DataRate
+                                     },
+                          hotspot = PubkeyBin},
+            Sig = SigFun(blockchain_state_channel_v1_pb:encode_msg(PbPacket)),
+            SignedPBPacket = PbPacket#blockchain_state_channel_packet_v1_pb{signature=Sig},
+            StateChannelMsg = blockchain_state_channel_v1_pb:encode_msg(#blockchain_state_channel_message_v1_pb{msg = {packet, SignedPBPacket}}),
+
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
                     case application:get_env(miner, default_router, undefined) of
                         undefined ->
                             lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
                         Address ->
-                            send_to_router(Swarm, Address, jsx:encode(Packet))
+                            send_to_router_(Swarm, Address, StateChannelMsg)
                     end;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
@@ -281,14 +307,14 @@ send_to_router(_Name, {OUI, Packet}) ->
                     lists:foreach(
                         fun(BinAddress) ->
                             Address = erlang:binary_to_list(BinAddress),
-                            send_to_router(Swarm, Address, jsx:encode(Packet))
+                            send_to_router_(Swarm, Address, StateChannelMsg)
                         end,
                         Addresses
                     )
             end
     end.
 
-send_to_router(Swarm, Address, Packet) ->
+send_to_router_(Swarm, Address, Packet) ->
     RegName = erlang:list_to_atom(Address),
     case erlang:whereis(RegName) of
         Stream when is_pid(Stream) ->

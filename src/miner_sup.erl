@@ -180,7 +180,8 @@ init(_Args) ->
                     radio_udp_bind_port => RadioBindPort,
                     radio_udp_send_ip => RadioSendIP,
                     radio_udp_send_port => RadioSendPort,
-                    ecdh_fun => ECDHFun
+                    ecdh_fun => ECDHFun,
+                    sig_fun => SigFun
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
                  ?WORKER(miner_lora, [OnionOpts])];
