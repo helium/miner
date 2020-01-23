@@ -20,8 +20,8 @@
 -define(FREQUENCY, 915).
 -define(TRANSMIT_POWER, 28).
 -define(MAX_ANTENNA_GAIN, 6).
--define(ETA, 2).
--define(ABS_RSSI, -50).
+-define(ETA, 2.5).
+-define(ABS_RSSI, -10).
 
 start_link(MyPort, UDPPorts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [MyPort, UDPPorts], []).
@@ -54,7 +54,7 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
     lists:foreach(
         fun({Port, Location}) ->
                 Distance = blockchain_utils:distance(OriginLocation, Location),
-                FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
+                %% FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
                 case Distance > 32 of
                     true ->
                         ct:pal("NOT sending from ~p to ~p -> ~p km", [OriginLocation, Location, Distance]),
@@ -76,11 +76,5 @@ handle_info(Msg, State) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-%% dBm_to_mW(Power) ->
-%%     math:pow(10, Power/10).
-%% 
-%% mW_to_dBm(Power) ->
-%%     10 * math:log10(Power).
 approx_rssi(Distance) ->
     ?ABS_RSSI - ?ETA * (10 * math:log10(Distance * 1000)).
