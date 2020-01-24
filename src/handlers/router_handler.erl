@@ -59,9 +59,9 @@ init(client, _Conn, _Args) ->
 
 handle_data(_Type, Bin, State) ->
     case blockchain_state_channel_v1_pb:decode_msg(Bin, blockchain_state_channel_message_v1_pb) of
-        {ok, #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=false}}}} ->
+        #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=false}}} ->
             ok;
-        {ok, #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=true, downlink=Downlink}}}} ->
+        #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=true, downlink=Downlink}}} ->
             case Downlink of
                 undefined ->
                     ok;
@@ -70,7 +70,7 @@ handle_data(_Type, Bin, State) ->
                     spawn(fun() -> miner_lora:send(Packet) end),
                     ok
             end;
-        {ok, Msg} ->
+        Msg ->
             lager:info("Got unhandled message ~p", [Msg]),
             ok;
         {error, _} ->

@@ -70,13 +70,15 @@ handle_call({send, Payload, When, Freq, DataRate, Power}, From, State) ->
     %% TODO we should check this for regulatory compliance
     Packet = jsx:encode(#{<<"txpk">> => #{
                               <<"imme">> => When == immediate,
-                              <<"powe">> => Power,
+                              <<"powe">> => trunc(Power),
                               %% TODO gps time?
                               <<"tmst">> => When,
                               <<"freq">> => Freq,
                               <<"modu">> => <<"LORA">>,
-                              <<"datr">> => DataRate,
+                              <<"datr">> => list_to_binary(DataRate),
+                              <<"codr">> => <<"4/5">>,
                               <<"size">> => byte_size(Payload),
+                              <<"rfch">> => 0,
                               <<"data">> => base64:encode(Payload)
                              }}),
     Gateway = element(2, hd(maps:to_list(State#state.gateways))),
