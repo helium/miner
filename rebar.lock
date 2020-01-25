@@ -102,7 +102,7 @@
   2},
  {<<"rocksdb">>,
   {git,"https://gitlab.com/Vagabond1/erlang-rocksdb",
-       {ref,"05b1fe76b29ed06a2d222f79ed73fe63b853d4ea"}},
+       {ref,"d973475b27f0efef86ed9cbda7f528343b01fbd3"}},
   3},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
  {<<"splicer">>,
