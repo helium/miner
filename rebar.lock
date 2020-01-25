@@ -98,7 +98,7 @@
  {<<"recon">>,{pkg,<<"recon">>,<<"2.5.0">>},0},
  {<<"relcast">>,
   {git,"https://github.com/helium/relcast.git",
-       {ref,"6486002bd832aea7664026fba3a85e0bd13871fe"}},
+       {ref,"971ef44a68aa13e118c2bef4afac2d0ef1ba938e"}},
   2},
  {<<"rocksdb">>,
   {git,"https://gitlab.com/Vagabond1/erlang-rocksdb",
