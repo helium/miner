@@ -1,7 +1,0 @@
-case os:getenv("ERLANG_ROCKSDB_OPTS") of
-    false ->
-        os:putenv("ERLANG_ROCKSDB_OPTS", "-DWITH_BUNDLE_SNAPPY=ON -DWITH_BUNDLE_LZ4=ON");
-    _ ->
-        ok
-end,
-CONFIG.
