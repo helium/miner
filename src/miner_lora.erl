@@ -69,6 +69,7 @@ handle_call({send, Payload, When, Freq, DataRate, Power}, From, State) ->
     Token = mk_token(State),
     %% TODO we should check this for regulatory compliance
     Packet = jsx:encode(#{<<"txpk">> => #{
+                              <<"ipol">> => true,
                               <<"imme">> => When == immediate,
                               <<"powe">> => trunc(Power),
                               %% TODO gps time?
@@ -233,7 +234,7 @@ route(<<_MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, F
         0 when FOptsLen /= 0 ->
             error;
         _ ->
-            <<OUI:32/integer-unsigned-big>> = reverse(DevAddr0),
+            <<OUI:32/integer-unsigned-big>> = DevAddr0,
             {lorawan, OUI}
     end;
 route(Pkt) ->
