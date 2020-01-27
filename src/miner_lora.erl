@@ -59,7 +59,8 @@ send(Payload, When, Freq, DataRate, Power) ->
 
 init(Args) ->
     UDPIP = maps:get(radio_udp_bind_ip, Args),
-    {ok, Socket} = gen_udp:open(1680, [binary, {active, 100}, {ip, UDPIP}]),
+    UDPPort = maps:get(radio_udp_bind_port, Args),
+    {ok, Socket} = gen_udp:open(UDPPort, [binary, {active, 100}, {ip, UDPIP}]),
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 pubkey_bin = blockchain_swarm:pubkey_bin()
@@ -69,6 +70,7 @@ handle_call({send, Payload, When, Freq, DataRate, Power}, From, State) ->
     Token = mk_token(State),
     %% TODO we should check this for regulatory compliance
     Packet = jsx:encode(#{<<"txpk">> => #{
+                              %% TODO don't use inverse polarity for longfi?
                               <<"ipol">> => true,
                               <<"imme">> => When == immediate,
                               <<"powe">> => trunc(Power),
@@ -120,16 +122,15 @@ terminate(_Reason, _State = #state{socket=Socket}) ->
 
 handle(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, MAC:64/integer, JSON/binary>>, IP, Port, State) ->
     lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
-    case maps:find(MAC, State#state.gateways) of
-        {ok, G} ->
-            gen_udp:send(State#state.socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>),
-            Received = G#gateway.received,
-            Gateway = G#gateway{received=Received+1},
-            handle_DATA(jsx:decode(JSON), Gateway, State);
-        error ->
-            lager:warning("discarding packet ~p", [JSON]),
-            State
-    end;
+    Gateway = case maps:find(MAC, State#state.gateways) of
+                  {ok, G} ->
+                      Received = G#gateway.received,
+                      G#gateway{ip=IP, port=Port, received=Received+1};
+                  error ->
+                      #gateway{mac=MAC, ip=IP, port=Port, received=1}
+              end,
+    gen_udp:send(State#state.socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>),
+    handle_DATA(jsx:decode(JSON), Gateway, State);
 handle(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, MAC:64/integer>>, IP, Port, State) ->
     gen_udp:send(State#state.socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>),
     lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
