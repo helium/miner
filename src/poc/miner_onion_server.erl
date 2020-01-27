@@ -66,7 +66,7 @@ start_link(Args) ->
 
 -spec decrypt_p2p(binary(), pid()) -> ok.
 decrypt_p2p(Onion, Stream) ->
-    gen_server:cast(?MODULE, {decrypt_p2_p2pp, Onion, Stream}).
+    gen_server:cast(?MODULE, {decrypt_p2p, Onion, Stream}).
 
 %-spec decrypt_radio(binary()) -> ok.
 decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Spreading) ->
@@ -273,7 +273,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             <<IntData:16/integer-unsigned-little>> = Data,
             Freq = lists:nth((IntData rem 8) + 1, ?CHANNELS),
             %timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-            spawn(fun() -> miner_lora:send(Packet, immediate, Freq, 'SF10BW125', ?TX_POWER) end),
+            spawn(fun() -> miner_lora:send(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
             erlang:spawn(
                 fun() ->
                     ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)

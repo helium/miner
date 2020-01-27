@@ -209,7 +209,7 @@ handle_packet([Packet|Tail], Gateway, State) ->
             ok;
         {onion, Payload} ->
             %% onion server
-            miner_onion_server:decrypt_radio(Payload, proplists:get_value(<<"rssi">>, Packet),
+            miner_onion_server:decrypt_radio(Payload, trunc(proplists:get_value(<<"rssi">>, Packet)),
                                             proplists:get_value(<<"lsnr">>, Packet),
                                             %% TODO we might want to send GPS time here, if available
                                             proplists:get_value(<<"tmst">>, Packet),
@@ -221,23 +221,6 @@ handle_packet([Packet|Tail], Gateway, State) ->
     end,
     handle_packet(Tail, Gateway, State).
 
-
-route(<<2#000:3, _:5, AppEUI0:8/binary, _DevEUI0:8/binary, _DevNonce:2/binary, _MIC:4/binary>>) ->
-    <<OUI:32/integer-unsigned-big, _DID:32/integer-unsigned-big>> = reverse(AppEUI0),
-    {lorawan, OUI};
-route(<<_MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) ->
-    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
-    {FPort, _FRMPayload} = case Body of
-                              <<>> -> {undefined, <<>>};
-                              <<Port:8, Payload/binary>> -> {Port, Payload}
-                          end,
-    case FPort of
-        0 when FOptsLen /= 0 ->
-            error;
-        _ ->
-            <<OUI:32/integer-unsigned-big>> = DevAddr0,
-            {lorawan, OUI}
-    end;
 route(Pkt) ->
     case longfi:deserialize(Pkt) of
         {ok, LongFiPkt} ->
@@ -255,8 +238,29 @@ route(Pkt) ->
                     {longfi, longfi:oui(LongFiPkt)}
             end;
         error ->
-            error
+            route_(Pkt)
     end.
+
+
+route_(<<?JOIN_REQUEST:3, _:5, AppEUI0:8/binary, _DevEUI0:8/binary, _DevNonce:2/binary, _MIC:4/binary>>) ->
+    <<OUI:32/integer-unsigned-big, _DID:32/integer-unsigned-big>> = reverse(AppEUI0),
+    {lorawan, OUI};
+route_(<<MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when
+      MType == ?UNCONFIRMED_UP; MType == ?CONFIRMED_UP ->
+    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
+    {FPort, _FRMPayload} = case Body of
+                              <<>> -> {undefined, <<>>};
+                              <<Port:8, Payload/binary>> -> {Port, Payload}
+                          end,
+    case FPort of
+        0 when FOptsLen /= 0 ->
+            error;
+        _ ->
+            <<OUI:32/integer-unsigned-big>> = DevAddr0,
+            {lorawan, OUI}
+    end;
+route_(_) ->
+    error.
 
 reverse(Bin) -> reverse(Bin, <<>>).
 reverse(<<>>, Acc) -> Acc;

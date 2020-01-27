@@ -92,6 +92,7 @@ end_per_testcase(restart_test, Config) ->
             ok
     end;
 end_per_testcase(TestCase, Config) ->
+    gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -641,6 +642,7 @@ setup_dist_test(TestCase, Config, VarMap) ->
     miner_fake_radio_backplane:start_link(45000, lists:zip(lists:seq(46001, 46000 + MinerCount), Locations)),
     timer:sleep(5000),
     true = load_genesis_block(GenesisBlock, Miners, Config),
+    miner_fake_radio_backplane ! go,
     %% wait till height 50
     true = wait_until_height(Miners, 50),
     ok.
