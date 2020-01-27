@@ -59,20 +59,20 @@ all() ->
      poc_dist_v7_partitioned_lying_test,
      restart_test].
 
-init_per_testcase(basic_test, Config) -> Config;
-init_per_testcase(restart_test, Config) -> Config;
+init_per_testcase(basic_test = TestCase, Config) ->
+    miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
+init_per_testcase(restart_test = TestCase, Config) ->
+    miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
 init_per_testcase(TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(TestCase, Config0),
-    Config.
+    miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0).
 
 end_per_testcase(basic_test, Config) ->
     catch gen_statem:stop(miner_poc_statem),
-    case proplists:get_value(tc_status, Config) of
+    case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            PrivDir = proplists:get_value(priv_dir, Config),
-            BaseDir = PrivDir++ "/data_miner_poc_SUITE_basic_test",
-            os:cmd("rm -rf "++BaseDir),
+            BaseDir = ?config(base_dir, Config),
+            os:cmd("rm -rf "++ BaseDir),
             ok;
         _ ->
             %% leave results alone for analysis
@@ -80,11 +80,10 @@ end_per_testcase(basic_test, Config) ->
     end;
 end_per_testcase(restart_test, Config) ->
     catch gen_statem:stop(miner_poc_statem),
-    case proplists:get_value(tc_status, Config) of
+    case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            PrivDir = proplists:get_value(priv_dir, Config),
-            BaseDir = PrivDir ++ "/data_miner_poc_SUITE_restart_test",
+            BaseDir = ?config(base_dir, Config),
             os:cmd("rm -rf "++BaseDir),
             ok;
         _ ->
@@ -154,8 +153,8 @@ poc_dist_v7_partitioned_lying_test(Config) ->
     run_dist_with_params(poc_dist_v7_partitioned_lying_test, Config, maps:put(?poc_version, 7, CommonPOCVars)).
 
 basic_test(Config) ->
-    PrivDir = proplists:get_value(priv_dir, Config),
-    BaseDir = PrivDir ++ "/data_miner_poc_SUITE_basic_test",
+    BaseDir = ?config(base_dir, Config),
+
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
@@ -307,8 +306,7 @@ basic_test(Config) ->
     ok.
 
 restart_test(Config) ->
-    PrivDir = proplists:get_value(priv_dir, Config),
-    BaseDir = PrivDir ++ "/data_miner_poc_SUITE_restart_test",
+    BaseDir = ?config(base_dir, Config),
     {PrivKey, PubKey} = new_random_key(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
@@ -578,7 +576,7 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     %% Execute the test
     ok = exec_dist_test(TestCase, Config, VarMap),
     %% show the final receipt counter
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
     ct:pal("FinalReceiptCounter: ~p", [receipt_counter(FinalReceiptMap)]),
     %% The test endeth here
@@ -599,7 +597,7 @@ exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
 exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
     do_common_partition_checks(Config);
 exec_dist_test(_, Config, VarMap) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
@@ -635,7 +633,7 @@ exec_dist_test(_, Config, VarMap) ->
     ok.
 
 setup_dist_test(TestCase, Config, VarMap) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     MinerCount = length(Miners),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = get_genesis_block(Miners, Config),
@@ -683,9 +681,9 @@ gen_locations(_TestCase, Addresses, VarMap) ->
     {Locs, Locs}.
 
 initialize_chain(Miners, TestCase, Config, VarMap) ->
-    Addresses = proplists:get_value(addresses, Config),
-    N = proplists:get_value(num_consensus_members, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
+    Addresses = ?config(addresses, Config),
+    N = ?config(num_consensus_members, Config),
+    Curve = ?config(dkg_curve, Config),
     Keys = libp2p_crypto:generate_keys(ecc_compact),
     InitialVars = miner_ct_utils:make_vars(Keys, VarMap),
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
@@ -705,7 +703,7 @@ initialize_chain(Miners, TestCase, Config, VarMap) ->
     AddressesWithClaimedLocations.
 
 get_genesis_block(Miners, Config) ->
-    RPCTimeout = proplists:get_value(rpc_timeout, Config),
+    RPCTimeout = ?config(rpc_timeout, Config),
     ct:pal("RPCTimeout: ~p", [RPCTimeout]),
     %% obtain the genesis block
     GenesisBlock = get_genesis_block_(Miners, RPCTimeout),
@@ -726,7 +724,7 @@ get_genesis_block_([Miner|Miners], RPCTimeout) ->
 
 
 load_genesis_block(GenesisBlock, Miners, Config) ->
-    RPCTimeout = proplists:get_value(rpc_timeout, Config),
+    RPCTimeout = ?config(rpc_timeout, Config),
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
@@ -1017,8 +1015,8 @@ active_gateways([Miner | _]=_Miners) ->
     ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger]).
 
 gateway_scores(Config) ->
-    [Miner | _] = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    [Miner | _] = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     lists:foldl(fun(Address, Acc) ->
@@ -1030,11 +1028,11 @@ gateway_scores(Config) ->
                 Addresses).
 
 common_poc_vars(Config) ->
-    N = proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
-    Interval = proplists:get_value(election_interval, Config),
-    BatchSize = proplists:get_value(batch_size, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
+    N = ?config(num_consensus_members, Config),
+    BlockTime = ?config(block_time, Config),
+    Interval = ?config(election_interval, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
     %% Don't put the poc version here
     %% Add it to the map in the tests above
     #{?block_time => BlockTime,
@@ -1061,7 +1059,7 @@ common_poc_vars(Config) ->
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
 do_common_partition_checks(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
@@ -1084,12 +1082,12 @@ do_common_partition_checks(Config) ->
     ok.
 
 balances(Config) ->
-    [Miner | _] = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    [Miner | _] = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
 
 get_rewards(Config) ->
-    [Miner | _] = proplists:get_value(miners, Config),
+    [Miner | _] = ?config(miners, Config),
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Blocks = ct_rpc:call(Miner, blockchain, blocks, [Chain]),
     maps:fold(fun(_, Block, Acc) ->
@@ -1122,7 +1120,7 @@ check_no_poc_rewards(RewardsTxns) ->
                   RewardTypes).
 
 do_common_partition_lying_checks(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),

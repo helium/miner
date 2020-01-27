@@ -30,26 +30,26 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(_TestCase, Config).
+    miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config).
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 initial_dkg_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{}),
     InitialPaymentTransactions = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitialTransactions = InitialVars ++ InitialPaymentTransactions,
-    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
+    Curve = ?config(dkg_curve, Config),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialTransactions, Addresses, 
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialTransactions, Addresses,
                                             NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-    
+
     {comment, DKGResults}.
 
 

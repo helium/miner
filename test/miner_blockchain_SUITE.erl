@@ -35,20 +35,20 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(TestCase, Config0),
-    Miners = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
 
-    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
     BlockTime = case TestCase of
                     restart_test ->
                         3000;
                     _ ->
-                        proplists:get_value(block_time, Config)
+                        ?config(block_time, Config)
                 end,
-    Interval = proplists:get_value(election_interval, Config),
-    BatchSize = proplists:get_value(batch_size, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
+    Interval = ?config(election_interval, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
 
     #{secret := Priv, public := Pub} = Keys =
         libp2p_crypto:generate_keys(ecc_compact),
@@ -113,7 +113,8 @@ end_per_testcase(_TestCase, Config) ->
 
 
 restart_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    BaseDir = ?config(base_dir, Config),
+    Miners = ?config(miners, Config),
 
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 60),
@@ -126,7 +127,7 @@ restart_test(Config) ->
      || Miner <- lists:sublist(Miners, 3, 4)],
 
     %% just kill the consensus groups, we should be able to restore them
-    ok = miner_ct_utils:delete_dirs("/data_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
 
     ok = miner_ct_utils:start_miners(lists:sublist(Miners, 1, 2)),
 
@@ -138,8 +139,8 @@ restart_test(Config) ->
 
 
 dkg_restart_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
-    Interval = proplists:get_value(election_interval, Config),
+    Miners = ?config(miners, Config),
+    Interval = ?config(election_interval, Config),
 
     AddrList = miner_ct_utils:addr_list(Miners),
 
@@ -186,8 +187,9 @@ dkg_restart_test(Config) ->
     ?assert(EndHeight < (Height + Interval + 99)).
 
 election_test(Config) ->
+    BaseDir = ?config(base_dir, Config),
     %% get all the miners
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     AddrList = miner_ct_utils:addr_list(Miners),
 
     Me = self(),
@@ -230,7 +232,7 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
 
     %% delete the groups
-    ok = miner_ct_utils:delete_dirs("/data_*{1,2,3,4}*", "/blockchain_swarm/groups/*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2,3,4}*", "/blockchain_swarm/groups/*"),
 
     %% start the stopped miners back up again
     miner_ct_utils:start_miners(TargetMiners),
@@ -245,7 +247,7 @@ election_test(Config) ->
     %% third: mint and submit the rescue txn, shrinking the group at
     %% the same time.
 
-    Addresses = proplists:get_value(addresses, Config),
+    Addresses = ?config(addresses, Config),
     NewGroup = lists:sublist(Addresses, 3, 4),
 
     HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -255,7 +257,7 @@ election_test(Config) ->
 
     Vars = #{num_consensus_members => 4},
 
-    {Priv, _Pub} = proplists:get_value(master_key, Config),
+    {Priv, _Pub} = ?config(master_key, Config),
 
     Txn = blockchain_txn_vars_v1:new(Vars, 3),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
@@ -321,8 +323,8 @@ election_test(Config) ->
 
 group_change_test(Config) ->
     %% get all the miners
-    Miners = proplists:get_value(miners, Config),
-    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    Miners = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
 
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(4, length(ConsensusMiners)),
@@ -338,7 +340,7 @@ group_change_test(Config) ->
 
     Vars = #{num_consensus_members => 7},
 
-    {Priv, _Pub} = proplists:get_value(master_key, Config),
+    {Priv, _Pub} = ?config(master_key, Config),
 
     Txn = blockchain_txn_vars_v1:new(Vars, 2, #{version_predicate => 2,
                                                 unsets => [garbage_value]}),
@@ -386,8 +388,8 @@ group_change_test(Config) ->
 
 master_key_test(Config) ->
     %% get all the miners
-    Miners = proplists:get_value(miners, Config),
-    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    Miners = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
 
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(7, length(ConsensusMiners)),
@@ -398,7 +400,7 @@ master_key_test(Config) ->
     %% baseline: chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
-    {Priv, _Pub} = proplists:get_value(master_key, Config),
+    {Priv, _Pub} = ?config(master_key, Config),
 
     Vars = #{garbage_value => totes_goats_garb},
     Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
@@ -476,8 +478,8 @@ master_key_test(Config) ->
 
 version_change_test(Config) ->
     %% get all the miners
-    Miners = proplists:get_value(miners, Config),
-    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    Miners = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
 
 
     ?assertNotEqual([], ConsensusMiners),
@@ -489,7 +491,7 @@ version_change_test(Config) ->
     %% baseline: old-style chain vars are working
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
-    {Priv, _Pub} = proplists:get_value(master_key, Config),
+    {Priv, _Pub} = ?config(master_key, Config),
 
     Vars = #{garbage_value => totes_goats_garb},
     Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars),
