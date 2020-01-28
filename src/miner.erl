@@ -340,7 +340,15 @@ signed_block(Signatures, BinBlock) ->
               libp2p_swarm:gossip_group(Swarm),
               ?GOSSIP_PROTOCOL,
               blockchain_gossip_handler:gossip_data(Swarm, Block)
-             );
+             ),
+            {Signatories, _} = lists:unzip(blockchain_block:signatures(Block)),
+            {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(Chain)),
+            lists:foreach(fun(Member) ->
+                                  spawn(fun() ->
+                                                libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [Chain])
+                                        end)
+                          end, ConsensusAddrs -- Signatories);
+
         Error ->
             lager:error("signed_block, error: ~p", [Error])
     end,

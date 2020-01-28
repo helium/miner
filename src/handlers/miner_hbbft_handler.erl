@@ -163,7 +163,8 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                 {ok, done, Signatures} when Round > NewState#state.signed ->
                     %% no point in doing this more than once
                     ok = miner:signed_block(Signatures, State#state.artifact),
-                    {NewState#state{signed = Round, sig_phase = done}, []};
+                    {NewState#state{signed = Round, sig_phase = done},
+                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                 _ ->
                     {NewState, []}
             end;
@@ -177,7 +178,8 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                         {ok, done, Signatures} when Round > NewState#state.signed ->
                             %% no point in doing this more than once
                             ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState#state{signed = Round, sig_phase = done}, []};
+                            {NewState#state{signed = Round, sig_phase = done},
+                             [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                         {ok, gossip, Signatures} ->
                             {NewState#state{sig_phase = gossip, signatures = Signatures},
                              [{multicast, term_to_binary({signatures, Round, Signatures})}]};
