@@ -56,7 +56,7 @@
 -define(READ_RADIO_PACKET_EXTENDED, 16#82).
 -define(BLOCK_RETRY_COUNT, 10).
 -define(CHANNELS, [911.9, 912.1, 912.3, 912.5, 912.7, 912.9, 913.1, 913.3]).
--define(TX_POWER, 28). %% 28 db
+-define(TX_POWER, 27). %% 27 db
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
