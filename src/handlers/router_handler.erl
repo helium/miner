@@ -58,10 +58,10 @@ init(client, _Conn, _Args) ->
     {ok, #state{}}.
 
 handle_data(_Type, Bin, State) ->
-    case blockchain_state_channel_v1_pb:decode_msg(Bin, blockchain_state_channel_message_v1_pb) of
-        #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=false}}} ->
+    case decode(Bin) of
+        {ok, #blockchain_state_channel_response_v1_pb{accepted=false}} ->
             ok;
-        #blockchain_state_channel_message_v1_pb{msg = {response, #blockchain_state_channel_response_v1_pb{accepted=true, downlink=Downlink}}} ->
+        {ok, #blockchain_state_channel_response_v1_pb{accepted=true, downlink=Downlink}} ->
             case Downlink of
                 undefined ->
                     ok;
@@ -71,13 +71,12 @@ handle_data(_Type, Bin, State) ->
                     ok
             end;
         {error, _Reason} ->
-            lager:error("got error decoding blockchain_state_channel_message ~p", [_Reason]);
-        _Msg ->
-            lager:info("Got unhandled message ~p", [_Msg])
+            lager:warning("got error decoding blockchain_state_channel_message ~p", [_Reason])
     end,
     {noreply, State}.
 
 handle_info(_Type, {send, Data}, State) ->
+    lager:debug("~p sending data ~p", [_Type, Data]),
     {noreply, State, Data};
 handle_info(_Type, _Msg, State) ->
     lager:warning("~p got info ~p", [_Type, _Msg]),
@@ -87,6 +86,16 @@ handle_info(_Type, _Msg, State) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+-spec decode(binary()) -> {ok, #blockchain_state_channel_response_v1_pb{}} | {error, any()}.
+decode(Bin) ->
+    case blockchain_state_channel_v1_pb:decode_msg(Bin, blockchain_state_channel_message_v1_pb) of
+        #blockchain_state_channel_message_v1_pb{msg={response, Resp}} ->
+            {ok, Resp};
+        {error, _Reason}=Error ->
+            Error;
+        Msg ->
+            {error, {unknown_msg, Msg}}
+    end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

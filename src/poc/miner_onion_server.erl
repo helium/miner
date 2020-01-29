@@ -273,12 +273,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             <<IntData:16/integer-unsigned-little>> = Data,
             Freq = lists:nth((IntData rem 8) + 1, ?CHANNELS),
             %timer:sleep(rand:uniform(?TX_RAND_SLEEP) + ?TX_MIN_SLEEP),
-            spawn(fun() -> miner_lora:send(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
-            erlang:spawn(
-                fun() ->
-                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)
-                end
-            ),
+            erlang:spawn(fun() -> miner_lora:send(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
+            erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)end),
             State;
         {error, Reason} ->
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
