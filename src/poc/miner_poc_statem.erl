@@ -114,10 +114,18 @@ init(Args) ->
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
             {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
                                    address=Address, poc_interval=Delay, state=requesting}};
+        %% we loaded a state from the saved statem file, initialise with this if its an exported/supported state
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
-            {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
-                                  address=Address, poc_interval=Delay, state=State,
-                                  poc_restarts = POCRestarts - 1}}
+            case is_supported_state(State) of
+                true ->
+                    {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                                          address=Address, poc_interval=Delay, state=State,
+                                          poc_restarts = POCRestarts - 1}};
+                false ->
+                    lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
+                    {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
+                                           address=Address, poc_interval=Delay, state=requesting}}
+            end
     end.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -337,6 +345,10 @@ waiting(EventType, EventContent, Data) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+is_supported_state(State)->
+    erlang:function_exported(?MODULE, State, 3).
+
 handle_event(info, {blockchain_event, {new_chain, NC}},
              #data{address = Address, poc_interval = Delay}) ->
     {next_state, requesting, save_data(#data{state = requesting, blockchain=NC,
