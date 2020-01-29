@@ -360,6 +360,10 @@ handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
+handle_targeting(_, _, _, Data = #data{retry = Retry})
+  when Retry =< 0 ->
+    lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
+    {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
 handle_targeting(Entropy, Height, Ledger, Data) ->
     %% Challenger details
     ChallengerAddr = blockchain_swarm:pubkey_bin(),
