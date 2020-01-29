@@ -270,7 +270,7 @@ handle_packets([], _Gateway, State) ->
     State;
 handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigFun}=State) ->
     Data = base64:decode(proplists:get_value(<<"data">>, Packet)),
-    case   (Data) of
+    case route(Data) of
         error ->
             ok;
         {onion, Payload} ->
