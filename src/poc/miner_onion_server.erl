@@ -43,9 +43,6 @@
     handle_info/2
 ]).
 
--define(READ_RADIO_PACKET_EXTENDED, 16#82).
-
--define(BLOCK_RETRY_COUNT, 10).
 
 -record(state, {
     compact_key :: ecc_compact:compact_key(),
@@ -55,6 +52,9 @@
     packet_id = 0 :: non_neg_integer()
 }).
 
+
+-define(READ_RADIO_PACKET_EXTENDED, 16#82).
+-define(BLOCK_RETRY_COUNT, 10).
 -define(CHANNELS, [911.9, 912.1, 912.3, 912.5, 912.7, 912.9, 913.1, 913.3]).
 -define(TX_POWER, 28). %% 28 db
 
@@ -68,7 +68,6 @@ start_link(Args) ->
 decrypt_p2p(Onion, Stream) ->
     gen_server:cast(?MODULE, {decrypt_p2p, Onion, Stream}).
 
-%-spec decrypt_radio(binary()) -> ok.
 decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Spreading) ->
     gen_server:cast(?MODULE, {decrypt_radio, Packet, RSSI, SNR, Timestamp, Freq, Spreading}).
 
@@ -98,7 +97,6 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
             {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
             Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
             EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
-
             case erlang:is_pid(Stream) of
                 true ->
                     Stream ! {send, EncodedReceipt},
@@ -188,15 +186,15 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({decrypt_p2p, <<IV:2/binary,
-                        OnionCompactKey:33/binary,
-                        Tag:4/binary,
-                        CipherText/binary>>, Pid}, State) ->
+                            OnionCompactKey:33/binary,
+                            Tag:4/binary,
+                            CipherText/binary>>, Pid}, State) ->
     NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, Pid, State),
     {noreply, NewState};
 handle_cast({decrypt_radio, <<IV:2/binary,
-                        OnionCompactKey:33/binary,
-                        Tag:4/binary,
-                        CipherText/binary>>, RSSI, _SNR, _Timestamp, _Frequency, _Spreading}, State) ->
+                              OnionCompactKey:33/binary,
+                              Tag:4/binary,
+                              CipherText/binary>>, RSSI, _SNR, _Timestamp, _Frequency, _Spreading}, State) ->
     NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, undefined, State),
     {noreply, NewState};
 handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}, State) ->
@@ -219,10 +217,12 @@ wait_until_next_block() ->
             ok
     end.
 
+-spec wait_for_block(function(), non_neg_integer()) -> ok | {error, any()}.
 wait_for_block(Fun, Count) when Count > 0 ->
     ok = blockchain_event:add_handler(self()),
     wait_for_block_(Fun, Count).
 
+-spec wait_for_block_(function(), non_neg_integer()) -> ok | {error, any()}.
 wait_for_block_(_, 0) ->
     {error, no_matching_block_found};
 wait_for_block_(Fun, Count) ->
@@ -242,16 +242,16 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
         poc_not_found ->
             Ledger = blockchain:ledger(Chain),
             _ = erlang:spawn(fun() ->
-                                     ok = wait_for_block(fun() ->
-                                                            case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
-                                                                {ok, _} ->
-                                                                    true;
-                                                                _ ->
-                                                                    false
-                                                            end
-                                                    end, 10),
-                                     ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream)
-                             end),
+                ok = wait_for_block(fun() ->
+                    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+                        {ok, _} ->
+                            true;
+                        _ ->
+                            false
+                    end
+                end, 10),
+                ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream)
+            end),
             State;
         {error, fail_decrypt} ->
             _ = erlang:spawn(
