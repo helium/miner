@@ -315,22 +315,21 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
-
--spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
-tx_params(_, true) ->
-    {application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
-tx_params(Len, false) when Len < 54 ->
-    {'SF9', 'CR4_6'};
-tx_params(Len, false) when Len < 83 ->
-    {'SF8', 'CR4_8'};
-tx_params(Len, false) when Len < 99 ->
-    {'SF8', 'CR4_7'};
-tx_params(Len, false) when Len < 115 ->
-    {'SF8', 'CR4_6'};
-tx_params(Len, false) when Len < 139 ->
-    {'SF8', 'CR4_5'};
-tx_params(Len, false) when Len < 160 ->
-    {'SF7', 'CR4_8'};
-tx_params(_, false) ->
-    %% onion packets won't be this big, but this will top out around 180 bytes
-    {'SF7', 'CR4_7'}.
+% -spec tx_params(integer(), Fragment :: boolean()) -> {atom(), atom()}.
+% tx_params(_, true) ->
+%     {application:get_env(miner, poc_spreading_factor, 'SF10'), 'CR4_5'};
+% tx_params(Len, false) when Len < 54 ->
+%     {'SF9', 'CR4_6'};
+% tx_params(Len, false) when Len < 83 ->
+%     {'SF8', 'CR4_8'};
+% tx_params(Len, false) when Len < 99 ->
+%     {'SF8', 'CR4_7'};
+% tx_params(Len, false) when Len < 115 ->
+%     {'SF8', 'CR4_6'};
+% tx_params(Len, false) when Len < 139 ->
+%     {'SF8', 'CR4_5'};
+% tx_params(Len, false) when Len < 160 ->
+%     {'SF7', 'CR4_8'};
+% tx_params(_, false) ->
+%     %% onion packets won't be this big, but this will top out around 180 bytes
+%     {'SF7', 'CR4_7'}.

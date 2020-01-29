@@ -70,11 +70,10 @@ handle_data(_Type, Bin, State) ->
                     spawn(fun() -> miner_lora:send(Packet) end),
                     ok
             end;
-        Msg ->
-            lager:info("Got unhandled message ~p", [Msg]),
-            ok;
-        {error, _} ->
-            ok
+        {error, _Reason} ->
+            lager:error("got error decoding blockchain_state_channel_message ~p", [_Reason]);
+        _Msg ->
+            lager:info("Got unhandled message ~p", [_Msg])
     end,
     {noreply, State}.
 
