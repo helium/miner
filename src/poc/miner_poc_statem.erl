@@ -407,7 +407,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                         end;
                     {ok, V} ->
                         {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
-                        lager:info("poc_v7 (~p) target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
+                        lager:info("poc_v~p target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
                         self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                         handle_challenging(Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
                 end
@@ -434,9 +434,13 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
                                   Path = blockchain_poc_path_v2:build(Target, Gateways, Time, Entropy, Vars),
                                   lager:info("poc_v4 Path: ~p~n", [Path]),
                                   Self ! {Attempt, {ok, Path}};
-                              {ok, _V} ->
+                              {ok, V} when V < 8 ->
                                   Path = blockchain_poc_path_v3:build(Target, Ledger, Time, Entropy, Vars),
                                   lager:info("poc_v7 Path: ~p~n", [Path]),
+                                  Self ! {Attempt, {ok, Path}};
+                              {ok, _V} ->
+                                  Path = blockchain_poc_path_v4:build(Target, Ledger, Time, Entropy, Vars),
+                                  lager:info("poc_v8 Path: ~p~n", [Path]),
                                   Self ! {Attempt, {ok, Path}}
                           end
                   end),
