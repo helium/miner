@@ -52,7 +52,8 @@
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
-    onboarding_key=undefined :: undefined | public_key:public_key()
+    onboarding_key=undefined :: undefined | public_key:public_key(),
+    start_block_time=undefined :: undefined | pos_integer()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -398,10 +399,8 @@ handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
-    Ref = set_next_block_timer(Chain),
-    {reply, ok, State#state{consensus_group = ConsensusGroup,
-                            blockchain = Chain,
-                            block_timer = Ref}};
+    {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
+                                           blockchain = Chain})};
 handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
@@ -486,9 +485,7 @@ handle_cast({install_consensus, NewConsensusGroup},
             State) ->
     lager:info("installing consensus ~p after ~p",
                [NewConsensusGroup, State#state.consensus_group]),
-    Ref = set_next_block_timer(State#state.blockchain),
-    {noreply, State#state{block_timer = Ref,
-                          consensus_group = NewConsensusGroup}};
+    {noreply, set_next_block_timer(State#state{consensus_group = NewConsensusGroup})};
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -526,8 +523,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                   ConsensusGroup, {next_round, NextRound,
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
-                                State#state{block_timer = set_next_block_timer(Chain),
-                                            current_height = Height};
+                                set_next_block_timer(State#state{current_height = Height});
 
                             {true, _, _, _} ->
                                 State#state{block_timer = make_ref(),
@@ -583,10 +579,41 @@ terminate(Reason, _State) ->
 %% Internal functions
 %% =================================================================
 
-set_next_block_timer(Chain) ->
-    {ok, BlockTime} = blockchain:config(?block_time, blockchain:ledger(Chain)),
+set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockTime0}) ->
+    Now = erlang:system_time(seconds),
+    {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
-    LastBlockTimestamp = blockchain_block:time(HeadBlock),
-    NextBlockTime = max(0, (LastBlockTimestamp + (BlockTime div 1000)) - erlang:system_time(seconds)),
+    BlockTime = BlockTime0 div 1000,
+    {ok, Height} = blockchain:height(Chain),
+    LastBlockTimestamp = case Height of
+                             1 ->
+                                 %% make up a plausible time for the genesis block
+                                 Now;
+                             _ ->
+                                 blockchain_block:time(HeadBlock)
+                         end,
+
+    StartBlockTime = case StartBlockTime0 of
+                         undefined ->
+                             case Height > 2 of
+                                 true ->
+                                     {ok, StartBlock} = blockchain:get_block(2, Chain),
+                                     blockchain_block:time(StartBlock);
+                                 false ->
+                                     undefined
+                             end;
+                         Time ->
+                             Time
+                     end,
+    AvgBlockTime = case StartBlockTime of
+                       undefined ->
+                           BlockTime;
+                       _ ->
+                           ceil((LastBlockTimestamp - StartBlockTime) / (Height - 2))
+                   end,
+    BlockTimeDeviation = BlockTime - AvgBlockTime,
+    lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
+    NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    erlang:send_after(NextBlockTime * 1000, self(), block_timeout).
+    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
+    State#state{start_block_time=StartBlockTime, block_timer=Timer}.
