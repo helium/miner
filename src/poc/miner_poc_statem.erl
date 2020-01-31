@@ -521,35 +521,41 @@ load_data(BaseDir) ->
     try file:read_file(File) of
         {error, _Reason}=Error ->
             Error;
+        {ok, <<>>} ->
+            {error, empty_file};
         {ok, Binary} ->
-            case erlang:binary_to_term(Binary) of
-                #{state := State,
-                  secret := Secret,
-                  onion_keys := Keys,
-                  challengees := Challengees,
-                  packet_hashes := PacketHashes,
-                  responses := Responses,
-                  receiving_timeout := RecTimeout,
-                  poc_hash := PoCHash,
-                  mining_timeout := MiningTimeout,
-                  retry := Retry,
-                  receipts_timeout := ReceiptTimeout} ->
-                    {ok, State,
-                     #data{base_dir = BaseDir,
-                           state = State,
-                           secret = Secret,
-                           onion_keys = Keys,
-                           challengees = Challengees,
-                           packet_hashes = PacketHashes,
-                           responses = Responses,
-                           receiving_timeout = RecTimeout,
-                           poc_hash = PoCHash,
-                           mining_timeout = MiningTimeout,
-                           retry = Retry,
-                           receipts_timeout = ReceiptTimeout}};
-                _ ->
-                    {error, wrong_data}
+            try erlang:binary_to_term(Binary) of
+                    #{state := State,
+                      secret := Secret,
+                      onion_keys := Keys,
+                      challengees := Challengees,
+                      packet_hashes := PacketHashes,
+                      responses := Responses,
+                      receiving_timeout := RecTimeout,
+                      poc_hash := PoCHash,
+                      mining_timeout := MiningTimeout,
+                      retry := Retry,
+                      receipts_timeout := ReceiptTimeout} ->
+                        {ok, State,
+                         #data{base_dir = BaseDir,
+                               state = State,
+                               secret = Secret,
+                               onion_keys = Keys,
+                               challengees = Challengees,
+                               packet_hashes = PacketHashes,
+                               responses = Responses,
+                               receiving_timeout = RecTimeout,
+                               poc_hash = PoCHash,
+                               mining_timeout = MiningTimeout,
+                               retry = Retry,
+                               receipts_timeout = ReceiptTimeout}};
+                    _ ->
+                        {error, wrong_data}
+            catch
+                error:bararg ->
+                    {error, bad_term}
             end
+
     catch _:_ ->
             {error, read_error}
     end.
