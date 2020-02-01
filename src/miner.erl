@@ -593,11 +593,12 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                                  blockchain_block:time(HeadBlock)
                          end,
 
+    {ok, StartHeight} = application:get_env(miner, stabilization_period_start),
     StartBlockTime = case StartBlockTime0 of
                          undefined ->
-                             case Height > 2 of
+                             case Height > StartHeight of
                                  true ->
-                                     {ok, StartBlock} = blockchain:get_block(2, Chain),
+                                     {ok, StartBlock} = blockchain:get_block(StartHeight, Chain),
                                      blockchain_block:time(StartBlock);
                                  false ->
                                      undefined
@@ -609,7 +610,7 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                        undefined ->
                            BlockTime;
                        _ ->
-                           ceil((LastBlockTimestamp - StartBlockTime) / (Height - 2))
+                           ceil((LastBlockTimestamp - StartBlockTime) / (Height - StartHeight))
                    end,
     BlockTimeDeviation = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
