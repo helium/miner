@@ -28,9 +28,11 @@
     poc_dist_v8_test/1,
     poc_dist_v8_partitioned_test/1,
     poc_dist_v8_partitioned_lying_test/1,
-    restart_test/1
+    restart_test/1,
+    bad_state_test/1
 ]).
 
+-define(STATE_FILE, "miner_poc_statem.state").
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
 -define(NYLOCS, [631243922668565503, 631243922671147007, 631243922895615999, 631243922665907711]).
 -define(AUSTINLOCS1, [631781084745290239, 631781089167934463, 631781054839691775, 631781050465723903]).
@@ -66,7 +68,8 @@ all() ->
      poc_dist_v8_test,
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
-     restart_test].
+     restart_test,
+     bad_state_test].
 
 init_per_testcase(basic_test = TestCase, Config) ->
     miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
@@ -496,6 +499,80 @@ restart_test(Config) ->
     meck:unload(blockchain_txn_poc_receipts_v1),
 
     ok = gen_statem:stop(Statem1),
+    ok.
+
+
+bad_state_test(Config) ->
+    PrivDir = proplists:get_value(priv_dir, Config),
+    BaseDir = PrivDir ++ "/data_miner_poc_SUITE_restart_test",
+    {PrivKey, PubKey} = new_random_key(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
+    Opts = [
+        {key, {PubKey, SigFun, ECDHFun}},
+        {seed_nodes, []},
+        {port, 0},
+        {num_consensus_members, 7},
+        {base_dir, BaseDir}
+    ],
+    {ok, _Sup} = blockchain_sup:start_link(Opts),
+    ?assert(erlang:is_pid(blockchain_swarm:swarm())),
+
+    %% start up the statem, confirm it defaults to requesting state
+    {ok, Statem0} = miner_poc_statem:start_link(#{delay => 5,
+                                                  base_dir => BaseDir}),
+
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem0))),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem0)))), % State is requesting
+
+    % stop the statem, rewrite the statem file and put it to mining state
+    % start the statem back up and confirm its in mining state
+    % this is to confirm the rewriting of the statem file is taking effect
+    ok = gen_statem:stop(Statem0),
+    {ok, Statem0Map1} = read_poc_statem_file(BaseDir),
+    Statem0Map2 = maps:update(state, mining, Statem0Map1),
+    ok = write_poc_statem_file(Statem0Map2, BaseDir),
+
+    {ok, Statem1} = miner_poc_statem:start_link(#{delay => 5,
+                                                  base_dir => BaseDir}),
+    ?assertEqual(mining,  erlang:element(1, sys:get_state(Statem1))),
+    ?assertEqual(mining, erlang:element(6, erlang:element(2, sys:get_state(Statem1)))),
+
+    % now that we have confirmed the rewriting of the statem file is working,
+    % lets do it again but this time rewrite with a bad/unsupported state
+    % the statem file should ignore the bad state and default to requesting
+    ok = gen_statem:stop(Statem1),
+    {ok, Statem1Map1} = read_poc_statem_file(BaseDir),
+    Statem1Map2 = maps:update(state, bad_state, Statem1Map1),
+    ok = write_poc_statem_file(Statem1Map2, BaseDir),
+
+    {ok, Statem2} = miner_poc_statem:start_link(#{delay => 5,
+                                                  base_dir => BaseDir}),
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem2))),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem2)))),
+
+    %% test starting of the statem with an empty state file, should default to requesting state
+    ok = gen_statem:stop(Statem2),
+    ok = write_empty_poc_statem_file(BaseDir),
+
+    {ok, Statem3} = miner_poc_statem:start_link(#{delay => 5,
+                                                  base_dir => BaseDir}),
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem3))),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem3)))),
+
+
+    %% test starting of the statem with a state file containing a bad term, should default to requesting state
+    ok = gen_statem:stop(Statem3),
+    ok = write_bad_term_poc_statem_file(BaseDir),
+
+    {ok, Statem4} = miner_poc_statem:start_link(#{delay => 5,
+                                                  base_dir => BaseDir}),
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem4))),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem4)))),
+
+    %
+    ok = gen_statem:stop(Statem4),
+    ok = delete_poc_statem_file(BaseDir),
     ok.
 
 
@@ -1210,3 +1287,34 @@ location_sets(poc_dist_v8_partitioned_test) ->
     {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
 location_sets(_TestCase) ->
     {sets:from_list(?SFLOCS), sets:from_list(?NYLOCS)}.
+
+read_poc_statem_file(BaseDir)->
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    try file:read_file(File) of
+        {ok, Binary} ->
+            try erlang:binary_to_term(Binary) of
+                Term -> {ok, Term}
+            catch
+                error:bararg ->
+                    {error, bad_term}
+            end
+    catch _:_ ->
+        {error, read_error}
+    end.
+
+write_poc_statem_file(Term, BaseDir)->
+    BinState = erlang:term_to_binary(Term),
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    file:write_file(File, BinState).
+
+write_empty_poc_statem_file(BaseDir)->
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    file:write_file(File, <<>>).
+
+write_bad_term_poc_statem_file(BaseDir)->
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    file:write_file(File, "bad_term").
+
+delete_poc_statem_file(BaseDir)->
+    File = filename:join([BaseDir, ?STATE_FILE]),
+    file:delete(File).

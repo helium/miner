@@ -583,7 +583,7 @@ load_data(BaseDir) ->
                 _ ->
                     {error, wrong_data}
             catch
-                error:bararg ->
+                error:badarg ->
                     {error, bad_term}
             end
 
