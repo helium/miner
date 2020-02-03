@@ -113,19 +113,19 @@ init(Args) ->
                                    address=Address, poc_interval=Delay, state=requesting}};
         %% we have attempted to unsuccessfully restart this POC too many times, give up and revert to default state
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
-            {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting})};
+            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting}};
         %% we loaded a state from the saved statem file, initialise with this if its an exported/supported state
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
                 true ->
-                    {ok, State, save_data(Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                    {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                           address=Address, poc_interval=Delay, state=State,
-                                          poc_restarts = POCRestarts - 1})};
+                                          poc_restarts = POCRestarts - 1}};
                 false ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
-                    {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
-                                           address=Address, poc_interval=Delay, state=requesting})}
+                    {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
+                                           address=Address, poc_interval=Delay, state=requesting}}
 
             end
     end.
@@ -152,8 +152,8 @@ terminate(_Reason, _State) ->
 %%
 requesting(enter, _State, Data)->
     %% each time we enter requesting state we assume we are starting a new POC and thus we reset our restart count allocation
-    {keep_state, Data#data{poc_restarts=?POC_RESTARTS, retry=?CHALLENGE_RETRY,
-                            mining_timeout=?MINING_TIMEOUT, targeting_data=undefined}};
+    {keep_state, save_data(Data#data{poc_restarts=?POC_RESTARTS, retry=?CHALLENGE_RETRY,
+                                        mining_timeout=?MINING_TIMEOUT, targeting_data=undefined})};
 requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -175,9 +175,9 @@ requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #dat
             lager:info("request allowed @ ~p", [BlockHash]),
             ok = blockchain_worker:submit_txn(Txn),
             lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, save_data(Data#data{state=mining, secret=Secret,
-                                                      onion_keys=Keys, responses=#{},
-                                                      poc_hash=BlockHash})}
+            {next_state, mining, Data#data{state=mining, secret=Secret,
+                                            onion_keys=Keys, responses=#{},
+                                            poc_hash=BlockHash}}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -194,7 +194,7 @@ requesting(EventType, EventContent, Data) ->
 mining(enter, _State, #data{targeting_data = {targeting, BlockHash, PinnedLedger}} = Data)->
     %% sorry, have to send msg via self here as state enters cannot insert events..bah...
     self ! {retry_targeting, BlockHash, PinnedLedger},
-    {keep_state, Data};
+    {keep_state, save_data(Data)};
 mining(enter, _State, Data)->
     {keep_state, Data};
 mining(info, Msg, #data{blockchain=undefined}=Data) ->
@@ -214,17 +214,17 @@ mining(EventType, EventContent, Data) ->
 %% and then transition to waiting state
 %%
 receiving(enter, _State, Data)->
-    {keep_state, Data#data{receiving_timeout=?RECEIVING_TIMEOUT, targeting_data=undefined}};
+    {keep_state, save_data(Data#data{receiving_timeout=?RECEIVING_TIMEOUT, targeting_data=undefined})};
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
-            {next_state, requesting, save_data(Data#data{state=requesting})};
+            {next_state, requesting, Data#data{state=requesting}};
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             ok = submit_receipts(Data),
-            {next_state, waiting, save_data(Data#data{state=waiting})}
+            {next_state, waiting, Data#data{state=waiting}}
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
@@ -310,14 +310,14 @@ receiving(EventType, EventContent, Data) ->
 %% if we dont see our receipts after N blocks then give up and transition to requesting state
 %%
 waiting(enter, _State, Data)->
-    {keep_state, Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
+    {keep_state, save_data(Data#data{receipts_timeout=?RECEIPTS_TIMEOUT})};
 waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
-    {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+    {next_state, requesting,  Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT}};
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
-            {next_state, requesting, save_data(Data#data{state=requesting})};
+            {next_state, requesting, Data#data{state=requesting}};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
             {keep_state, save_data(Data#data{receipts_timeout=Timeout-1})}
@@ -336,8 +336,8 @@ is_supported_state(State)->
 
 handle_event(info, {blockchain_event, {new_chain, NC}},
              #data{address = Address, poc_interval = Delay}) ->
-    {next_state, requesting, save_data(#data{state = requesting, blockchain=NC,
-                                              address=Address, poc_interval=Delay})};
+    {next_state, requesting, #data{state = requesting, blockchain=NC,
+                                              address=Address, poc_interval=Delay}};
 handle_event(info, {blockchain_event, {add_block, _, _, _}}, Data) ->
     %% suppress the warning here
     {keep_state, Data};
@@ -366,7 +366,7 @@ handle_mining(BlockHash, PinnedLedger, #data{blockchain = _Chain, address = Chal
                     {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
                     lager:error("did not see PoC request in last ~p block, giving up on this POC", [?MINING_TIMEOUT]),
-                    {next_state, requesting, save_data(Data#data{state=requesting})}
+                    {next_state, requesting, Data#data{state=requesting}}
             end
     end.
 
@@ -381,7 +381,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
     case blockchain_ledger_gateway_v2:location(ChallengerGw) of
         undefined ->
             lager:warning("poc no challenger location, back to requesting"),
-            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+            {next_state, requesting, Data#data{state=requesting, retry=?CHALLENGE_RETRY}};
         ChallengerLoc ->
             Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
 
@@ -393,7 +393,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                                 handle_challenging(Entropy, Target, Gateways, Height, Ledger, #{}, Data#data{challengees=[]});
                             no_target ->
                                 lager:warning("no target found, back to requesting"),
-                                {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
+                                {next_state, requesting, Data#data{state=requesting, retry=?CHALLENGE_RETRY}}
                         end;
                     {ok, V} when V < 7 ->
                         %% Create tagged score map
@@ -407,7 +407,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                                 lager:info("POCVersion: ~p~n", [V]),
                                 lager:info("GatewayScores: ~p~n", [GatewayScores]),
                                 lager:info("poc_v4 no target found, back to requesting"),
-                                {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+                                {next_state, requesting, Data#data{state=requesting, retry=?CHALLENGE_RETRY}};
                             {ok, TargetPubkeyBin} ->
                                 lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
                                 lager:info("POCVersion: ~p~n", [V]),
@@ -468,8 +468,8 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
             P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
             case send_onion(P2P, Onion, 3) of
                 ok ->
-                    {next_state, receiving, save_data(Data#data{state=receiving, challengees=lists:zip(Path, LayerData),
-                        packet_hashes=lists:zip(Path, LayerHashes)})};
+                    {next_state, receiving, Data#data{state=receiving, challengees=lists:zip(Path, LayerData),
+                                                        packet_hashes=lists:zip(Path, LayerHashes)}};
 
                 {error, Reason} ->
                     lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
@@ -483,7 +483,7 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
         erlang:demonitor(Ref, [flush]),
         erlang:exit(Pid, kill),
         lager:error("blockchain_poc_path took too long: Entropy ~p Target ~p Height ~p", [Entropy, Target, Height]),
-        {next_state, requesting, save_data(Data#data{state=requesting})}
+        {next_state, requesting, Data#data{state=requesting}}
 
     end.
 
