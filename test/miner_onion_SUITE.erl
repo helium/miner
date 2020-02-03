@@ -2,8 +2,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("helium_proto/src/pb/longfi_pb.hrl").
 -include("miner_ct_macros.hrl").
+-include("lora.hrl").
 
 -export([
     all/0
@@ -56,12 +56,20 @@ basic(_Config) ->
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey)
     }),
 
+    {ok, RadioServer} = miner_lora:start_link(#{
+        radio_udp_bind_ip => {127,0,0,1},
+        radio_udp_bind_port => 5678,
+        radio_udp_send_ip => {127,0,0,1},
+        radio_udp_send_port => Port,
+        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey)
+    }),
+
     TestDir = miner_ct_utils:tmp_dir("miner_onion_suite_basic"),
     Ledger = blockchain_ledger_v1:new(TestDir),
     BlockHash = crypto:strong_rand_bytes(32),
-    Data1 = <<1, 2, 3>>,
-    Data2 = <<4, 5, 6>>,
-    Data3 = <<7, 8, 9>>,
+    Data1 = <<1, 2>>,
+    Data2 = <<3, 4>>,
+    Data3 = <<5, 6>>,
     OnionKey = #{public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
 
     % This is for `try_decrypt`
@@ -87,26 +95,30 @@ basic(_Config) ->
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
     end),
 
-    Rx0 = #'LongFiRxPacket_pb'{
-        oui=0,
-        device_id=1,
-        crc_check=true,
-        spreading= 'SF8',
-        payload= Onion
-    },
-    Resp0 = #'LongFiResp_pb'{id=0, kind={rx, Rx0}},
-    Packet0 = longfi_pb:encode_msg(Resp0, 'LongFiResp_pb'),
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet0),
-    {ok, {{127,0,0,1}, 5678, Packet1}} = gen_udp:recv(Sock, 0, 5000),
+    Token = <<0, 0>>,
+    %% set up the gateway
+    gen_udp:send(Sock, {127, 0, 0, 1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, 16#deadbeef:64/integer>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
 
-    Got0 = longfi_pb:decode_msg(Packet1, 'LongFiReq_pb'),
-    {_, Got0Uplink} = Got0#'LongFiReq_pb'.kind,
-    X = Got0Uplink#'LongFiTxPacket_pb'.payload,
+    Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 0, 1, 0, Onion, #{})),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
+                                                  (jsx:encode(#{<<"rxpk">> =>
+                                                             [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
+                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON1/binary>>}} = gen_udp:recv(Sock, 0, 5000),
 
+    #{<<"txpk">> := #{<<"data">> := Packet1}} = jsx:decode(PacketJSON1, [return_maps]),
+
+    {ok, LongFiPkt1} = longfi:deserialize(base64:decode(Packet1)),
+
+    X = longfi:payload(LongFiPkt1),
     timer:sleep(2000),
     %% check that the packet size is the same
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(X)),
     gen_server:stop(Server),
+    gen_server:stop(RadioServer),
     ct:pal("~p~n", [X]),
 
     ?assert(meck:validate(miner_onion_server)),
@@ -135,47 +147,49 @@ basic(_Config) ->
         ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivateKey2)
     }),
 
+    {ok, RadioServer1} = miner_lora:start_link(#{
+        radio_udp_bind_ip => {127,0,0,1},
+        radio_udp_bind_port => 5678,
+        radio_udp_send_ip => {127,0,0,1},
+        radio_udp_send_port => Port,
+        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey2)
+    }),
+
+    %% set up the gateway
+    gen_udp:send(Sock, {127, 0, 0, 1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, 16#deadbeef:64/integer>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
+
     %% check we can't decrypt the original
-    Rx2 = #'LongFiRxPacket_pb'{
-        oui=0,
-        device_id=1,
-        crc_check=true,
-        spreading= 'SF8',
-        payload= Onion
-    },
-    Resp2 = #'LongFiResp_pb'{id=0, kind={rx, Rx2}},
-    Packet2 = longfi_pb:encode_msg(Resp2, 'LongFiResp_pb'),
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet2),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
+                                                  (jsx:encode(#{<<"rxpk">> =>
+                                                             [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
+                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
-    Rx3 = #'LongFiRxPacket_pb'{
-        oui = 0,
-        device_id=1,
-        crc_check=true,
-        spreading= 'SF8',
-        payload= X
-    },
-    Resp3 = #'LongFiResp_pb'{id=0, kind={rx, Rx3}},
-    Packet3 = longfi_pb:encode_msg(Resp3, 'LongFiResp_pb'),
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet3),
-    {ok, {{127,0,0,1}, 5678, Packet4}} = gen_udp:recv(Sock, 0, 5000),
 
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
+                                                  (jsx:encode(#{<<"rxpk">> =>
+                                                                [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
+                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                   <<"datr">> => <<"SF10BW125">>, <<"data">> => Packet1}]}))/binary>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token2:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON2/binary>>}} = gen_udp:recv(Sock, 0, 5000),
+    gen_udp:send(Sock, {127, 0, 0, 1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token2:2/binary, ?PULL_ACK:8/integer-unsigned, 16#deadbeef:64/integer>>),
 
-    Got1 = longfi_pb:decode_msg(Packet4, 'LongFiReq_pb'),
-    {_, Got1Uplink} = Got1#'LongFiReq_pb'.kind,
-    Y = Got1Uplink#'LongFiTxPacket_pb'.payload,
+    #{<<"txpk">> := #{<<"data">> := Packet2}} = jsx:decode(PacketJSON2, [return_maps]),
+    {ok, LongFiPkt2} = longfi:deserialize(base64:decode(Packet2)),
+
+    Y = longfi:payload(LongFiPkt2),
 
     %% check we can't decrypt the next layer
-    Rx5 = #'LongFiRxPacket_pb'{
-        oui=0,
-        device_id=1,
-        crc_check=true,
-        spreading= 'SF8',
-        payload= Y
-    },
-    Resp5 = #'LongFiResp_pb'{id=0, kind={rx, Rx5}},
-    Packet5 = longfi_pb:encode_msg(Resp5, 'LongFiResp_pb'),
-    ok = gen_udp:send(Sock, "127.0.0.1",  5678, Packet5),
+    ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
+                                                  (jsx:encode(#{<<"rxpk">> =>
+                                                                [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
+                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                   <<"datr">> => <<"SF10BW125">>, <<"data">> => Packet2}]}))/binary>>),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
 
     ?assertEqual(erlang:byte_size(Onion), erlang:byte_size(Y)),
@@ -197,6 +211,7 @@ basic(_Config) ->
     ?assert(meck:validate(blockchain_ledger_v1)),
     meck:unload(blockchain_ledger_v1),
     gen_server:stop(Server1),
+    gen_server:stop(RadioServer1),
     ok.
 
 
