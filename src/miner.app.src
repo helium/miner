@@ -24,7 +24,6 @@
     rand_compat, %% nat_upnp has a missing dep
     inets, %% nat_upnp has a missing dep
     xmerl,  %% nat_upnp has a missing dep
-    helium_proto,
     jsx,
     kvc,
     longfi
