@@ -1192,7 +1192,7 @@ do_common_partition_lying_checks(TestCase, Config) ->
 
 extra_vars(poc_v8) ->
     #{?poc_version => 8,
-      ?poc_good_bucket_low => -115,
+      ?poc_good_bucket_low => -132,
       ?poc_good_bucket_high => -80,
       ?poc_v4_prob_rssi_wt => 0.1,
       ?poc_v4_prob_time_wt => 0.1,
