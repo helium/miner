@@ -153,6 +153,8 @@ einfo() ->
 %%%===================================================================
 
 init(_Args) ->
+    erlang:process_flag(trap_exit, true),
+    lager:debug("starting...",[]),
     ok = blockchain_event:add_handler(self()),
     case  blockchain_worker:blockchain() of
         undefined ->
@@ -610,6 +612,7 @@ terminate(_Reason, #state{active_group = Active,
                           started_groups = Started,
                           current_dkgs = Current,
                           cancel_dkgs = Cancel}) ->
+    lager:debug("terminating with reason ~p", [_Reason]),
     stop_group(Active),
     maps:map(fun(_, G) -> stop_group(G) end, Started),
     maps:map(fun(_, G) -> stop_group(G) end, Current),

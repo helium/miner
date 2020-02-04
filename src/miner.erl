@@ -378,7 +378,8 @@ version() ->
 %% ------------------------------------------------------------------
 
 init(Args) ->
-    lager:info("STARTING UP MINER"),
+    erlang:process_flag(trap_exit, true),
+    lager:info("hello from miner"),
     ok = blockchain_event:add_handler(self()),
     BlockchainRef = erlang:monitor(process, blockchain_worker),
     case blockchain_worker:blockchain() of
@@ -572,7 +573,7 @@ handle_info(_Msg, State) ->
     {noreply, State}.
 
 terminate(Reason, _State) ->
-    lager:info("stopping: ~p", [Reason]),
+    lager:info("goodbye from miner: ~p", [Reason]),
     ok.
 
 %% ==================================================================

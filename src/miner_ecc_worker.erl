@@ -36,6 +36,7 @@ start_link(KeySlot) ->
 
 
 init([KeySlot]) ->
+    erlang:process_flag(trap_exit, true),
     {ok, ECCHandle} = ecc508:start_link(),
     {ok, #state{ecc_handle=ECCHandle, key_slot=KeySlot}}.
 

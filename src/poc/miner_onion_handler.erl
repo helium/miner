@@ -44,9 +44,11 @@ send(Pid, Data) ->
 %% libp2p_framed_stream Function Definitions
 %% ------------------------------------------------------------------
 init(client, _Conn, _Args) ->
+    erlang:process_flag(trap_exit, true),
     lager:info("started ~p client", [?MODULE]),
     {ok, #state{}};
 init(server, _Conn, _Args) ->
+    erlang:process_flag(trap_exit, true),
     lager:info("started ~p server", [?MODULE]),
     {ok, #state{}}.
 

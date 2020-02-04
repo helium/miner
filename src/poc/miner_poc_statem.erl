@@ -97,6 +97,8 @@ witness(Data) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
+    erlang:process_flag(trap_exit, true),
+    lager:debug("starting...",[]),
     ok = blockchain_event:add_handler(self()),
     ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
@@ -134,6 +136,7 @@ code_change(_OldVsn, State, _Extra) ->
 callback_mode() -> [state_functions,state_enter].
 
 terminate(_Reason, _State) ->
+    lager:debug("terminating with reason ~p", [_Reason]),
     ok.
 
 %% ------------------------------------------------------------------

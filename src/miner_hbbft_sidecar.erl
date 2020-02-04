@@ -61,8 +61,11 @@ new_round(Buf, Txns) ->
 %%%===================================================================
 
 init([]) ->
+    erlang:process_flag(trap_exit, true),
     init(#state{});
 init(State) ->
+    erlang:process_flag(trap_exit, true),
+    lager:debug("starting...",[]),
     case blockchain_worker:blockchain() of
         undefined ->
             erlang:send_after(500, self(), chain_check),
@@ -208,6 +211,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{validations = Validations}) ->
+    lager:debug("terminating with reason ~p", [_Reason]),
     maps:map(
       fun(_K, #validation{from = From, pid = Pid}) ->
               gen_server:reply(From, {error, exiting}),
