@@ -20,8 +20,8 @@
 -define(FREQUENCY, 915).
 -define(TRANSMIT_POWER, 28).
 -define(MAX_ANTENNA_GAIN, 6).
--define(ETA, 2.5).
--define(ABS_RSSI, -10).
+-define(ETA, 1.8).
+-define(ABS_RSSI, -48).
 
 start_link(MyPort, UDPPorts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [MyPort, UDPPorts], []).
