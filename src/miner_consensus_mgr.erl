@@ -450,10 +450,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                     %% we're not in
                                     error ->
                                         stop_group(State2#state.active_group),
+                                        miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
                                         State2#state{active_group = undefined};
                                     {ok, out} ->
                                         stop_group(State2#state.active_group),
+                                        miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
                                         State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
                                                      active_group = undefined};
