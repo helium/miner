@@ -305,6 +305,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
     %% above the present one.
     ok = miner:install_consensus(Group),
     %% here the dkg has already been moved into the cancel state.
+    lager:info("rescue stopping old group"),
     stop_group(State#state.active_group),
     miner_hbbft_sidecar:set_group(Group),
     libp2p_group_relcast:handle_input(Group, {next_round, Round + 1, [], false}),
@@ -449,11 +450,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                 case maps:find(EID, State#state.current_dkgs) of
                                     %% we're not in
                                     error ->
+                                        lager:info("stopping old group: election, no key"),
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
                                         State2#state{active_group = undefined};
                                     {ok, out} ->
+                                        lager:info("stopping old group: election, elected out"),
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
@@ -612,6 +615,7 @@ terminate(_Reason, #state{active_group = Active,
                           started_groups = Started,
                           current_dkgs = Current,
                           cancel_dkgs = Cancel}) ->
+    lager:info("starting termination stops"),
     stop_group(Active),
     maps:map(fun(_, G) -> stop_group(G) end, Started),
     maps:map(fun(_, G) -> stop_group(G) end, Current),

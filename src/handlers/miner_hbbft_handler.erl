@@ -66,9 +66,11 @@ handle_command({set_buf, Buf}, State) ->
     {reply, ok, [], State#state{hbbft = hbbft:buf(Buf, State#state.hbbft)}};
 handle_command(stop, State) ->
     %% TODO add ignore support for this four tuple to use ignore
+    lager:info("stop called without timeout"),
     {reply, ok, [{stop, timer:minutes(1)}], State};
 handle_command({stop, Timeout}, State) ->
     %% TODO add ignore support for this four tuple to use ignore
+    lager:info("stop called with timeout: ~p", [Timeout]),
     {reply, ok, [{stop, Timeout}], State};
 handle_command({status, Ref, Worker}, State) ->
     Map = hbbft:status(State#state.hbbft),
