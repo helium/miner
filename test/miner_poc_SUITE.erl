@@ -1202,7 +1202,7 @@ extra_vars(poc_v8) ->
       ?poc_v4_randomness_wt => 0.2,
       ?poc_v4_prob_count_wt => 0.1,
       ?poc_centrality_wt => 0.5,
-      ?poc_max_hop_cells => 500};
+      ?poc_max_hop_cells => 2000};
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
 
