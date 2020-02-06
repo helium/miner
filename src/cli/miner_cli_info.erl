@@ -335,8 +335,8 @@ get_gateway_info(Chain, PubKey)->
     case blockchain_ledger_v1:find_gateway_info(PubKey, Ledger) of
         {ok, Gateway} ->
             GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
-            GWOwnAddr = blockchain_ledger_gateway_v2:owner_address(Gateway),
-            lists:concat(["Gateway location: ", GWLoc, "Ownder address: ", GWOwnAddr]);
+            GWOwnAddr = libp2p_crypto:pubkey_bin_to_p2p(blockchain_ledger_gateway_v2:owner_address(Gateway)),
+            [lists:concat(["Gateway location: ", GWLoc]), lists:concat(["Owner address: ", GWOwnAddr])];
         _ ->
             "gateway not found in ledger"
     end.
