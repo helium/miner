@@ -1194,11 +1194,15 @@ extra_vars(poc_v8) ->
     #{?poc_version => 8,
       ?poc_good_bucket_low => -132,
       ?poc_good_bucket_high => -80,
+      ?poc_v5_target_prob_randomness_wt => 1.0,
+      ?poc_v4_target_prob_edge_wt => 0.0,
+      ?poc_v4_target_prob_score_wt => 0.0,
       ?poc_v4_prob_rssi_wt => 0.1,
       ?poc_v4_prob_time_wt => 0.1,
       ?poc_v4_randomness_wt => 0.2,
       ?poc_v4_prob_count_wt => 0.1,
-      ?poc_centrality_wt => 0.5};
+      ?poc_centrality_wt => 0.5,
+      ?poc_max_hop_cells => 500};
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
 

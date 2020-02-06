@@ -375,48 +375,61 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
         ChallengerLoc ->
             Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
 
-                case blockchain:config(?poc_version, Ledger) of
-                    {ok, V} when V < 4 ->
-                        case blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()) of
-                            {Target, Gateways} ->
-                                lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
-                                handle_challenging(Entropy, Target, Gateways, Height, Ledger, #{}, Data#data{challengees=[]});
-                            no_target ->
-                                lager:warning("no target found, back to requesting"),
-                                {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
-                        end;
-                    {ok, V} when V < 7 ->
-                        %% Create tagged score map
-                        GatewayScoreMap = blockchain_utils:score_gateways(Ledger),
+            case blockchain:config(?poc_version, Ledger) of
+                {ok, V} when V < 4 ->
+                    case blockchain_poc_path:target(Entropy, Ledger, blockchain_swarm:pubkey_bin()) of
+                        {Target, Gateways} ->
+                            lager:info("target found ~p, challenging, hash: ~p", [Target, Entropy]),
+                            handle_challenging({Entropy, ignored}, Target, Gateways, Height, Ledger, #{}, Data#data{challengees=[]});
+                        no_target ->
+                            lager:warning("no target found, back to requesting"),
+                            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})}
+                    end;
+                {ok, V} when V < 7 ->
+                    %% Create tagged score map
+                    GatewayScoreMap = blockchain_utils:score_gateways(Ledger),
 
-                        %% Filtered gateways
-                        GatewayScores = blockchain_poc_target_v2:filter(GatewayScoreMap, ChallengerAddr, ChallengerLoc, Height, Vars),
-                        case blockchain_poc_target_v2:target(Entropy, GatewayScores, Vars) of
-                            {error, no_target} ->
-                                lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
-                                lager:info("POCVersion: ~p~n", [V]),
-                                lager:info("GatewayScores: ~p~n", [GatewayScores]),
-                                lager:info("poc_v4 no target found, back to requesting"),
-                                {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
-                            {ok, TargetPubkeyBin} ->
-                                lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
-                                lager:info("POCVersion: ~p~n", [V]),
-                                lager:info("GatewayScores: ~p~n", [GatewayScores]),
-                                lager:info("poc_v4 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
-                                handle_challenging(Entropy, TargetPubkeyBin, GatewayScores, Height, Ledger, Vars, Data#data{challengees=[]})
-                        end;
-                    {ok, V} ->
-                        {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
-                        lager:info("poc_v~p target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
-                        self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
-                        handle_challenging(Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
-                end
+                    %% Filtered gateways
+                    GatewayScores = blockchain_poc_target_v2:filter(GatewayScoreMap, ChallengerAddr, ChallengerLoc, Height, Vars),
+                    case blockchain_poc_target_v2:target(Entropy, GatewayScores, Vars) of
+                        {error, no_target} ->
+                            lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
+                            lager:info("POCVersion: ~p~n", [V]),
+                            lager:info("GatewayScores: ~p~n", [GatewayScores]),
+                            lager:info("poc_v4 no target found, back to requesting"),
+                            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+                        {ok, TargetPubkeyBin} ->
+                            lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
+                            lager:info("POCVersion: ~p~n", [V]),
+                            lager:info("GatewayScores: ~p~n", [GatewayScores]),
+                            lager:info("poc_v4 target found ~p, challenging, hash: ~p", [TargetPubkeyBin, Entropy]),
+                            handle_challenging({Entropy, ignored}, TargetPubkeyBin, GatewayScores, Height, Ledger, Vars, Data#data{challengees=[]})
+                    end;
+                {ok, V} when V < 8 ->
+                    {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
+                    lager:info("poc_v~p target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
+                    self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
+                    handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
+                {ok, V} ->
+                    case blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars) of
+                        {error, no_target} ->
+                            %% not a single gateway in this hex is eligibile for targetting
+                            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
+                        {ok, {TargetPubkeyBin, TargetRandState}} ->
+                            lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
+                            lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
+                            %% XXX: Don't think this line is needed?
+                            self() ! {challenge, TargetRandState, TargetPubkeyBin, ignored, Height, Ledger, Vars},
+                            %% NOTE: We pass in the TargetRandState along with the entropy here
+                            handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
+                    end
+            end
     end.
 
-handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retry=Retry,
-                                                                            onion_keys=OnionKey,
-                                                                            poc_hash=BlockHash,
-                                                                            blockchain=Chain}=Data) ->
+handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger, Vars, #data{  retry=Retry,
+                                                                                               onion_keys=OnionKey,
+                                                                                               poc_hash=BlockHash,
+                                                                                               blockchain=Chain}=Data) ->
 
     Self = self(),
     Attempt = make_ref(),
@@ -436,11 +449,12 @@ handle_challenging(Entropy, Target, Gateways, Height, Ledger, Vars, #data{  retr
                                   Self ! {Attempt, {ok, Path}};
                               {ok, V} when V < 8 ->
                                   Path = blockchain_poc_path_v3:build(Target, Ledger, Time, Entropy, Vars),
-                                  lager:info("poc_v7 Path: ~p~n", [Path]),
+                                  lager:info("poc_v~p Path: ~p~n", [V, Path]),
                                   Self ! {Attempt, {ok, Path}};
-                              {ok, _V} ->
-                                  Path = blockchain_poc_path_v4:build(Target, Ledger, Time, Entropy, Vars),
-                                  lager:info("poc_v8 Path: ~p~n", [Path]),
+                              {ok, V} ->
+                                  %% NOTE: v8 onwards path:build signature has changed to use rand_state instead of entropy
+                                  Path = blockchain_poc_path_v4:build(Target, TargetRandState, Ledger, Time, Vars),
+                                  lager:info("poc_v~p Path: ~p~n", [V, Path]),
                                   Self ! {Attempt, {ok, Path}}
                           end
                   end),
