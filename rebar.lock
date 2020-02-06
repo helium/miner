@@ -2,7 +2,7 @@
 [{<<"backoff">>,{pkg,<<"backoff">>,<<"1.1.6">>},2},
  {<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},3},
  {<<"blockchain">>,
-  {git,"git@github.com:helium/blockchain-core.git",
+  {git,"https://github.com/helium/blockchain-core.git",
        {ref,"96755429e6b8e3dee2b033ca4d5a61f47413c6f9"}},
   0},
  {<<"clique">>,
