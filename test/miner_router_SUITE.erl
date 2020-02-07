@@ -31,20 +31,20 @@
 all() -> [basic].
 
 init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
-    Miners = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitialDCTransactions = [ blockchain_txn_dc_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
-    Interval = proplists:get_value(election_interval, Config),
-    BatchSize = proplists:get_value(batch_size, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
-    %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
+    BlockTime = ?config(block_time, Config),
+    Interval = ?config(election_interval, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
+    %% VarCommitInterval = ?config(var_commit_interval, Config),
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
@@ -86,7 +86,7 @@ end_per_testcase(_TestCase, Config) ->
 %% @end
 %%--------------------------------------------------------------------
 basic(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Owner| _Tail] = Miners,
     OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
 

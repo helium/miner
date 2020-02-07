@@ -33,14 +33,14 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(TestCase, Config).
+    miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config).
 
 end_per_testcase(TestCase, Config) ->
     miner_ct_utils:end_per_testcase(TestCase, Config).
 
 %% test cases
 listen_addr_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     ListenAddrs = lists:foldl(fun(Miner, Acc) ->
                                       Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
                                       LA = ct_rpc:call(Miner, libp2p_swarm, sessions, [Swarm]),
@@ -50,7 +50,7 @@ listen_addr_test(Config) ->
     {comment, ListenAddrs}.
 
 p2p_addr_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     P2PAddrs = lists:foldl(fun(Miner, Acc) ->
                                    Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                                    P2PAddr = ct_rpc:call(Miner, libp2p_crypto, pubkey_bin_to_p2p, [Address]),

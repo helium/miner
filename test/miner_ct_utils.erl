@@ -1,11 +1,15 @@
 -module(miner_ct_utils).
 
+-include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include("miner_ct_macros.hrl").
 
+-define(BASE_TMP_DIR, "./_build/test/tmp").
+-define(BASE_TMP_DIR_TEMPLATE, "XXXXXXXXXX").
+
 -export([
-         init_per_testcase/2,
+         init_per_testcase/3,
          end_per_testcase/2,
          pmap/2, pmap/3,
          wait_until/1, wait_until/3,
@@ -20,6 +24,8 @@
          get_balance/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
+         cleanup_tmp_dir/1,
+         init_base_dir_config/3,
          generate_keys/1,
          new_random_key/1,
          stop_miners/1, stop_miners/2,
@@ -290,8 +296,7 @@ wait_for_chain_var_update(Miners, Key, Value, Timeout)->
     ok.
 
 delete_dirs(DirWildcard, SubDir)->
-    Data = string:trim(os:cmd("pwd")),
-    Dirs = filelib:wildcard(Data ++ DirWildcard),
+    Dirs = filelib:wildcard(DirWildcard),
     [begin
          ct:pal("rm dir ~s", [Dir]),
          os:cmd("rm -r " ++ Dir ++ SubDir)
@@ -478,7 +483,11 @@ partition_miners(Members, AddrList) ->
                             lists:member(Addr, Members)
                     end, Miners).
 
-init_per_testcase(TestCase, Config) ->
+init_per_testcase(Mod, TestCase, Config) ->
+    Config0 = init_base_dir_config(Mod, TestCase, Config),
+    BaseDir = ?config(base_dir, Config0),
+    LogDir = ?config(log_dir, Config0),
+
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
     case net_kernel:start([list_to_atom("runner-miner" ++
@@ -532,7 +541,7 @@ init_per_testcase(TestCase, Config) ->
                      {Miner, Ports, GECDH, GPub, GAddr, GSigFun}
              end, MinersAndPorts),
 
-    PrivDir = proplists:get_value(priv_dir, Config),
+
 
     ConfigResult = miner_ct_utils:pmap(
         fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
@@ -543,14 +552,17 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Miner, application, load, [blockchain]),
             ct_rpc:call(Miner, application, load, [libp2p]),
             %% give each miner its own log directory
-            LogRoot = PrivDir ++ "/log_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+            LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+            ct:pal("MinerLogRoot: ~p", [LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
             %% set blockchain configuration
             Key = {PubKey, ECDH, SigFun, undefined},
-            BaseDir = PrivDir ++ "/data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+
+            MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+            ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
             %% set blockchain env
-            ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, BaseDir]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
             ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
             ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
             ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
@@ -627,13 +639,13 @@ init_per_testcase(TestCase, Config) ->
         {election_interval, Interval},
         {num_consensus_members, NumConsensusMembers},
         {rpc_timeout, timer:seconds(5)}
-        | Config
+        | Config0
     ].
 
 end_per_testcase(TestCase, Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
-    case proplists:get_value(tc_status, Config) of
+    case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
             cleanup_per_testcase(TestCase, Config);
@@ -644,8 +656,8 @@ end_per_testcase(TestCase, Config) ->
     {comment, done}.
 
 cleanup_per_testcase(TestCase, Config) ->
-    Miners = proplists:get_value(miners, Config),
-    PrivDir = proplists:get_value(priv_dir, Config),
+    Miners = ?config(miners, Config),
+    PrivDir = ?config(priv_dir, Config),
     lists:foreach(fun(Miner) ->
                           LogRoot = PrivDir ++ "/log_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
                           Res = os:cmd("rm -rf " ++ LogRoot),
@@ -735,12 +747,6 @@ make_vars(Keys, Map, Mode) ->
 
         end.
 
-tmp_dir() ->
-    ?MODULE:nonl(os:cmd("mktemp -d")).
-
-tmp_dir(Dir) ->
-    filename:join(tmp_dir(), Dir).
-
 nonl([$\n|T]) -> nonl(T);
 nonl([H|T]) -> [H|nonl(T)];
 nonl([]) -> [].
@@ -759,6 +765,55 @@ generate_keys(N) ->
 new_random_key(Curve) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
     {PrivKey, PubKey}.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% generate a tmp directory to be used as a scratch by eunit tests
+%% @end
+%%-------------------------------------------------------------------
+tmp_dir() ->
+    os:cmd("mkdir -p " ++ ?BASE_TMP_DIR),
+    create_tmp_dir(?BASE_TMP_DIR_TEMPLATE).
+tmp_dir(SubDir) ->
+    Path = filename:join(?BASE_TMP_DIR, SubDir),
+    os:cmd("mkdir -p " ++ Path),
+    create_tmp_dir(Path ++ "/" ++ ?BASE_TMP_DIR_TEMPLATE).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Deletes the specified directory
+%% @end
+%%-------------------------------------------------------------------
+-spec cleanup_tmp_dir(list()) -> ok.
+cleanup_tmp_dir(Dir)->
+    os:cmd("rm -rf " ++ Dir),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% create a tmp directory at the specified path
+%% @end
+%%-------------------------------------------------------------------
+-spec create_tmp_dir(list()) -> list().
+create_tmp_dir(Path)->
+    ?MODULE:nonl(os:cmd("mktemp -d " ++  Path)).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% generate a tmp directory based off priv_dir to be used as a scratch by common tests
+%% @end
+%%-------------------------------------------------------------------
+-spec init_base_dir_config(atom(), atom(), list()) -> {list(), list()}.
+init_base_dir_config(Mod, TestCase, Config)->
+    PrivDir = ?config(priv_dir, Config),
+    BaseDir = PrivDir ++ "data/" ++ erlang:atom_to_list(Mod) ++ "_" ++ erlang:atom_to_list(TestCase),
+    LogDir = PrivDir ++ "logs/" ++ erlang:atom_to_list(Mod) ++ "_" ++ erlang:atom_to_list(TestCase),
+    [
+        {base_dir, BaseDir},
+        {log_dir, LogDir}
+        | Config
+    ].
 
 
 %% ------------------------------------------------------------------

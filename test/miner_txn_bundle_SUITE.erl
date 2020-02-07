@@ -53,9 +53,9 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
-    Miners = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     Balance = 5000,
     InitialCoinbaseTxns = [ blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
     CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
@@ -63,12 +63,12 @@ init_per_testcase(_TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    NumConsensusMembers= proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
+    NumConsensusMembers= ?config(num_consensus_members, Config),
+    BlockTime = ?config(block_time, Config),
     %% Don't want an election to happen, messes up checking the balances later
     Interval = 100,
-    BatchSize = proplists:get_value(batch_size, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
@@ -96,7 +96,7 @@ end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 basic_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -135,7 +135,7 @@ basic_test(Config) ->
     ok.
 
 negative_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -179,7 +179,7 @@ negative_test(Config) ->
     ok.
 
 double_spend_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee, Other | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -230,7 +230,7 @@ successive_test(Config) ->
     %% A -> B -> C
     %% A -> B 5000
     %% B -> C 10000
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA, MinerB, MinerC | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
     MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
@@ -281,7 +281,7 @@ invalid_successive_test(Config) ->
     %% A -> B -> C
     %% A -> B 4000
     %% B -> C 10000 <-- this is invalid
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA, MinerB, MinerC | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
     MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
@@ -331,7 +331,7 @@ single_payer_test(Config) ->
     %% Test a bundled payment from single payer
     %% A -> B 2000
     %% A -> C 3000
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA, MinerB, MinerC | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
     MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
@@ -381,7 +381,7 @@ single_payer_invalid_test(Config) ->
     %% Test a bundled payment from single payer
     %% A -> B 2000
     %% A -> C 4000
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA, MinerB, MinerC | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
     MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
@@ -433,7 +433,7 @@ full_circle_test(Config) ->
     %% A -> B -> C
     %% A -> B 5000
     %% B -> C 10000
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA, MinerB, MinerC | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
     MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
@@ -491,7 +491,7 @@ full_circle_test(Config) ->
 add_assert_test(Config) ->
     %% Test add + assert in a bundled txn
     %% A -> [add_gateway, assert_location]
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
 
@@ -539,7 +539,7 @@ add_assert_test(Config) ->
 invalid_add_assert_test(Config) ->
     %% Test add + assert in a bundled txn
     %% A -> [add_gateway, assert_location]
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [MinerA | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
 
@@ -580,7 +580,7 @@ invalid_add_assert_test(Config) ->
     ok.
 
 single_txn_bundle_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -616,7 +616,7 @@ single_txn_bundle_test(Config) ->
     ok.
 
 bundleception_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),

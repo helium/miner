@@ -35,7 +35,7 @@ all() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-basic(_Config) ->
+basic(Config) ->
     application:ensure_all_started(lager),
 
     {ok, Sock} = gen_udp:open(0, [{active, false}, binary, {reuseaddr, true}]),
@@ -64,8 +64,9 @@ basic(_Config) ->
         sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey)
     }),
 
-    TestDir = miner_ct_utils:tmp_dir("miner_onion_suite_basic"),
-    Ledger = blockchain_ledger_v1:new(TestDir),
+    BaseDir = ?config(base_dir, Config),
+    Ledger = blockchain_ledger_v1:new(BaseDir),
+
     BlockHash = crypto:strong_rand_bytes(32),
     Data1 = <<1, 2>>,
     Data2 = <<3, 4>>,

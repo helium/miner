@@ -33,18 +33,18 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(_TestCase, Config0),
-    Miners = proplists:get_value(miners, Config),
-    Addresses = proplists:get_value(addresses, Config),
+    Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    NumConsensusMembers = proplists:get_value(num_consensus_members, Config),
-    BlockTime = proplists:get_value(block_time, Config),
-    BatchSize = proplists:get_value(batch_size, Config),
-    Curve = proplists:get_value(dkg_curve, Config),
-    %% VarCommitInterval = proplists:get_value(var_commit_interval, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
+    BlockTime = ?config(block_time, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
+    %% VarCommitInterval = ?config(var_commit_interval, Config),
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
@@ -76,8 +76,8 @@ end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 single_payment_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
-    ConsensusMiners = proplists:get_value(consensus_miners, Config),
+    Miners = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
@@ -153,7 +153,7 @@ single_payment_test(Config) ->
     ok.
 
 self_payment_test(Config) ->
-    Miners = proplists:get_value(miners, Config),
+    Miners = ?config(miners, Config),
     [Payer, Payee | _Tail] = Miners,
     PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
     PayeeAddr = PayerAddr,
