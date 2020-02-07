@@ -474,6 +474,16 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                                                              ElectionDelay, State2#state.chain),
                                                     HGrp
                                             end,
+                                        %% make sure the new members are on the latest block so they know to start the round now
+                                        {ok, NewConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.chain)),
+                                        {ok, OldLedger} = blockchain:ledger_at(BlockHeight - 1, State#state.chain),
+                                        {ok, OldConsensusAddrs} = blockchain_ledger_v1:consensus_members(OldLedger),
+                                        Swarm = blockchain_swarm:swarm(),
+                                        lists:foreach(fun(Member) ->
+                                                              spawn(fun() ->
+                                                                            libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [State#state.chain])
+                                                                    end)
+                                                      end, NewConsensusAddrs -- OldConsensusAddrs),
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, Round),
                                         State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs)),
