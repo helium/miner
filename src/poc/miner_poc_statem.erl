@@ -418,8 +418,6 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                         {ok, {TargetPubkeyBin, TargetRandState}} ->
                             lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                             lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
-                            %% XXX: Don't think this line is needed?
-                            self() ! {challenge, TargetRandState, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                             %% NOTE: We pass in the TargetRandState along with the entropy here
                             handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
                     end
