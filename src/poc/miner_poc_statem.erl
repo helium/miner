@@ -411,16 +411,11 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                     self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                     handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
                 {ok, V} ->
-                    case blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars) of
-                        {error, no_target} ->
-                            %% not a single gateway in this hex is eligibile for targetting
-                            {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
-                        {ok, {TargetPubkeyBin, TargetRandState}} ->
-                            lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
-                            lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
-                            %% NOTE: We pass in the TargetRandState along with the entropy here
-                            handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
-                    end
+                    {ok, {TargetPubkeyBin, TargetRandState}} = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
+                    lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
+                    lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
+                    %% NOTE: We pass in the TargetRandState along with the entropy here
+                    handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
             end
     end.
 
