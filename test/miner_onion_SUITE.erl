@@ -108,7 +108,7 @@ basic(Config) ->
                                                                 <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
                                                                 <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
-    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON1/binary>>}} = gen_udp:recv(Sock, 0, 5000),
+    {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, _Token1:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON1/binary>>}} = gen_udp:recv(Sock, 0, 5000),
 
     #{<<"txpk">> := #{<<"data">> := Packet1}} = jsx:decode(PacketJSON1, [return_maps]),
 
