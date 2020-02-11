@@ -42,8 +42,9 @@ start_link() ->
 init(_Args) ->
     SupFlags = #{
         strategy => rest_for_one,
-        intensity => 10,
-        period => 10
+        %% safer to do a full restart for now, so tear everything down
+        intensity => 0,
+        period => 1
     },
 
     %% Blockchain Supervisor Options
