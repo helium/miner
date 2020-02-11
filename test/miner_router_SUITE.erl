@@ -14,7 +14,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+-include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("miner_ct_macros.hrl").
 -include("lora.hrl").
 
@@ -155,9 +155,9 @@ basic(Config) ->
             ct:pal("Thing ~p", [Thing]),
             #blockchain_state_channel_message_v1_pb{msg={packet,
                                                          #blockchain_state_channel_packet_v1_pb{hotspot=PubKeyBin,
-                                                                                                packet=#helium_packet_pb{oui=1,
-                                                                                                                         type=longfi,
-                                                                                                                         payload= Packet}}}} = Thing,
+                                                                                                packet=#packet_pb{oui=1,
+                                                                                                                  type=longfi,
+                                                                                                                  payload= Packet}}}} = Thing,
             %{ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
             %Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
             ok;
