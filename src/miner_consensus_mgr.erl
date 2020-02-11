@@ -40,7 +40,8 @@
          chain :: undefined | blockchain:blockchain(),
          cancel_dkgs = #{} :: #{pos_integer() => pid()},
          started_groups = #{} :: #{{pos_integer(),non_neg_integer()} => pid()},
-         active_group :: undefined | pid()
+         active_group :: undefined | pid(),
+         ag_monitor = make_ref() :: reference()
         }).
 
 %%%===================================================================
@@ -300,17 +301,19 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
+    Ref = erlang:monitor(process, Group),
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
     %% adjust the height upwards, the rescue will be from one block
     %% above the present one.
     ok = miner:install_consensus(Group),
     %% here the dkg has already been moved into the cancel state.
     lager:info("rescue stopping old group"),
+    erlang:demonitor(State#state.ag_monitor, [flush]),
     stop_group(State#state.active_group),
     miner_hbbft_sidecar:set_group(Group),
     libp2p_group_relcast:handle_input(Group, {next_round, Round + 1, [], false}),
 
-    {reply, ok, State#state{active_group = Group}};
+    {reply, ok, State#state{active_group = Group, ag_monitor = Ref}};
 handle_call(dkg_group, _From, #state{current_dkgs = DKGs} = State) ->
     %% get the highest one
     case lists:reverse(lists:sort(maps:to_list(DKGs))) of
@@ -451,12 +454,14 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                     %% we're not in
                                     error ->
                                         lager:info("stopping old group: election, no key"),
+                                        erlang:demonitor(State2#state.ag_monitor, [flush]),
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
                                         State2#state{active_group = undefined};
                                     {ok, out} ->
                                         lager:info("stopping old group: election, elected out"),
+                                        erlang:demonitor(State2#state.ag_monitor, [flush]),
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
@@ -486,10 +491,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                                       end, NewConsensusAddrs -- OldConsensusAddrs),
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, Round),
+                                        Ref = erlang:monitor(process, HBBFTGroup),
                                         State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs)),
                                                      cancel_dkgs = CancelDKGs#{BlockHeight+2 => ElectionGroup},
                                                      started_groups = cleanup_groups(EID, State#state.started_groups),
-                                                     active_group = HBBFTGroup}
+                                                     active_group = HBBFTGroup, ag_monitor = Ref}
                                 end,
                             {noreply, State3#state{delay = 0}};
                         false when ElectionRunning ->
@@ -580,7 +586,8 @@ handle_info(timeout, State) ->
                         case wait_for_group(Group) of
                             started ->
                                 activate_hbbft(Group, undefined, Round),
-                                State#state{active_group = Group};
+                                Ref = erlang:monitor(process, Group),
+                                State#state{active_group = Group, ag_monitor = Ref};
                             {error, cannot_start} ->
                                 lager:info("didn't restore consensus group, missing"),
                                 ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
@@ -617,15 +624,57 @@ handle_info(timeout, State) ->
                     {noreply, RestoreState}
             end
     end;
+handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
+            #state{ag_monitor = OldRef, active_group = OldGroup,
+                   chain = Chain} = State) ->
+    lager:info("active group ~p went down: ~p", [OldGroup, _Reason]),
+    %% try to restart
+    Ledger = blockchain:ledger(Chain),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+
+    F = ((N - 1) div 3),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    #{election_height := ElectionHeight,
+      election_delay := ElectionDelay} =
+        blockchain_election:election_info(Ledger, Chain),
+    {ok, Block} = blockchain:head_block(Chain),
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
+    Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
+    {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
+    %% we intentionally don't use create here
+    GroupArg = [miner_hbbft_handler, [ConsensusAddrs,
+                                      Pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      undefined,
+                                      Chain]],
+    lager:info("restoring down consensus group ~p", [Name]),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                                         Name,
+                                         libp2p_group_relcast, GroupArg),
+    Round = blockchain_block:hbbft_round(Block),
+    case wait_for_group(Group) of
+        started ->
+            Ref = erlang:monitor(process, Group),
+            activate_hbbft(Group, undefined, Round),
+            {noreply, State#state{active_group = Group, ag_monitor = Ref}};
+        {error, Reason} ->
+            %% die on failure
+            lager:info("didn't restore consensus group: ~p", [Reason]),
+            {stop, State}
+    end;
 handle_info(_Info, State) ->
     lager:warning("unexpected message ~p", [_Info]),
     {noreply, State}.
 
 terminate(_Reason, #state{active_group = Active,
+                          ag_monitor = Ref,
                           started_groups = Started,
                           current_dkgs = Current,
                           cancel_dkgs = Cancel}) ->
     lager:info("starting termination stops"),
+    erlang:demonitor(Ref, [flush]),
     stop_group(Active),
     maps:map(fun(_, G) -> stop_group(G) end, Started),
     maps:map(fun(_, G) -> stop_group(G) end, Current),
