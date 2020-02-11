@@ -27,8 +27,8 @@ Introduces:
 | poc_v4_randomness_wt 	| 0.4       	| 0.5      	| Increased to still keep 50% chance of picking a random witness as next hop _after_ filtering.                                                                                         	|
 | poc_centrality_wt    	| undefined 	| 0.5      	| Introduced to pick potentially legitimate witnesses as next hops when constructing paths.                                                                                             	|
 | poc_max_hop_cells    	| undefined 	| 2000     	| Introduced to limit max next hop distance. A rough estimate is given by: sqrt(3).a.(n-1), where, a: hex_edge_length and n: poc_max_hop_cells. For hexagons at resolution 12, ~32.5kms 	|
-| poc_good_bucket_high 	| undefined 	| -80     	| Lower bound for a good RSSI value                                                                                                                                                     	|
-| poc_good_bucket_low  	| undefined 	| -115     	| Upper bound for a good RSSI value                                                                                                                                                     	|
+| poc_good_bucket_high 	| undefined 	| -80     	| Upper bound for a good RSSI value                                                                                                                                                     	|
+| poc_good_bucket_low  	| undefined 	| -115     	| Lower bound for a good RSSI value                                                                                                                                                     	|
 
 ## Version threshold
 
