@@ -17,7 +17,7 @@
     code_change/3
 ]).
 
--include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+-include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("lora.hrl").
 
 -record(gateway, {
@@ -42,7 +42,7 @@
 
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
--type helium_packet() :: #helium_packet_pb{}.
+-type helium_packet() :: #packet_pb{}.
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -52,7 +52,7 @@ start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 -spec send(helium_packet()) -> ok | {error, any()}.
-send(#helium_packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequency=Freq, datarate=DataRate}) ->
+send(#packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequency=Freq, datarate=DataRate}) ->
     gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power, true}, 11000).
 
 -spec send_poc(binary(), any(), float(), iolist(), any()) -> ok | {error, any()}.
@@ -335,7 +335,7 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
             Time = proplists:get_value(<<"tmst">>, Packet),
             Freq = proplists:get_value(<<"freq">>, Packet),
             DataRate = proplists:get_value(<<"datr">>, Packet),
-            HeliumPacket = #helium_packet_pb{
+            HeliumPacket = #packet_pb{
                 oui = OUI,
                 type = Type,
                 payload = Data,

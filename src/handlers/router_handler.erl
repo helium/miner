@@ -7,7 +7,7 @@
 
 -behavior(libp2p_framed_stream).
 
--include_lib("helium_proto/src/pb/blockchain_state_channel_v1_pb.hrl").
+-include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -65,7 +65,7 @@ handle_data(_Type, Bin, State) ->
             case Downlink of
                 undefined ->
                     ok;
-                #helium_packet_pb{}=Packet ->
+                #packet_pb{}=Packet ->
                     %% ok, try to send this out
                     spawn(fun() -> miner_lora:send(Packet) end),
                     ok
