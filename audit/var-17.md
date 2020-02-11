@@ -36,6 +36,7 @@ None
 
 ## Transaction
 
+```
 [{200500,
   [{blockchain_txn_vars_v1_pb,
        [{blockchain_var_v1_pb,"poc_centrality_wt","float",
@@ -61,7 +62,7 @@ None
          129,88,12,60,12,159,156,175,178,177,39,50,156,85,100,
          207,170,44,125,38,215,213,95>>,
        <<>>,<<>>,[],[],17}]}]
-
+```
 
 ## Acceptance block
 
