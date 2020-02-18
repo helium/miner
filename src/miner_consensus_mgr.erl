@@ -866,6 +866,9 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
     end.
 
 start_hbbft(DKG, Height, Delay, Chain) ->
+    start_hbbft(DKG, Height, Delay, Chain, 3).
+
+start_hbbft(DKG, Height, Delay, Chain, Retries) ->
     Ledger = blockchain:ledger(Chain),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
@@ -899,7 +902,14 @@ start_hbbft(DKG, Height, Delay, Chain) ->
             ok = miner:install_consensus(Group),
             {ok, Group};
         {error, not_done} ->
-            {error, not_done}
+            case Retries of
+                0 ->
+                    {error, not_done};
+                _ ->
+                    %% try a little harder to wait for the end.
+                    timer:sleep(5000),
+                    start_hbbft(DKG, Height, Delay, Chain, Retries - 1)
+            end
     end.
 
 activate_hbbft(Group, PrevGroup, Round) ->
@@ -929,13 +939,19 @@ wait_for_group(Group) ->
 wait_for_group(_Group, 0) ->
     {error, could_not_check};
 wait_for_group(Group, Retries) ->
-    case libp2p_group_relcast:status(Group) of
+    try libp2p_group_relcast:status(Group) of
         started ->
             started;
         cannot_start ->
             {error, cannot_start};
         not_started ->
             timer:sleep(500),
+            wait_for_group(Group, Retries - 1)
+    catch C:E ->
+            %% we've probably crashed because of a timeout, give it a
+            %% bit more time
+            lager:warning("status call failed: ~p:~p", [C, E]),
+            timer:sleep(1000),
             wait_for_group(Group, Retries - 1)
     end.
 
