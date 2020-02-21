@@ -497,11 +497,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         {ok, OldLedger} = blockchain:ledger_at(BlockHeight - 1, State#state.chain),
                                         {ok, OldConsensusAddrs} = blockchain_ledger_v1:consensus_members(OldLedger),
                                         Swarm = blockchain_swarm:swarm(),
-                                        lists:foreach(fun(Member) ->
-                                                              spawn(fun() ->
-                                                                            libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [State#state.chain])
-                                                                    end)
-                                                      end, NewConsensusAddrs -- OldConsensusAddrs),
+                                        lists:foreach(
+                                          fun(Member) ->
+                                              spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, State#state.chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
+                                          end, NewConsensusAddrs -- OldConsensusAddrs),
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, Round),
                                         Ref = erlang:monitor(process, HBBFTGroup),
@@ -848,11 +847,10 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
 
             %% To ensure the DKG can actually complete, attempt to fastforward all the
             %% DKG peers so they all know they're in the newly proposed consensus group
-            lists:foreach(fun(Member) ->
-                                  spawn(fun() ->
-                                                libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [Chain])
-                                        end)
-                          end, ConsensusAddrs -- [MyAddress]),
+            lists:foreach(
+              fun(Member) ->
+                  spawn(fun() -> blockchain_fastforward_handler:dial( Swarm, Chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
+              end, ConsensusAddrs -- [MyAddress]),
 
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
