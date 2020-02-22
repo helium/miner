@@ -1,0 +1,3 @@
+#!/bin/sh
+
+erl -pa {{lib_dirs}}/**/ebin -noshell -eval 'miner_keys:print_keys("{{sys_config}}")' -eval 'init:stop()'

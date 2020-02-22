@@ -65,72 +65,19 @@ init(_Args) ->
 
     case application:get_env(blockchain, key, undefined) of
         undefined ->
-            SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
-            ok = filelib:ensure_dir(SwarmKey),
-            {PublicKey, ECDHFun, SigFun, OnboardingKey} =
-                case libp2p_crypto:load_keys(SwarmKey) of
-                    {ok, #{secret := PrivKey0, public := PubKey}} ->
-                        {PubKey,
-                         libp2p_crypto:mk_ecdh_fun(PrivKey0),
-                         libp2p_crypto:mk_sig_fun(PrivKey0),
-                         undefined};
-                    {error, enoent} ->
-                        KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-                        ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
-                        {PubKey,
-                         libp2p_crypto:mk_ecdh_fun(PrivKey0),
-                         libp2p_crypto:mk_sig_fun(PrivKey0),
-                         undefined}
-                end,
+            #{ pubkey := PublicKey,
+               ecdh_fun := ECDHFun,
+               sig_fun := SigFun,
+               onboarding_key := OnboardingKey
+             } = miner_keys:keys({file, BaseDir}),
             ECCWorker = [];
         {ecc, Props} when is_list(Props) ->
-            KeySlot0 = proplists:get_value(key_slot, Props, 0),
-            OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
-            %% Create a temporary ecc link to get the public key and
-            %% onboarding keys for the given slots as well as the
-            {ok, ECCPid} = ecc508:start_link(),
-            %% Define a helper funtion to retry automatic keyslot key
-            %% generation and locking the first time we encounter an
-            %% empty keyslot.
-            GetPublicKey = fun GetPublicKey(KS) ->
-                                   case ecc508:genkey(ECCPid, public, KS) of
-                                       {ok, PubKey} ->
-                                           case ecc_compact:is_compact(PubKey) of
-                                               {true, _} ->
-                                                   {ok, {ecc_compact, PubKey}, KS};
-                                               false ->
-                                                   %% initial hotspots had a bug where they
-                                                   %% did not generate a compact key here.
-                                                   %% This code is fallback to use a secondary
-                                                   %% slot to handle this case.
-                                                   GetPublicKey(KS+1)
-                                           end;
-                                       {error, ecc_response_exec_error} ->
-                                           %% key is not present, generate one
-                                           %%
-                                           %% XXX this is really not the best thing to do here
-                                           %% but deadlines rule everything around us
-                                           ok = gen_compact_key(ECCPid, KS),
-                                           GetPublicKey(KS)
-                                   end
-                           end,
-            ecc508:wake(ECCPid),
-            %% Get (or generate) the public and onboarding keys
-            {ok, PublicKey, KeySlot} = GetPublicKey(KeySlot0),
-            {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
-            %% The signing and ecdh functions will use an actual
-            %% worker against a named process.
-            SigFun = fun(Bin) ->
-                             {ok, Sig} = miner_ecc_worker:sign(Bin),
-                             Sig
-                     end,
-            ECDHFun = fun(PubKey) ->
-                              {ok, Bin} = miner_ecc_worker:ecdh(PubKey),
-                              Bin
-                      end,
-            %% Stop ephemeral ecc pid and let the named worker take
-            %% over
-            ecc508:stop(ECCPid),
+            #{ pubkey := PublicKey,
+               key_slot := KeySlot,
+               ecdh_fun := ECDHFun,
+               sig_fun := SigFun,
+               onboarding_key := OnboardingKey
+             } = miner_keys:keys({ecc, Props}),
             ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot])];
         {PublicKey, ECDHFun, SigFun, OnboardingKey} ->
             ECCWorker = [],
@@ -207,20 +154,3 @@ init(_Args) ->
         OnionServer ++
         [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.
-
-
-gen_compact_key(Pid, Slot) ->
-    gen_compact_key(Pid, Slot, 100).
-
-gen_compact_key(_Pid, _Slot, 0) ->
-    {error, compact_key_create_failed};
-gen_compact_key(Pid, Slot, N) when N > 0 ->
-    case  ecc508:genkey(Pid, private, Slot) of
-        {ok, PubKey} ->
-            case ecc_compact:is_compact(PubKey) of
-                {true, _} -> ok;
-                false -> gen_compact_key(Pid, Slot, N - 1)
-            end;
-        {error, Error} ->
-            {error, Error}
-    end.
