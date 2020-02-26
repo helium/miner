@@ -186,13 +186,17 @@ requesting(EventType, EventContent, Data) ->
 %%
 %% mining: in mining state we handle blockchain_event of type 'add block'
 %% for each block added we inspect the txn list included in the block
-%% if our POC request is contained in that list then we run the targetting/challenging
+%% if our POC request is contained in that list then we run targeting/challenging
 %% and transition to receiving state
 %% if we dont see our POC request txn having been mined within the Mining Timeout period ( 5 blocks )
 %% then we give up on the request and transition back to requesting state
+%% we also look out for possible restarts which took place whilst handling targeting
+%% if targeting data is set then we reload the specified block using the stored hash
+%% and retry the targeting
 %%
 mining(enter, _State, #data{targeting_data = {targeting, BlockHash, PinnedLedger}} = Data)->
     %% sorry, have to send msg via self here as state enters cannot insert events..bah...
+    %% so I either send it here or during init..feels better here
     self ! {retry_targeting, BlockHash, PinnedLedger},
     {keep_state, Data};
 mining(enter, _State, Data)->
