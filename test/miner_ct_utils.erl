@@ -170,7 +170,7 @@ confirm_balance(Miners, Addr, Bal) ->
                             Bal == miner_ct_utils:get_balance(Miner, Addr)
                          end, Miners)
                  end,
-        Result == true, 60, timer:seconds(1)),
+        Result == true, 60, timer:seconds(5)),
     ok.
 
 confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
