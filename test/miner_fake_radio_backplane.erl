@@ -4,6 +4,8 @@
 
 -export([start_link/3, init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+-export([transmit/3]).
+
 -include("miner_ct_macros.hrl").
 -include("lora.hrl").
 
@@ -27,6 +29,9 @@
 start_link(POCVersion, MyPort, UDPPorts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [POCVersion, MyPort, UDPPorts], []).
 
+transmit(Payload, Frequency, TxLocation) ->
+    gen_server:cast(?MODULE, {transmit, Payload, Frequency, TxLocation}).
+
 init([POCVersion, MyPort, UDPPorts]) ->
     %% create UDP client port
     {ok, Sock} = gen_udp:open(MyPort, [binary, {active, true}, {reuseaddr, true}]),
@@ -37,6 +42,32 @@ init([POCVersion, MyPort, UDPPorts]) ->
 handle_call(Msg, _From, State) ->
     lager:warning("unhandled call ~p", [Msg]),
     {reply, error, State}.
+
+handle_cast({transmit, Payload, Frequency, TxLocation}, State = #state{udp_sock=UDPSock, udp_ports=Ports, poc_version=POCVersion}) ->
+    ct:pal("transmitting"),
+    Token = crypto:strong_rand_bytes(2),
+    lists:foreach(
+        fun({Port, Location}) ->
+                Distance = blockchain_utils:distance(TxLocation, Location),
+                RSSI = case POCVersion of
+                             V when V < 8 ->
+                                 FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
+                                 FreeSpacePathLoss;
+                             _ ->
+                                 %% Use approx_rssi poc_version 8 onwards
+                                 approx_rssi(Distance)
+                         end,
+                case Distance > 32 of
+                    true -> ok;
+                    false ->
+                        NewJSON = #{<<"rxpk">> => [#{<<"rssi">> => RSSI, <<"lsnr">> => 1.0, <<"tmst">> => erlang:system_time(seconds), <<"data">> => base64:encode(Payload), <<"freq">> => Frequency, <<"datr">> => <<"SF8BW125">>}]},
+                        ct:pal("Sending ~p", [NewJSON]),
+                        gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
+                end
+        end,
+        Ports
+    ),
+    {noreply, State};
 
 handle_cast(Msg, State) ->
     lager:warning("unhandled cast ~p", [Msg]),
