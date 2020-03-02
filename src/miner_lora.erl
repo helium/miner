@@ -283,11 +283,13 @@ route(Pkt) ->
             route_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
-            case longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
+            try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
                 true ->
                     {onion, longfi:payload(LongFiPkt)};
                 false ->
                     {longfi, longfi:oui(LongFiPkt)}
+            catch _:_ ->
+                      route_non_longfi(Pkt)
             end
     end.
 
