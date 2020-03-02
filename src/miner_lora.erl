@@ -283,11 +283,13 @@ route(Pkt) ->
             route_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
-            case longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
+            try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
                 true ->
                     {onion, longfi:payload(LongFiPkt)};
                 false ->
                     {longfi, longfi:oui(LongFiPkt)}
+            catch _:_ ->
+                      route_non_longfi(Pkt)
             end
     end.
 
@@ -355,11 +357,21 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
             StateChannelMsg = blockchain_state_channel_v1_pb:encode_msg(#blockchain_state_channel_message_v1_pb{msg={packet, SignedPBPacket}}),
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
-                    case application:get_env(miner, default_router, undefined) of
-                        undefined ->
-                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
-                        Address ->
-                            send_to_router_(Swarm, Address, StateChannelMsg)
+                    case OUI of
+                        1 ->
+                            case application:get_env(miner, oui1_router, undefined) of
+                                undefined ->
+                                    lager:warning("ingnored could not find OUI ~p in ledger and no oui1 router is set", [OUI]);
+                                Address ->
+                                    send_to_router_(Swarm, Address, StateChannelMsg)
+                            end;
+                        _ ->
+                            case application:get_env(miner, default_router, undefined) of
+                                undefined ->
+                                    lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
+                                Address ->
+                                    send_to_router_(Swarm, Address, StateChannelMsg)
+                            end
                     end;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
