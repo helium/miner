@@ -1,4 +1,4 @@
--module(miner_multi_payment_txn_SUITE).
+-module(miner_payment_v2_txn_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -15,13 +15,13 @@
         ]).
 
 -export([
-         basic_multi_payment_test/1
+         basic_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          basic_multi_payment_test
+          basic_test
          ].
 
 init_per_suite(Config) ->
@@ -51,7 +51,8 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?election_interval => infinity,
                                                    ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+                                                   ?dkg_curve => Curve,
+                                                   ?max_payments => 10}),
 
     DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                            Addresses, NumConsensusMembers, Curve),
@@ -73,7 +74,7 @@ init_per_testcase(_TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
-basic_multi_payment_test(Config) ->
+basic_test(Config) ->
     Miners = ?config(miners, Config),
     _ConsensusMiners = ?config(consensus_miners, Config),
     [Payer | Payees] = Miners,
@@ -103,12 +104,12 @@ basic_multi_payment_test(Config) ->
 
     %% send some helium tokens from payer to payees
     PayeeAmount = 100,
-    ToPay = [{P, PayeeAmount} || P <- PayeeAddrs],
-    Txn = ct_rpc:call(Payer, blockchain_txn_multi_payment_v1, new, [PayerAddr, ToPay, Fee, 1]),
+    Payments = [blockchain_payment_v2:new(P, PayeeAmount) || P <- PayeeAddrs],
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1, Fee]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
-    SignedTxn = ct_rpc:call(Payer, blockchain_txn_multi_payment_v1, sign, [Txn, SigFun]),
+    SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v2, sign, [Txn, SigFun]),
     ct:pal("SignedTxn: ~p", [SignedTxn]),
 
     ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
@@ -127,4 +128,12 @@ basic_multi_payment_test(Config) ->
                                ok = miner_ct_utils:confirm_balance(Miners, PayeeAddr, 5000 + PayeeAmount)
                        end,
                        PayeeAddrs),
+
+    %% Print for verification
+    ok = lists:foreach(fun(M) ->
+                               A = ct_rpc:call(M, blockchain_swarm, pubkey_bin, []),
+                               ct:pal("Addr: ~p, Balance: ~p", [A, miner_ct_utils:get_balance(M, A)])
+                       end,
+                       Miners),
+
     ok.
