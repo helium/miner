@@ -1,3 +1,6 @@
 #!/bin/sh
 
-erl -pa {{lib_dirs}}/**/ebin -noshell -eval 'miner_keys:print_keys("{{sys_config}}")' -eval 'init:stop()'
+CONFIG=$(find $ROOTDIR/releases -name sys.config)
+LIB_DIR=$ROOTDIR/lib
+
+exec $BINDIR/$PROGNAME erl -pa $LIB_DIR/*/ebin -boot "$ROOTDIR/bin/start_clean" -noshell -eval "miner_keys:print_keys(\"${CONFIG}\")" -eval 'init:stop()'
