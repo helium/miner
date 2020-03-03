@@ -357,21 +357,11 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
             StateChannelMsg = blockchain_state_channel_v1_pb:encode_msg(#blockchain_state_channel_message_v1_pb{msg={packet, SignedPBPacket}}),
             case blockchain_ledger_v1:find_routing(OUI, Ledger) of
                 {error, _Reason} ->
-                    case OUI of
-                        1 ->
-                            case application:get_env(miner, oui1_router, undefined) of
-                                undefined ->
-                                    lager:warning("ingnored could not find OUI ~p in ledger and no oui1 router is set", [OUI]);
-                                Address ->
-                                    send_to_router_(Swarm, Address, StateChannelMsg)
-                            end;
-                        _ ->
-                            case application:get_env(miner, default_router, undefined) of
-                                undefined ->
-                                    lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
-                                Address ->
-                                    send_to_router_(Swarm, Address, StateChannelMsg)
-                            end
+                    case application:get_env(miner, default_router, undefined) of
+                        undefined ->
+                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
+                        Address ->
+                            send_to_router_(Swarm, Address, StateChannelMsg)
                     end;
                 {ok, Routing} ->
                     Addresses = blockchain_ledger_routing_v1:addresses(Routing),
