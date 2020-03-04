@@ -13,9 +13,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1,
-    pubkey_bin/0,
-    onboarding_key_bin/0,
+    start_link/0,
     add_gateway_txn/4,
     assert_loc_txn/6,
     p2p_status/0,
@@ -52,7 +50,6 @@
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
-    onboarding_key=undefined :: undefined | public_key:public_key(),
     start_block_time=undefined :: undefined | pos_integer()
 }).
 
@@ -95,26 +92,8 @@ inc_tv(Incr) ->
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
-start_link(Args) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Args, [{hibernate_after, 5000}]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
-pubkey_bin() ->
-    Swarm = blockchain_swarm:swarm(),
-    libp2p_swarm:pubkey_bin(Swarm).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec onboarding_key_bin() -> libp2p_crypto:pubkey_bin().
-onboarding_key_bin() ->
-    gen_server:call(?MODULE, onboarding_key_bin).
-
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], [{hibernate_after, 5000}]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -377,7 +356,8 @@ version() ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(Args) ->
+
+init(_Args) ->
     lager:info("STARTING UP MINER"),
     ok = blockchain_event:add_handler(self()),
     BlockchainRef = erlang:monitor(process, blockchain_worker),
@@ -386,15 +366,9 @@ init(Args) ->
             {ok, #state{}};
         Chain ->
             {ok, #state{blockchain = Chain,
-                        blockchain_ref = BlockchainRef,
-                        onboarding_key = proplists:get_value(onboarding_key, Args, undefined)}}
+                        blockchain_ref = BlockchainRef}}
     end.
 
-handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=undefined}) ->
-    %% Return an empty binary if no onboarding key is present
-    {reply, <<>>, State};
-handle_call(onboarding_key_bin, _From, State=#state{onboarding_key=PubKey}) ->
-    {reply, libp2p_crypto:pubkey_to_bin({ecc_compact, PubKey}), State};
 handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
@@ -561,11 +535,9 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     {noreply, State#state{blockchain = Chain}};
-handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref,
-                                                        onboarding_key = Key}) ->
+handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref}) ->
     State1 = #state{blockchain = NC,
-                    blockchain_ref = Ref,
-                    onboarding_key = Key},
+                    blockchain_ref = Ref},
     {noreply, State1};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),

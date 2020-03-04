@@ -67,19 +67,17 @@ init(_Args) ->
         undefined ->
             #{ pubkey := PublicKey,
                ecdh_fun := ECDHFun,
-               sig_fun := SigFun,
-               onboarding_key := OnboardingKey
+               sig_fun := SigFun
              } = miner_keys:keys({file, BaseDir}),
             ECCWorker = [];
         {ecc, Props} when is_list(Props) ->
             #{ pubkey := PublicKey,
                key_slot := KeySlot,
                ecdh_fun := ECDHFun,
-               sig_fun := SigFun,
-               onboarding_key := OnboardingKey
+               sig_fun := SigFun
              } = miner_keys:keys({ecc, Props}),
             ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot])];
-        {PublicKey, ECDHFun, SigFun, OnboardingKey} ->
+        {PublicKey, ECDHFun, SigFun} ->
             ECCWorker = [],
             ok
     end,
@@ -97,17 +95,7 @@ init(_Args) ->
 
     %% Miner Options
     Curve = application:get_env(miner, curve, 'SS512'),
-    BlockTime = application:get_env(miner, block_time, 15000),
     BatchSize = application:get_env(miner, batch_size, 500),
-    RadioDevice = application:get_env(miner, radio_device, undefined),
-
-    MinerOpts =
-        [
-         {block_time, BlockTime},
-         {radio_device, RadioDevice},
-         {election_interval, application:get_env(miner, election_interval, 30)},
-         {onboarding_key, OnboardingKey}
-        ],
 
     ElectOpts =
         [
@@ -147,7 +135,7 @@ init(_Args) ->
         [
          ?SUP(blockchain_sup, [BlockchainOpts]),
          ?WORKER(miner_hbbft_sidecar, []),
-         ?WORKER(miner, [MinerOpts]),
+         ?WORKER(miner, []),
          ?WORKER(miner_consensus_mgr, [ElectOpts])
         ] ++
         EbusServer ++

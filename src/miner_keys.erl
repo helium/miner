@@ -63,7 +63,7 @@ keys({ecc, Props}) when is_list(Props) ->
                           {ok, Sig} = miner_ecc_worker:sign(Bin),
                           Sig
                   end,
-       onboarding_key => OnboardingKey
+       onboarding_key => {ecc_compact, OnboardingKey}
      }.
 
 
@@ -78,7 +78,8 @@ print_keys(ConfigFile) ->
                     undefined -> {file, BaseDir};
                     KC -> KC
                 end,
-    #{ pubkey := PubKey,
+    #{
+       pubkey := PubKey,
        onboarding_key := OnboardingKey
      } = keys(KeyConfig),
     MaybeB58 = fun(undefined) -> undefined;
