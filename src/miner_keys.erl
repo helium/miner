@@ -43,13 +43,24 @@ keys({file, BaseDir}) ->
 keys({ecc, Props}) when is_list(Props) ->
     KeySlot0 = proplists:get_value(key_slot, Props, 0),
     OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
-    %% Create a temporary ecc link to get the public key and
-    %% onboarding keys for the given slots as well as the
-    {ok, ECCPid} = ecc508:start_link(),
+    {ok, ECCPid} = case whereis(miner_ecc_worker) of
+                       undefined ->
+                           %% Create a temporary ecc link to get the public key and
+                           %% onboarding keys for the given slots as well as the
+                           ecc508:start_link();
+                       _ECCWorker ->
+                           %% use the existing ECC pid
+                           miner_ecc_worker:get_pid()
+                   end,
     {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
     {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
-    %% Stop ephemeral ecc pid
-    ecc508:stop(ECCPid),
+    case whereis(miner_ecc_worker) of
+        undefined ->
+            %% Stop ephemeral ecc pid
+            ecc508:stop(ECCPid);
+        _ ->
+            ok
+    end,
 
     #{ pubkey => PubKey,
        key_slot => KeySlot,
@@ -70,11 +81,9 @@ keys({ecc, Props}) when is_list(Props) ->
 %% @doc prints the public hotspot and onboadring key in a file:consult
 %% friendly way to stdout. This is used by other services (like
 %% gateway_config) to get read access to the public keys
-print_keys(ConfigFile) ->
-    {ok, [Config]} = file:consult(ConfigFile),
-    {blockchain, BlockchainConfig} = proplists:lookup(blockchain, Config),
-    BaseDir = proplists:get_value(base_dir, BlockchainConfig, "data"),
-    KeyConfig = case proplists:get_value(key, BlockchainConfig, undefined) of
+print_keys(_) ->
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
+    KeyConfig = case application:get_env(blockchain, key, undefined) of
                     undefined -> {file, BaseDir};
                     KC -> KC
                 end,
