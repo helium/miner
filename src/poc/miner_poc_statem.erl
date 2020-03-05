@@ -109,8 +109,8 @@ init(Args) ->
     lager:info("init with ~p", [Args]),
     case load_data(BaseDir) of
         {error, _} ->
-            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting}};
+            {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting})};
         %% we have attempted to unsuccessfully restart this POC too many times, give up and revert to default state
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
             {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,

@@ -103,7 +103,7 @@ end_per_testcase(restart_test, Config) ->
             ok
     end;
 end_per_testcase(TestCase, Config) ->
-    gen_server:stop(miner_fake_radio_backplane),
+    catch gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
