@@ -424,7 +424,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                     lager:info("poc_v~p target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
                     handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
                 {ok, V} ->
-                    {ok, {TargetPubkeyBin, TargetRandState}}  = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
+                    {ok, {TargetPubkeyBin, TargetRandState}} = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
                     lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                     lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
                     handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
