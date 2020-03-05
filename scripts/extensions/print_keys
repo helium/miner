@@ -4,7 +4,7 @@ CONFIG=$(find $ROOTDIR/releases -name sys.config)
 LIB_DIR=$ROOTDIR/lib
 
 if relx_nodetool "ping" > /dev/null 2>&1; then
-    relx_nodetool "rpcterms" miner_keys print_keys "'${CONFIG}'." | sed '$d'
+    cat /var/data/public_keys
     exit 0
 fi
 
