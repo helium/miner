@@ -53,8 +53,9 @@
          inital_dkg/5, inital_dkg/6,
          confirm_balance/3,
          confirm_balance_both_sides/5,
-         wait_for_gte/3, wait_for_gte/5
+         wait_for_gte/3, wait_for_gte/5,
 
+         submit_txn/2
 
         ]).
 
@@ -184,6 +185,11 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
         Result == true, 60, timer:seconds(1)),
     ok.
 
+
+submit_txn(Txn, Miners) ->
+    lists:foreach(fun(Miner) ->
+                          ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
+                  end, Miners).
 
 
 wait_for_gte(height = Type, Miners, Threshold)->
@@ -483,10 +489,10 @@ partition_miners(Members, AddrList) ->
                             lists:member(Addr, Members)
                     end, Miners).
 
-init_per_testcase(Mod, TestCase, Config) ->
-    Config0 = init_base_dir_config(Mod, TestCase, Config),
-    BaseDir = ?config(base_dir, Config0),
-    LogDir = ?config(log_dir, Config0),
+init_per_testcase(Mod, TestCase, Config0) ->
+    Config = init_base_dir_config(Mod, TestCase, Config0),
+    BaseDir = ?config(base_dir, Config),
+    LogDir = ?config(log_dir, Config),
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -572,6 +578,7 @@ init_per_testcase(Mod, TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
             ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
             ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
             %% set miner configuration
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
             ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
@@ -610,6 +617,26 @@ init_per_testcase(Mod, TestCase, Config) ->
                 end, Addrs)
       end, Miners),
 
+
+    %% make sure each node is gossiping with a majority of its peers
+    true = miner_ct_utils:wait_until(fun() ->
+                                      lists:all(fun(Miner) ->
+                                                        GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 2000),
+                                                        case length(GossipPeers) >= (length(Miners) / 2) + 1 of
+                                                            true -> true;
+                                                            false ->
+                                                                ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
+                                                                Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                                                                lists:foreach(
+                                                                  fun(A) ->
+                                                                          CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000),
+                                                                          ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
+                                                                  end, Addrs),
+                                                                false
+                                                        end
+                                                end, Miners)
+                              end),
+
     %% accumulate the address of each miner
     Addresses = lists:foldl(
         fun(Miner, Acc) ->
@@ -639,7 +666,7 @@ init_per_testcase(Mod, TestCase, Config) ->
         {election_interval, Interval},
         {num_consensus_members, NumConsensusMembers},
         {rpc_timeout, timer:seconds(5)}
-        | Config0
+        | Config
     ].
 
 end_per_testcase(TestCase, Config) ->

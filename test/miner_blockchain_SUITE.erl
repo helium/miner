@@ -214,11 +214,12 @@ election_test(Config) ->
                             ct:pal("not seen: ~p ", [Not]),
                             ok
                     end,
+                    timer:sleep(500),
                     Loop(N - 1)
             after timer:seconds(30) ->
                     error(timeout)
             end
-    end(120),
+    end(300),
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
@@ -366,9 +367,18 @@ group_change_test(Config) ->
     %% alter the "version" for all of them.
     lists:foreach(
       fun(Miner) ->
-              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]), %% make sure we're exercising the summing
-              ct:pal("test version ~p ~p", [Miner, ct_rpc:call(Miner, miner, test_version, [], 1000)])
+              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
       end, Miners),
+
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     lists:all(
+                       fun(Miner) ->
+                               NewVersion = ct_rpc:call(Miner, miner, test_version, [], 1000),
+                               ct:pal("test version ~p ~p", [Miner, NewVersion]),
+                               NewVersion > 1
+                       end, Miners)
+             end),
 
     %% wait for the change to take effect
     ok = miner_ct_utils:wait_for_in_consensus(Miners, 7),
