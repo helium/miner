@@ -198,7 +198,7 @@ mining(enter, _State, #data{blockchain = Chain,
                             targeting_data = {targeting, BlockHash, BlockHeight}} = Data)->
     %% sorry, have to send msg via self here as state enters cannot insert events..bah...
     %% so I either send it here or during init..feels better here
-    PinnedLedger = blockchain:ledger_at(BlockHeight, Chain),
+    {ok, PinnedLedger} = blockchain:ledger_at(BlockHeight, Chain),
     self ! {retry_targeting, BlockHash, PinnedLedger},
     {keep_state, Data};
 mining(enter, _State, Data)->
