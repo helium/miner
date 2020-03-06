@@ -75,7 +75,7 @@
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
     poc_restarts = ?POC_RESTARTS :: non_neg_integer(),
-    targeting_data :: {atom(), blockchain_block:hash(), binary()} | undefined
+    targeting_data :: {atom(), blockchain_block:hash(), pos_integer()} | undefined
 }).
 
 -type state() :: requesting | mining | receiving | waiting.
@@ -194,9 +194,11 @@ requesting(EventType, EventContent, Data) ->
 %% if targeting data is set then we reload the specified block using the stored hash
 %% and retry the targeting
 %%
-mining(enter, _State, #data{targeting_data = {targeting, BlockHash, PinnedLedger}} = Data)->
+mining(enter, _State, #data{blockchain = Chain,
+                            targeting_data = {targeting, BlockHash, BlockHeight}} = Data)->
     %% sorry, have to send msg via self here as state enters cannot insert events..bah...
     %% so I either send it here or during init..feels better here
+    PinnedLedger = blockchain:ledger_at(BlockHeight, Chain),
     self ! {retry_targeting, BlockHash, PinnedLedger},
     {keep_state, Data};
 mining(enter, _State, Data)->
@@ -361,7 +363,7 @@ handle_mining(BlockHash, PinnedLedger, #data{blockchain = _Chain, address = Chal
             timer:sleep(?BLOCK_PROPOGATION_TIME),
             %% save the block hash in which we found the poc request, if we crash out in targeting we can pick back up
             %% this will be nulled if we revert back to requesting or go forward to receiving
-            Data0 = save_data(Data#data{targeting_data={targeting, BlockHash, PinnedLedger}}),
+            Data0 = save_data(Data#data{targeting_data={targeting, BlockHash, Height}}),
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
                                 Data0#data{mining_timeout = ?MINING_TIMEOUT});
         {error, _Reason} ->
