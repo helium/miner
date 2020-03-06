@@ -22,6 +22,7 @@
          randname/1,
          get_config/2,
          get_balance/2,
+         get_block/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
          cleanup_tmp_dir/1,
@@ -294,12 +295,14 @@ wait_for_chain_var_update(Miners, Key, Value, Timeout)->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
-                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
-                             {ok, Value} == ct_rpc:call(Miner, blockchain, config, [Key, Ledger], Timeout)
+                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                                 Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                                 R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], Timeout),
+                                 ct:pal("var = ~p", [R]),
+                                 {ok, Value} == R
                          end, miner_ct_utils:shuffle(Miners))
                  end,
-        Result == true, 40, timer:seconds(1)),
+                 Result, 40, timer:seconds(1)),
     ok.
 
 delete_dirs(DirWildcard, SubDir)->
@@ -722,6 +725,20 @@ get_balance(Miner, Addr) ->
                     end
             end
     end.
+
+get_block(Block, Miner) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, get_block, [Block, Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                {ok, BlockRec} ->
+                    BlockRec
+            end
+    end.
+
 
 make_vars(Keys) ->
     make_vars(Keys, #{}).

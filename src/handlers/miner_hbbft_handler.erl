@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%% @doc
+%% @Dec
 %% == miner hbbft_handler ==
 %% @end
 %%%-------------------------------------------------------------------
@@ -7,7 +7,14 @@
 
 -behavior(relcast).
 
--export([init/1, handle_message/3, handle_command/2, callback_message/3, serialize/1, deserialize/1, restore/2, stamp/1]).
+-export([
+         init/1,
+         handle_message/3, handle_command/2, callback_message/3,
+         serialize/1, deserialize/1, restore/2,
+         metadata/3
+        ]).
+
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -record(state,
         {
@@ -24,20 +31,32 @@
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
          chain :: undefined | blockchain:blockchain(),
-         signed = 0 :: non_neg_integer()
+         signed = 0 :: non_neg_integer(),
+         seen = #{} :: #{non_neg_integer() => boolean()},
+         bba = <<>> :: binary()
         }).
 
-stamp(Chain) ->
+metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
-    term_to_binary({erlang:system_time(seconds), HeadHash}).
+    case Version of
+        tuple ->
+            term_to_binary({erlang:system_time(seconds), HeadHash});
+        map ->
+            ChainMeta = #{timestamp => erlang:system_time(seconds), head_hash => HeadHash},
+            term_to_binary(maps:merge(Meta, ChainMeta))
+    end.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
     init([Members, Id, N, F, BatchSize, SK, Chain, 0, []]);
 init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
+    %% if we're first starting up, we don't know anything about the
+    %% metadata.
+    Ledger0 = blockchain:ledger(Chain),
+    Version = md_version(Ledger0),
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
-                       {?MODULE, stamp, [Chain]}, Round, Buf),
-    Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
+                       {?MODULE, metadata, [Version, #{}, Chain]}, Round, Buf),
+    Ledger = blockchain_ledger_v1:new_context(Ledger0),
     Chain1 = blockchain:ledger(Ledger, Chain),
 
     lager:info("HBBFT~p started~n", [Id]),
@@ -80,7 +99,7 @@ handle_command({status, Ref, Worker}, State) ->
                    end,
     Sigs = map_ids(State#state.signatures, State#state.members),
     Worker ! {Ref, maps:merge(#{signatures_required =>
-                                    State#state.signatures_required - length(Sigs),
+                                    max(State#state.signatures_required - length(Sigs), 0),
                                 signatures => Sigs,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
@@ -88,7 +107,10 @@ handle_command({status, Ref, Worker}, State) ->
                                }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->
-    case hbbft:next_round(State#state.hbbft) of
+    Chain = blockchain_worker:blockchain(),
+    Version = md_version(blockchain:ledger(Chain)),
+    HBBFT = hbbft:set_stamp_fun(?MODULE, metadata, [Version, #{}, Chain], State#state.hbbft),
+    case hbbft:next_round(HBBFT) of
         {NextHBBFT, ok} ->
             Worker ! {Ref, ok},
             {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
@@ -116,13 +138,23 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
                         Buf1 = miner_hbbft_sidecar:new_round(Buf, BinTxnsToRemove),
                         hbbft:buf(Buf1, HBBFT)
                 end,
-            case hbbft:next_round(HBBFT1, NextRound, []) of
+            Chain = blockchain_worker:blockchain(),
+            Ledger = blockchain:ledger(Chain),
+            Version = md_version(Ledger),
+            Seen = blockchain_utils:map_to_bitvector(State#state.seen),
+            HBBFT2 = hbbft:set_stamp_fun(?MODULE, metadata, [Version,
+                                                             #{seen => Seen,
+                                                               bba_completion => State#state.bba},
+                                                             Chain], HBBFT1),
+            case hbbft:next_round(HBBFT2, NextRound, []) of
                 {NextHBBFT, ok} ->
                     {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[],
-                                                           artifact=undefined, sig_phase=unsent}};
+                                                           artifact=undefined, sig_phase=unsent,
+                                                           bba = <<>>, seen = #{}}};
                 {NextHBBFT, {send, NextMsgs}} ->
                     {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs),
-                     State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
+                     State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
+                                 bba = <<>>, seen = #{}}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -201,18 +233,19 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     ignore
             end;
         _ ->
+            Seen = (State#state.seen)#{Index => true},
             case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
-                    {State#state{hbbft=NewHBBFT}, []};
+                    {State#state{hbbft=NewHBBFT, seen = Seen}, []};
                 {_, defer} ->
                     defer;
                 {NewHBBFT, {send, Msgs}} ->
                     %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
-                    {State#state{hbbft=NewHBBFT}, fixup_msgs(Msgs)};
-                {NewHBBFT, {result, {transactions, Stamps0, BinTxns}}} ->
-                    Stamps = [{Id, binary_to_term(S)} || {Id, S} <- Stamps0],
+                    {State#state{hbbft=NewHBBFT, seen = Seen}, fixup_msgs(Msgs)};
+                {NewHBBFT, {result, {transactions, Metadata0, BinTxns}}} ->
+                    Metadata = lists:map(fun({Id, BMap}) -> {Id, binary_to_term(BMap)} end, Metadata0),
                     Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus ~p ~p", [Index, Round]),
                     %% lager:info("stamps ~p~n", [Stamps]),
@@ -222,7 +255,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     %% transactions depending on its buffer
                     NewRound = hbbft:round(NewHBBFT),
                     Before = erlang:monotonic_time(millisecond),
-                    case miner:create_block(Stamps, Txns, NewRound) of
+                    case miner:create_block(Metadata, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, TxnsToRemove} ->
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
@@ -234,7 +267,9 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             NewerHBBFT1 = hbbft:buf(Buf1, NewerHBBFT),
                             put(filtered, NewRound),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
-                            {filter_signatures(State#state{hbbft=NewerHBBFT1, sig_phase=sig, artifact=Artifact}), fixup_msgs(Msgs)};
+                            BBA = make_bba(State#state.n, Metadata),
+                            {filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
+                                                           seen = Seen, artifact = Artifact}), fixup_msgs(Msgs)};
                         {error, Reason} ->
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
@@ -245,6 +280,18 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
     end.
 
 callback_message(_, _, _) -> none.
+
+make_bba(Sz, Metadata) ->
+    M = maps:from_list([{Id, true} || {Id, _} <- Metadata]),
+    M1 = lists:foldl(fun(Id, Acc) ->
+                             case Acc of
+                                 #{Id := _} ->
+                                     Acc;
+                                 _ ->
+                                     Acc#{Id => false}
+                             end
+                     end, M, lists:seq(1, Sz)),
+    blockchain_utils:map_to_bitvector(M1).
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
@@ -274,6 +321,7 @@ deserialize(#{sk := SKSer,
     SK = tpke_privkey:deserialize(binary_to_term(SKSer)),
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
+    Bundef = term_to_binary(undefined, [compressed]),
     DeserList =
         lists:map(
           fun(hbbft) ->
@@ -284,15 +332,15 @@ deserialize(#{sk := SKSer,
                   undefined;
              (K)->
                   case StateMap of
-                      #{K := V} ->
-                          case V of
-                              undefined ->
-                                  undefined;
-                              _ ->
-                                  binary_to_term(V)
-                          end;
+                      #{K := V} when V /= undefined andalso
+                                     V /= Bundef ->
+                          binary_to_term(V);
                       _ when K == sig_phase ->
                           sig;
+                      _ when K == seen ->
+                          #{};
+                      _ when K == bba ->
+                          <<>>;
                       _ ->
                           undefined
                   end
@@ -376,3 +424,11 @@ map_ids(Sigs, Members0) ->
                     end,
                     Sigs),
     lists:usort(IDs).
+
+md_version(Ledger) ->
+    case blockchain:config(?election_version, Ledger) of
+        {ok, N} when N >= 3 ->
+            map;
+        _ ->
+            tuple
+    end.

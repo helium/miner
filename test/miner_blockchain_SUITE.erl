@@ -25,7 +25,8 @@ all() -> [
           election_test,
           group_change_test,
           master_key_test,
-          version_change_test
+          version_change_test,
+          election_v3_test
          ].
 
 init_per_suite(Config) ->
@@ -556,6 +557,127 @@ version_change_test(Config) ->
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
     ok.
+
+
+election_v3_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
+
+    ?assertNotEqual([], ConsensusMiners),
+    ?assertEqual(7, length(ConsensusMiners)),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2),
+
+    Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {Priv, _Pub} = ?config(master_key, Config),
+
+    Vars = #{?election_version => 3,
+             ?election_bba_penalty => 0.01,
+             ?election_seen_penalty => 0.05},
+
+    Txn = blockchain_txn_vars_v1:new(Vars, 2),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    Txn1 = blockchain_txn_vars_v1:proof(Txn, Proof),
+
+    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
+         || Miner <- Miners],
+
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?election_version, 3),
+
+    {ok, Start} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
+
+    %% wait until height has increased by 10
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Start + 10),
+
+    %% get all blocks and check that they have the appropriate
+    %% metadata
+
+    [begin
+         PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
+         Block = miner_ct_utils:get_block(N, hd(Miners)),
+         ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
+         case N of
+             _ when N < Start ->
+                 ?assertEqual([], blockchain_block_v1:seen_votes(Block)),
+                 ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block));
+             %% skip these because we're not 100% certain when the var
+             %% will become effective.
+             _ when N < Start + 5 ->
+                 ok;
+             _ ->
+                 Ts = blockchain_block:transactions(PrevBlock),
+                 case lists:filter(fun(T) ->
+                                           blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                                   end, Ts) of
+                     [] ->
+                         ?assertNotEqual([], blockchain_block_v1:seen_votes(Block)),
+                         ?assertNotEqual(<<>>, blockchain_block_v1:bba_completion(Block));
+                     %% first post-election block has no info
+                     _ ->
+                         ?assertEqual([{0,<<>>}, {1,<<>>}, {2,<<>>}, {3,<<>>}, {4,<<>>},
+                                       {5,<<>>}, {6,<<>>}],
+                                      blockchain_block_v1:seen_votes(Block)),
+                         ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
+                 end
+         end
+     end
+     || N <- lists:seq(2, Start + 10)],
+
+    %% two should guarantee at least one consensus member is down but
+    %% that block production is still happening
+    StopList = lists:sublist(Miners, 7, 2),
+    ct:pal("stop list ~p", [StopList]),
+    miner_ct_utils:stop_miners(StopList),
+
+    {ok, Start2} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
+    %% try a skip to move past the occasional stuck group
+    [ct_rpc:call(M, miner, hbbft_skip, []) || M <- lists:sublist(Miners, 1, 6)],
+
+    ok = miner_ct_utils:wait_for_gte(height, lists:sublist(Miners, 1, 6), Start2 + 10, all, 120),
+
+    [begin
+         PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
+         Block = miner_ct_utils:get_block(N, hd(Miners)),
+         ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
+         Ts = blockchain_block:transactions(PrevBlock),
+         case lists:filter(fun(T) ->
+                                   blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                           end, Ts) of
+             [] ->
+                 Seen = blockchain_block_v1:seen_votes(Block),
+                 %% given the current code, BBA will always be 2f+1,
+                 %% so there's no point in checking it other than
+                 %% seeing that it is not <<>> or <<0>>
+                 %% when we have something to check, this might be
+                 %% helpful: lists:sum([case $; band (1 bsl N) of 0 -> 0; _ -> 1 end || N <- lists:seq(1, 7)]).
+                 BBA = blockchain_block_v1:bba_completion(Block),
+
+                 ?assertNotEqual([], Seen),
+                 ?assertNotEqual(<<>>, BBA),
+                 ?assertNotEqual(<<0>>, BBA),
+
+                 Len = length(Seen),
+                 ?assert(Len == 6 orelse Len == 5),
+
+                 Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
+                 [?assertNotEqual(<<127>>, V) || V <- Votes];
+             %% first post-election block has no info
+             _ ->
+                 Seen = blockchain_block_v1:seen_votes(Block),
+                 Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
+                 ?assertEqual([<<>>], Votes),
+                 ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
+         end
+     end
+     %% start at +2 so we don't get a stale block that saw the
+     %% stopping nodes.
+     || N <- lists:seq(Start2 + 2, Start2 + 10)],
+
+    ok.
+
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
