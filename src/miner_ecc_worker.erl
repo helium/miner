@@ -2,7 +2,8 @@
 -behavior(gen_server).
 
 -export([sign/1,
-         ecdh/1]).
+         ecdh/1,
+         get_pid/0]).
 
 -export([start_link/1,
          init/1,
@@ -31,6 +32,9 @@ sign(Binary) ->
 ecdh({ecc_compact, PubKey}) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
+get_pid() ->
+    gen_server:call(?MODULE, get_pid).
+
 start_link(KeySlot) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [KeySlot], []).
 
@@ -50,7 +54,8 @@ handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
                              ecc508:ecdh(Pid, State#state.key_slot, PubKey)
                      end, ?MAX_TXN_RETRIES),
     {reply, Reply, State};
-
+handle_call(get_pid, _From, State=#state{ecc_handle=Pid}) ->
+    {reply, {ok, Pid}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.

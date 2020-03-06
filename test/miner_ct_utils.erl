@@ -557,7 +557,7 @@ init_per_testcase(Mod, TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
             %% set blockchain configuration
-            Key = {PubKey, ECDH, SigFun, undefined},
+            Key = {PubKey, ECDH, SigFun},
 
             MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
             ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
@@ -851,4 +851,3 @@ handle_gte_type(height_exactly, Miner, Threshold)->
     {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
     ct:pal("miner ~p height ~p Exact Threshold ~p", [Miner, Ht, Threshold]),
     Ht == Threshold.
-

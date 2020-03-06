@@ -1,3 +1,11 @@
 #!/bin/sh
 
-erl -pa {{lib_dirs}}/**/ebin -noshell -eval 'miner_keys:print_keys("{{sys_config}}")' -eval 'init:stop()'
+CONFIG=$(find $ROOTDIR/releases -name sys.config)
+LIB_DIR=$ROOTDIR/lib
+
+if relx_nodetool "ping" > /dev/null 2>&1; then
+    relx_nodetool rpc miner_keys print_keys
+    exit $?
+fi
+
+exec $BINDIR/$PROGNAME erl -pa $LIB_DIR/*/ebin -boot "$ROOTDIR/bin/start_clean" -boot_var ERTS_LIB_DIR "$ERTS_LIB_DIR" -config "$RELX_CONFIG_PATH" -noshell -eval "ok = application:load(blockchain), miner_keys:print_keys([])" -eval 'init:stop()'
