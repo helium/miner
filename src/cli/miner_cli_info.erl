@@ -362,5 +362,4 @@ format_macs_from_interfaces(IFs)->
     [], IFs).
 
 format_hwaddr(HWAddr)->
-    HWAddr0 = [integer_to_list(B,16) || B <- HWAddr ],
-    lists:concat(HWAddr0).
+   string:to_upper(blockchain_utils:bin_to_hex(list_to_binary(HWAddr))).
