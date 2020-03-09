@@ -50,7 +50,7 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
             State = #state{udp_sock=UDPSock, udp_ports=Ports, poc_version=POCVersion}) ->
     gen_udp:send(UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?TX_ACK:8/integer-unsigned, 16#deadbeef:64/integer>>),
     #{<<"txpk">> := Packet} = jsx:decode(JSON, [return_maps]),
-    ct:pal("Source port ~p, Ports ~p", [SrcPort, Ports]),
+    %ct:pal("Source port ~p, Ports ~p", [SrcPort, Ports]),
     {SrcPort, OriginLocation} = lists:keyfind(SrcPort, 1, Ports),
     lists:foreach(
         fun({Port, Location}) ->
@@ -68,6 +68,10 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
         lists:keydelete(SrcPort, 1, Ports)
     ),
     {noreply, State};
+handle_info({udp, _UDPSock, _IP, _SrcPort, <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}, State) ->
+    {noreply, State};
+handle_info({udp, _UDPSock, _IP, _SrcPort, <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}, State) ->
+    {noreply, State};
 handle_info(Msg, State) ->
     ct:pal("unhandled info ~p", [Msg]),
     {noreply, State}.
@@ -78,13 +82,13 @@ handle_info(Msg, State) ->
 approx_rssi(Distance) ->
     ?ABS_RSSI - ?ETA * (10 * math:log10(Distance * 1000)).
 
-do_send(ToSend, Distance, OriginLocation, Location, Token, Packet, UDPSock, Port) ->
+do_send(ToSend, Distance, _OriginLocation, _Location, Token, Packet, UDPSock, Port) ->
     case Distance > 32 of
         true ->
-            ct:pal("NOT sending from ~p to ~p -> ~p km", [OriginLocation, Location, Distance]),
+            %ct:pal("NOT sending from ~p to ~p -> ~p km", [OriginLocation, Location, Distance]),
             ok;
         false ->
             NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ToSend, <<"snr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
-            ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, OriginLocation, Location, Distance, ToSend]),
+            %ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, OriginLocation, Location, Distance, ToSend]),
             gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
     end.

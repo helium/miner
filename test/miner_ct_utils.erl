@@ -53,8 +53,10 @@
          inital_dkg/5, inital_dkg/6,
          confirm_balance/3,
          confirm_balance_both_sides/5,
-         wait_for_gte/3, wait_for_gte/5
+         wait_for_gte/3, wait_for_gte/5,
 
+         submit_txn/2,
+         wait_for_txn/2, wait_for_txn/3
 
         ]).
 
@@ -184,6 +186,11 @@ confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, PayerBal, PayeeBal) ->
         Result == true, 60, timer:seconds(1)),
     ok.
 
+
+submit_txn(Txn, Miners) ->
+    lists:foreach(fun(Miner) ->
+                          ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn])
+                  end, Miners).
 
 
 wait_for_gte(height = Type, Miners, Threshold)->
@@ -376,6 +383,9 @@ start_node(Name, Config, Case) ->
     %% have the slave nodes monitor the runner node, so they can't outlive it
     NodeConfig = [
                   {monitor_master, true},
+                  {boot_timeout, 10},
+                  {init_timeout, 10},
+                  {startup_timeout, 10},
                   {startup_functions, [
                                        {code, set_path, [CodePath]}
                                       ]}],
@@ -483,10 +493,10 @@ partition_miners(Members, AddrList) ->
                             lists:member(Addr, Members)
                     end, Miners).
 
-init_per_testcase(Mod, TestCase, Config) ->
-    Config0 = init_base_dir_config(Mod, TestCase, Config),
-    BaseDir = ?config(base_dir, Config0),
-    LogDir = ?config(log_dir, Config0),
+init_per_testcase(Mod, TestCase, Config0) ->
+    Config = init_base_dir_config(Mod, TestCase, Config0),
+    BaseDir = ?config(base_dir, Config),
+    LogDir = ?config(log_dir, Config),
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -572,6 +582,7 @@ init_per_testcase(Mod, TestCase, Config) ->
             ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
             ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
             ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+            ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
             %% set miner configuration
             ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
             ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
@@ -610,6 +621,26 @@ init_per_testcase(Mod, TestCase, Config) ->
                 end, Addrs)
       end, Miners),
 
+
+    %% make sure each node is gossiping with a majority of its peers
+    true = miner_ct_utils:wait_until(fun() ->
+                                      lists:all(fun(Miner) ->
+                                                        GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 2000),
+                                                        case length(GossipPeers) >= (length(Miners) / 2) + 1 of
+                                                            true -> true;
+                                                            false ->
+                                                                ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
+                                                                Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                                                                lists:foreach(
+                                                                  fun(A) ->
+                                                                          CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000),
+                                                                          ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
+                                                                  end, Addrs),
+                                                                false
+                                                        end
+                                                end, Miners)
+                              end),
+
     %% accumulate the address of each miner
     Addresses = lists:foldl(
         fun(Miner, Acc) ->
@@ -639,7 +670,7 @@ init_per_testcase(Mod, TestCase, Config) ->
         {election_interval, Interval},
         {num_consensus_members, NumConsensusMembers},
         {rpc_timeout, timer:seconds(5)}
-        | Config0
+        | Config
     ].
 
 end_per_testcase(TestCase, Config) ->
@@ -669,10 +700,22 @@ cleanup_per_testcase(TestCase, Config) ->
                   end, Miners).
 
 get_balance(Miner, Addr) ->
-    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
-    ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry])
+                    end
+            end
+    end.
 
 make_vars(Keys) ->
     make_vars(Keys, #{}).
@@ -815,6 +858,48 @@ init_base_dir_config(Mod, TestCase, Config)->
         | Config
     ].
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Wait for a txn to occur.
+%%
+%% Examples:
+%%
+%% CheckType = fun(T) -> blockchain_txn:type(T) == SomeTxnType end,
+%% wait_for_txn(Miners, CheckType)
+%%
+%% CheckTxn = fun(T) -> T == SomeSignedTxn end,
+%% wait_for_txn(Miners, CheckTxn)
+%%
+%% @end
+%%-------------------------------------------------------------------
+wait_for_txn(Miners, PredFun) ->
+    wait_for_txn(Miners, PredFun, timer:seconds(30)).
+
+wait_for_txn(Miners, PredFun, Timeout)->
+    ?assertAsync(begin
+                     Result = lists:all(
+                                fun(Miner) ->
+                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                                        {ok, H} = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
+                                        Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
+
+                                        Res = lists:filter(fun({_Hash, Block}) ->
+                                                                   BH = blockchain_block:height(Block),
+                                                                   Txns = blockchain_block:transactions(Block),
+                                                                   ToFind = lists:filter(fun(T) ->
+                                                                                                 PredFun(T)
+                                                                                         end,
+                                                                                         Txns),
+                                                                   ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                                                   ToFind /= []
+                                                           end,
+                                                           maps:to_list(Blocks)),
+                                        ct:pal("ChainHeight: ~p, Res: ~p", [H, Res]),
+                                        Res /= []
+                                end, miner_ct_utils:shuffle(Miners))
+                 end,
+                 Result == true, 40, timer:seconds(1)),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Local Helper functions

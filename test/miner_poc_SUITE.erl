@@ -670,7 +670,7 @@ setup_dist_test(TestCase, Config, VarMap) ->
     true = load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 50
-    true = wait_until_height(Miners, 50),
+    true = wait_until_height(Miners, 10),
     ok.
 
 gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
@@ -793,7 +793,12 @@ wait_until_height(Miners, Height) ->
                                           end
                                   end,
                                   Miners),
-              ct:pal("Heights: ~w", [Heights]),
+              case length(lists:usort(Heights)) of
+                  1 ->
+                      ok;
+                  _ ->
+                      ct:pal("Heights: ~w", [Heights])
+              end,
 
               true == lists:all(fun(H) ->
                                         H >= Height

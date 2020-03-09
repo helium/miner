@@ -124,7 +124,7 @@ basic_test(Config) ->
     BundleTxn = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[SignedTxn1, SignedTxn2]]),
     ct:pal("BundleTxn: ~p", [BundleTxn]),
     %% Submit the bundle txn
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
     ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
@@ -166,7 +166,7 @@ negative_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -212,7 +212,7 @@ double_spend_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -263,7 +263,7 @@ successive_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -314,7 +314,7 @@ invalid_successive_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -364,7 +364,7 @@ single_payer_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -414,7 +414,7 @@ single_payer_invalid_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -475,7 +475,7 @@ full_circle_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
@@ -516,7 +516,7 @@ add_assert_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height 20, should be long enough I believe
     ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
@@ -564,7 +564,7 @@ invalid_add_assert_test(Config) ->
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(MinerA, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
 
     %% wait till height 20, should be long enough I believe
     ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
@@ -604,7 +604,7 @@ single_txn_bundle_test(Config) ->
     BundleTxn = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[SignedTxn1]]),
     ct:pal("BundleTxn: ~p", [BundleTxn]),
     %% Submit the bundle txn
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleTxn]),
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
     ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
@@ -673,7 +673,7 @@ bundleception_test(Config) ->
     ct:pal("BundleInBundleTxn: ~p", [BundleInBundleTxn]),
 
     %% Submit the bundle txn
-    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [BundleInBundleTxn]),
+    miner_ct_utils:submit_txn(BundleInBundleTxn, Miners),
 
     %% wait till height is 15, ideally should wait till the payment actually occurs
     %% it should be plenty fast regardless
