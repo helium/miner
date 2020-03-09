@@ -15,13 +15,15 @@
         ]).
 
 -export([
-         no_packets_expiry_test/1
+         no_packets_expiry_test/1,
+         packets_expiry_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          no_packets_expiry_test
+          no_packets_expiry_test,
+          packets_expiry_test
          ].
 
 init_per_suite(Config) ->
@@ -138,5 +140,79 @@ no_packets_expiry_test(Config) ->
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    ok.
+
+packets_expiry_test(Config) ->
+    Miners = ?config(miners, Config),
+
+    [RouterNode, ClientNode | _] = Miners,
+
+    %% setup
+    %% oui txn
+    {ok, RouterPubkey, RouterSigFun, _ECDHFun} = ct_rpc:call(RouterNode, blockchain_swarm, keys, []),
+    RouterPubkeyBin = libp2p_crypto:pubkey_to_bin(RouterPubkey),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    ct:pal("RouterSwarm: ~p", [RouterSwarm]),
+    RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
+    ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
+    OUI = 1,
+    OUITxn = ct_rpc:call(RouterNode,
+                         blockchain_txn_oui_v1,
+                         new,
+                         [RouterPubkeyBin, [erlang:list_to_binary(RouterP2PAddress)], OUI, 1, 0]),
+    ct:pal("OUITxn: ~p", [OUITxn]),
+    SignedOUITxn = ct_rpc:call(RouterNode,
+                               blockchain_txn_oui_v1,
+                               sign,
+                               [OUITxn, RouterSigFun]),
+    ct:pal("SignedOUITxn: ~p", [SignedOUITxn]),
+    ok = ct_rpc:call(RouterNode, blockchain_worker, submit_txn, [SignedOUITxn]),
+
+    %% check that oui txn appears on miners
+    CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
+    CheckTxnOUI = fun(T) -> T == SignedOUITxn end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
+
+    Height = miner_ct_utils:height(RouterNode),
+
+    %% open a state channel
+    TotalDC = 10,
+    ID = crypto:strong_rand_bytes(32),
+    ExpireWithin = 25,
+    SCOpenTxn = ct_rpc:call(RouterNode,
+                            blockchain_txn_state_channel_open_v1,
+                            new,
+                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, 1]),
+    ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
+    SignedSCOpenTxn = ct_rpc:call(RouterNode,
+                                  blockchain_txn_state_channel_open_v1,
+                                  sign,
+                                  [SCOpenTxn, RouterSigFun]),
+    ct:pal("SignedSCOpenTxn: ~p", [SignedSCOpenTxn]),
+    ok = ct_rpc:call(RouterNode, blockchain_worker, submit_txn, [SignedSCOpenTxn]),
+
+    %% check that sc open txn appears on miners
+    CheckTypeSCOpen = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_open_v1 end,
+    CheckTxnSCOpen = fun(T) -> T == SignedSCOpenTxn end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% At this point, we're certain that sc is open
+    %% Use client node to send some packets
+    Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
+    Packet2 = blockchain_helium_packet_v1:new(OUI, <<"p2">>),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
+
+    %% wait ExpireWithin + 3 more blocks to be safe
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
+    %% for the state_channel_close txn to appear
+    CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% TODO: Check whether we have balances in the state_channel within the state_channel_close txn
 
     ok.
