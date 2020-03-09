@@ -55,7 +55,8 @@
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5,
 
-         submit_txn/2
+         submit_txn/2,
+         wait_for_txn/2, wait_for_txn/3
 
         ]).
 
@@ -857,6 +858,39 @@ init_base_dir_config(Mod, TestCase, Config)->
         | Config
     ].
 
+%%--------------------------------------------------------------------
+%% @doc
+%% Wait for a particular txn type to occur on miners
+%% @end
+%%-------------------------------------------------------------------
+wait_for_txn(Miners, TxnType) ->
+    wait_for_txn(Miners, TxnType, timer:seconds(30)).
+
+wait_for_txn(Miners, TxnType, Timeout)->
+    ?assertAsync(begin
+                     Result = lists:all(
+                                fun(Miner) ->
+                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                                        H = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
+                                        Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
+
+                                        Res = lists:filter(fun({_Hash, Block}) ->
+                                                                   BH = blockchain_block:height(Block),
+                                                                   Txns = blockchain_block:transactions(Block),
+                                                                   ToFind = lists:filter(fun(T) ->
+                                                                                                 blockchain_txn:type(T) == TxnType
+                                                                                         end,
+                                                                                         Txns),
+                                                                   ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                                                   ToFind /= []
+                                                           end,
+                                                           maps:to_list(Blocks)),
+                                        ct:pal("ChainHeight: ~p, Res: ~p", [H, Res]),
+                                        Res /= []
+                                end, miner_ct_utils:shuffle(Miners))
+                 end,
+                 Result == true, 40, timer:seconds(1)),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
