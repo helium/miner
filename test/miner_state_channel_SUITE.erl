@@ -15,13 +15,13 @@
         ]).
 
 -export([
-         basic_test/1
+         no_packets_expiry_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          basic_test
+          no_packets_expiry_test
          ].
 
 init_per_suite(Config) ->
@@ -77,7 +77,7 @@ init_per_testcase(_TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
-basic_test(Config) ->
+no_packets_expiry_test(Config) ->
     Miners = ?config(miners, Config),
 
     [RouterNode | _] = Miners,
@@ -105,8 +105,8 @@ basic_test(Config) ->
     %% check that oui txn appears on miners
     CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
     CheckTxnOUI = fun(T) -> T == SignedOUITxn end,
-    ok = wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
-    ok = wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
 
     %% open a state channel
     TotalDC = 10,
@@ -126,33 +126,7 @@ basic_test(Config) ->
     %% check that sc open txn appears on miners
     CheckTypeSCOpen = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_open_v1 end,
     CheckTxnSCOpen = fun(T) -> T == SignedSCOpenTxn end,
-    ok = wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
-    ok = wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
-    ok.
-
-wait_for_txn(Miners, PredFun, Timeout)->
-    ?assertAsync(begin
-                     Result = lists:all(
-                                fun(Miner) ->
-                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                                        {ok, H} = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
-                                        Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
-
-                                        Res = lists:filter(fun({_Hash, Block}) ->
-                                                                   BH = blockchain_block:height(Block),
-                                                                   Txns = blockchain_block:transactions(Block),
-                                                                   ToFind = lists:filter(fun(T) ->
-                                                                                                 PredFun(T)
-                                                                                         end,
-                                                                                         Txns),
-                                                                   ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
-                                                                   ToFind /= []
-                                                           end,
-                                                           maps:to_list(Blocks)),
-                                        ct:pal("ChainHeight: ~p, Res: ~p", [H, Res]),
-                                        Res /= []
-                                end, miner_ct_utils:shuffle(Miners))
-                 end,
-                 Result == true, 40, timer:seconds(1)),
     ok.
