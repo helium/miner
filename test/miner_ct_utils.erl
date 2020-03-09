@@ -699,10 +699,22 @@ cleanup_per_testcase(TestCase, Config) ->
                   end, Miners).
 
 get_balance(Miner, Addr) ->
-    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Entry} = ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]),
-    ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry]).
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_entry_v1, balance, [Entry])
+                    end
+            end
+    end.
 
 make_vars(Keys) ->
     make_vars(Keys, #{}).
