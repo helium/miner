@@ -213,6 +213,10 @@ packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
-    %% TODO: Check whether we have balances in the state_channel within the state_channel_close txn
+    %% Check whether the balances are updated in the eventual sc close txn
+    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
+    SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
+    ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
+    ?assertNotEqual([], blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn))),
 
     ok.
