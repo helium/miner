@@ -108,13 +108,16 @@ no_packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
 
+    Height = miner_ct_utils:height(RouterNode),
+
     %% open a state channel
     TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
+    ExpireWithin = 11,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, TotalDC, 10, 1]),
+                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, 1]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -127,6 +130,13 @@ no_packets_expiry_test(Config) ->
     CheckTypeSCOpen = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_open_v1 end,
     CheckTxnSCOpen = fun(T) -> T == SignedSCOpenTxn end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% wait ExpireWithin + 3 more blocks to be safe
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
+    %% for the state_channel_close txn to appear
+    CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
     ok.
