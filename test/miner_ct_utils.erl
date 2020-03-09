@@ -860,13 +860,22 @@ init_base_dir_config(Mod, TestCase, Config)->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Wait for a particular txn type to occur on miners
+%% Wait for a txn to occur.
+%%
+%% Examples:
+%%
+%% CheckType = fun(T) -> blockchain_txn:type(T) == SomeTxnType end,
+%% wait_for_txn(Miners, CheckType)
+%%
+%% CheckTxn = fun(T) -> T == SomeSignedTxn end,
+%% wait_for_txn(Miners, CheckTxn)
+%%
 %% @end
 %%-------------------------------------------------------------------
-wait_for_txn(Miners, TxnType) ->
-    wait_for_txn(Miners, TxnType, timer:seconds(30)).
+wait_for_txn(Miners, PredFun) ->
+    wait_for_txn(Miners, PredFun, timer:seconds(30)).
 
-wait_for_txn(Miners, TxnType, Timeout)->
+wait_for_txn(Miners, PredFun, Timeout)->
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
@@ -878,7 +887,7 @@ wait_for_txn(Miners, TxnType, Timeout)->
                                                                    BH = blockchain_block:height(Block),
                                                                    Txns = blockchain_block:transactions(Block),
                                                                    ToFind = lists:filter(fun(T) ->
-                                                                                                 blockchain_txn:type(T) == TxnType
+                                                                                                 PredFun(T)
                                                                                          end,
                                                                                          Txns),
                                                                    ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
