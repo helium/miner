@@ -880,7 +880,7 @@ wait_for_txn(Miners, PredFun, Timeout)->
                      Result = lists:all(
                                 fun(Miner) ->
                                         C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                                        H = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
+                                        {ok, H} = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
                                         Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
 
                                         Res = lists:filter(fun({_Hash, Block}) ->
