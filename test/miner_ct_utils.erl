@@ -902,13 +902,13 @@ get_txn_block_details(Miner, PredFun, Timeout) ->
                     Error;
                 Blocks ->
                     lists:filter(fun({_Hash, Block}) ->
-                                               BH = blockchain_block:height(Block),
+                                               %% BH = blockchain_block:height(Block),
                                                Txns = blockchain_block:transactions(Block),
                                                ToFind = lists:filter(fun(T) ->
                                                                              PredFun(T)
                                                                      end,
                                                                      Txns),
-                                               ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                               %% ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
                                                ToFind /= []
                                        end,
                                        maps:to_list(Blocks))

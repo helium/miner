@@ -136,12 +136,20 @@ no_packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
     ok.
 
@@ -201,6 +209,11 @@ packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
     Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
@@ -213,6 +226,9 @@ packets_expiry_test(Config) ->
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
+
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
@@ -294,11 +310,19 @@ multi_clients_packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3, all, 100),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)),
+
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
@@ -307,4 +331,17 @@ multi_clients_packets_expiry_test(Config) ->
     ?assertEqual(2,
                  length(blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)))),
 
+    ok.
+
+%% Helper functions
+
+get_ledger_state_channel(Node, SCID, PubkeyBin) ->
+    RouterChain = ct_rpc:call(Node, blockchain_worker, blockchain, []),
+    RouterLedger = ct_rpc:call(Node, blockchain, ledger, [RouterChain]),
+    ct_rpc:call(Node, blockchain_ledger_v1, find_state_channel, [SCID, PubkeyBin, RouterLedger]).
+
+check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, Amount, SCID) ->
+    ?assertEqual(SCID, blockchain_ledger_state_channel_v1:id(LedgerSC)),
+    ?assertEqual(OwnerPubkeyBin, blockchain_ledger_state_channel_v1:owner(LedgerSC)),
+    ?assertEqual(Amount, blockchain_ledger_state_channel_v1:amount(LedgerSC)),
     ok.
