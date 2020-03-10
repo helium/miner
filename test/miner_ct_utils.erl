@@ -881,10 +881,7 @@ wait_for_txn(Miners, PredFun, Timeout)->
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
-                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                                        {ok, H} = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
                                         Res = get_txn_block_details(Miner, PredFun, Timeout),
-                                        ct:pal("ChainHeight: ~p, Res: ~p", [H, Res]),
                                         Res /= []
 
                                 end, miner_ct_utils:shuffle(Miners))
@@ -896,21 +893,27 @@ get_txn_block_details(Miner, PredFun) ->
     get_txn_block_details(Miner, PredFun, timer:seconds(5)).
 
 get_txn_block_details(Miner, PredFun, Timeout) ->
-    C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-    Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
-
-    Res = lists:filter(fun({_Hash, Block}) ->
-                               BH = blockchain_block:height(Block),
-                               Txns = blockchain_block:transactions(Block),
-                               ToFind = lists:filter(fun(T) ->
-                                                             PredFun(T)
-                                                     end,
-                                                     Txns),
-                               ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
-                               ToFind /= []
-                       end,
-                       maps:to_list(Blocks)),
-    Res.
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, blocks, [Chain], Timeout) of
+                {badrpc, Error} ->
+                    Error;
+                Blocks ->
+                    lists:filter(fun({_Hash, Block}) ->
+                                               BH = blockchain_block:height(Block),
+                                               Txns = blockchain_block:transactions(Block),
+                                               ToFind = lists:filter(fun(T) ->
+                                                                             PredFun(T)
+                                                                     end,
+                                                                     Txns),
+                                               ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                               ToFind /= []
+                                       end,
+                                       maps:to_list(Blocks))
+            end
+    end.
 
 get_txn([{_, B}], PredFun) ->
     hd(lists:filter(fun(T) ->
