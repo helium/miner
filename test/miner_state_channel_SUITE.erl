@@ -255,7 +255,6 @@ multi_clients_packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
 
-    Height = miner_ct_utils:height(RouterNode),
 
     %% open a state channel
     TotalDC = 10,
@@ -278,6 +277,11 @@ multi_clients_packets_expiry_test(Config) ->
     CheckTxnSCOpen = fun(T) -> T == SignedSCOpenTxn end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% make sure the router node has it too
+    ok = miner_ct_utils:wait_for_txn([RouterNode], CheckTxnSCOpen, timer:seconds(30)),
+    Height = miner_ct_utils:height(RouterNode),
+    ct:pal("State channel opened at ~p", [Height]),
 
     %% At this point, we're certain that sc is open
     %% Use client nodes to send some packets
