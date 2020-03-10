@@ -213,7 +213,6 @@ packets_expiry_test(Config) ->
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
@@ -292,11 +291,10 @@ multi_clients_packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3, all, 100),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)),
 
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
