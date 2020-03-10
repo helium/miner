@@ -319,7 +319,13 @@ multi_clients_packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3, all, 100),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)),
+    try miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)) of
+        ok -> ok
+    catch _:_ ->
+              ct:pal("Txn manager: ~p", [print_txn_mgr_buf(ct_rpc:call(RouterNode, blockchain_txn_mgr, txn_list, []))]),
+              [ ct:pal("Hbbft buf ~p ~p", [Miner, print_hbbft_buf(ct_rpc:call(Miner, miner_consensus_mgr, txn_buf, []))]) || Miner <- Miners],
+              ct:fail("failed")
+    end,
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -345,3 +351,9 @@ check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, Amount, SCID) ->
     ?assertEqual(OwnerPubkeyBin, blockchain_ledger_state_channel_v1:owner(LedgerSC)),
     ?assertEqual(Amount, blockchain_ledger_state_channel_v1:amount(LedgerSC)),
     ok.
+
+print_hbbft_buf({ok, Txns}) ->
+    [blockchain_txn:deserialize(T) || T <- Txns].
+
+print_txn_mgr_buf(Txns) ->
+    [{Txn, length(Accepts), length(Rejects)} || {Txn, {_Callback, Accepts, Rejects, _Dialers}} <- Txns].

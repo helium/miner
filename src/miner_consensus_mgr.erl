@@ -21,6 +21,7 @@
          consensus_pos/0,
          in_consensus/0,
          dkg_status/0,
+         txn_buf/0,
 
          group_predicate/1
         ]).
@@ -59,6 +60,13 @@ dkg_status() ->
         undefined -> not_running;
         Pid -> libp2p_group_relcast:handle_command(Pid, status)
     end.
+
+txn_buf() ->
+    case gen_server:call(?MODULE, txn_buf, 60000) of
+        undefined -> not_running;
+        Res -> Res
+    end.
+
 
 -spec consensus_pos() -> integer() | undefined.
 consensus_pos() ->
@@ -270,6 +278,8 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
 
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
     {reply, ok, State#state{started_groups = Groups#{{Height, Delay} => Group}}};
+handle_call(txn_buf, _From, State) ->
+    {reply, {ok, get_buf(State#state.active_group)}, State};
 handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _Delay}, _From,
             State = #state{chain = Chain}) ->
     Ledger = blockchain:ledger(Chain),
