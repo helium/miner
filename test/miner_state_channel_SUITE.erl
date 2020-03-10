@@ -136,12 +136,20 @@ no_packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
     ok.
 
@@ -201,6 +209,11 @@ packets_expiry_test(Config) ->
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
     Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
@@ -214,12 +227,17 @@ packets_expiry_test(Config) ->
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
 
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
-    ?assertEqual(1,
-                 length(blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)))),
+
+    %% Check whether clientnode's balance is correct
+    ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin, 4),
 
     ok.
 
@@ -294,17 +312,62 @@ multi_clients_packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
 
+    %% check state_channel appears on the ledger
+    {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    ct:pal("SC: ~p", [SC]),
+
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3, all, 100),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)),
+    try miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)) of
+        ok -> ok
+    catch _:_ ->
+              ct:pal("Txn manager: ~p", [print_txn_mgr_buf(ct_rpc:call(RouterNode, blockchain_txn_mgr, txn_list, []))]),
+              [ ct:pal("Hbbft buf ~p ~p", [Miner, print_hbbft_buf(ct_rpc:call(Miner, miner_consensus_mgr, txn_buf, []))]) || Miner <- Miners],
+              ct:fail("failed")
+    end,
+
+    %% check state_channel is removed once the close txn appears
+    {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
     %% Check whether the balances are updated in the eventual sc close txn
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
-    ?assertEqual(2,
-                 length(blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)))),
+
+    %% Check whether clientnode balance is correct
+
+    ClientNodePubkeyBin1 = ct_rpc:call(ClientNode1, blockchain_swarm, pubkey_bin, []),
+    ClientNodePubkeyBin2 = ct_rpc:call(ClientNode2, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin1, 4),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin2, 4),
 
     ok.
+
+%% Helper functions
+
+get_ledger_state_channel(Node, SCID, PubkeyBin) ->
+    RouterChain = ct_rpc:call(Node, blockchain_worker, blockchain, []),
+    RouterLedger = ct_rpc:call(Node, blockchain, ledger, [RouterChain]),
+    ct_rpc:call(Node, blockchain_ledger_v1, find_state_channel, [SCID, PubkeyBin, RouterLedger]).
+
+check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, Amount, SCID) ->
+    CheckId = SCID == blockchain_ledger_state_channel_v1:id(LedgerSC),
+    CheckOwner = OwnerPubkeyBin == blockchain_ledger_state_channel_v1:owner(LedgerSC),
+    CheckAmount = Amount == blockchain_ledger_state_channel_v1:amount(LedgerSC),
+    CheckId andalso CheckOwner andalso CheckAmount.
+
+print_hbbft_buf({ok, Txns}) ->
+    [blockchain_txn:deserialize(T) || T <- Txns].
+
+print_txn_mgr_buf(Txns) ->
+    [{Txn, length(Accepts), length(Rejects)} || {Txn, {_Callback, Accepts, Rejects, _Dialers}} <- Txns].
+
+check_sc_balances(SCCloseTxn, PubkeyBin, NumBytes) ->
+    Balances = blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)),
+    ct:pal("Balances: ~p", [Balances]),
+    {ok, Balance} = blockchain_state_channel_balance_v1:get_balance(PubkeyBin, Balances),
+    ct:pal("Balance: ~p", [Balance]),
+    NumBytes == Balance.

@@ -209,7 +209,8 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
                         fun(Miner) ->
                              try
                                  handle_gte_type(Type, Miner, Threshold)
-                             catch _:_ ->
+                             catch What:Why ->
+                                       ct:pal("Failed to check GTE ~p ~p ~p: ~p:~p", [Type, Miner, Threshold, What, Why]),
                                      false
                              end
                         end, miner_ct_utils:shuffle(Miners))
@@ -571,6 +572,13 @@ init_per_testcase(Mod, TestCase, Config0) ->
             ct:pal("MinerLogRoot: ~p", [LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
             ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
+            ct_rpc:call(Miner, application, set_env, [lager, handlers,
+                                                      [
+                                                       {lager_file_backend, [{file, "console.log"},
+                                                                             {level, debug}]},
+                                                       {lager_file_backend, [{file, "error.log"},
+                                                                             {level, error}]}
+                                                      ]]),
             %% set blockchain configuration
             Key = {PubKey, ECDH, SigFun},
 
@@ -925,13 +933,13 @@ get_txn_block_details(Miner, PredFun, Timeout) ->
                     Error;
                 Blocks ->
                     lists:filter(fun({_Hash, Block}) ->
-                                               BH = blockchain_block:height(Block),
+                                               %% BH = blockchain_block:height(Block),
                                                Txns = blockchain_block:transactions(Block),
                                                ToFind = lists:filter(fun(T) ->
                                                                              PredFun(T)
                                                                      end,
                                                                      Txns),
-                                               ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                               %% ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
                                                ToFind /= []
                                        end,
                                        maps:to_list(Blocks))
@@ -968,8 +976,13 @@ handle_miners_by_consensus(Mod, Bool, Miners)->
 handle_gte_type(height, Miner, Threshold)->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-    ct:pal("miner ~p height ~p  Threshold ~p", [Miner, Height, Threshold]),
-    Height >= Threshold;
+    case Height >= Threshold of
+        false ->
+            ct:pal("miner ~p height ~p  Threshold ~p", [Miner, Height, Threshold]),
+            false;
+        true ->
+            true
+    end;
 handle_gte_type(epoch, Miner, Threshold)->
     {Height, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
     ct:pal("miner ~p Height ~p Epoch ~p Threshold ~p", [Miner, Height, Epoch, Threshold]),
