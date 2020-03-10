@@ -74,31 +74,35 @@ init(Args) ->
 handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{socket=Socket,
                                                                        gateways=Gateways,
                                                                        packet_timers=Timers}=State) ->
-    Token = mk_token(Timers),
-    %% TODO we should check this for regulatory compliance
-    BinJSX = jsx:encode(
-        #{<<"txpk">> => #{
-            %% IPol for downlink to devices only, not poc packets
-            <<"ipol">> => IPol,
-            <<"imme">> => When == immediate,
-            <<"powe">> => trunc(Power),
-            %% TODO gps time?
-            <<"tmst">> => When,
-            <<"freq">> => Freq,
-            <<"modu">> => <<"LORA">>,
-            <<"datr">> => list_to_binary(DataRate),
-            <<"codr">> => <<"4/5">>,
-            <<"size">> => byte_size(Payload),
-            <<"rfch">> => 0,
-            <<"data">> => base64:encode(Payload)
-        }
-    }),
-    #gateway{ip=IP, port=Port} = select_gateway(Gateways),
-    Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
-    ok = gen_udp:send(Socket, IP, Port, Packet),
-    %% TODO a better timeout would be good here
-    Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-    {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}};
+    case select_gateway(Gateways) of
+        #gateway{ip=IP, port=Port} ->
+            Token = mk_token(Timers),
+            %% TODO we should check this for regulatory compliance
+            BinJSX = jsx:encode(
+                       #{<<"txpk">> => #{
+                             %% IPol for downlink to devices only, not poc packets
+                             <<"ipol">> => IPol,
+                             <<"imme">> => When == immediate,
+                             <<"powe">> => trunc(Power),
+                             %% TODO gps time?
+                             <<"tmst">> => When,
+                             <<"freq">> => Freq,
+                             <<"modu">> => <<"LORA">>,
+                             <<"datr">> => list_to_binary(DataRate),
+                             <<"codr">> => <<"4/5">>,
+                             <<"size">> => byte_size(Payload),
+                             <<"rfch">> => 0,
+                             <<"data">> => base64:encode(Payload)
+                            }
+                        }),
+            Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
+            ok = gen_udp:send(Socket, IP, Port, Packet),
+            %% TODO a better timeout would be good here
+            Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+            {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}};
+        error ->
+            {reply, {error, no_gateways}, State}
+    end;
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
@@ -144,9 +148,14 @@ mk_token(Timers) ->
         false -> Token
     end.
 
--spec select_gateway(map()) -> gateway().
+-spec select_gateway(map()) -> gateway() | error.
 select_gateway(Gateways) ->
-    erlang:element(2, erlang:hd(maps:to_list(Gateways))).
+    case maps:size(Gateways) of
+        0 ->
+            error;
+        _ ->
+            erlang:element(2, erlang:hd(maps:to_list(Gateways)))
+    end.
 
 -spec handle_udp_packet(binary(), inet:ip_address(), inet:port_number(), state()) -> state().
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
