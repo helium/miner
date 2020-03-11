@@ -1,7 +1,7 @@
 .PHONY: deps compile test typecheck cover
 
 REBAR=./rebar3
-HASH=$(shell git describe)
+HASH=$(shell git rev-parse HEAD)
 
 all: compile
 
