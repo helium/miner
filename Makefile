@@ -1,6 +1,7 @@
 .PHONY: deps compile test typecheck cover
 
 REBAR=./rebar3
+HASH=$(shell git describe)
 
 all: compile
 
@@ -20,7 +21,12 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) do dialyzer,xref && $(REBAR) do eunit,ct
+	rm success; $(REBAR) do dialyzer,xref && $(REBAR) do eunit,ct && touch success
+	if [ ! -f success ] ; \
+then \
+    mkdir -p artifacts; \
+    tar -czf artifacts/test_log-$(HASH).tar.gz _build/test; \
+fi;
 
 release:
 	$(REBAR) as prod release -n miner
