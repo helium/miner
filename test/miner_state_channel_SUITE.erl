@@ -234,7 +234,10 @@ packets_expiry_test(Config) ->
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
-    true = check_sc_balances(SCCloseTxn, 2),
+
+    %% Check whether clientnode's balance is correct
+    ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin, 4),
 
     ok.
 
@@ -334,7 +337,12 @@ multi_clients_packets_expiry_test(Config) ->
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
 
-    true = check_sc_balances(SCCloseTxn, 4),
+    %% Check whether clientnode balance is correct
+
+    ClientNodePubkeyBin1 = ct_rpc:call(ClientNode1, blockchain_swarm, pubkey_bin, []),
+    ClientNodePubkeyBin2 = ct_rpc:call(ClientNode2, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin1, 4),
+    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin2, 4),
 
     ok.
 
@@ -357,6 +365,9 @@ print_hbbft_buf({ok, Txns}) ->
 print_txn_mgr_buf(Txns) ->
     [{Txn, length(Accepts), length(Rejects)} || {Txn, {_Callback, Accepts, Rejects, _Dialers}} <- Txns].
 
-check_sc_balances(SCCloseTxn, LenToCheck) ->
+check_sc_balances(SCCloseTxn, PubkeyBin, NumBytes) ->
     Balances = blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)),
-    LenToCheck == length(Balances).
+    ct:pal("Balances: ~p", [Balances]),
+    Balance = blockchain_state_channel_balance_v1:get_balance(PubkeyBin, Balances),
+    ct:pal("Balance: ~p", [Balance]),
+    NumBytes == Balance.
