@@ -21,7 +21,7 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit || (mkdir -p artifacts; tar -czf artifacts/test_log-$(HASH).tar.gz _build/test; false))
+	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar -czf artifacts/test_log-$(HASH).tar.gz _build/test; false))
 
 release:
 	$(REBAR) as prod release -n miner
