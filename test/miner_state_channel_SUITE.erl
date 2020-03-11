@@ -138,7 +138,7 @@ no_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -211,7 +211,7 @@ packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -234,8 +234,7 @@ packets_expiry_test(Config) ->
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
-    ?assertEqual(1,
-                 length(blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)))),
+    true = check_sc_balances(SCCloseTxn, 2),
 
     ok.
 
@@ -312,7 +311,7 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    ok = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -334,8 +333,8 @@ multi_clients_packets_expiry_test(Config) ->
     BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCClose),
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
-    ?assertEqual(2,
-                 length(blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)))),
+
+    true = check_sc_balances(SCCloseTxn, 4),
 
     ok.
 
@@ -347,13 +346,17 @@ get_ledger_state_channel(Node, SCID, PubkeyBin) ->
     ct_rpc:call(Node, blockchain_ledger_v1, find_state_channel, [SCID, PubkeyBin, RouterLedger]).
 
 check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, Amount, SCID) ->
-    ?assertEqual(SCID, blockchain_ledger_state_channel_v1:id(LedgerSC)),
-    ?assertEqual(OwnerPubkeyBin, blockchain_ledger_state_channel_v1:owner(LedgerSC)),
-    ?assertEqual(Amount, blockchain_ledger_state_channel_v1:amount(LedgerSC)),
-    ok.
+    CheckId = SCID == blockchain_ledger_state_channel_v1:id(LedgerSC),
+    CheckOwner = OwnerPubkeyBin == blockchain_ledger_state_channel_v1:owner(LedgerSC),
+    CheckAmount = Amount == blockchain_ledger_state_channel_v1:amount(LedgerSC),
+    CheckId andalso CheckOwner andalso CheckAmount.
 
 print_hbbft_buf({ok, Txns}) ->
     [blockchain_txn:deserialize(T) || T <- Txns].
 
 print_txn_mgr_buf(Txns) ->
     [{Txn, length(Accepts), length(Rejects)} || {Txn, {_Callback, Accepts, Rejects, _Dialers}} <- Txns].
+
+check_sc_balances(SCCloseTxn, LenToCheck) ->
+    Balances = blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)),
+    LenToCheck == length(Balances).
