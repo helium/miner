@@ -1,6 +1,12 @@
 .PHONY: deps compile test typecheck cover
 
 REBAR=./rebar3
+ifeq ($(BUILDKITE), true)
+  # get branch name and replace any forward slashes it may contain
+  CIBRANCH=$(subst /,-,$(BUILDKITE_BRANCH))
+else
+  CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
+endif
 
 all: compile
 
@@ -20,7 +26,7 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) do dialyzer,xref && $(REBAR) do eunit,ct
+	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
 release:
 	$(REBAR) as prod release -n miner

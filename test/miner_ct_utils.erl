@@ -688,14 +688,15 @@ end_per_testcase(TestCase, Config) ->
 
 cleanup_per_testcase(TestCase, Config) ->
     Miners = ?config(miners, Config),
-    PrivDir = ?config(priv_dir, Config),
+    BaseDir = ?config(base_dir, Config),
+    LogDir = ?config(log_dir, Config),
     lists:foreach(fun(Miner) ->
-                          LogRoot = PrivDir ++ "/log_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
+                          LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
                           Res = os:cmd("rm -rf " ++ LogRoot),
                           ct:pal("rm -rf ~p -> ~p", [LogRoot, Res]),
-                          BaseDir = PrivDir ++ "/data_" ++ atom_to_list(TestCase) ++ "_" ++ atom_to_list(Miner),
-                          Res2 = os:cmd("rm -rf " ++ BaseDir),
-                          ct:pal("rm -rf ~p -> ~p", [BaseDir, Res2]),
+                          DataDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+                          Res2 = os:cmd("rm -rf " ++ DataDir),
+                          ct:pal("rm -rf ~p -> ~p", [DataDir, Res2]),
                           ok
                   end, Miners).
 
