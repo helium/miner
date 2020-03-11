@@ -368,6 +368,6 @@ print_txn_mgr_buf(Txns) ->
 check_sc_balances(SCCloseTxn, PubkeyBin, NumBytes) ->
     Balances = blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)),
     ct:pal("Balances: ~p", [Balances]),
-    Balance = blockchain_state_channel_balance_v1:get_balance(PubkeyBin, Balances),
+    {ok, Balance} = blockchain_state_channel_balance_v1:get_balance(PubkeyBin, Balances),
     ct:pal("Balance: ~p", [Balance]),
     NumBytes == Balance.
