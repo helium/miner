@@ -187,7 +187,7 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(Msg, #state{chain = Chain0} = State) ->
-    lager:debug("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
+    lager:info("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
     %% we have no chain yet, so catch all casts,
     %% and attempt to get the chain, then put the msg back in the queue
     NC =
