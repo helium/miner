@@ -50,7 +50,7 @@
     miner_name :: binary(),
     sender :: undefined | {pid(), term()},
     packet_id = 0 :: non_neg_integer(),
-    chain = undefined :: blockchain:blockchain()
+    chain :: undefined  | blockchain:blockchain()
 }).
 
 -define(BLOCK_RETRY_COUNT, 10).
@@ -186,7 +186,7 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(Msg, #state{chain = undefined} = State) ->
+handle_cast(Msg, #state{chain = Chain0} = State) ->
     lager:debug("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
     %% we have no chain yet, so catch all casts,
     %% and attempt to get the chain, then put the msg back in the queue
