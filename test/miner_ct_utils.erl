@@ -657,7 +657,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     %% QUESTION: is there a better process to use to determine things are healthy
     %%           and which works for both in consensus and non consensus miners?
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
-    ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
+    %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
     [
         {miners, Miners},
