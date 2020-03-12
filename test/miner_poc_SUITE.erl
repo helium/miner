@@ -764,6 +764,7 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
+            ct:pal("checking inconsensus for miner ~p", [Miner]),
                 case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
                     true ->
                         ok;
