@@ -194,7 +194,7 @@ handle_cast(Msg, #state{chain = Chain0} = State) ->
         case blockchain_worker:blockchain() of
             undefined ->
                 %% chain still not ready, to take a breather and give it a space to come up
-                timer:sleep(2000),
+                timer:sleep(500),
                 undefined;
             Chain ->
                 Chain
