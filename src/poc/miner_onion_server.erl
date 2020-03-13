@@ -49,7 +49,9 @@
     ecdh_fun,
     miner_name :: binary(),
     sender :: undefined | {pid(), term()},
-    packet_id = 0 :: non_neg_integer()
+    packet_id = 0 :: non_neg_integer(),
+    chain :: undefined  | blockchain:blockchain(),
+    chain_retry_count = 0 :: integer()
 }).
 
 -define(BLOCK_RETRY_COUNT, 10).
@@ -168,20 +170,42 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
+    lager:info("init with ~p", [Args]),
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
     MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
+    Chain = blockchain_worker:blockchain(),
     State = #state{
         compact_key = blockchain_swarm:pubkey_bin(),
         ecdh_fun = maps:get(ecdh_fun, Args),
-        miner_name = unicode:characters_to_binary(MinerName, utf8)
+        miner_name = unicode:characters_to_binary(MinerName, utf8),
+        chain = Chain
     },
-    lager:info("init with ~p", [Args]),
     {ok, State}.
 
 handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefined ->
     {reply, {ok, CK}, State};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
+
+handle_cast(Msg, #state{chain = undefined, chain_retry_count = RetryCount} = State) when RetryCount < 100 ->
+    %% we have no chain yet, so catch all casts,
+    %% and attempt to get the chain, then put the msg back in the queue
+    %% we will do this max of 100 times and then let things crash...
+    %% if chain isnt up by then, we will want to know about...
+    lager:info("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
+    NC =
+        case blockchain_worker:blockchain() of
+            undefined ->
+                %% chain still not ready, to take a breather and give it a space to come up
+                timer:sleep(250),
+                undefined;
+            Chain ->
+                Chain
+        end,
+    %% requeue the msg back to ourselves, brutal...
+    ok = gen_server:cast(?MODULE, Msg),
+    {noreply, State#state{chain = NC, chain_retry_count = RetryCount + 1}};
+
 
 handle_cast({decrypt_p2p, <<IV:2/binary,
                             OnionCompactKey:33/binary,
@@ -232,10 +256,9 @@ wait_for_block_(Fun, Count) ->
             wait_for_block_(Fun, Count - 1)
     end.
 
-decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun}=State) ->
+decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    Chain = blockchain_worker:blockchain(),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
         poc_not_found ->
             Ledger = blockchain:ledger(Chain),
@@ -281,9 +304,13 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
 -ifdef(EQC).
 -spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    Chain = blockchain_worker:blockchain(),
-    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain).
+    case blockchain_worker:blockchain() of
+        undefined->
+            {error, chain_not_ready};
+        Chain ->
+            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+            try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain)
+    end.
 -endif.
 
 -spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.

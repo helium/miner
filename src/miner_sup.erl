@@ -42,7 +42,7 @@ start_link() ->
 init(_Args) ->
     SupFlags = #{
         strategy => rest_for_one,
-        intensity => 2,
+        intensity => 10,
         period => 5
     },
 
