@@ -535,7 +535,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 46000+I}}
+            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 0}}
         end,
         lists:seq(1, TotalMiners)
     ),
@@ -659,10 +659,16 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
     %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
+    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _}}) ->
+                                              {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
+                                              ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
+                                              {Miner, {TCPPort, RandomPort}}
+                                      end, MinersAndPorts),
+
     [
         {miners, Miners},
         {keys, Keys},
-        {ports, MinersAndPorts},
+        {ports, UpdatedMinersAndPorts},
         {addresses, Addresses},
         {block_time, BlockTime},
         {batch_size, BatchSize},

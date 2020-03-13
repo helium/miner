@@ -5,7 +5,8 @@
 -export([
     start_link/1,
     send/1,
-    send_poc/5
+    send_poc/5,
+    port/0
 ]).
 
 -export([
@@ -59,6 +60,10 @@ send(#packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequenc
 send_poc(Payload, When, Freq, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power, false}, 11000).
 
+-spec port() -> {ok, inet:port_number()} | {error, any()}.
+port() ->
+    gen_server:call(?MODULE, port, 11000).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -66,7 +71,7 @@ send_poc(Payload, When, Freq, DataRate, Power) ->
 init(Args) ->
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
-    {ok, Socket} = gen_udp:open(UDPPort, [binary, {active, 100}, {ip, UDPIP}]),
+    {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 pubkey_bin = blockchain_swarm:pubkey_bin()}}.
@@ -99,6 +104,8 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
     %% TODO a better timeout would be good here
     Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
     {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}};
+handle_call(port, _From, State) ->
+    {reply, inet:port(State#state.socket), State};
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
@@ -287,7 +294,9 @@ route(Pkt) ->
                 true ->
                     {onion, longfi:payload(LongFiPkt)};
                 false ->
-                    {longfi, longfi:oui(LongFiPkt)}
+                    %% we currently don't expect non-onion packets,
+                    %% this is probably a false positive on a LoRaWAN packet
+                      route_non_longfi(Pkt)
             catch _:_ ->
                       route_non_longfi(Pkt)
             end
