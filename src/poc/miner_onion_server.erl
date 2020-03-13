@@ -50,8 +50,7 @@
     miner_name :: binary(),
     sender :: undefined | {pid(), term()},
     packet_id = 0 :: non_neg_integer(),
-    chain :: undefined  | blockchain:blockchain(),
-    chain_retry_count = 0 :: integer()
+    chain :: undefined  | blockchain:blockchain()
 }).
 
 -define(BLOCK_RETRY_COUNT, 10).
