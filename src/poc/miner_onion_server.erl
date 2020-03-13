@@ -187,25 +187,10 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(Msg, #state{chain = undefined, chain_retry_count = RetryCount} = State) when RetryCount < 100 ->
-    %% we have no chain yet, so catch all casts,
-    %% and attempt to get the chain, then put the msg back in the queue
-    %% we will do this max of 100 times and then let things crash...
-    %% if chain isnt up by then, we will want to know about...
-    lager:info("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
-    NC =
-        case blockchain_worker:blockchain() of
-            undefined ->
-                %% chain still not ready, to take a breather and give it a space to come up
-                timer:sleep(250),
-                undefined;
-            Chain ->
-                Chain
-        end,
-    %% requeue the msg back to ourselves, brutal...
-    ok = gen_server:cast(?MODULE, Msg),
-    {noreply, State#state{chain = NC, chain_retry_count = RetryCount + 1}};
-
+handle_cast(Msg, #state{chain = undefined} = State) ->
+    %% we have no chain yet, so try and set it, the received packed will be dropped
+    lager:warning("received ~p whilst no chain.  Dropping packet...", [Msg]),
+    {noreply, State#state{chain = blockchain_worker:blockchain()}};
 
 handle_cast({decrypt_p2p, <<IV:2/binary,
                             OnionCompactKey:33/binary,
