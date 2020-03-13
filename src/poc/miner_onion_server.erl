@@ -169,6 +169,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(Args) ->
+    lager:info("init with ~p", [Args]),
     {ok, Name} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_swarm:pubkey_bin())),
     MinerName = binary:replace(erlang:list_to_binary(Name), <<"-">>, <<" ">>, [global]),
     Chain = blockchain_worker:blockchain(),
@@ -178,7 +179,6 @@ init(Args) ->
         miner_name = unicode:characters_to_binary(MinerName, utf8),
         chain = Chain
     },
-    lager:info("init with ~p", [Args]),
     {ok, State}.
 
 handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefined ->
@@ -186,7 +186,7 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(Msg, #state{chain = Chain0} = State) ->
+handle_cast(Msg, #state{chain = undefined} = State) ->
     lager:info("received ~p whilst no chain.  Will attempt to get chain and requeue", [Msg]),
     %% we have no chain yet, so catch all casts,
     %% and attempt to get the chain, then put the msg back in the queue
