@@ -66,7 +66,7 @@ send_poc(Payload, When, Freq, DataRate, Power) ->
 init(Args) ->
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
-    {ok, Socket} = gen_udp:open(UDPPort, [binary, {active, 100}, {ip, UDPIP}]),
+    {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 pubkey_bin = blockchain_swarm:pubkey_bin()}}.
@@ -287,7 +287,9 @@ route(Pkt) ->
                 true ->
                     {onion, longfi:payload(LongFiPkt)};
                 false ->
-                    {longfi, longfi:oui(LongFiPkt)}
+                    %% we currently don't expect non-onion packets,
+                    %% this is probably a false positive on a LoRaWAN packet
+                      route_non_longfi(Pkt)
             catch _:_ ->
                       route_non_longfi(Pkt)
             end
