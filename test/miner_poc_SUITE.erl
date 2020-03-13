@@ -662,10 +662,11 @@ exec_dist_test(TestCase, Config, VarMap) ->
 
 setup_dist_test(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
-    MinerCount = length(Miners),
+    MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = get_genesis_block(Miners, Config),
-    miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000, lists:zip(lists:seq(46001, 46000 + MinerCount), Locations)),
+    RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
+    miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000, lists:zip(RadioPorts, Locations)),
     timer:sleep(5000),
     true = load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
