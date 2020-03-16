@@ -227,9 +227,6 @@ packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [PacketInfo1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [PacketInfo2]),
 
-    Deets1 = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet_details, []),
-    ct:pal("Deets1: ~p", [Deets1]),
-
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
     %% for the state_channel_close txn to appear
@@ -493,8 +490,8 @@ replay_test(Config) ->
     %% check that oui txn appears on miners
     CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
     CheckTxnOUI = fun(T) -> T == SignedOUITxn end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(60)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(60)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(120)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(120)),
 
     Height = miner_ct_utils:height(RouterNode),
 
@@ -518,8 +515,8 @@ replay_test(Config) ->
     %% check that sc open txn appears on miners
     CheckTypeSCOpen = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_open_v1 end,
     CheckTxnSCOpen = fun(T) -> T == SignedSCOpenTxn end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(60)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(60)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(120)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(120)),
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -535,14 +532,11 @@ replay_test(Config) ->
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [PacketInfo1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [PacketInfo2]),
 
-    Deets1 = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet_details, []),
-    ct:pal("Deets1: ~p", [Deets1]),
-
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(60)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(120)),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -575,8 +569,7 @@ replay_test(Config) ->
 
     %% check that this replayed sc open txn does NOT appear on miners
     NewCheckTxnSCOpen = fun(T) -> T == NewSignedSCOpenTxn end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCOpen, timer:seconds(60), false),
-    ok = miner_ct_utils:wait_for_txn(Miners, NewCheckTxnSCOpen, timer:seconds(60), false),
+    ok = miner_ct_utils:wait_for_txn(Miners, NewCheckTxnSCOpen, timer:seconds(120), false),
 
     ok.
 
