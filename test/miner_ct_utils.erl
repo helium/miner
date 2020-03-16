@@ -57,7 +57,7 @@
          wait_for_gte/3, wait_for_gte/5,
 
          submit_txn/2,
-         wait_for_txn/2, wait_for_txn/3,
+         wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
          get_txn_block_details/2, get_txn_block_details/3,
          get_txn/2
 
@@ -906,9 +906,12 @@ init_base_dir_config(Mod, TestCase, Config)->
 %% @end
 %%-------------------------------------------------------------------
 wait_for_txn(Miners, PredFun) ->
-    wait_for_txn(Miners, PredFun, timer:seconds(30)).
+    wait_for_txn(Miners, PredFun, timer:seconds(30), true).
 
-wait_for_txn(Miners, PredFun, Timeout)->
+wait_for_txn(Miners, PredFun, Timeout) ->
+    wait_for_txn(Miners, PredFun, Timeout, true).
+
+wait_for_txn(Miners, PredFun, Timeout, ExpectedResult)->
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
@@ -917,7 +920,7 @@ wait_for_txn(Miners, PredFun, Timeout)->
 
                                 end, miner_ct_utils:shuffle(Miners))
                  end,
-                 Result == true, 40, timer:seconds(1)),
+                 Result == ExpectedResult, 40, timer:seconds(1)),
     ok.
 
 get_txn_block_details(Miner, PredFun) ->
