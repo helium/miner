@@ -582,7 +582,17 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                        undefined ->
                            BlockTime;
                        _ ->
-                           ceil((LastBlockTimestamp - StartBlockTime) / (Height - StartHeight))
+                           Diff = ceil((LastBlockTimestamp - StartBlockTime) /
+                                           (Height - StartHeight)),
+                           case Diff of
+                               N when N > 0 ->
+                                   min(ceil(N * N), 15);
+                               N ->
+                                   %% to maintain sensitivity, and actually cap slowdown,
+                                   %% invert all the operations here, and use abs to
+                                   %% preserve sign.
+                                   max(floor(N * abs(N)), -15)
+                           end
                    end,
     BlockTimeDeviation = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
