@@ -38,7 +38,8 @@
     gateways = #{}, %% keyed by MAC
     packet_timers = #{}, %% keyed by token
     sig_fun,
-    pubkey_bin
+    pubkey_bin,
+    mirror_socket
 }).
 
 -type state() :: #state{}.
@@ -72,8 +73,16 @@ init(Args) ->
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
     {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
+    MirrorSocket = case application:get_env(miner, radio_mirror_port, undefined) of
+        undefined ->
+            undefined;
+        P ->
+            {ok, S} = gen_udp:open(P, [binary, {active, true}]),
+            S
+    end,
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
+                mirror_socket = {MirrorSocket, undefined},
                 pubkey_bin = blockchain_swarm:pubkey_bin()}}.
 
 handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{socket=Socket,
@@ -103,6 +112,7 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
                             }
                         }),
             Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
+            maybe_mirror(State#state.mirror_socket, Packet),
             ok = gen_udp:send(Socket, IP, Port, Packet),
             %% TODO a better timeout would be good here
             Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
@@ -127,11 +137,15 @@ handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     end,
     {noreply, State#state{packet_timers=maps:remove(Token, Timers)}};
 handle_info({udp, Socket, IP, Port, Packet}, #state{socket=Socket}=State) ->
+    maybe_mirror(State#state.mirror_socket, Packet),
     State2 = handle_udp_packet(Packet, IP, Port, State),
     {noreply, State2};
 handle_info({udp_passive, Socket}, #state{socket=Socket}=State) ->
     inet:setopts(Socket, [{active, 100}]),
     {noreply, State};
+handle_info({udp, Socket, IP, Port, _Packet}, #state{mirror_socket={Socket, _}}=State) ->
+    lager:info("received mirror port connection from ~p ~p", [IP, Port]),
+    {noreply, State#state{mirror_socket={Socket, {IP, Port}}}};
 handle_info(_Msg, State) ->
     lager:warning("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
@@ -181,13 +195,17 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             error ->
                 #gateway{mac=MAC, ip=IP, port=Port, received=1}
         end,
-    ok = gen_udp:send(Socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>),
+    Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>,
+    maybe_mirror(State#state.mirror_socket, Packet),
+    ok = gen_udp:send(Socket, IP, Port, Packet),
     handle_json_data(jsx:decode(JSON, [return_maps]), Gateway, State);
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PULL_DATA:8/integer-unsigned,
                     MAC:64/integer>>, IP, Port, #state{socket=Socket, gateways=Gateways}=State) ->
-    ok = gen_udp:send(Socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>),
+    Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>,
+    maybe_mirror(State#state.mirror_socket, Packet),
+    ok = gen_udp:send(Socket, IP, Port, Packet),
     lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
@@ -419,4 +437,11 @@ send_to_router_(Swarm, Address, Packet) ->
                     lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
             end
     end.
+
+maybe_mirror({undefined, undefined}, _) ->
+    ok;
+maybe_mirror({_, undefined}, _) ->
+    ok;
+maybe_mirror({Sock, Destination}, Packet) ->
+    gen_udp:send(Sock, Destination, Packet).
 
