@@ -38,6 +38,10 @@ all() ->
 basic(Config) ->
     application:ensure_all_started(lager),
 
+    BaseDir = ?config(base_dir, Config),
+    Ledger = blockchain_ledger_v1:new(BaseDir),
+    BlockHash = crypto:strong_rand_bytes(32),
+
     {ok, Sock} = gen_udp:open(0, [{active, false}, binary, {reuseaddr, true}]),
     {ok, Port} = inet:port(Sock),
 
@@ -47,6 +51,17 @@ basic(Config) ->
 
     meck:new(blockchain_swarm, [passthrough]),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),
+
+    % This is for `try_decrypt`
+    meck:new(blockchain_worker, [passthrough]),
+    meck:expect(blockchain_worker, blockchain, fun() -> ok end),
+    meck:new(blockchain, [passthrough]),
+    meck:expect(blockchain, ledger, fun(_) -> Ledger end),
+    meck:new(blockchain_ledger_v1, [passthrough]),
+    meck:expect(blockchain_ledger_v1, find_poc, fun(_, _) ->
+        PoC = blockchain_ledger_poc_v2:new(<<"SecretHash">>, <<"OnionKeyHash">>, <<"Challenger">>, BlockHash),
+        {ok, [PoC]}
+    end),
 
     {ok, Server} = miner_onion_server:start_link(#{
         radio_udp_bind_ip => {127,0,0,1},
@@ -64,25 +79,11 @@ basic(Config) ->
         sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey)
     }),
 
-    BaseDir = ?config(base_dir, Config),
-    Ledger = blockchain_ledger_v1:new(BaseDir),
 
-    BlockHash = crypto:strong_rand_bytes(32),
     Data1 = <<1, 2>>,
     Data2 = <<3, 4>>,
     Data3 = <<5, 6>>,
     OnionKey = #{public := OnionCompactKey} = libp2p_crypto:generate_keys(ecc_compact),
-
-    % This is for `try_decrypt`
-    meck:new(blockchain_worker, [passthrough]),
-    meck:expect(blockchain_worker, blockchain, fun() -> ok end),
-    meck:new(blockchain, [passthrough]),
-    meck:expect(blockchain, ledger, fun(_) -> Ledger end),
-    meck:new(blockchain_ledger_v1, [passthrough]),
-    meck:expect(blockchain_ledger_v1, find_poc, fun(_, _) ->
-        PoC = blockchain_ledger_poc_v2:new(<<"SecretHash">>, <<"OnionKeyHash">>, <<"Challenger">>, BlockHash),
-        {ok, [PoC]}
-    end),
 
     {Onion, _} = blockchain_poc_packet:build(OnionKey, 1234, [{PubKey, Data1},
                                                               {PubKey2, Data2},
