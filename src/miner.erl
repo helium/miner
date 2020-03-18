@@ -582,10 +582,20 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                        undefined ->
                            BlockTime;
                        _ ->
-                           ceil((LastBlockTimestamp - StartBlockTime) / (Height - StartHeight))
+                           (LastBlockTimestamp - StartBlockTime) / (Height - StartHeight)
                    end,
-    BlockTimeDeviation = BlockTime - AvgBlockTime,
+    BlockTimeDeviation0 = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
+    BlockTimeDeviation =
+        case BlockTimeDeviation0 of
+            N when N > 0 ->
+                min(ceil(N * N), 15);
+            N ->
+                %% to maintain sensitivity, and actually cap slowdown,
+                %% invert all the operations here, and use abs to
+                %% preserve sign.
+                max(floor(N * abs(N)), -15)
+        end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
