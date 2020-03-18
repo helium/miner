@@ -157,6 +157,9 @@ mk_token(Timers) ->
 
 -spec select_gateway(map()) -> {ok, gateway()} | {error, no_gateways}.
 select_gateway(Gateways) ->
+    %% TODO for a multi-tenant miner we'd have a mapping of swarm keys to
+    %% 64-bit packet forwarder IDs and, depending on what swarm key this send
+    %% was directed to, we'd select the appropriate gateway from the map.
     case maps:size(Gateways) of
         0 ->
             {error, no_gateways};
