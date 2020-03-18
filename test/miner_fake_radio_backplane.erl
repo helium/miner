@@ -88,7 +88,7 @@ do_send(ToSend, Distance, _OriginLocation, _Location, Token, Packet, UDPSock, Po
             %ct:pal("NOT sending from ~p to ~p -> ~p km", [OriginLocation, Location, Distance]),
             ok;
         false ->
-            NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ToSend, <<"snr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
+            NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ToSend, <<"lsnr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
             %ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, OriginLocation, Location, Distance, ToSend]),
             gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
     end.

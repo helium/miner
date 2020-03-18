@@ -79,31 +79,35 @@ init(Args) ->
 handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{socket=Socket,
                                                                        gateways=Gateways,
                                                                        packet_timers=Timers}=State) ->
-    Token = mk_token(Timers),
-    %% TODO we should check this for regulatory compliance
-    BinJSX = jsx:encode(
-        #{<<"txpk">> => #{
-            %% IPol for downlink to devices only, not poc packets
-            <<"ipol">> => IPol,
-            <<"imme">> => When == immediate,
-            <<"powe">> => trunc(Power),
-            %% TODO gps time?
-            <<"tmst">> => When,
-            <<"freq">> => Freq,
-            <<"modu">> => <<"LORA">>,
-            <<"datr">> => list_to_binary(DataRate),
-            <<"codr">> => <<"4/5">>,
-            <<"size">> => byte_size(Payload),
-            <<"rfch">> => 0,
-            <<"data">> => base64:encode(Payload)
-        }
-    }),
-    #gateway{ip=IP, port=Port} = select_gateway(Gateways),
-    Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
-    ok = gen_udp:send(Socket, IP, Port, Packet),
-    %% TODO a better timeout would be good here
-    Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-    {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}};
+    case select_gateway(Gateways) of
+        {error, _}=Error ->
+            {reply, Error, State};
+        {ok, #gateway{ip=IP, port=Port}} ->
+            Token = mk_token(Timers),
+            %% TODO we should check this for regulatory compliance
+            BinJSX = jsx:encode(
+                       #{<<"txpk">> => #{
+                             %% IPol for downlink to devices only, not poc packets
+                             <<"ipol">> => IPol,
+                             <<"imme">> => When == immediate,
+                             <<"powe">> => trunc(Power),
+                             %% TODO gps time?
+                             <<"tmst">> => When,
+                             <<"freq">> => Freq,
+                             <<"modu">> => <<"LORA">>,
+                             <<"datr">> => list_to_binary(DataRate),
+                             <<"codr">> => <<"4/5">>,
+                             <<"size">> => byte_size(Payload),
+                             <<"rfch">> => 0,
+                             <<"data">> => base64:encode(Payload)
+                            }
+                        }),
+            Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
+            ok = gen_udp:send(Socket, IP, Port, Packet),
+            %% TODO a better timeout would be good here
+            Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+            {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}}
+    end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
 handle_call(_Msg, _From, State) ->
@@ -151,9 +155,17 @@ mk_token(Timers) ->
         false -> Token
     end.
 
--spec select_gateway(map()) -> gateway().
+-spec select_gateway(map()) -> {ok, gateway()} | {error, no_gateways}.
 select_gateway(Gateways) ->
-    erlang:element(2, erlang:hd(maps:to_list(Gateways))).
+    %% TODO for a multi-tenant miner we'd have a mapping of swarm keys to
+    %% 64-bit packet forwarder IDs and, depending on what swarm key this send
+    %% was directed to, we'd select the appropriate gateway from the map.
+    case maps:size(Gateways) of
+        0 ->
+            {error, no_gateways};
+        _ ->
+            {ok, erlang:element(2, erlang:hd(maps:to_list(Gateways)))}
+    end.
 
 -spec handle_udp_packet(binary(), inet:ip_address(), inet:port_number(), state()) -> state().
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
@@ -170,7 +182,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                 #gateway{mac=MAC, ip=IP, port=Port, received=1}
         end,
     ok = gen_udp:send(Socket, IP, Port, <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>),
-    handle_json_data(jsx:decode(JSON), Gateway, State);
+    handle_json_data(jsx:decode(JSON, [return_maps]), Gateway, State);
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PULL_DATA:8/integer-unsigned,
@@ -236,24 +248,24 @@ handle_udp_packet(Packet, _IP, _Port, State) ->
     lager:info("unhandled udp packet ~p", [Packet]),
     State.
 
--spec handle_json_data(list(), gateway(), state()) -> state().
-handle_json_data([], _Gateway, State) ->
-    State;
-handle_json_data([{<<"rxpk">>, Packets}|Tail], Gateway, State0) ->
+-spec handle_json_data(map(), gateway(), state()) -> state().
+handle_json_data(#{<<"rxpk">> := Packets} = Map, Gateway, State0) ->
     State1 = handle_packets(sort_packets(Packets), Gateway, State0),
-    handle_json_data(Tail, Gateway, State1);
-handle_json_data([{<<"stat">>, Status}|Tail], Gateway0, #state{gateways=Gateways}=State) ->
+    handle_json_data(maps:remove(<<"rxpk">>, Map), Gateway, State1);
+handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gateways}=State) ->
     Gateway1 = Gateway0#gateway{status=Status},
     lager:info("got status ~p", [Status]),
     lager:info("Gateway ~p", [lager:pr(Gateway1, ?MODULE)]),
     Mac = Gateway1#gateway.mac,
-    handle_json_data(Tail, Gateway1, State#state{gateways=maps:put(Mac, Gateway1, Gateways)}).
+    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1, State#state{gateways=maps:put(Mac, Gateway1, Gateways)});
+handle_json_data(_, _Gateway, State) ->
+    State.
 
 -spec sort_packets(list()) -> list().
 sort_packets(Packets) ->
     lists:sort(
         fun(A, B) ->
-            proplists:get_value(<<"lsnr">>, A) >= proplists:get_value(<<"lsnr">>, B)
+            maps:get(<<"lsnr">>, A) >= maps:get(<<"lsnr">>, B)
         end,
         Packets
     ).
@@ -262,7 +274,7 @@ sort_packets(Packets) ->
 handle_packets([], _Gateway, State) ->
     State;
 handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigFun}=State) ->
-    Data = base64:decode(proplists:get_value(<<"data">>, Packet)),
+    Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
             ok;
@@ -270,12 +282,12 @@ handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigF
             %% onion server
             miner_onion_server:decrypt_radio(
                 Payload,
-                erlang:trunc(proplists:get_value(<<"rssi">>, Packet)),
-                proplists:get_value(<<"lsnr">>, Packet),
+                erlang:trunc(maps:get(<<"rssi">>, Packet)),
+                maps:get(<<"lsnr">>, Packet),
                 %% TODO we might want to send GPS time here, if available
-                proplists:get_value(<<"tmst">>, Packet),
-                proplists:get_value(<<"freq">>, Packet),
-                proplists:get_value(<<"datr">>, Packet)
+                maps:get(<<"tmst">>, Packet),
+                maps:get(<<"freq">>, Packet),
+                maps:get(<<"datr">>, Packet)
             );
         {Type, OUI} ->
             lager:notice("Routing ~p", [OUI]),
@@ -337,15 +349,15 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
         undefined ->
             lager:warning("ingnored packet chain is undefined");
         Chain ->
-            Data = base64:decode(proplists:get_value(<<"data">>, Packet)),
+            Data = base64:decode(maps:get(<<"data">>, Packet)),
             Ledger = blockchain:ledger(Chain),
             Swarm = blockchain_swarm:swarm(),
-            RSSI = proplists:get_value(<<"rssi">>, Packet),
-            SNR = proplists:get_value(<<"lsnr">>, Packet),
+            RSSI = maps:get(<<"rssi">>, Packet),
+            SNR = maps:get(<<"lsnr">>, Packet),
             %% TODO we might want to send GPS time here, if available
-            Time = proplists:get_value(<<"tmst">>, Packet),
-            Freq = proplists:get_value(<<"freq">>, Packet),
-            DataRate = proplists:get_value(<<"datr">>, Packet),
+            Time = maps:get(<<"tmst">>, Packet),
+            Freq = maps:get(<<"freq">>, Packet),
+            DataRate = maps:get(<<"datr">>, Packet),
             HeliumPacket = #packet_pb{
                 oui = OUI,
                 type = Type,
