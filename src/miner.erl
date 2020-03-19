@@ -243,7 +243,7 @@ relcast_queue(Group) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block(Stamps :: [{non_neg_integer(), {pos_integer(), binary()}},...],
+-spec create_block(Metadata :: [{pos_integer(), #{}},...],
                    Txns :: blockchain_txn:txns(),
                    HBBFTRound :: non_neg_integer())
                   -> {ok,
@@ -252,9 +252,9 @@ relcast_queue(Group) ->
                       binary(),
                       blockchain_txn:txns()} |
                      {error, term()}.
-create_block(Stamps, Txns, HBBFTRound) ->
+create_block(Metadata, Txns, HBBFTRound) ->
     try
-        gen_server:call(?MODULE, {create_block, Stamps, Txns, HBBFTRound}, infinity)
+        gen_server:call(?MODULE, {create_block, Metadata, Txns, HBBFTRound}, infinity)
     catch exit:{noproc, _} ->
             %% if the miner noprocs, we're likely shutting down
             {error, no_miner}
@@ -374,8 +374,8 @@ handle_call(consensus_group, _From, State) ->
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
-                                           blockchain = Chain})};
-handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
+                                                 blockchain = Chain})};
+handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
     %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
     %% by checking for a stale hash
@@ -383,10 +383,34 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
-    lager:info("stamps ~p, current hash ~p", [Stamps, CurrentBlockHash]),
+    lager:info("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
+    StampHashes =
+        lists:foldl(fun({_, {Stamp, Hash}}, Acc) -> % old tuple vsn
+                            [{Stamp, Hash} | Acc];
+                       ({_, #{head_hash := Hash, timestamp := Stamp}}, Acc) -> % new map vsn
+                            [{Stamp, Hash} | Acc];
+                       (_, Acc) ->
+                            %% maybe crash here?
+                            Acc
+                    end,
+                    [],
+                    Metadata),
+    SeenBBAs =
+        lists:foldl(fun({Idx, #{seen := Seen, bba_completion := B}}, Acc) -> % new map vsn
+                            [{{Idx, Seen}, B} | Acc];
+                       (_, Acc) ->
+                            %% maybe crash here?
+                            Acc
+                    end,
+                    [],
+                    Metadata),
+    {Stamps, Hashes} = lists:unzip(StampHashes),
+    {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
+    {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
+    BBA = process_bbas(length(Consensus), BBAs),
     Reply =
-        case lists:usort([ X || {_, {_, X}} <- Stamps ]) of
+        case lists:usort(Hashes) of
             [CurrentBlockHash] ->
                 SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
                 CurrentBlockHeight = blockchain_block:height(CurrentBlock),
@@ -394,13 +418,11 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
                 LastBlockTimestamp = blockchain_block:time(CurrentBlock),
-                BlockTime = miner_util:median([ X || {_, {X, _}} <- Stamps,
+                BlockTime = miner_util:median([ X || X <- Stamps,
                                                      X > LastBlockTimestamp]),
 
                 {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, Chain),
 
-                %% is there some cheaper way to do this?  maybe it's
-                %% cheap enough?
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
                     case blockchain_election:has_new_group(ValidTransactions) of
                         {true, _, ConsensusGroupTxn, _} ->
@@ -426,7 +448,10 @@ handle_call({create_block, Stamps, Txns, HBBFTRound}, _From, State) ->
                                hbbft_round => HBBFTRound,
                                time => BlockTime,
                                election_epoch => ElectionEpoch,
-                               epoch_start => EpochStart}),
+                               epoch_start => EpochStart,
+                               seen_votes => SeenVectors,
+                               bba_completion => BBA
+                              }),
                 lager:debug("newblock ~p", [NewBlock]),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
@@ -600,3 +625,21 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
     State#state{start_block_time=StartBlockTime, block_timer=Timer}.
+
+process_bbas(N, BBAs) ->
+    %% 2f + 1 = N - ((N - 1) div 3)
+    Threshold = N - ((N - 1) div 3),
+    M = lists:foldl(fun(B, Acc) -> maps:update_with(B, fun(V) -> V + 1 end, 1, Acc) end, #{}, BBAs),
+    case maps:size(M) of
+        0 ->
+            <<>>;
+        _ ->
+            %% this should work for any other value
+            [{BBAVal, Ct} | _] = lists:reverse(lists:keysort(2, maps:to_list(M))),
+            case Ct >= Threshold of
+                true ->
+                    BBAVal;
+                _ ->
+                    <<>>
+            end
+    end.

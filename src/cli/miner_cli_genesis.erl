@@ -180,8 +180,19 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
     %% Give DCs to 2 members
     InitialDCs = [ blockchain_txn_dc_coinbase_v1:new(Addr, 10000000) || Addr <- lists:sublist(Addresses, 2)],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
-    InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, 16#8c283475d4e89ff, 0)
-                                  || Addr <- Addresses ],
+
+    Locations = lists:foldl(
+        fun(I, Acc) ->
+            [h3:from_geo({37.780586, -122.469470 + I/10}, 12)|Acc]
+        end,
+        [],
+        lists:seq(1, length(Addresses))
+    ),
+
+
+    LocAddresses = lists:zip(Locations, Addresses),
+    InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+                                  || {Loc, Addr} <- LocAddresses ],
     miner_consensus_mgr:initial_dkg([VarTxn1] ++
                                         InitialPaymentTransactions ++
                                         InitialGatewayTransactions ++
@@ -317,7 +328,15 @@ make_vars() ->
     #{?chain_vars_version => 2,
       ?block_time => BlockTime,
       ?election_interval => Interval,
-      ?election_restart_interval => 10,
+      ?election_restart_interval => 5,
+      ?election_version => 3,
+      ?election_bba_penalty => 0.01,
+      ?election_seen_penalty => 0.25,
+      ?election_selection_pct => 75,
+      ?election_replacement_factor => 4,
+      ?election_replacement_slope => 20,
+      ?election_removal_pct => 85,
+      ?election_cluster_res => 8,
       ?num_consensus_members => N,
       ?batch_size => BatchSize,
       ?vars_commit_delay => 1,
@@ -358,9 +377,6 @@ make_vars() ->
       ?poc_version=> 8,
       ?poc_witnesses_percent=> 0.05,
       ?consensus_percent => 0.10,
-      ?election_selection_pct => 75,
-      ?election_replacement_factor => 4,
-      ?election_replacement_slope => 20,
       ?min_score => 0.15,
       ?alpha_decay => 0.007,
       ?beta_decay => 0.0005,

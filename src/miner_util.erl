@@ -6,10 +6,10 @@
 -module(miner_util).
 
 -export([
-    index_of/2
-    ,h3_index/3
-    ,median/1
-]).
+         index_of/2,
+         h3_index/3,
+         median/1
+        ]).
 
 %%--------------------------------------------------------------------
 %% @doc
