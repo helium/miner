@@ -31,6 +31,12 @@ cover:
 devrelease:
 	$(REBAR) as dev release
 
+aws:
+	$(REBAR) as aws release
+
+seed:
+	$(REBAR) as seed release
+
 devrel:
 	$(REBAR) as dev, miner1 release -n miner1
 	$(REBAR) as dev, miner2 release -n miner2
