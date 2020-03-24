@@ -562,46 +562,40 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ConfigResult = miner_ct_utils:pmap(
         fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
                 ct:pal("Miner ~p", [Miner]),
-            ct_rpc:call(Miner, cover, start, []),
-            ct_rpc:call(Miner, application, load, [lager]),
-            ct_rpc:call(Miner, application, load, [miner]),
-            ct_rpc:call(Miner, application, load, [blockchain]),
-            ct_rpc:call(Miner, application, load, [libp2p]),
-            %% give each miner its own log directory
-            LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
-            ct:pal("MinerLogRoot: ~p", [LogRoot]),
-            ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
-            ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
-            ct_rpc:call(Miner, application, set_env, [lager, handlers,
-                                                      [
-                                                       {lager_file_backend, [{file, "console.log"},
-                                                                             {level, debug}]},
-                                                       {lager_file_backend, [{file, "error.log"},
-                                                                             {level, error}]}
-                                                      ]]),
-            %% set blockchain configuration
-            Key = {PubKey, ECDH, SigFun},
+                ct_rpc:call(Miner, cover, start, []),
+                ct_rpc:call(Miner, application, load, [lager]),
+                ct_rpc:call(Miner, application, load, [miner]),
+                ct_rpc:call(Miner, application, load, [blockchain]),
+                ct_rpc:call(Miner, application, load, [libp2p]),
+                %% give each miner its own log directory
+                LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerLogRoot: ~p", [LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
 
-            MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
-            ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
-            %% set blockchain env
-            ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
-            %% set miner configuration
-            ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
-            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
-            ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+                %% set blockchain configuration
+                Key = {PubKey, ECDH, SigFun},
 
-            {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+                MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
+                %% set blockchain env
+                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
+                %% set miner configuration
+                ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+                ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
+                ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+
+                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
         end,
         Keys
