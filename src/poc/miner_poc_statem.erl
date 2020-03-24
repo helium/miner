@@ -159,22 +159,34 @@ requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined
         NewChain ->
             {keep_state, Data#data{blockchain=NewChain}, [{next_event, info, Msg}]}
     end;
-requesting(info, {blockchain_event, {add_block, BlockHash, false, Ledger}}, #data{address=Address}=Data) ->
-    case allow_request(BlockHash, Data) of
-        false ->
-            lager:debug("request not allowed @ ~p", [BlockHash]),
-            {keep_state, Data};
-        true ->
-            {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
-            #{public := PubKey} = Keys,
-            <<ID:10/binary, _/binary>> = libp2p_crypto:pubkey_to_bin(PubKey),
-            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
-            lager:info("request allowed @ ~p", [BlockHash]),
-            ok = blockchain_worker:submit_txn(Txn),
-            lager:info("submitted poc request ~p", [Txn]),
-            {next_state, mining, save_data(Data#data{state=mining, secret=Secret,
-                                                      onion_keys=Keys, responses=#{},
-                                                      poc_hash=BlockHash})}
+requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
+           #data{address=Address}=Data) ->
+    Now = erlang:system_time(seconds),
+    case blockchain:get_block(BlockHash, Data#data.blockchain) of
+        {ok, Block} ->
+            case Sync andalso (Now - blockchain_block:time(Block) > 3600) of
+                false ->
+                    case allow_request(BlockHash, Data) of
+                        false ->
+                            lager:debug("request not allowed @ ~p", [BlockHash]),
+                            {keep_state, Data};
+                        true ->
+                            {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
+                            #{public := PubKey} = Keys,
+                            <<ID:10/binary, _/binary>> = libp2p_crypto:pubkey_to_bin(PubKey),
+                            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
+                            lager:info("request allowed @ ~p", [BlockHash]),
+                            ok = blockchain_worker:submit_txn(Txn),
+                            lager:info("submitted poc request ~p", [Txn]),
+                            {next_state, mining, save_data(Data#data{state=mining, secret=Secret,
+                                                                     onion_keys=Keys, responses=#{},
+                                                                     poc_hash=BlockHash})}
+                    end;
+                true ->
+                    handle_event(info, Msg, Data)
+            end;
+        {error, _Reason} ->
+            {keep_state, Data}
     end;
 requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
