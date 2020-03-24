@@ -61,8 +61,7 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?election_interval => infinity,
                                                    ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve,
-                                                   ?max_payments => 10}),
+                                                   ?dkg_curve => Curve}),
 
     DKGResults = miner_ct_utils:inital_dkg(Miners,
                                            InitialVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns,
@@ -77,9 +76,9 @@ init_per_testcase(_TestCase, Config0) ->
     %% confirm we have a height of 1
     ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
 
-    [   {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config].
+    [{consensus_miners, ConsensusMiners},
+     {non_consensus_miners, NonConsensusMiners}
+     | Config].
 
 
 end_per_testcase(_TestCase, Config) ->
@@ -98,6 +97,9 @@ no_packets_expiry_test(Config) ->
     ct:pal("RouterSwarm: ~p", [RouterSwarm]),
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
+
+    ct:pal("Height before oui: ~p", [miner_ct_utils:height(RouterNode)]),
+
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
@@ -110,11 +112,13 @@ no_packets_expiry_test(Config) ->
     ct:pal("SignedOUITxn: ~p", [SignedOUITxn]),
     ok = ct_rpc:call(RouterNode, blockchain_worker, submit_txn, [SignedOUITxn]),
 
+    ct:pal("Height after oui: ~p", [miner_ct_utils:height(RouterNode)]),
+
     %% check that oui txn appears on miners
     CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
     CheckTxnOUI = fun(T) -> T == SignedOUITxn end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(120)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI, timer:seconds(120)),
 
     Height = miner_ct_utils:height(RouterNode),
 
