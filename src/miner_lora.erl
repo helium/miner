@@ -29,8 +29,7 @@
     received = 0,
     dropped = 0,
     status,
-    rtt_samples = [],
-    rtt=5000000 %% in microseconds
+    time_source :: undefined | #gps_info_pb{} | #ntp_info_pb{}
 }).
 
 -record(state, {
@@ -256,8 +255,36 @@ handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gatewa
     Gateway1 = Gateway0#gateway{status=Status},
     lager:info("got status ~p", [Status]),
     lager:info("Gateway ~p", [lager:pr(Gateway1, ?MODULE)]),
-    Mac = Gateway1#gateway.mac,
-    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1, State#state{gateways=maps:put(Mac, Gateway1, Gateways)});
+    TimeInfo = case maps:find(<<"tacc">>, Status) of
+                   {ok, _} ->
+                       %% ok we have GPS information
+                       {gps, #gps_info_pb{
+                                horizontal_accuracy=maps:get(<<"eha">>, Status),
+                                vertical_accuracy=maps:get(<<"eva">>, Status),
+                                altitude=maps:get(<<"alti">>, Status),
+                                time_accuracy=maps:get(<<"tacc">>, Status)
+                               }};
+                   error ->
+                       %% ok, try to get NTP
+                       case parse_ntp_status() of
+                           {ok, NTPStatus} ->
+                               NStatus = proplists:get_value(status, NTPStatus),
+                               {ntp, #ntp_info_pb{
+                                        synced = (not lists:member(<<"leap_alarm">>, NStatus)) andalso lists:member(<<"sync_ntp">>, NStatus),
+                                        stratum = proplists:get_value(stratum, NTPStatus),
+                                        sys_jitter = proplists:get_value(sys_jitter, NTPStatus),
+                                        clk_jitter = proplists:get_value(clk_jitter, NTPStatus),
+                                        clk_wander = proplists:get_value(clk_wander, NTPStatus),
+                                        frequency = proplists:get_value(frequency, NTPStatus)
+                                       }};
+                           Error ->
+                               lager:notice("Unable to get NTP status ~p", [Error]),
+                               undefined
+                       end
+               end,
+    Gateway2 = Gateway1#gateway{time_source = TimeInfo},
+    Mac = Gateway2#gateway.mac,
+    handle_json_data(maps:remove(<<"stat">>, Map), Gateway2, State#state{gateways=maps:put(Mac, Gateway2, Gateways)});
 handle_json_data(_, _Gateway, State) ->
     State.
 
@@ -291,7 +318,7 @@ handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigF
             );
         {Type, OUI} ->
             lager:notice("Routing ~p", [OUI]),
-            erlang:spawn(fun() -> send_to_router(PubKeyBin, SigFun, {Type, OUI, Packet}) end)
+            erlang:spawn(fun() -> send_to_router(PubKeyBin, SigFun, {Type, OUI, Gateway, Packet}) end)
     end,
     handle_packets(Tail, Gateway, State).
 
@@ -344,7 +371,7 @@ reverse(<<H:1/binary, Rest/binary>>, Acc) ->
     reverse(Rest, <<H/binary, Acc/binary>>).
 
 -spec send_to_router(libp2p_crypto:pubkey_bin(), function(), any()) -> ok.
-send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
+send_to_router(PubkeyBin, SigFun, {Type, OUI, Gateway, Packet}) ->
     case blockchain_worker:blockchain() of
         undefined ->
             lager:warning("ingnored packet chain is undefined");
@@ -354,19 +381,32 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
             Swarm = blockchain_swarm:swarm(),
             RSSI = maps:get(<<"rssi">>, Packet),
             SNR = maps:get(<<"lsnr">>, Packet),
-            %% TODO we might want to send GPS time here, if available
-            Time = maps:get(<<"tmst">>, Packet),
+            TMST = maps:get(<<"tmst">>, Packet),
             Freq = maps:get(<<"freq">>, Packet),
             DataRate = maps:get(<<"datr">>, Packet),
+            Time = case maps:find(<<"time">>, Packet) of
+                       {ok, TS} ->
+                           {Date, {Hours, Minutes, FractionalSeconds}} = iso8601:parse_exact(TS),
+                           %% compute the number of seconds since 1970
+                           UnixTime = calendar:datetime_to_gregorian_seconds({Date, {Hours, Minutes, trunc(FractionalSeconds)}}) - 62167219200,
+                           %% convert the fractional seconds into nanoseconds
+                           NanoSeconds = trunc((FractionalSeconds - trunc(FractionalSeconds)) * 1000000000),
+                           %% multiply the unix timestamp by 1 billion and add the nanosecond component on
+                           (UnixTime * 1000000000) + NanoSeconds;
+                       error ->
+                           erlang:system_time(nanosecond)
+                   end,
             HeliumPacket = #packet_pb{
                 oui = OUI,
                 type = Type,
                 payload = Data,
-                timestamp = Time,
+                internal_conc_timer = TMST,
                 signal_strength = RSSI,
                 frequency = Freq,
                 snr = SNR,
-                datarate = DataRate
+                datarate = DataRate,
+                timestamp = Time,
+                time_source = Gateway#gateway.time_source
             },
             PbPacket = #blockchain_state_channel_packet_v1_pb{
                 packet = HeliumPacket,
@@ -420,3 +460,84 @@ send_to_router_(Swarm, Address, Packet) ->
             end
     end.
 
+
+parse_ntp_status() ->
+    Output = list_to_binary(os:cmd("ntpq -c rv")),
+    parse_ntp_status(Output, []).
+
+parse_ntp_status(<<>>, Acc) ->
+    {ok, Acc};
+parse_ntp_status(<<"associd=", Output/binary>>, Acc) ->
+    [Value, Rest] = binary:split(Output, <<" ">>),
+    parse_ntp_status(Rest, [{associd, list_to_integer(binary_to_list(Value))}|Acc]);
+parse_ntp_status(<<"status=", Output/binary>>, Acc) ->
+    [Status, Rest] = binary:split(Output, <<",\n">>),
+    [Status0|Statuses] = binary:split(Status, <<", ">>, [global]),
+    [_, Status1] = binary:split(Status0, <<" ">>),
+    parse_ntp_status(Rest, [{status, [Status1|Statuses]}|Acc]);
+parse_ntp_status(<<"version=\"", Output/binary>>, Acc) ->
+    [Version, Rest] = binary:split(Output, [<<"\",\n">>, <<"\", ">>]),
+    parse_ntp_status(Rest, [{version, Version}|Acc]);
+parse_ntp_status(<<"processor=\"", Output/binary>>, Acc) ->
+    parse_ntp_string(processor, Output, Acc);
+parse_ntp_status(<<"system=\"", Output/binary>>, Acc) ->
+    parse_ntp_string(system, Output, Acc);
+parse_ntp_status(<<"leap=", Output/binary>>, Acc) ->
+    parse_ntp_integer(leap, Output, 2, Acc);
+parse_ntp_status(<<"stratum=", Output/binary>>, Acc) ->
+    parse_ntp_integer(stratum, Output, Acc);
+parse_ntp_status(<<"precision=", Output/binary>>, Acc) ->
+    parse_ntp_integer(precision, Output, Acc);
+parse_ntp_status(<<"rootdelay=", Output/binary>>, Acc) ->
+    parse_ntp_float(rootdelay, Output, Acc);
+parse_ntp_status(<<"rootdisp=", Output/binary>>, Acc) ->
+    parse_ntp_float(rootdisp, Output, Acc);
+parse_ntp_status(<<"refid=", Output/binary>>, Acc) ->
+    [Value, Rest] = binary:split(Output, [<<",\n">>, <<", ">>]),
+    parse_ntp_status(Rest, [{refid, Value}|Acc]);
+parse_ntp_status(<<"reftime=", Output/binary>>, Acc) ->
+    parse_ntp_time(reftime, Output, Acc);
+parse_ntp_status(<<"clock=", Output/binary>>, Acc) ->
+    parse_ntp_time(clock, Output, Acc);
+parse_ntp_status(<<"peer=", Output/binary>>, Acc) ->
+    parse_ntp_integer(peer, Output, Acc);
+parse_ntp_status(<<"tc=", Output/binary>>, Acc) ->
+    parse_ntp_integer(tc, Output, Acc);
+parse_ntp_status(<<"mintc=", Output/binary>>, Acc) ->
+    parse_ntp_integer(mintc, Output, Acc);
+parse_ntp_status(<<"offset=", Output/binary>>, Acc) ->
+    parse_ntp_float(offset, Output, Acc);
+parse_ntp_status(<<"frequency=", Output/binary>>, Acc) ->
+    parse_ntp_float(frequency, Output, Acc);
+parse_ntp_status(<<"sys_jitter=", Output/binary>>, Acc) ->
+    parse_ntp_float(sys_jitter, Output, Acc);
+parse_ntp_status(<<"clk_jitter=", Output/binary>>, Acc) ->
+    parse_ntp_float(clk_jitter, Output, Acc);
+parse_ntp_status(<<"clk_wander=", Output/binary>>, Acc) ->
+    parse_ntp_float(clk_wander, Output, Acc);
+parse_ntp_status(Rest, _Acc) ->
+    {error, {unexpected_token, Rest}}.
+
+parse_ntp_string(Name, Output, Acc) ->
+    [Value, Rest] = binary:split(Output, [<<"\",\n">>, <<"\", ">>]),
+    parse_ntp_status(Rest, [{Name, Value}|Acc]).
+
+parse_ntp_integer(Name, Output, Acc) ->
+    parse_ntp_integer(Name, Output, 10, Acc).
+
+parse_ntp_integer(Name, Output, Base, Acc) ->
+    [Value, Rest] = binary:split(Output, [<<",\n">>, <<", ">>, <<"\n">>]),
+    parse_ntp_status(Rest, [{Name, list_to_integer(binary_to_list(Value), Base)}|Acc]).
+
+parse_ntp_float(Name, Output, Acc) ->
+    [Value, Rest] = binary:split(Output, [<<",\n">>, <<", ">>, <<"\n">>]),
+    parse_ntp_status(Rest, [{Name, list_to_float(binary_to_list(Value))}|Acc]).
+
+parse_ntp_time(_Name, <<"(no time), ", Rest/binary>>, Acc) ->
+    parse_ntp_status(Rest, Acc);
+parse_ntp_time(_Name, <<"(no time),\n", Rest/binary>>, Acc) ->
+    parse_ntp_status(Rest, Acc);
+parse_ntp_time(Name, Output, Acc) ->
+    [_, Rest0] = binary:split(Output, <<"  ">>),
+    [DateTime, Rest1] = re:split(Rest0, <<"[0-9],[ \n]">>, [{parts, 2}]),
+    parse_ntp_status(Rest1, [{Name, DateTime}|Acc]).
