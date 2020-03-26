@@ -247,7 +247,7 @@ packets_expiry_test(Config) ->
 
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin, 4),
+    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
 
     ok.
 
@@ -355,8 +355,8 @@ multi_clients_packets_expiry_test(Config) ->
 
     ClientNodePubkeyBin1 = ct_rpc:call(ClientNode1, blockchain_swarm, pubkey_bin, []),
     ClientNodePubkeyBin2 = ct_rpc:call(ClientNode2, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin1, 4),
-    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin2, 4),
+    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin1, 2),
+    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin2, 2),
 
     ok.
 
@@ -461,7 +461,7 @@ not_enough_dc_test(Config) ->
 
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin, 24*TotalDC),
+    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 10),
 
     ok.
 
@@ -552,7 +552,7 @@ replay_test(Config) ->
 
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_balances(SCCloseTxn, ClientNodePubkeyBin, 4),
+    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
 
     %% re-create the sc open txn with the same nonce
     NewTotalDC = 10,
@@ -597,9 +597,7 @@ print_hbbft_buf({ok, Txns}) ->
 print_txn_mgr_buf(Txns) ->
     [{Txn, length(Accepts), length(Rejects)} || {Txn, {_Callback, Accepts, Rejects, _Dialers}} <- Txns].
 
-check_sc_balances(SCCloseTxn, PubkeyBin, NumBytes) ->
-    Balances = blockchain_state_channel_v1:balances(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)),
-    ct:pal("Balances: ~p", [Balances]),
-    {ok, Balance} = blockchain_state_channel_balance_v1:get_balance(PubkeyBin, Balances),
-    ct:pal("Balance: ~p", [Balance]),
-    NumBytes == Balance.
+check_sc_num_packets(SCCloseTxn, ClientPubkeyBin, ExpectedNumPackets) ->
+    SC = blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn),
+    NumPackets = blockchain_state_channel_v1:num_packets(SC, ClientPubkeyBin),
+    ExpectedNumPackets == NumPackets.
