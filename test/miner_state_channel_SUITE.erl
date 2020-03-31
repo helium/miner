@@ -599,5 +599,12 @@ print_txn_mgr_buf(Txns) ->
 
 check_sc_num_packets(SCCloseTxn, ClientPubkeyBin, ExpectedNumPackets) ->
     SC = blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn),
-    NumPackets = blockchain_state_channel_v1:num_packets(SC, ClientPubkeyBin),
+    Summaries = blockchain_state_channel_v1:summaries(SC),
+    ct:pal("Summaries: ~p", [Summaries]),
+
+    {ok, Summary} = blockchain_state_channel_summary_v1:summary_for(ClientPubkeyBin, Summaries),
+    ct:pal("Summary: ~p", [Summary]),
+
+    NumPackets = blockchain_state_channel_summary_v1:num_packets(Summary),
+
     ExpectedNumPackets == NumPackets.
