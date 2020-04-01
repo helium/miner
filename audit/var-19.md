@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction sets `max_payments` and subsequently enables payment_v2 transactions.
+This transaction sets the `max_payments` variable and thereby enables payment_v2 transactions.
 
 ## Rationale
 
