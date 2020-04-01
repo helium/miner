@@ -258,8 +258,9 @@ handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gatewa
     TimeInfo = case maps:find(<<"tacc">>, Status) of
                    {ok, _} ->
                        %% ok we have GPS information
+                       {Accuracy, _Lat, _Lon} = calculate_horizontal_accuracy(Status, State#state.pubkey_bin),
                        {gps, #gps_info_pb{
-                                horizontal_accuracy=maps:get(<<"eha">>, Status),
+                                horizontal_accuracy=Accuracy,
                                 vertical_accuracy=maps:get(<<"eva">>, Status),
                                 altitude=maps:get(<<"alti">>, Status),
                                 time_accuracy=maps:get(<<"tacc">>, Status)
@@ -408,6 +409,7 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Gateway, Packet}) ->
                 timestamp = Time,
                 time_source = Gateway#gateway.time_source
             },
+            lager:info("Helium packet ~p", [lager:pr(HeliumPacket, ?MODULE)]),
             PbPacket = #blockchain_state_channel_packet_v1_pb{
                 packet = HeliumPacket,
                 hotspot = PubkeyBin
@@ -461,6 +463,53 @@ send_to_router_(Swarm, Address, Packet) ->
     end.
 
 
+%% @doc This function attempts to reconcile asserted location with GPS location without compromising privacy.
+%% If the hotspot has a location on-chain, the location on chain is compared with the GPS location.
+%% The distance between those two points is calculated and the GPS horizontal accuracy is added. This value is
+%% then compared against the resolution of the H3 hex the hotspot is claiming to be located in.
+%% The larger of these two values is taken as the horizontal accuracy.
+%%
+%% If the hotspot is not asserting a location, the resolution is obfuscated somewhat by converting the GPS
+%% coordinates to H3 coordinates at resolution 8 (a hexagon with about 1km diameter) and then converting back
+%% to GPS, with the precision taken as the larger of GPS horizontal accuracy and H3 hex edge length.
+calculate_horizontal_accuracy(GPSStatus, PubkeyBin) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            %% no chain, I guess just assume we don't have a presence claim
+            calculate_horizontal_accuracy_with_no_asserted_location(GPSStatus);
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            case blockchain_ledger_v1:find_gateway_info(PubkeyBin, Ledger) of
+                {ok, GwInfo} ->
+                    case blockchain_ledger_gateway_v2:location(GwInfo) of
+                        undefined ->
+                            %% we don't have an asserted location
+                            calculate_horizontal_accuracy_with_no_asserted_location(GPSStatus);
+                        Index ->
+                            case vincenty:distance(h3:to_geo(Index), {maps:get(<<"lati">>, GPSStatus), maps:get(<<"long">>, GPSStatus)}) of
+                                {error, _} ->
+                                    %% hard to tell which is more wrong here since vincenty should only fail for antipodal points
+                                    calculate_horizontal_accuracy_with_no_asserted_location(GPSStatus);
+                                {ok, Distance} ->
+                                    %% compute the bigger distance between the 2 possible GPS coordinates (plus the gps horizontal accuracy)
+                                    %% and the H3 resolution and use that as the resolution of the position
+                                    Resolution = max(maps:get(<<"eha">>, GPSStatus) + Distance, h3:edge_length_meters(Index)),
+                                    {Lat, Lon} = h3:to_geo(Index),
+                                    {Resolution, Lat, Lon}
+                            end
+                    end;
+                {error, _} ->
+                    calculate_horizontal_accuracy_with_no_asserted_location(GPSStatus)
+            end
+    end.
+
+calculate_horizontal_accuracy_with_no_asserted_location(GPSStatus) ->
+    Index = h3:from_geo({maps:get(<<"lati">>, GPSStatus), maps:get(<<"long">>, GPSStatus)}, 8),
+    Resolution = max(maps:get(<<"eha">>, GPSStatus), h3:edge_length_meters(Index)),
+    {Lat, Lon} = h3:to_geo(Index),
+    {Resolution, Lat, Lon}.
+
+%% attempt to parse the output of ntpd's "read variables" to figure out NTP sync status
 parse_ntp_status() ->
     Output = list_to_binary(os:cmd("ntpq -c rv")),
     parse_ntp_status(Output, []).
