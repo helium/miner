@@ -3,4 +3,4 @@
 NODE=$1
 shift
 
-./_build/dev\+miner${NODE}/rel/miner${NODE}/bin/miner${NODE} $@
+./_build/testdev\+miner${NODE}/rel/miner${NODE}/bin/miner${NODE} $@

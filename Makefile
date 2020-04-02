@@ -28,9 +28,6 @@ release:
 cover:
 	$(REBAR) cover
 
-devrelease:
-	$(REBAR) as dev release
-
 aws:
 	$(REBAR) as aws release
 
@@ -38,14 +35,17 @@ seed:
 	$(REBAR) as seed release
 
 devrel:
-	$(REBAR) as dev, miner1 release -n miner1
-	$(REBAR) as dev, miner2 release -n miner2
-	$(REBAR) as dev, miner3 release -n miner3
-	$(REBAR) as dev, miner4 release -n miner4
-	$(REBAR) as dev, miner5 release -n miner5
-	$(REBAR) as dev, miner6 release -n miner6
-	$(REBAR) as dev, miner7 release -n miner7
-	$(REBAR) as dev, miner8 release -n miner8
+	$(REBAR) as testdev, miner1 release -n miner1
+	$(REBAR) as testdev, miner2 release -n miner2
+	$(REBAR) as testdev, miner3 release -n miner3
+	$(REBAR) as testdev, miner4 release -n miner4
+	$(REBAR) as testdev, miner5 release -n miner5
+	$(REBAR) as testdev, miner6 release -n miner6
+	$(REBAR) as testdev, miner7 release -n miner7
+	$(REBAR) as testdev, miner8 release -n miner8
+
+devrelease:
+	$(REBAR) as dev release
 
 startdevrel:
 	./_build/default/rel/miner/bin/miner ping && ./_build/default/rel/miner/bin/miner restart || ./_build/default/rel/miner/bin/miner start
