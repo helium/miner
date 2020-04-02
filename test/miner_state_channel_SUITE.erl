@@ -123,13 +123,12 @@ no_packets_expiry_test(Config) ->
     Height = miner_ct_utils:height(RouterNode),
 
     %% open a state channel
-    TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 11,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, 1]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -146,7 +145,7 @@ no_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    %% true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -196,7 +195,6 @@ packets_expiry_test(Config) ->
     Height = miner_ct_utils:height(RouterNode),
 
     %% open a state channel
-    %% TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
     SCOpenTxn = ct_rpc:call(RouterNode,
@@ -283,13 +281,12 @@ multi_clients_packets_expiry_test(Config) ->
 
 
     %% open a state channel
-    TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, 1]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -322,7 +319,7 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    %% true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -389,13 +386,12 @@ not_enough_dc_test(Config) ->
     Height = miner_ct_utils:height(RouterNode),
 
     %% open a state channel
-    TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, 1]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -412,11 +408,11 @@ not_enough_dc_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    %% true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
-    %% 1DC = 24 byte packet, the client node sends `TotalDC` such packets
+    %% 1DC = 24 byte packet, the client node sends 10 such packets
     Packets = lists:map(fun(I) ->
                                 {blockchain_helium_packet_v1:new(OUI, crypto:strong_rand_bytes(24)),
                                  <<"devaddr">>,
@@ -424,7 +420,7 @@ not_enough_dc_test(Config) ->
                                  <<"mic", I>>
                                 }
                         end,
-                        lists:seq(1, TotalDC)),
+                        lists:seq(1, 10)),
 
     ct:pal("Packets: ~p", [Packets]),
 
@@ -494,14 +490,13 @@ replay_test(Config) ->
     Height = miner_ct_utils:height(RouterNode),
 
     %% open a state channel
-    TotalDC = 10,
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
     SCOpenNonce = 1,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, TotalDC, ExpireWithin, SCOpenNonce]),
+                            [ID, RouterPubkeyBin, ExpireWithin, SCOpenNonce]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -518,7 +513,7 @@ replay_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    %% true = check_ledger_state_channel(SC, RouterPubkeyBin, TotalDC, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -547,13 +542,12 @@ replay_test(Config) ->
     true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
 
     %% re-create the sc open txn with the same nonce
-    NewTotalDC = 10,
     NewID = crypto:strong_rand_bytes(32),
     NewExpireWithin = 5,
     NewSCOpenTxn = ct_rpc:call(RouterNode,
                                blockchain_txn_state_channel_open_v1,
                                new,
-                               [NewID, RouterPubkeyBin, NewTotalDC, NewExpireWithin, SCOpenNonce]),
+                               [NewID, RouterPubkeyBin, NewExpireWithin, SCOpenNonce]),
 
     ct:pal("NewSCOpenTxn: ~p", [NewSCOpenTxn]),
     NewSignedSCOpenTxn = ct_rpc:call(RouterNode,
@@ -580,8 +574,6 @@ get_ledger_state_channel(Node, SCID, PubkeyBin) ->
 check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, SCID) ->
     CheckId = SCID == blockchain_ledger_state_channel_v1:id(LedgerSC),
     CheckOwner = OwnerPubkeyBin == blockchain_ledger_state_channel_v1:owner(LedgerSC),
-    %% CheckAmount = Amount == blockchain_ledger_state_channel_v1:amount(LedgerSC),
-    %% CheckId andalso CheckOwner andalso CheckAmount.
     CheckId andalso CheckOwner.
 
 print_hbbft_buf({ok, Txns}) ->
