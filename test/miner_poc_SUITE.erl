@@ -767,13 +767,20 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
     %% load the genesis block on all the nodes
     lists:foreach(
         fun(Miner) ->
+                %% wait for the consensus manager to be booted
+                true = miner_ct_utils:wait_until(
+                  fun() ->
+                          is_boolean(ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout))
+                  end),
                 case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
                     true ->
                         ok;
                     false ->
                         Res = ct_rpc:call(Miner, blockchain_worker,
                                           integrate_genesis_block, [GenesisBlock], RPCTimeout),
-                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res])
+                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res]);
+                    {badrpc, Reason} ->
+                        ct:pal("failed to load genesis block on ~p: ~p", [Miner, Reason])
                 end
         end,
         Miners
