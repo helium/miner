@@ -220,8 +220,10 @@ packets_expiry_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
-    Packet2 = blockchain_helium_packet_v1:new(OUI, <<"p2">>),
+    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
+    Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    Packet1 = blockchain_helium_packet_v1:new(OUI, Payload1),
+    Packet2 = blockchain_helium_packet_v1:new(OUI, Payload2),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
 
@@ -239,9 +241,18 @@ packets_expiry_test(Config) ->
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
 
+    %% find the block that this SC opened in, we need the hash
+    [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCOpen),
+
+    %% construct what the skewed merkle tree should look like
+    ExpectedTree = skewed:add(Payload2, fun skewed:hash_value/1, skewed:add(Payload1, fun skewed:hash_value/1, skewed:new(OpenHash))),
+    %% assert the root hashes should match
+    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
+
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
     true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
+    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin, 3),
 
     ok.
 
@@ -312,6 +323,7 @@ multi_clients_packets_expiry_test(Config) ->
     Packet4 = blockchain_helium_packet_v1:new(OUI, <<"p4">>),
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1]), %% duplicate from client 2
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
 
@@ -340,12 +352,26 @@ multi_clients_packets_expiry_test(Config) ->
     SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
 
+    %% find the block that this SC opened in, we need the hash
+    [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCOpen),
+
+    %% construct what the skewed merkle tree should look like
+    ExpectedTree = lists:foldl(fun(P, Acc) ->
+                                       skewed:add(blockchain_helium_packet_v1:payload(P), fun skewed:hash_value/1, Acc)
+                               end,
+                               skewed:new(OpenHash), [Packet1, Packet2, Packet3, Packet4]),
+    %% assert the root hashes should match
+    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
+
+
     %% Check whether clientnode balance is correct
 
     ClientNodePubkeyBin1 = ct_rpc:call(ClientNode1, blockchain_swarm, pubkey_bin, []),
     ClientNodePubkeyBin2 = ct_rpc:call(ClientNode2, blockchain_swarm, pubkey_bin, []),
     true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin1, 2),
-    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin2, 2),
+    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin2, 3),
+    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin1, 2),
+    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin2, 3),
 
     ok.
 
@@ -480,3 +506,8 @@ check_sc_num_packets(SCCloseTxn, ClientPubkeyBin, ExpectedNumPackets) ->
     SC = blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn),
     {ok, NumPackets} = blockchain_state_channel_v1:num_packets_for(ClientPubkeyBin, SC),
     ExpectedNumPackets == NumPackets.
+
+check_sc_num_dcs(SCCloseTxn, ClientPubkeyBin, ExpectedNumDCs) ->
+    SC = blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn),
+    {ok, NumDCs} = blockchain_state_channel_v1:num_dcs_for(ClientPubkeyBin, SC),
+    ExpectedNumDCs == NumDCs.
