@@ -2,7 +2,10 @@ steps:
   - commands:
       - ". $HOME/.asdf/asdf.sh"
       - "asdf local erlang 21.3"
+      - "make compile"
       - "make ci"
     name: ":hammer: build"
     agents:
       queue: "erlang"
+    artifact_paths:
+      - "artifacts/*"
