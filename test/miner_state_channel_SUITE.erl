@@ -245,7 +245,7 @@ packets_expiry_test(Config) ->
     [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, CheckTypeSCOpen),
 
     %% construct what the skewed merkle tree should look like
-    ExpectedTree = skewed:add(Payload2, fun skewed:hash_value/1, skewed:add(Payload1, fun skewed:hash_value/1, skewed:new(OpenHash))),
+    ExpectedTree = skewed:add(Payload2, skewed:add(Payload1, skewed:new(OpenHash))),
     %% assert the root hashes should match
     ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
 
@@ -358,12 +358,11 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% construct what the skewed merkle tree should look like
     ExpectedTree = lists:foldl(fun(P, Acc) ->
-                                       skewed:add(blockchain_helium_packet_v1:payload(P), fun skewed:hash_value/1, Acc)
+                                       skewed:add(blockchain_helium_packet_v1:payload(P), Acc)
                                end,
                                skewed:new(OpenHash), [Packet1, Packet2, Packet3, Packet4]),
     %% assert the root hashes should match
     ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
-
 
     %% Check whether clientnode balance is correct
 
