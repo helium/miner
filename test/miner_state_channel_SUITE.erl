@@ -324,6 +324,7 @@ multi_clients_packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1]), %% duplicate from client 2
+    timer:sleep(1000), %% this should help prevent a race condition over merkle tree order
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
 
