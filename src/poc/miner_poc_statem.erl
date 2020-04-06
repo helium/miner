@@ -74,7 +74,8 @@
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
-    poc_restarts = ?POC_RESTARTS :: non_neg_integer()
+    poc_restarts = ?POC_RESTARTS :: non_neg_integer(),
+    targeting_data :: {atom(), blockchain_block:hash(), pos_integer()} | undefined
 }).
 
 -type state() :: requesting | mining | receiving | waiting.
@@ -108,23 +109,24 @@ init(Args) ->
     lager:info("init with ~p", [Args]),
     case load_data(BaseDir) of
         {error, _} ->
-            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting}};
+            {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting})};
         %% we have attempted to unsuccessfully restart this POC too many times, give up and revert to default state
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
-            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting}};
+            {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting})};
         %% we loaded a state from the saved statem file, initialise with this if its an exported/supported state
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
                 true ->
-                    {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                    {ok, State, save_data(Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                           address=Address, poc_interval=Delay, state=State,
-                                          poc_restarts = POCRestarts - 1}};
+                                          poc_restarts = POCRestarts - 1})};
                 false ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
-                    {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                           address=Address, poc_interval=Delay, state=requesting}}
+                    {ok, requesting, save_data(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                           address=Address, poc_interval=Delay, state=requesting})}
+
             end
     end.
 
@@ -150,7 +152,8 @@ terminate(_Reason, _State) ->
 %%
 requesting(enter, _State, Data)->
     %% each time we enter requesting state we assume we are starting a new POC and thus we reset our restart count allocation
-    {keep_state, Data#data{poc_restarts=?POC_RESTARTS, retry=?CHALLENGE_RETRY, mining_timeout=?MINING_TIMEOUT}};
+    {keep_state, Data#data{poc_restarts=?POC_RESTARTS, retry=?CHALLENGE_RETRY,
+                            mining_timeout=?MINING_TIMEOUT, targeting_data=undefined}};
 requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined ->
     case blockchain_worker:blockchain() of
         undefined ->
@@ -192,44 +195,32 @@ requesting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
 
-
-
 %%
 %% mining: in mining state we handle blockchain_event of type 'add block'
 %% for each block added we inspect the txn list included in the block
-%% if our POC request is contained in that list then we run the targetting/challenging
+%% if our POC request is contained in that list then we run targeting/challenging
 %% and transition to receiving state
 %% if we dont see our POC request txn having been mined within the Mining Timeout period ( 5 blocks )
 %% then we give up on the request and transition back to requesting state
+%% we also look out for possible restarts which took place whilst handling targeting
+%% if targeting data is set then we reload the specified block using the stored hash
+%% and retry the targeting
 %%
+mining(enter, _State, #data{blockchain = Chain,
+                            targeting_data = {targeting, BlockHash, BlockHeight}} = Data)->
+    %% sorry, have to send msg via self here as state enters cannot insert events..bah...
+    %% so I either send it here or during init..feels better here
+    {ok, PinnedLedger} = blockchain:ledger_at(BlockHeight, Chain),
+    self ! {retry_targeting, BlockHash, PinnedLedger},
+    {keep_state, Data};
 mining(enter, _State, Data)->
     {keep_state, Data};
 mining(info, Msg, #data{blockchain=undefined}=Data) ->
     handle_event(info, Msg, Data);
-mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
-       #data{blockchain = _Chain, address = Challenger,
-             mining_timeout = MiningTimeout, secret = Secret} = Data) ->
-    case find_request(BlockHash, Data) of
-        {ok, Block} ->
-            Height = blockchain_block:height(Block),
-            %% TODO discuss making this delay verifiable so you can't punish a hotspot by
-            %% intentionally fast-challenging them before they have the block
-            %% Is this timer necessary ??
-            timer:sleep(?BLOCK_PROPOGATION_TIME),
-            %% NOTE: if we crash out whilst handling targetting, effectively the POC is abandoned
-            %% as when this statem is restarted, it will init in mining state but the block with the request txns
-            %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
-            handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
-                                Data#data{mining_timeout = ?MINING_TIMEOUT});
-        {error, _Reason} ->
-             case MiningTimeout > 0 of
-                true ->
-                    {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
-                false ->
-                    lager:error("did not see PoC request in last ~p block, giving up on this POC", [?MINING_TIMEOUT]),
-                    {next_state, requesting, save_data(Data#data{state=requesting})}
-            end
-    end;
+mining(info, {retry_targeting, BlockHash, PinnedLedger}, Data)->
+    handle_mining(BlockHash, PinnedLedger, Data);
+mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}}, Data) ->
+    handle_mining(BlockHash, PinnedLedger, Data);
 mining(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
@@ -241,7 +232,7 @@ mining(EventType, EventContent, Data) ->
 %% and then transition to waiting state
 %%
 receiving(enter, _State, Data)->
-    {keep_state, Data#data{receiving_timeout=?RECEIVING_TIMEOUT}};
+    {keep_state, Data#data{receiving_timeout=?RECEIVING_TIMEOUT, targeting_data=undefined}};
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=0, responses=Responses}=Data) ->
     case maps:size(Responses) of
         0 ->
@@ -372,6 +363,31 @@ handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
 
+
+handle_mining(BlockHash, PinnedLedger, #data{blockchain = _Chain, address = Challenger,
+                                             mining_timeout = MiningTimeout, secret = Secret} = Data)->
+    case find_request(BlockHash, Data) of
+        {ok, Block} ->
+            Height = blockchain_block:height(Block),
+            %% TODO discuss making this delay verifiable so you can't punish a hotspot by
+            %% intentionally fast-challenging them before they have the block
+            %% Is this timer necessary ??
+            timer:sleep(?BLOCK_PROPOGATION_TIME),
+            %% save the block hash in which we found the poc request, if we crash out in targeting we can pick back up
+            %% this will be nulled if we revert back to requesting or go forward to receiving
+            Data0 = save_data(Data#data{targeting_data={targeting, BlockHash, Height}}),
+            handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
+                                Data0#data{mining_timeout = ?MINING_TIMEOUT});
+        {error, _Reason} ->
+             case MiningTimeout > 0 of
+                true ->
+                    {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
+                false ->
+                    lager:error("did not see PoC request in last ~p block, giving up on this POC", [?MINING_TIMEOUT]),
+                    {next_state, requesting, save_data(Data#data{state=requesting})}
+            end
+    end.
+
 handle_targeting(_, _, _, Data = #data{retry = Retry})
   when Retry =< 0 ->
     lager:error("targeting/challenging failed ~p times back to requesting", [?CHALLENGE_RETRY]),
@@ -420,13 +436,11 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                 {ok, V} when V < 8 ->
                     {ok, TargetPubkeyBin} = blockchain_poc_target_v2:target_v2(Entropy, Ledger, Vars),
                     lager:info("poc_v~p target found ~p, challenging, hash: ~p", [V, TargetPubkeyBin, Entropy]),
-                    self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                     handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
                 {ok, V} ->
                     {ok, {TargetPubkeyBin, TargetRandState}} = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
                     lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                     lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
-                    %% NOTE: We pass in the TargetRandState along with the entropy here
                     handle_challenging({Entropy, TargetRandState}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]})
             end
     end.
@@ -517,7 +531,9 @@ save_data(#data{base_dir = BaseDir,
                 poc_hash = PoCHash,
                 mining_timeout = MiningTimeout,
                 retry = Retry,
-                receipts_timeout = ReceiptTimeout} = State) ->
+                receipts_timeout = ReceiptTimeout,
+                poc_restarts = PoCRestarts,
+                targeting_data = TargetingData} = State) ->
     StateMap = #{
                  state => CurrState,
                  secret => Secret,
@@ -529,7 +545,9 @@ save_data(#data{base_dir = BaseDir,
                  poc_hash => PoCHash,
                  mining_timeout => MiningTimeout,
                  retry => Retry,
-                 receipts_timeout => ReceiptTimeout
+                 receipts_timeout => ReceiptTimeout,
+                 poc_restarts => PoCRestarts,
+                 targeting_data => TargetingData
                 },
     BinState = erlang:term_to_binary(StateMap),
     File = filename:join([BaseDir, ?STATE_FILE]),
@@ -548,39 +566,43 @@ load_data(BaseDir) ->
             {error, empty_file};
         {ok, Binary} ->
             try erlang:binary_to_term(Binary) of
-                    #{state := State,
-                      secret := Secret,
-                      onion_keys := Keys,
-                      challengees := Challengees,
-                      packet_hashes := PacketHashes,
-                      responses := Responses,
-                      receiving_timeout := RecTimeout,
-                      poc_hash := PoCHash,
-                      mining_timeout := MiningTimeout,
-                      retry := Retry,
-                      receipts_timeout := ReceiptTimeout} ->
-                        {ok, State,
-                         #data{base_dir = BaseDir,
-                               state = State,
-                               secret = Secret,
-                               onion_keys = Keys,
-                               challengees = Challengees,
-                               packet_hashes = PacketHashes,
-                               responses = Responses,
-                               receiving_timeout = RecTimeout,
-                               poc_hash = PoCHash,
-                               mining_timeout = MiningTimeout,
-                               retry = Retry,
-                               receipts_timeout = ReceiptTimeout}};
-                    _ ->
-                        {error, wrong_data}
+                #{state := State,
+                    secret := Secret,
+                    onion_keys := Keys,
+                    challengees := Challengees,
+                    packet_hashes := PacketHashes,
+                    responses := Responses,
+                    receiving_timeout := RecTimeout,
+                    poc_hash := PoCHash,
+                    mining_timeout := MiningTimeout,
+                    retry := Retry,
+                    receipts_timeout := ReceiptTimeout,
+                    poc_restarts := PoCRestarts,
+                    targeting_data := TargetingData} ->
+                    {ok, State,
+                        #data{base_dir = BaseDir,
+                            state = State,
+                            secret = Secret,
+                            onion_keys = Keys,
+                            challengees = Challengees,
+                            packet_hashes = PacketHashes,
+                            responses = Responses,
+                            receiving_timeout = RecTimeout,
+                            poc_hash = PoCHash,
+                            mining_timeout = MiningTimeout,
+                            retry = Retry,
+                            receipts_timeout = ReceiptTimeout,
+                            poc_restarts = PoCRestarts,
+                            targeting_data = TargetingData}};
+                _ ->
+                    {error, wrong_data}
             catch
-                error:bararg ->
+                error:badarg ->
                     {error, bad_term}
             end
 
     catch _:_ ->
-            {error, read_error}
+        {error, read_error}
     end.
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
