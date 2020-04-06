@@ -380,7 +380,7 @@ send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
                 {error, _Reason} ->
                     case application:get_env(miner, default_routers, undefined) of
                         undefined ->
-                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
+                            lager:warning("ingnored could not find OUI ~p in ledger and no default routers are set", [OUI]);
                         Addresses ->
                             lists:foreach(
                                 fun(Address) ->
