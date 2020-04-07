@@ -273,7 +273,7 @@ sort_packets(Packets) ->
 -spec handle_packets(list(), gateway(), state()) -> state().
 handle_packets([], _Gateway, State) ->
     State;
-handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigFun}=State) ->
+handle_packets([Packet|Tail], Gateway, State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -291,7 +291,7 @@ handle_packets([Packet|Tail], Gateway, #state{pubkey_bin=PubKeyBin, sig_fun=SigF
             );
         {Type, OUI} ->
             lager:notice("Routing ~p", [OUI]),
-            erlang:spawn(fun() -> send_to_router(PubKeyBin, SigFun, {Type, OUI, Packet}) end)
+            erlang:spawn(fun() -> send_to_router(Type, OUI, Packet) end)
     end,
     handle_packets(Tail, Gateway, State).
 
@@ -343,80 +343,14 @@ reverse(<<>>, Acc) -> Acc;
 reverse(<<H:1/binary, Rest/binary>>, Acc) ->
     reverse(Rest, <<H/binary, Acc/binary>>).
 
--spec send_to_router(libp2p_crypto:pubkey_bin(), function(), any()) -> ok.
-send_to_router(PubkeyBin, SigFun, {Type, OUI, Packet}) ->
-    case blockchain_worker:blockchain() of
-        undefined ->
-            lager:warning("ingnored packet chain is undefined");
-        Chain ->
-            Data = base64:decode(maps:get(<<"data">>, Packet)),
-            Ledger = blockchain:ledger(Chain),
-            Swarm = blockchain_swarm:swarm(),
-            RSSI = maps:get(<<"rssi">>, Packet),
-            SNR = maps:get(<<"lsnr">>, Packet),
-            %% TODO we might want to send GPS time here, if available
-            Time = maps:get(<<"tmst">>, Packet),
-            Freq = maps:get(<<"freq">>, Packet),
-            DataRate = maps:get(<<"datr">>, Packet),
-            HeliumPacket = #packet_pb{
-                oui = OUI,
-                type = Type,
-                payload = Data,
-                timestamp = Time,
-                signal_strength = RSSI,
-                frequency = Freq,
-                snr = SNR,
-                datarate = DataRate
-            },
-            PbPacket = #blockchain_state_channel_packet_v1_pb{
-                packet = HeliumPacket,
-                hotspot = PubkeyBin
-            },
-            %% TODO we probably need an ephemeral key for the state channel to take the load off the ECC
-            Sig = SigFun(blockchain_state_channel_v1_pb:encode_msg(PbPacket)),
-            SignedPBPacket = PbPacket#blockchain_state_channel_packet_v1_pb{signature=Sig},
-            StateChannelMsg = blockchain_state_channel_v1_pb:encode_msg(#blockchain_state_channel_message_v1_pb{msg={packet, SignedPBPacket}}),
-            case blockchain_ledger_v1:find_routing(OUI, Ledger) of
-                {error, _Reason} ->
-                    case application:get_env(miner, default_router, undefined) of
-                        undefined ->
-                            lager:warning("ingnored could not find OUI ~p in ledger and no default router is set", [OUI]);
-                        Address ->
-                            send_to_router_(Swarm, Address, StateChannelMsg)
-                    end;
-                {ok, Routing} ->
-                    Addresses = blockchain_ledger_routing_v1:addresses(Routing),
-                    lager:debug("found addresses ~p", [Addresses]),
-                    lists:foreach(
-                        fun(BinAddress) ->
-                            Address = erlang:binary_to_list(BinAddress),
-                            send_to_router_(Swarm, Address, StateChannelMsg)
-                        end,
-                        Addresses
-                    )
-            end
-    end.
-
--spec send_to_router_(pid(), string(), binary()) -> ok.
-send_to_router_(Swarm, Address, Packet) ->
-    RegName = erlang:list_to_atom(Address),
-    case erlang:whereis(RegName) of
-        Stream when is_pid(Stream) ->
-            Stream ! {send, Packet},
-            lager:info("sent packet ~p to ~p", [Packet, Address]);
-        undefined ->
-            Result = libp2p_swarm:dial_framed_stream(Swarm,
-                                                     Address,
-                                                     router_handler:version(),
-                                                     router_handler,
-                                                     []),
-            case Result of
-                {ok, Stream} ->
-                    Stream ! {send, Packet},
-                    catch erlang:register(RegName, Stream),
-                    lager:info("sent packet ~p to ~p", [Packet, Address]);
-                {error, _Reason} ->
-                    lager:error("failed to send packet ~p to ~p (~p)", [Packet, Address, _Reason])
-            end
-    end.
-
+-spec send_to_router(lorawan, pos_integer(), map()) -> ok.
+send_to_router(Type, OUI, Packet) ->
+    Data = base64:decode(maps:get(<<"data">>, Packet)),
+    RSSI = maps:get(<<"rssi">>, Packet),
+    SNR = maps:get(<<"lsnr">>, Packet),
+    %% TODO we might want to send GPS time here, if available
+    Time = maps:get(<<"tmst">>, Packet),
+    Freq = maps:get(<<"freq">>, Packet),
+    DataRate = maps:get(<<"datr">>, Packet),
+    HeliumPacket = blockchain_helium_packet_v1:new(OUI, Type, Data, Time, RSSI, Freq, DataRate, SNR),
+    blockchain_state_channels_client:packet(HeliumPacket).
