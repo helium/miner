@@ -289,9 +289,9 @@ handle_packets([Packet|Tail], Gateway, State) ->
                 maps:get(<<"freq">>, Packet),
                 maps:get(<<"datr">>, Packet)
             );
-        {Type, OUI} ->
-            lager:notice("Routing ~p", [OUI]),
-            erlang:spawn(fun() -> send_to_router(Type, OUI, Packet) end)
+        {Type, RoutingInfo} ->
+            lager:notice("Routing ~p", [RoutingInfo]),
+            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet) end)
     end,
     handle_packets(Tail, Gateway, State).
 
@@ -315,11 +315,10 @@ route(Pkt) ->
     end.
 
 % Some binary madness going on here
--spec route_non_longfi(binary()) -> any().
-route_non_longfi(<<?JOIN_REQUEST:3, _:5, AppEUI0:8/binary, _DevEUI0:8/binary, _DevNonce:2/binary, _MIC:4/binary>>) ->
-    <<OUI:32/integer-unsigned-big, _DID:32/integer-unsigned-big>> = reverse(AppEUI0),
-    {lorawan, OUI};
-route_non_longfi(<<MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4,
+-spec route_non_longfi(binary()) -> {lorawan, blockchain_helium_packet:routing_info()} | error.
+route_non_longfi(<<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>>) ->
+    {lorawan, {eui, DevEUI, AppEUI}};
+route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4,
                    _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when MType == ?UNCONFIRMED_UP; MType == ?CONFIRMED_UP ->
     Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
     {FPort, _FRMPayload} =
@@ -331,20 +330,13 @@ route_non_longfi(<<MType:3, _:5,DevAddr0:4/binary, _ADR:1, _ADRACKReq:1, _ACK:1,
         0 when FOptsLen /= 0 ->
             error;
         _ ->
-            <<OUI:32/integer-unsigned-big>> = DevAddr0,
-            {lorawan, OUI}
+            {lorawan, {devaddr, DevAddr}}
     end;
 route_non_longfi(_) ->
     error.
 
--spec reverse(binary()) -> binary().
-reverse(Bin) -> reverse(Bin, <<>>).
-reverse(<<>>, Acc) -> Acc;
-reverse(<<H:1/binary, Rest/binary>>, Acc) ->
-    reverse(Rest, <<H/binary, Acc/binary>>).
-
--spec send_to_router(lorawan, pos_integer(), map()) -> ok.
-send_to_router(Type, OUI, Packet) ->
+-spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map()) -> ok.
+send_to_router(Type, RoutingInfo, Packet) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     RSSI = maps:get(<<"rssi">>, Packet),
     SNR = maps:get(<<"lsnr">>, Packet),
@@ -352,5 +344,5 @@ send_to_router(Type, OUI, Packet) ->
     Time = maps:get(<<"tmst">>, Packet),
     Freq = maps:get(<<"freq">>, Packet),
     DataRate = maps:get(<<"datr">>, Packet),
-    HeliumPacket = blockchain_helium_packet_v1:new(OUI, Type, Data, Time, RSSI, Freq, DataRate, SNR),
+    HeliumPacket = blockchain_helium_packet_v1:new(RoutingInfo, Type, Data, Time, RSSI, Freq, DataRate, SNR),
     blockchain_state_channels_client:packet(HeliumPacket).
