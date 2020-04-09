@@ -98,10 +98,11 @@ no_packets_expiry_test(Config) ->
 
     ct:pal("Height before oui: ~p", [miner_ct_utils:height(RouterNode)]),
 
+    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [erlang:list_to_binary(RouterP2PAddress)], 1, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -172,10 +173,12 @@ packets_expiry_test(Config) ->
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
     OUI = 1,
+
+    {Filter, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [erlang:list_to_binary(RouterP2PAddress)], OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -222,8 +225,8 @@ packets_expiry_test(Config) ->
     %% Use client node to send some packets
     Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
-    Packet1 = blockchain_helium_packet_v1:new(OUI, Payload1),
-    Packet2 = blockchain_helium_packet_v1:new(OUI, Payload2),
+    Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, Payload1), %% pretend this is a join
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, Payload2), %% pretend this is a packet after join
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
 
@@ -270,10 +273,13 @@ multi_clients_packets_expiry_test(Config) ->
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
     OUI = 1,
+    {Filter, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>,
+                                          <<16#dead:64/integer-unsigned-little, 16#beef:64/integer-unsigned-little>>
+                                         ], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [erlang:list_to_binary(RouterP2PAddress)], OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -317,10 +323,10 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client nodes to send some packets
-    Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
-    Packet2 = blockchain_helium_packet_v1:new(OUI, <<"p2">>),
-    Packet3 = blockchain_helium_packet_v1:new(OUI, <<"p3">>),
-    Packet4 = blockchain_helium_packet_v1:new(OUI, <<"p4">>),
+    Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, <<"p1">>), %% first device joining
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p2">>), %% first device transmitting
+    Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, <<"p3">>), %% second device joining
+    Packet4 = blockchain_helium_packet_v1:new({devaddr, 2}, <<"p4">>), %% second device transmitting
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2]),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1]), %% duplicate from client 2
@@ -389,10 +395,11 @@ replay_test(Config) ->
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
     OUI = 1,
+    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [erlang:list_to_binary(RouterP2PAddress)], OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -438,8 +445,8 @@ replay_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Packet1 = blockchain_helium_packet_v1:new(OUI, <<"p1">>),
-    Packet2 = blockchain_helium_packet_v1:new(OUI, <<"p2">>),
+    Packet1 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p1">>),
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p2">>),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
 
