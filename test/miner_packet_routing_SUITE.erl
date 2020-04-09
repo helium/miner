@@ -59,7 +59,7 @@ end_per_testcase(TestCase, Config) ->
 basic_test(Config) ->
     Miners = ?config(miners, Config),
     ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
-    miner_fake_radio_backplane:transmit(<<?JOIN_REQUEST:3, 0:5, 1337:64/integer-unsigned-big, 1234:64/integer-unsigned-big, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>, 911.200, 631210968910285823),
+    miner_fake_radio_backplane:transmit(<<?JOIN_REQUEST:3, 0:5, 1337:64/integer-unsigned-little, 1234:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>, 911.200, 631210968910285823),
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10),
     ok.
 
