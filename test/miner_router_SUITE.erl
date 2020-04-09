@@ -6,6 +6,9 @@
     all/0
 ]).
 
+%% State channel packet handler callback
+-export([handle_packet/2]).
+
 -export([
     basic/1
 ]).
@@ -14,9 +17,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("miner_ct_macros.hrl").
 -include("lora.hrl").
+
+handle_packet(Packet, Pid) ->
+    ct:pal("Got SC packet ~p", [Packet]),
+    ct_sc_handler ! {sc_handler, Packet},
+    ok.
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -71,9 +80,13 @@ init_per_testcase(_TestCase, Config0) ->
     %% confirm height has grown to 1
     ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
 
+    meck:new(blockchain_state_channels_server, [passthrough]),
+    meck:expect(blockchain_state_channels_server, packet, fun(Packet, HandlerPid) -> handle_packet(Packet, HandlerPid) end),
+
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    meck:unload(blockchain_state_channels_server),
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -96,6 +109,8 @@ basic(Config) ->
     application:ensure_all_started(lager),
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
+    application:set_env(blockchain, sc_packet_handler, ?MODULE),
+    register(ct_sc_handler, self()),
 
     SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
     {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
@@ -104,17 +119,20 @@ basic(Config) ->
     Version = simple_http_stream_test:version(),
     ok = libp2p_swarm:add_stream_handler(
         RouterSwarm,
-        Version,
-        {libp2p_framed_stream, server, [simple_http_stream_test, self()]}
+        ?STATE_CHANNEL_PROTOCOL,
+        {libp2p_framed_stream, server, [blockchain_state_channel_handler]}
     ),
 
     [RouterAddress|_] = libp2p_swarm:listen_addrs(RouterSwarm),
     OwnerSwarm = ct_rpc:call(Owner, blockchain_swarm, swarm, []),
     {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
 
+    DevEUI=rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI=rand:uniform(trunc(math:pow(2, 64))),
+
     ct:pal("Owner is ~p", [Owner]),
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterPubkey}]),
-    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
+    {Filter, _} = xor16:to_bin(xor16:new([<<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
     Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterPubkey], Filter, 8, 1, 1, 0]),
     {ok, Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
@@ -126,14 +144,20 @@ basic(Config) ->
     ?assertAsync(begin
                         Result =
                             case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
-                                {ok, _} -> true;
+                                {ok, Routing} ->
+                                    ct:pal("Routing ~p", [Routing]),
+                                    true;
                                 _ -> false
                             end
                  end,
         Result == true, 60, timer:seconds(1)),
 
-    {_, P1, _, P2} =  ct_rpc:call(Owner, application, get_env, [miner, radio_device, undefined]),
-    {ok, Sock} = gen_udp:open(P2, [{active, false}, binary, {reuseaddr, true}]),
+    MinersAndPorts = ?config(ports, Config),
+    ct:pal("MinersAndPorts ~p", [MinersAndPorts]),
+    {_, P1} = proplists:get_value(Owner, MinersAndPorts),
+
+    ct:pal("connecting to ~p on port ~p", [Owner, P1]),
+    {ok, Sock} = gen_udp:open(0, [{active, false}, binary, {reuseaddr, true}]),
 
     Token = <<0, 0>>,
     %% set up the gateway
@@ -141,7 +165,7 @@ basic(Config) ->
     {ok, {{127,0,0,1}, P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
 
 
-    Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 1, 1, 0, <<"some data">>, #{})),
+    Packet = <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>,
     ok = gen_udp:send(Sock, "127.0.0.1",  P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
                                                 (jsx:encode(#{<<"rxpk">> =>
                                                               [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
@@ -150,16 +174,14 @@ basic(Config) ->
 
     ct:pal("SENT ~p", [Packet]),
     receive
-        {simple_http_stream_test, Got} ->
-            ct:pal("Got ~p", [Got]),
+        {sc_handler, Thing} ->
             PubKeyBin = libp2p_crypto:pubkey_to_bin(Pubkey),
-            Thing = blockchain_state_channel_v1_pb:decode_msg(Got, blockchain_state_channel_message_v1_pb),
             ct:pal("Thing ~p", [Thing]),
-            #blockchain_state_channel_message_v1_pb{msg={packet,
-                                                         #blockchain_state_channel_packet_v1_pb{hotspot=PubKeyBin,
-                                                                                                packet=#packet_pb{routing={devaddr, 1},
-                                                                                                                  type=longfi,
-                                                                                                                  payload= Packet}}}} = Thing,
+            ?assert(blockchain_state_channel_packet_v1:validate(Thing)),
+            ?assertEqual(PubKeyBin, blockchain_state_channel_packet_v1:hotspot(Thing)),
+            HeliumPacket = blockchain_state_channel_packet_v1:packet(Thing),
+            ?assertEqual({eui, DevEUI, AppEUI}, blockchain_helium_packet_v1:routing_info(HeliumPacket)),
+            ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
             %{ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
             %Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
             ok;
