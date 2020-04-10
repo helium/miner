@@ -201,6 +201,6 @@ basic(Config) ->
             ct:pal("got downlink response packet ~p", [RespPacket]),
             ?assertEqual(ReplyPayload, base64:decode(maps:get(<<"data">>, RespPacket)))
     after 2000 ->
-        ct:fail(timeout)
+        ct:fail(timeout2)
     end,
     ok.

@@ -228,8 +228,8 @@ packets_expiry_test(Config) ->
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, Payload1), %% pretend this is a join
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, Payload2), %% pretend this is a packet after join
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
@@ -327,12 +327,12 @@ multi_clients_packets_expiry_test(Config) ->
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p2">>), %% first device transmitting
     Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, <<"p3">>), %% second device joining
     Packet4 = blockchain_helium_packet_v1:new({devaddr, 2}, <<"p4">>), %% second device transmitting
-    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1]),
-    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2]),
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1]), %% duplicate from client 2
+    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1, []]), %% duplicate from client 2
     timer:sleep(1000), %% this should help prevent a race condition over merkle tree order
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3]),
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3, []]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4, []]),
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -446,8 +446,8 @@ replay_test(Config) ->
     %% Use client node to send some packets
     Packet1 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p1">>),
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, <<"p2">>),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
@@ -625,11 +625,11 @@ multi_oui_test(Config) ->
     Packet3 = blockchain_helium_packet_v1:new({devaddr, 10}, Payload3), %% pretend this is a packet after join, only routes to oui 2
     Packet4 = blockchain_helium_packet_v1:new({eui, DevEUI2, AppEUI2}, Payload4), %% pretend this is a join, it will go to oui 2
     Packet5 = blockchain_helium_packet_v1:new({eui, DevEUI3, AppEUI3}, Payload5), %% pretend this is a join, it will go to nobody
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
 
     %% wait ExpireWithin + 10 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 10),
