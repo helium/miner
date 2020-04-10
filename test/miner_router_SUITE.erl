@@ -24,7 +24,7 @@
 
 handle_packet(Packet, Pid) ->
     ct:pal("Got SC packet ~p", [Packet]),
-    ct_sc_handler ! {sc_handler, Packet},
+    ct_sc_handler ! {sc_handler, Packet, Pid},
     ok.
 
 %%--------------------------------------------------------------------
@@ -174,7 +174,7 @@ basic(Config) ->
 
     ct:pal("SENT ~p", [Packet]),
     receive
-        {sc_handler, Thing} ->
+        {sc_handler, Thing, HandlerPid} ->
             PubKeyBin = libp2p_crypto:pubkey_to_bin(Pubkey),
             ct:pal("Thing ~p", [Thing]),
             ?assert(blockchain_state_channel_packet_v1:validate(Thing)),
@@ -184,6 +184,11 @@ basic(Config) ->
             ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
             %{ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
             %Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
+            Resp = blockchain_state_channel_response_v1:new(true,
+                                                            blockchain_helium_packet_v1:new_downlink(<<"hello">>,
+                                                                                                     erlang:system_time(millisecond) + 1000,
+                                                                                                     28, 911.6, <<"SF8BW500">>)),
+            blockchain_state_channel_handler:send_response(HandlerPid, Resp),
             ok;
         _Other ->
             ct:pal("wrong data ~p", [_Other]),
