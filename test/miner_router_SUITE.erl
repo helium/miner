@@ -116,7 +116,7 @@ basic(Config) ->
     {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
     ok = libp2p_swarm:listen(RouterSwarm, "/ip4/0.0.0.0/tcp/0"),
     RouterPubkey = libp2p_swarm:pubkey_bin(RouterSwarm),
-    Version = simple_http_stream_test:version(),
+    _Version = simple_http_stream_test:version(),
     ok = libp2p_swarm:add_stream_handler(
         RouterSwarm,
         ?STATE_CHANNEL_PROTOCOL,
@@ -133,7 +133,7 @@ basic(Config) ->
     ct:pal("Owner is ~p", [Owner]),
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterPubkey}]),
     {Filter, _} = xor16:to_bin(xor16:new([<<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
-    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterPubkey], Filter, 8, 1, 1, 0]),
+    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OwnerPubKeyBin, [RouterPubkey], Filter, 8, 1, 0]),
     {ok, Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),

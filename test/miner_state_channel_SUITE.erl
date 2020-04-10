@@ -104,7 +104,7 @@ no_packets_expiry_test(Config) ->
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -174,13 +174,12 @@ packets_expiry_test(Config) ->
     ct:pal("RouterSwarm: ~p", [RouterSwarm]),
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
-    OUI = 1,
 
     {Filter, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -274,14 +273,13 @@ multi_clients_packets_expiry_test(Config) ->
     ct:pal("RouterSwarm: ~p", [RouterSwarm]),
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
-    OUI = 1,
     {Filter, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>,
                                           <<16#dead:64/integer-unsigned-little, 16#beef:64/integer-unsigned-little>>
                                          ], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -396,12 +394,11 @@ replay_test(Config) ->
     ct:pal("RouterSwarm: ~p", [RouterSwarm]),
     RouterP2PAddress = ct_rpc:call(RouterNode, libp2p_swarm, p2p_address, [RouterSwarm]),
     ct:pal("RouterP2PAddress: ~p", [RouterP2PAddress]),
-    OUI = 1,
     {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, OUI, 1, 0]),
+                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -505,13 +502,26 @@ multi_oui_test(Config) ->
     ct:pal("RouterSwarm1: ~p", [RouterSwarm1]),
     RouterP2PAddress1 = ct_rpc:call(RouterNode1, libp2p_swarm, p2p_address, [RouterSwarm1]),
     ct:pal("RouterP2PAddress1: ~p", [RouterP2PAddress1]),
-    OUI1 = 1,
 
-    {Filter1, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
+    %% appears in both filters
+    DevEUI1=rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI1=rand:uniform(trunc(math:pow(2, 64))),
+    %% appears in only one filter
+    DevEUI2=rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI2=rand:uniform(trunc(math:pow(2, 64))),
+    %% appears in no filters
+    DevEUI3=rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI3=rand:uniform(trunc(math:pow(2, 64))),
+
+    {Filter1, _} = xor16:to_bin(xor16:new([<<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
+    %% sanity check we don't have a false positive
+    ?assert(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>)),
+    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
+    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
     OUITxn1 = ct_rpc:call(RouterNode1,
                           blockchain_txn_oui_v1,
                           new,
-                          [RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8, OUI1, 1, 0]),
+                          [RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8, 1, 0]),
     ct:pal("OUITxn1: ~p", [OUITxn1]),
     SignedOUITxn1 = ct_rpc:call(RouterNode1,
                                 blockchain_txn_oui_v1,
@@ -527,13 +537,21 @@ multi_oui_test(Config) ->
     ct:pal("RouterSwarm2: ~p", [RouterSwarm2]),
     RouterP2PAddress2 = ct_rpc:call(RouterNode2, libp2p_swarm, p2p_address, [RouterSwarm2]),
     ct:pal("RouterP2PAddress2: ~p", [RouterP2PAddress2]),
-    OUI2 = 2,
+    CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
+    CheckTxnOUI1 = fun(T) -> T == SignedOUITxn1 end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI1, timer:seconds(30)),
 
-    {Filter2, _} = xor16:to_bin(xor16:new([<<1234:64/integer-unsigned-little, 5678:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
+    {Filter2, _} = xor16:to_bin(xor16:new([<<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>,
+                                          <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
+    ?assert(xor16:contain({Filter2, fun xxhash:hash64/1}, <<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>)),
+    ?assert(xor16:contain({Filter2, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
+    ?assertNot(xor16:contain({Filter2, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
+
     OUITxn2 = ct_rpc:call(RouterNode2,
                           blockchain_txn_oui_v1,
                           new,
-                          [RouterPubkeyBin2, [RouterPubkeyBin2], Filter2, 8, OUI2, 1, 0]),
+                          [RouterPubkeyBin2, [RouterPubkeyBin2], Filter2, 8, 1, 0]),
     ct:pal("OUITxn2: ~p", [OUITxn2]),
     SignedOUITxn2 = ct_rpc:call(RouterNode2,
                                 blockchain_txn_oui_v1,
@@ -543,11 +561,8 @@ multi_oui_test(Config) ->
     ok = ct_rpc:call(RouterNode2, blockchain_worker, submit_txn, [SignedOUITxn2]),
 
     %% check that oui txn appears on miners
-    CheckTypeOUI = fun(T) -> blockchain_txn:type(T) == blockchain_txn_oui_v1 end,
-    CheckTxnOUI1 = fun(T) -> T == SignedOUITxn1 end,
     CheckTxnOUI2 = fun(T) -> T == SignedOUITxn2 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeOUI, timer:seconds(30)),
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI1, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnOUI2, timer:seconds(30)),
 
     Height = miner_ct_utils:height(RouterNode1),
@@ -602,39 +617,70 @@ multi_oui_test(Config) ->
     %% Use client node to send some packets
     Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
-    Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, Payload1), %% pretend this is a join
-    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, Payload2), %% pretend this is a packet after join
+    Payload3 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    Payload4 = crypto:strong_rand_bytes(rand:uniform(23)),
+    Payload5 = crypto:strong_rand_bytes(rand:uniform(23)),
+    Packet1 = blockchain_helium_packet_v1:new({eui, DevEUI1, AppEUI1}, Payload1), %% pretend this is a join, it will go to both ouis
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1}, Payload2), %% pretend this is a packet after join, only routes to oui 1
+    Packet3 = blockchain_helium_packet_v1:new({devaddr, 10}, Payload3), %% pretend this is a packet after join, only routes to oui 2
+    Packet4 = blockchain_helium_packet_v1:new({eui, DevEUI2, AppEUI2}, Payload4), %% pretend this is a join, it will go to oui 2
+    Packet5 = blockchain_helium_packet_v1:new({eui, DevEUI3, AppEUI3}, Payload5), %% pretend this is a join, it will go to nobody
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1]),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5]),
 
     %% wait ExpireWithin + 10 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 10),
-    %% for the state_channel_close txn to appear
-    CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
+
+    %% wait for the state_channel_close for sc open1 txn to appear
+    CheckSCClose1 = fun(T) ->
+                            blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC1)
+                    end,
+
+    %% wait for the state_channel_close for sc open2 txn to appear
+    CheckSCClose2 = fun(T) ->
+                            blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC2)
+                    end,
+
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose1, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose2, timer:seconds(30)),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
     {error, not_found} = get_ledger_state_channel(RouterNode2, ID2, RouterPubkeyBin2),
 
     %% Check whether the balances are updated in the eventual sc close txn
-    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode1, CheckTypeSCClose),
-    SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
-    ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
+    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode1, CheckSCClose1),
+    SCCloseTxn1 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose1),
+    SCCloseTxn2 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose2),
+    ct:pal("SCCloseTxn1: ~p", [SCCloseTxn1]),
+    ct:pal("SCCloseTxn2: ~p", [SCCloseTxn2]),
 
     %% find the block that this SC opened in, we need the hash
     [{OpenHash1, _}] = miner_ct_utils:get_txn_block_details(RouterNode1, CheckTxnSCOpen1),
-    %% [{OpenHash2, _}] = miner_ct_utils:get_txn_block_details(RouterNode2, CheckTxnSCOpen2),
+    [{OpenHash2, _}] = miner_ct_utils:get_txn_block_details(RouterNode2, CheckTxnSCOpen2),
 
-    %% construct what the skewed merkle tree should look like
+    %% construct what the skewed merkle tree should look like for the first state channel
     ExpectedTree = skewed:add(Payload2, skewed:add(Payload1, skewed:new(OpenHash1))),
     %% assert the root hashes should match
-    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
+    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn1)), skewed:root_hash(ExpectedTree)),
+
+    %% construct what the skewed merkle tree should look like for the second state channel
+    ExpectedTree2 = skewed:add(Payload4, skewed:add(Payload3, skewed:add(Payload1, skewed:new(OpenHash2)))),
+    %% assert the root hashes should match
+    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn2)), skewed:root_hash(ExpectedTree2)),
 
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
-    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin, 3),
+    true = check_sc_num_packets(SCCloseTxn1, ClientNodePubkeyBin, 2),
+    true = check_sc_num_dcs(SCCloseTxn1, ClientNodePubkeyBin, 3),
+
+    true = check_sc_num_packets(SCCloseTxn2, ClientNodePubkeyBin, 3),
+    true = check_sc_num_dcs(SCCloseTxn2, ClientNodePubkeyBin, 4),
 
     ok.
 
