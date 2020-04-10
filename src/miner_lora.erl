@@ -4,6 +4,7 @@
 
 -export([
     start_link/1,
+    handle_response/1,
     send/1,
     send_poc/5,
     port/0
@@ -51,6 +52,16 @@
 
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
+
+%% @doc used to handle state channel responses
+-spec handle_response(blockchain_state_channel_response_v1:response()) -> ok | {error, any()}.
+handle_response(Resp) ->
+    case blockchain_state_channel_response_v1:downlink(Resp) of
+        undefined ->
+            ok;
+        Packet ->
+            send(Packet)
+    end.
 
 -spec send(helium_packet()) -> ok | {error, any()}.
 send(#packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequency=Freq, datarate=DataRate}) ->

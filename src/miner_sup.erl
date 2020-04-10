@@ -63,6 +63,9 @@ init(_Args) ->
     %% TODO: Remove when cuttlefish
     MaxInboundConnections = application:get_env(blockchain, max_inbound_connections, 10),
 
+    %% downlink packets from state channels go here
+    application:set_env(blockchain, sc_client_handler, miner_lora),
+
     case application:get_env(blockchain, key, undefined) of
         undefined ->
             #{ pubkey := PublicKey,

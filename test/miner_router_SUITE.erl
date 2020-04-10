@@ -22,6 +22,9 @@
 -include("miner_ct_macros.hrl").
 -include("lora.hrl").
 
+-define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
+-define(NYLOCS, [631243922668565503, 631243922671147007, 631243922895615999, 631243922665907711]).
+
 handle_packet(Packet, Pid) ->
     ct:pal("Got SC packet ~p", [Packet]),
     ct_sc_handler ! {sc_handler, Packet, Pid},
@@ -42,11 +45,17 @@ all() -> [basic].
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     Miners = ?config(miners, Config),
+    MinersAndPorts = ?config(ports, Config),
     Addresses = ?config(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     InitialDCTransactions = [ blockchain_txn_dc_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
+    %AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
+                 %|| Addr <- Addresses],
+
+    Locations = ?SFLOCS ++ ?NYLOCS,
+    AddressesWithLocations = lists:zip(Addresses, Locations),
+    InitialGenGatewayTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- AddressesWithLocations],
+
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
     BlockTime = ?config(block_time, Config),
@@ -63,9 +72,13 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ AddGwTxns,
+    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ InitialGenGatewayTxns,
                                              Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+
+    RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
+    miner_fake_radio_backplane:start_link(8, 45000, lists:zip(RadioPorts, Locations)),
+
 
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
@@ -79,6 +92,8 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% confirm height has grown to 1
     ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
+
+    miner_fake_radio_backplane ! go,
 
     meck:new(blockchain_state_channels_server, [passthrough]),
     meck:expect(blockchain_state_channels_server, packet, fun(Packet, HandlerPid) -> handle_packet(Packet, HandlerPid) end),
@@ -152,25 +167,10 @@ basic(Config) ->
                  end,
         Result == true, 60, timer:seconds(1)),
 
-    MinersAndPorts = ?config(ports, Config),
-    ct:pal("MinersAndPorts ~p", [MinersAndPorts]),
-    {_, P1} = proplists:get_value(Owner, MinersAndPorts),
-
-    ct:pal("connecting to ~p on port ~p", [Owner, P1]),
-    {ok, Sock} = gen_udp:open(0, [{active, false}, binary, {reuseaddr, true}]),
-
-    Token = <<0, 0>>,
-    %% set up the gateway
-    gen_udp:send(Sock, {127, 0, 0, 1}, P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, 16#deadbeef:64/integer>>),
-    {ok, {{127,0,0,1}, P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
-
-
     Packet = <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>,
-    ok = gen_udp:send(Sock, "127.0.0.1",  P1, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
-                                                (jsx:encode(#{<<"rxpk">> =>
-                                                              [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
-                                                                 <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
-                                                                 <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
+    miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
+
+    ReplyPayload = crypto:strong_rand_bytes(12),
 
     ct:pal("SENT ~p", [Packet]),
     receive
@@ -182,17 +182,24 @@ basic(Config) ->
             HeliumPacket = blockchain_state_channel_packet_v1:packet(Thing),
             ?assertEqual({eui, DevEUI, AppEUI}, blockchain_helium_packet_v1:routing_info(HeliumPacket)),
             ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
-            %{ok, MinerName} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:pubkey_to_bin(Pubkey))),
-            %Resp2 = Resp#'LongFiResp_pb'{miner_name=binary:replace(erlang:list_to_binary(MinerName), <<"-">>, <<" ">>, [global])},
             Resp = blockchain_state_channel_response_v1:new(true,
-                                                            blockchain_helium_packet_v1:new_downlink(<<"hello">>,
+                                                            blockchain_helium_packet_v1:new_downlink(ReplyPayload,
                                                                                                      erlang:system_time(millisecond) + 1000,
                                                                                                      28, 911.6, <<"SF8BW500">>)),
+            miner_fake_radio_backplane:get_next_packet(),
             blockchain_state_channel_handler:send_response(HandlerPid, Resp),
             ok;
         _Other ->
             ct:pal("wrong data ~p", [_Other]),
             ct:fail(wrong_data)
+    after 2000 ->
+        ct:fail(timeout)
+    end,
+
+    receive
+        {fake_radio_backplane, RespPacket} ->
+            ct:pal("got downlink response packet ~p", [RespPacket]),
+            ?assertEqual(ReplyPayload, base64:decode(maps:get(<<"data">>, RespPacket)))
     after 2000 ->
         ct:fail(timeout)
     end,
