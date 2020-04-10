@@ -669,7 +669,6 @@ setup_dist_test(TestCase, Config, VarMap) ->
     GenesisBlock = get_genesis_block(Miners, Config),
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
     miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000, lists:zip(RadioPorts, Locations)),
-    timer:sleep(5000),
     ok = load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 10
