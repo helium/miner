@@ -605,18 +605,32 @@ multi_oui_test(Config) ->
 
     %% wait ExpireWithin + 10 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 10),
-    %% for the state_channel_close txn to appear
-    CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
+
+    %% wait for the state_channel_close for sc open1 txn to appear
+    CheckSCClose1 = fun(T) ->
+                            blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC1)
+                    end,
+
+    %% wait for the state_channel_close for sc open2 txn to appear
+    CheckSCClose2 = fun(T) ->
+                            blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC2)
+                    end,
+
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose1, timer:seconds(30)),
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose2, timer:seconds(30)),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
     {error, not_found} = get_ledger_state_channel(RouterNode2, ID2, RouterPubkeyBin2),
 
     %% Check whether the balances are updated in the eventual sc close txn
-    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode1, CheckTypeSCClose),
-    SCCloseTxn = miner_ct_utils:get_txn(BlockDetails, CheckTypeSCClose),
-    ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
+    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode1, CheckSCClose1),
+    SCCloseTxn1 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose1),
+    SCCloseTxn2 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose2),
+    ct:pal("SCCloseTxn1: ~p", [SCCloseTxn1]),
+    ct:pal("SCCloseTxn2: ~p", [SCCloseTxn2]),
 
     %% find the block that this SC opened in, we need the hash
     [{OpenHash1, _}] = miner_ct_utils:get_txn_block_details(RouterNode1, CheckTxnSCOpen1),
@@ -625,12 +639,12 @@ multi_oui_test(Config) ->
     %% construct what the skewed merkle tree should look like
     ExpectedTree = skewed:add(Payload2, skewed:add(Payload1, skewed:new(OpenHash1))),
     %% assert the root hashes should match
-    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
+    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn1)), skewed:root_hash(ExpectedTree)),
 
     %% Check whether clientnode's balance is correct
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
-    true = check_sc_num_packets(SCCloseTxn, ClientNodePubkeyBin, 2),
-    true = check_sc_num_dcs(SCCloseTxn, ClientNodePubkeyBin, 3),
+    true = check_sc_num_packets(SCCloseTxn1, ClientNodePubkeyBin, 2),
+    true = check_sc_num_dcs(SCCloseTxn1, ClientNodePubkeyBin, 3),
 
     ok.
 
