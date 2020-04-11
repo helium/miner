@@ -10,7 +10,8 @@
 -export([handle_packet/2]).
 
 -export([
-    basic/1
+    basic/1,
+    default_routers/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -40,7 +41,7 @@ handle_packet(Packet, Pid) ->
 %%   Running tests for this suite
 %% @end
 %%--------------------------------------------------------------------
-all() -> [basic].
+all() -> [basic, default_routers].
 
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
@@ -98,9 +99,27 @@ init_per_testcase(_TestCase, Config0) ->
     meck:new(blockchain_state_channels_server, [passthrough]),
     meck:expect(blockchain_state_channels_server, packet, fun(Packet, HandlerPid) -> handle_packet(Packet, HandlerPid) end),
 
-    Config.
+    application:ensure_all_started(throttle),
+    application:ensure_all_started(ranch),
+    application:set_env(lager, error_logger_flush_queue, false),
+    application:ensure_all_started(lager),
+    lager:set_loglevel(lager_console_backend, debug),
+    lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
+    application:set_env(blockchain, sc_packet_handler, ?MODULE),
+
+    lists:foreach(fun(Miner) ->
+                          ct_rpc:call(Miner, application, set_env, [miner, default_routers, []])
+                  end, Miners),
+
+    SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
+    {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
+
+    [{swarm, RouterSwarm}|Config].
 
 end_per_testcase(_TestCase, Config) ->
+    RouterSwarm = ?config(swarm, Config),
+    libp2p_swarm:stop(RouterSwarm),
+    gen_server:stop(miner_fake_radio_backplane),
     meck:unload(blockchain_state_channels_server),
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
@@ -115,20 +134,12 @@ end_per_testcase(_TestCase, Config) ->
 %%--------------------------------------------------------------------
 basic(Config) ->
     Miners = ?config(miners, Config),
+    RouterSwarm = ?config(swarm, Config),
     [Owner| _Tail] = Miners,
     OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
 
-    application:ensure_all_started(throttle),
-    application:ensure_all_started(ranch),
-    application:set_env(lager, error_logger_flush_queue, false),
-    application:ensure_all_started(lager),
-    lager:set_loglevel(lager_console_backend, debug),
-    lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
-    application:set_env(blockchain, sc_packet_handler, ?MODULE),
     register(ct_sc_handler, self()),
 
-    SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
-    {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
     ok = libp2p_swarm:listen(RouterSwarm, "/ip4/0.0.0.0/tcp/0"),
     RouterPubkey = libp2p_swarm:pubkey_bin(RouterSwarm),
     _Version = simple_http_stream_test:version(),
@@ -203,4 +214,77 @@ basic(Config) ->
     after 2000 ->
         ct:fail(timeout2)
     end,
+
+    miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
+    ok.
+
+default_routers(Config) ->
+    Miners = ?config(miners, Config),
+    RouterSwarm = ?config(swarm, Config),
+    [Owner| _Tail] = Miners,
+    OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
+
+    register(ct_sc_handler, self()),
+
+    ok = libp2p_swarm:listen(RouterSwarm, "/ip4/0.0.0.0/tcp/0"),
+    RouterPubkey = libp2p_swarm:pubkey_bin(RouterSwarm),
+    _Version = simple_http_stream_test:version(),
+    ok = libp2p_swarm:add_stream_handler(
+        RouterSwarm,
+        ?STATE_CHANNEL_PROTOCOL,
+        {libp2p_framed_stream, server, [blockchain_state_channel_handler]}
+    ),
+
+    lists:foreach(fun(Miner) ->
+                          ct_rpc:call(Miner, application, set_env, [miner, default_routers, [libp2p_crypto:pubkey_bin_to_p2p(RouterPubkey)]])
+                  end, Miners),
+
+    [RouterAddress|_] = libp2p_swarm:listen_addrs(RouterSwarm),
+    OwnerSwarm = ct_rpc:call(Owner, blockchain_swarm, swarm, []),
+    {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
+
+    DevEUI=rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI=rand:uniform(trunc(math:pow(2, 64))),
+
+    ct:pal("Owner is ~p", [Owner]),
+    ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterPubkey}]),
+    {ok, Pubkey, _SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
+
+    Packet = <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>,
+    miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
+
+    ReplyPayload = crypto:strong_rand_bytes(12),
+
+    ct:pal("SENT ~p", [Packet]),
+    receive
+        {sc_handler, Thing, HandlerPid} ->
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(Pubkey),
+            ct:pal("Thing ~p", [Thing]),
+            ?assert(blockchain_state_channel_packet_v1:validate(Thing)),
+            ?assertEqual(PubKeyBin, blockchain_state_channel_packet_v1:hotspot(Thing)),
+            HeliumPacket = blockchain_state_channel_packet_v1:packet(Thing),
+            ?assertEqual({eui, DevEUI, AppEUI}, blockchain_helium_packet_v1:routing_info(HeliumPacket)),
+            ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
+            Resp = blockchain_state_channel_response_v1:new(true,
+                                                            blockchain_helium_packet_v1:new_downlink(ReplyPayload,
+                                                                                                     erlang:system_time(millisecond) + 1000,
+                                                                                                     28, 911.6, <<"SF8BW500">>)),
+            miner_fake_radio_backplane:get_next_packet(),
+            blockchain_state_channel_handler:send_response(HandlerPid, Resp),
+            ok;
+        _Other ->
+            ct:pal("wrong data ~p", [_Other]),
+            ct:fail(wrong_data)
+    after 2000 ->
+        ct:fail(timeout)
+    end,
+
+    receive
+        {fake_radio_backplane, RespPacket} ->
+            ct:pal("got downlink response packet ~p", [RespPacket]),
+            ?assertEqual(ReplyPayload, base64:decode(maps:get(<<"data">>, RespPacket)))
+    after 2000 ->
+        ct:fail(timeout2)
+    end,
+    miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
     ok.
