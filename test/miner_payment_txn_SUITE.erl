@@ -17,7 +17,8 @@
 -export([
          single_payment_test/1,
          self_payment_test/1,
-         bad_payment_test/1
+         bad_payment_test/1,
+         dependent_payment_test/1
         ]).
 
 %% common test callbacks
@@ -25,7 +26,8 @@
 all() -> [
           single_payment_test,
           self_payment_test,
-          bad_payment_test
+          bad_payment_test,
+          dependent_payment_test
          ].
 
 init_per_suite(Config) ->
@@ -81,9 +83,11 @@ end_per_testcase(_TestCase, Config) ->
 single_payment_test(Config) ->
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = miner_ct_utils:node2addr(Payer, AddrList),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere
@@ -157,8 +161,10 @@ single_payment_test(Config) ->
 
 self_payment_test(Config) ->
     Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = miner_ct_utils:node2addr(Payer, AddrList),
     PayeeAddr = PayerAddr,
 
     %% check initial balances
@@ -255,3 +261,59 @@ bad_payment_test(Config) ->
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
+
+dependent_payment_test(Config) ->
+    Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+    Count = 50,
+    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Chain]),
+    {ok, Fee} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, transaction_fee, [Ledger]),
+
+    lists:foreach(fun(Miner) ->
+                        PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+                        Payee = hd(miner_ct_utils:shuffle(Miners -- [Miner])),
+                        PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+                        {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+                        UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
+                        SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
+                        put(a_txn, {Miner, lists:last(SignedTxns)}),
+                        [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- lists:reverse(SignedTxns) ]
+                end, Miners),
+
+
+    {AMiner, ATxn} = get(a_txn),
+    ct:pal("txn_mgr txn_status ~p ", [ct_rpc:call(AMiner, blockchain_txn_mgr, txn_status, [blockchain_txn:hash(ATxn)])]),
+    Result = miner_ct_utils:wait_until(fun() ->
+                                             HaveNoncesIncremented = lists:map(fun(Miner) ->
+                                                               Addr = miner_ct_utils:node2addr(Miner, AddrList),
+                                                               Nonce = miner_ct_utils:get_nonce(Miner, Addr),
+                                                               case Nonce == Count of
+                                                                   true ->
+                                                                       true;
+                                                                   false ->
+                                                                       TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                                                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                                       H = ct_rpc:call(Miner, blockchain, height, [C]),
+                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [Miner, Nonce, length(TxnList), H]),
+                                                                       false
+                                                               end
+                                                       end, Miners),
+                                             [true] == lists:usort(HaveNoncesIncremented)
+                                     end, 60, 5000),
+    case Result of
+        true ->
+            ok;
+        false ->
+            lists:foreach(fun(Miner) ->
+                                  TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                                  ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)])
+                          end, Miners),
+            ct:fail("boom")
+    end,
+    ok.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------

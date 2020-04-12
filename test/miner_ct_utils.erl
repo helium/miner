@@ -22,6 +22,7 @@
          randname/1,
          get_config/2,
          get_balance/2,
+         get_nonce/2,
          get_block/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
@@ -57,7 +58,9 @@
          wait_for_gte/3, wait_for_gte/5,
 
          submit_txn/2,
-         wait_for_txn/2, wait_for_txn/3
+         wait_for_txn/2, wait_for_txn/3,
+         format_txn_mgr_list/1
+
 
         ]).
 
@@ -651,14 +654,18 @@ init_per_testcase(Mod, TestCase, Config0) ->
                               end),
 
     %% accumulate the address of each miner
-    Addresses = lists:foldl(
+    MinerTaggedAddresses = lists:foldl(
         fun(Miner, Acc) ->
             Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
-            [Address | Acc]
+            [{Miner, Address} | Acc]
         end,
         [],
         Miners
     ),
+    %% save a version of the address list with the miner and address tuple
+    %% and then a version with just a list of addresses
+    {_Keys, Addresses} = lists:unzip(MinerTaggedAddresses),
+
     {ok, _} = ct_cover:add_nodes(Miners),
 
     %% wait until we get confirmation the miners are fully up
@@ -679,6 +686,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
         {addresses, Addresses},
+        {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
         {batch_size, BatchSize},
         {dkg_curve, Curve},
@@ -732,6 +740,25 @@ get_balance(Miner, Addr) ->
                     end
             end
     end.
+
+get_nonce(Miner, Addr) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_entry_v1, nonce, [Entry])
+                    end
+            end
+    end.
+
 
 get_block(Block, Miner) ->
     case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
@@ -930,6 +957,20 @@ wait_for_txn(Miners, PredFun, Timeout)->
                  end,
                  Result == true, 40, timer:seconds(1)),
     ok.
+
+format_txn_mgr_list(TxnList) ->
+    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
+                      TxnMod = blockchain_txn:type(Txn),
+                      TxnHash = blockchain_txn:hash(Txn),
+                      [
+                       {txn_type, atom_to_list(TxnMod)},
+                       {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
+                       {acceptions, length(Acceptions)},
+                       {rejections, length(Rejections)},
+                       {accepted_block_height, RecvBlockHeight},
+                       {active_dialers, length(_Dialers)}
+                      ]
+              end, TxnList).
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
