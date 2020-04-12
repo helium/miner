@@ -17,7 +17,8 @@
 -export([
          single_payment_test/1,
          self_payment_test/1,
-         bad_payment_test/1
+         bad_payment_test/1,
+         dependent_payment_test/1
         ]).
 
 %% common test callbacks
@@ -25,7 +26,8 @@
 all() -> [
           single_payment_test,
           self_payment_test,
-          bad_payment_test
+          bad_payment_test,
+          dependent_payment_test
          ].
 
 init_per_suite(Config) ->
@@ -255,3 +257,66 @@ bad_payment_test(Config) ->
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
+
+dependent_payment_test(Config) ->
+    Miners = ?config(miners, Config),
+    Count = 50,
+    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Chain]),
+    {ok, Fee} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, transaction_fee, [Ledger]),
+
+    lists:foreach(fun(Miner) ->
+                        PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+                        Payee = hd(miner_ct_utils:shuffle(Miners -- [Miner])),
+                        PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+                        {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+                        UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
+                        SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
+                        [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ]
+                end, Miners),
+
+    Result = miner_ct_utils:wait_until(fun() ->
+                                             HaveNoncesIncremented = lists:map(fun(Miner) ->
+                                                               Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+                                                               Nonce = miner_ct_utils:get_nonce(Miner, Addr),
+                                                               case Nonce == Count of
+                                                                   true ->
+                                                                       true;
+                                                                   false ->
+                                                                       TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue", [Miner, Nonce, length(TxnList)]),
+                                                                       false
+                                                               end
+                                                       end, Miners),
+                                             [true] == lists:usort(HaveNoncesIncremented)
+                                     end, 60, 5000),
+    case Result of
+        true ->
+            ok;
+        false ->
+            lists:foreach(fun(Miner) ->
+                                  TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                                  ct:pal("~p", [format_txn_list(TxnList)])
+                          end, Miners),
+            ct:fail("boom")
+    end,
+    ok.
+
+
+%% ------------------------------------------------------------------
+%% Local Helper functions
+%% ------------------------------------------------------------------
+
+format_txn_list(TxnList) ->
+    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
+                      TxnMod = blockchain_txn:type(Txn),
+                      TxnHash = blockchain_txn:hash(Txn),
+                      [
+                       {txn_type, atom_to_list(TxnMod)},
+                       {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
+                       {acceptions, length(Acceptions)},
+                       {rejections, length(Rejections)},
+                       {accepted_block_height, RecvBlockHeight},
+                       {active_dialers, length(_Dialers)}
+                      ]
+              end, TxnList).

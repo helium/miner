@@ -22,6 +22,7 @@
          randname/1,
          get_config/2,
          get_balance/2,
+         get_nonce/2,
          get_block/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
@@ -732,6 +733,25 @@ get_balance(Miner, Addr) ->
                     end
             end
     end.
+
+get_nonce(Miner, Addr) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_entry_v1, nonce, [Entry])
+                    end
+            end
+    end.
+
 
 get_block(Block, Miner) ->
     case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
