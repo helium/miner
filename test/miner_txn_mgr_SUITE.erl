@@ -88,7 +88,7 @@ txn_in_sequence_nonce_test(Config) ->
     %% and txn mgr cache will clear
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
-    IgnoredTxns = [blockchain_txn_poc_receipts_v1],
+    IgnoredTxns = [],
     Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -124,7 +124,7 @@ txn_in_sequence_nonce_test(Config) ->
                                                 _ -> false
                                             end
                                         end, 20, 5000),
-    ok = handle_get_cached_txn_result(Result, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
     miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
@@ -141,7 +141,8 @@ txn_out_of_sequence_nonce_test(Config) ->
     %% this txn will only clear out after the second txn is submitted
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
-    IgnoredTxns = [blockchain_txn_poc_receipts_v1],
+
+    IgnoredTxns = [],
     Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -181,7 +182,7 @@ txn_out_of_sequence_nonce_test(Config) ->
                     end
             end
         end, 20, 5000),
-    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
 
     %% now submit the other txn which will have the missing nonce
     %% this should result in both this and the previous txn being accepted by the CG
@@ -197,7 +198,7 @@ txn_out_of_sequence_nonce_test(Config) ->
                                                 _ -> false
                                             end
                                         end, 20, 5000),
-    ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
     miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
@@ -214,7 +215,7 @@ txn_invalid_nonce_test(Config) ->
     %% the first because it is absorbed, the second because it is invalid
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
-    IgnoredTxns = [blockchain_txn_poc_receipts_v1],
+    IgnoredTxns = [],
     Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
@@ -248,7 +249,7 @@ txn_invalid_nonce_test(Config) ->
                                                 _ -> false
                                             end
                                         end, 20, 5000),
-    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
 
     %% now send the second txn ( with the dup nonce )
     ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn2]),
@@ -262,7 +263,7 @@ txn_invalid_nonce_test(Config) ->
                                                 _ -> false
                                             end
                                         end, 20, 5000),
-    ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
     miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
@@ -290,7 +291,7 @@ txn_dependent_test(Config) ->
     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
-    IgnoredTxns = [blockchain_txn_poc_receipts_v1],
+    IgnoredTxns = [],
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
     {ok, StartHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
 
@@ -299,7 +300,7 @@ txn_dependent_test(Config) ->
     UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
     SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
     [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ],
-    IgnoredTxns = [blockchain_txn_poc_receipts_v1],
+
     Result1 = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
@@ -307,7 +308,7 @@ txn_dependent_test(Config) ->
                                                 _ -> false
                                             end
                                         end, 60, 5000),
-    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns),
+    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
     miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
     ExpectedNonce = StartNonce +50,
@@ -319,14 +320,15 @@ txn_dependent_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-handle_get_cached_txn_result(Result, Miner, IgnoredTxns)->
+handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain)->
     case Result of
         true ->
             ok;
         false ->
           TxnList = get_cached_txns_with_exclusions(Miner, IgnoredTxns),
+          {ok, CurHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
           ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)]),
-          ct:fail("unexpected txns in txn_mgr cache for miner ~p",[Miner])
+          ct:fail("unexpected txns in txn_mgr cache for miner ~p. Current height ~p",[Miner, CurHeight])
     end.
 
 
