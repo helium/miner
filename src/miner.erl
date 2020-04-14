@@ -247,10 +247,11 @@ relcast_queue(Group) ->
                    Txns :: blockchain_txn:txns(),
                    HBBFTRound :: non_neg_integer())
                   -> {ok,
-                      libp2p_crypto:pubkey_bin(),
-                      binary(),
-                      binary(),
-                      blockchain_txn:txns()} |
+                      Address :: libp2p_crypto:pubkey_bin(),
+                      UsignedBinaryBlock :: binary(),
+                      Signature :: binary(),
+                      PendingTxns :: blockchain_txn:txns(),
+                      InvalidTxns :: blockchain_txn:txns()} |
                      {error, term()}.
 create_block(Metadata, Txns, HBBFTRound) ->
     try
@@ -461,7 +462,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                            [self(), NewBlock, TxnsToInsert]),
                 %% return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
-                 Signature, TxnsToInsert ++ InvalidTransactions};
+                 Signature, TxnsToInsert, InvalidTransactions};
             [_OtherBlockHash] ->
                 {error, stale_hash};
             List ->
