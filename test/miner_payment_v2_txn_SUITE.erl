@@ -15,13 +15,15 @@
         ]).
 
 -export([
-         basic_test/1
+         basic_test/1,
+         zero_amt_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
-          basic_test
+          basic_test,
+          zero_amt_test
          ].
 
 init_per_suite(Config) ->
@@ -52,7 +54,8 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve,
-                                                   ?max_payments => 10}),
+                                                   ?max_payments => 10,
+                                                   ?allow_zero_amount => false}),
 
     DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                            Addresses, NumConsensusMembers, Curve),
@@ -126,6 +129,67 @@ basic_test(Config) ->
 
     ok = lists:foreach(fun(PayeeAddr) ->
                                ok = miner_ct_utils:confirm_balance(Miners, PayeeAddr, 5000 + PayeeAmount)
+                       end,
+                       PayeeAddrs),
+
+    %% Print for verification
+    ok = lists:foreach(fun(M) ->
+                               A = ct_rpc:call(M, blockchain_swarm, pubkey_bin, []),
+                               ct:pal("Addr: ~p, Balance: ~p", [A, miner_ct_utils:get_balance(M, A)])
+                       end,
+                       Miners),
+
+    ok.
+
+zero_amt_test(Config) ->
+    Miners = ?config(miners, Config),
+    _ConsensusMiners = ?config(consensus_miners, Config),
+    [Payer | Payees] = Miners,
+    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+
+    PayeeAddrs = lists:foldl(fun(Payee, Acc) ->
+                                     PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+                                     [PayeeAddr | Acc]
+                             end,
+                             [],
+                             Payees),
+
+    ct:pal("PayeeAddrs: ~p", [PayeeAddrs]),
+
+    %% check initial balances
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    ok = lists:foreach(fun({Payee, PayeeAddr}) ->
+                               5000 = miner_ct_utils:get_balance(Payee, PayeeAddr)
+                       end,
+                       lists:zip(Payees, PayeeAddrs)),
+
+    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
+    {ok, Height} = ct_rpc:call(Payer, blockchain, height, [Chain]),
+
+    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+    ct:pal("Fee: ~p", [Fee]),
+
+    %% send 0 amount
+    PayeeAmount = 0,
+    Payments = [blockchain_payment_v2:new(P, PayeeAmount) || P <- PayeeAddrs],
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1, Fee]),
+
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+
+    SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v2, sign, [Txn, SigFun]),
+    ct:pal("SignedTxn: ~p", [SignedTxn]),
+
+    {error, invalid_transaction} = ct_rpc:call(Payer, blockchain_txn, is_valid, [SignedTxn, Chain]),
+
+    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn]),
+
+    %% Wait 10 blocks after submission
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 10),
+
+    %% wait until all the nodes agree that balance has not changed
+    ok = lists:foreach(fun(PayeeAddr) ->
+                               ok = miner_ct_utils:confirm_balance(Miners, PayeeAddr, 5000)
                        end,
                        PayeeAddrs),
 
