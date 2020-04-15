@@ -272,8 +272,13 @@ dependent_payment_test(Config) ->
                         {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
                         UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
                         SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
+                        put(a_txn, {Miner, lists:last(SignedTxns)}),
                         [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ]
                 end, Miners),
+
+
+    {AMiner, ATxn} = get(a_txn),
+    ct:pal("txn_mgr txn_status ~p ", [ct_rpc:call(AMiner, blockchain_txn_mgr, txn_status, [blockchain_txn:hash(ATxn)])]),
 
     Result = miner_ct_utils:wait_until(fun() ->
                                              HaveNoncesIncremented = lists:map(fun(Miner) ->
@@ -284,7 +289,9 @@ dependent_payment_test(Config) ->
                                                                        true;
                                                                    false ->
                                                                        TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
-                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue", [Miner, Nonce, length(TxnList)]),
+                                                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                                                                       H = ct_rpc:call(Miner, blockchain, height, [C]),
+                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [Miner, Nonce, length(TxnList), H]),
                                                                        false
                                                                end
                                                        end, Miners),
