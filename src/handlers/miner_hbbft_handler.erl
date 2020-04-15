@@ -256,14 +256,16 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     NewRound = hbbft:round(NewHBBFT),
                     Before = erlang:monotonic_time(millisecond),
                     case miner:create_block(Metadata, Txns, NewRound) of
-                        {ok, Address, Artifact, Signature, TxnsToRemove} ->
+                        {ok, Address, Artifact, Signature, PendingTxns, InvalidTxns} ->
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
                             lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
-                            BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- TxnsToRemove],
+                            %% remove any pending txns or invalid txns from the buffer
+                            BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- PendingTxns ++ InvalidTxns],
                             NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
                             Buf = hbbft:buf(NewerHBBFT),
-                            Buf1 = miner_hbbft_sidecar:new_round(Buf, []),
+                            %% do an async filter of the remaining txn buffer while we finish off the block
+                            Buf1 = miner_hbbft_sidecar:prefilter_round(Buf, PendingTxns),
                             NewerHBBFT1 = hbbft:buf(Buf1, NewerHBBFT),
                             put(filtered, NewRound),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
