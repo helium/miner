@@ -56,6 +56,8 @@ init_per_testcase(_TestCase, Config0) ->
                                             Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
+    ok = miner_ct_utils:wait_for_in_consensus(Miners, NumConsensusMembers),
+
     %% Get non consensus miners
     NonConsensusMiners = miner_ct_utils:non_consensus_miners(Miners),
 
