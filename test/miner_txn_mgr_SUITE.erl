@@ -127,9 +127,8 @@ txn_in_sequence_nonce_test(Config) ->
     ok = handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
-    miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
     ExpectedNonce = StartNonce +2,
-    ExpectedNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
 
@@ -201,9 +200,8 @@ txn_out_of_sequence_nonce_test(Config) ->
     ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
-    miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
     ExpectedNonce = StartNonce +2,
-    ExpectedNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
 
@@ -266,9 +264,8 @@ txn_invalid_nonce_test(Config) ->
     ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
-    miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
     ExpectedNonce = StartNonce +1,
-    ExpectedNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
 
@@ -309,10 +306,10 @@ txn_dependent_test(Config) ->
                                             end
                                         end, 60, 5000),
     ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
+
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
-    miner_ct_utils:wait_for_gte(height, [Miner], StartHeight + 10),
     ExpectedNonce = StartNonce +50,
-    ExpectedNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
 
@@ -341,3 +338,13 @@ get_cached_txns_with_exclusions(Miner, Exclusions)->
                     not lists:member(blockchain_txn:type(Txn), Exclusions) end, Txns)
     end.
 
+nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners)->
+    true = miner_ct_utils:wait_until(
+        fun() ->
+            HaveNoncesIncremented =
+                lists:map(fun(M) ->
+                            Nonce = miner_ct_utils:get_nonce(M, Addr),
+                            Nonce == ExpectedNonce
+                          end, ConMiners),
+            [true] == lists:usort(HaveNoncesIncremented)
+        end, 100, 500).
