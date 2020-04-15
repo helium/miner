@@ -303,7 +303,7 @@ dependent_payment_test(Config) ->
         false ->
             lists:foreach(fun(Miner) ->
                                   TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
-                                  ct:pal("~p", [format_txn_list(TxnList)])
+                                  ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)])
                           end, Miners),
             ct:fail("boom")
     end,
@@ -313,17 +313,3 @@ dependent_payment_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-format_txn_list(TxnList) ->
-    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
-                      TxnMod = blockchain_txn:type(Txn),
-                      TxnHash = blockchain_txn:hash(Txn),
-                      [
-                       {txn_type, atom_to_list(TxnMod)},
-                       {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
-                       {acceptions, length(Acceptions)},
-                       {rejections, length(Rejections)},
-                       {accepted_block_height, RecvBlockHeight},
-                       {active_dialers, length(_Dialers)}
-                      ]
-              end, TxnList).

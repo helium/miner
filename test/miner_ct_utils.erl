@@ -58,7 +58,9 @@
          wait_for_gte/3, wait_for_gte/5,
 
          submit_txn/2,
-         wait_for_txn/2, wait_for_txn/3
+         wait_for_txn/2, wait_for_txn/3,
+         format_txn_mgr_list/1
+
 
         ]).
 
@@ -950,6 +952,20 @@ wait_for_txn(Miners, PredFun, Timeout)->
                  end,
                  Result == true, 40, timer:seconds(1)),
     ok.
+
+format_txn_mgr_list(TxnList) ->
+    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
+                      TxnMod = blockchain_txn:type(Txn),
+                      TxnHash = blockchain_txn:hash(Txn),
+                      [
+                       {txn_type, atom_to_list(TxnMod)},
+                       {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
+                       {acceptions, length(Acceptions)},
+                       {rejections, length(Rejections)},
+                       {accepted_block_height, RecvBlockHeight},
+                       {active_dialers, length(_Dialers)}
+                      ]
+              end, TxnList).
 
 %% ------------------------------------------------------------------
 %% Local Helper functions

@@ -85,6 +85,7 @@ txn_in_sequence_nonce_test(Config) ->
     %% send two standalone payments, with correctly sequenced nonce values
     %% both txns are sent in quick succession
     %% these should clear through the txn mgr right away without probs
+    %% and txn mgr cache will clear
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
     IgnoredTxns = [blockchain_txn_poc_receipts_v1],
@@ -136,9 +137,8 @@ txn_in_sequence_nonce_test(Config) ->
 
 txn_out_of_sequence_nonce_test(Config) ->
     %% send two standalone payments, but out of order so that the first submitted has an out of sequence nonce
-    %% this will result in validations determining undecided and the txn stays in txn mgr
-    %% until the prior txn is absorbed
-    %% thereafter both will
+    %% this will result in validations determining undecided and the txn stays in txn mgr cache
+    %% this txn will only clear out after the second txn is submitted
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
     IgnoredTxns = [blockchain_txn_poc_receipts_v1],
@@ -325,7 +325,7 @@ handle_get_cached_txn_result(Result, Miner, IgnoredTxns)->
             ok;
         false ->
           TxnList = get_cached_txns_with_exclusions(Miner, IgnoredTxns),
-          ct:pal("~p", [format_txn_list(TxnList)]),
+          ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)]),
           ct:fail("unexpected txns in txn_mgr cache for miner ~p",[Miner])
     end.
 
@@ -339,16 +339,3 @@ get_cached_txns_with_exclusions(Miner, Exclusions)->
                     not lists:member(blockchain_txn:type(Txn), Exclusions) end, Txns)
     end.
 
-format_txn_list(TxnList) ->
-    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
-                      TxnMod = blockchain_txn:type(Txn),
-                      TxnHash = blockchain_txn:hash(Txn),
-                      [
-                       {txn_type, atom_to_list(TxnMod)},
-                       {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
-                       {acceptions, length(Acceptions)},
-                       {rejections, length(Rejections)},
-                       {accepted_block_height, RecvBlockHeight},
-                       {active_dialers, length(_Dialers)}
-                      ]
-              end, TxnList).
