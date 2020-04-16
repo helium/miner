@@ -83,9 +83,11 @@ end_per_testcase(_TestCase, Config) ->
 single_payment_test(Config) ->
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = miner_ct_utils:node2addr(Payer, AddrList),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
 
     %% check initial balances
     %% FIXME: really need to be setting the balances elsewhere
@@ -159,8 +161,10 @@ single_payment_test(Config) ->
 
 self_payment_test(Config) ->
     Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     [Payer, Payee | _Tail] = Miners,
-    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = miner_ct_utils:node2addr(Payer, AddrList),
     PayeeAddr = PayerAddr,
 
     %% check initial balances
@@ -260,6 +264,7 @@ bad_payment_test(Config) ->
 
 dependent_payment_test(Config) ->
     Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
     Count = 50,
     Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Chain]),
@@ -273,16 +278,15 @@ dependent_payment_test(Config) ->
                         UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
                         SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
                         put(a_txn, {Miner, lists:last(SignedTxns)}),
-                        [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ]
+                        [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- lists:reverse(SignedTxns) ]
                 end, Miners),
 
 
     {AMiner, ATxn} = get(a_txn),
     ct:pal("txn_mgr txn_status ~p ", [ct_rpc:call(AMiner, blockchain_txn_mgr, txn_status, [blockchain_txn:hash(ATxn)])]),
-
     Result = miner_ct_utils:wait_until(fun() ->
                                              HaveNoncesIncremented = lists:map(fun(Miner) ->
-                                                               Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+                                                               Addr = miner_ct_utils:node2addr(Miner, AddrList),
                                                                Nonce = miner_ct_utils:get_nonce(Miner, Addr),
                                                                case Nonce == Count of
                                                                    true ->

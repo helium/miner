@@ -87,21 +87,22 @@ txn_in_sequence_nonce_test(Config) ->
     %% these should clear through the txn mgr right away without probs
     %% and txn mgr cache will clear
     Miner = hd(?config(non_consensus_miners, Config)),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     ConMiners = ?config(consensus_miners, Config),
     IgnoredTxns = [],
-    Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
-    PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, StartHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
@@ -140,21 +141,21 @@ txn_out_of_sequence_nonce_test(Config) ->
     %% this txn will only clear out after the second txn is submitted
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
 
     IgnoredTxns = [],
-    Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
-    PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, StartHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
@@ -213,20 +214,21 @@ txn_invalid_nonce_test(Config) ->
     %% the first because it is absorbed, the second because it is invalid
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     IgnoredTxns = [],
-    Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
-    PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, StartHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
@@ -276,21 +278,22 @@ txn_dependent_test(Config) ->
     %% confirm we dont have any strays in the txn mgr cache at the end of it
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
     Count = 50,
-    Addr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
-    PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+    PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
-    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     IgnoredTxns = [],
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, StartHeight} = ct_rpc:call(Miner, blockchain, height, [Chain]),
 
     %% send a bunch of dependant txns and ensure they are processed by the txn mgr
     %% and dont hang around it its cache

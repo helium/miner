@@ -654,14 +654,18 @@ init_per_testcase(Mod, TestCase, Config0) ->
                               end),
 
     %% accumulate the address of each miner
-    Addresses = lists:foldl(
+    MinerTaggedAddresses = lists:foldl(
         fun(Miner, Acc) ->
             Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
-            [Address | Acc]
+            [{Miner, Address} | Acc]
         end,
         [],
         Miners
     ),
+    %% save a version of the address list with the miner and address tuple
+    %% and then a version with just a list of addresses
+    {_Keys, Addresses} = lists:unzip(MinerTaggedAddresses),
+
     {ok, _} = ct_cover:add_nodes(Miners),
 
     %% wait until we get confirmation the miners are fully up
@@ -682,6 +686,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
         {addresses, Addresses},
+        {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
         {batch_size, BatchSize},
         {dkg_curve, Curve},
