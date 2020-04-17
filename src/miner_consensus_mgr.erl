@@ -103,7 +103,7 @@ group_predicate("dkg" ++ _ = Name) ->
         #{election_height := ElectionHeight} ->
             case string:tokens(Name, "-") of
                 [_Tag, _Hash, Height0, _Delay] ->
-                    lager:info("dkg pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    lager:debug("dkg pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
                 _ ->
@@ -119,11 +119,11 @@ group_predicate("consensus" ++ _ = Name) ->
         #{election_height := ElectionHeight} ->
             case string:tokens(Name, "_") of
                 [_Tag, Height0, _Delay, _Hash] ->
-                    lager:info("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    lager:debug("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
                 [_Tag, Height0, _Hash] ->
-                    lager:info("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    lager:debug("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
                 _ ->

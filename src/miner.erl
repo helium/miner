@@ -453,13 +453,12 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                seen_votes => SeenVectors,
                                bba_completion => BBA
                               }),
-                lager:debug("newblock ~p", [NewBlock]),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
-                lager:info("Worker:~p, Created Block: ~p, Txns: ~p",
-                           [self(), NewBlock, TxnsToInsert]),
+                lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
+                            [self(), NewBlock, TxnsToInsert]),
                 %% return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
                  Signature, TxnsToInsert, InvalidTransactions};
