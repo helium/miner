@@ -235,6 +235,9 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
                                ok ->
                                    lager:info("Election successful, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p!",
                                               [Height, Members, Proof, Delay]);
+                               {error, invalid} ->
+                                   %% we don't need to print anything for these nonce-style failures.
+                                   ok;
                                {error, Reason} ->
                                    lager:error("Election failed, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p, Reason: ~p",
                                                [Height, Members, Proof, Delay, Reason])
