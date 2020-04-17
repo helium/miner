@@ -709,7 +709,7 @@ end_per_testcase(TestCase, Config) ->
     end,
     {comment, done}.
 
-cleanup_per_testcase(TestCase, Config) ->
+cleanup_per_testcase(_TestCase, Config) ->
     Miners = ?config(miners, Config),
     BaseDir = ?config(base_dir, Config),
     LogDir = ?config(log_dir, Config),
@@ -959,18 +959,23 @@ wait_for_txn(Miners, PredFun, Timeout)->
     ok.
 
 format_txn_mgr_list(TxnList) ->
-    lists:map(fun({Txn, {_Callback, RecvBlockHeight, Acceptions, Rejections, _Dialers}}) ->
-                      TxnMod = blockchain_txn:type(Txn),
-                      TxnHash = blockchain_txn:hash(Txn),
+    maps:fold(fun(Txn, TxnData, Acc) ->
+                    TxnMod = blockchain_txn:type(Txn),
+                    TxnHash = blockchain_txn:hash(Txn),
+                    Acceptions = proplists:get_value(acceptions, TxnData, []),
+                    Rejections = proplists:get_value(rejections, TxnData, []),
+                    RecvBlockHeight = proplists:get_value(recv_block_height, TxnData, undefined),
+                    Dialers = proplists:get_value(dialers, TxnData, undefined),
                       [
-                       {txn_type, atom_to_list(TxnMod)},
+                       [{txn_type, atom_to_list(TxnMod)},
                        {txn_hash, io_lib:format("~p", [libp2p_crypto:bin_to_b58(TxnHash)])},
                        {acceptions, length(Acceptions)},
                        {rejections, length(Rejections)},
                        {accepted_block_height, RecvBlockHeight},
-                       {active_dialers, length(_Dialers)}
-                      ]
-              end, TxnList).
+                       {active_dialers, length(Dialers)}]
+                      | Acc]
+              end, [], TxnList).
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
