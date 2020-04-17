@@ -121,10 +121,10 @@ txn_in_sequence_nonce_test(Config) ->
     Result = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                [] -> true;
+                                                #{} -> true;
                                                 _ -> false
                                             end
-                                        end, 20, 5000),
+                                        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
@@ -173,15 +173,15 @@ txn_out_of_sequence_nonce_test(Config) ->
     Result1 = miner_ct_utils:wait_until(
         fun() ->
             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                [] -> true;
+                #{} -> true;
                 FilteredTxns ->
                     %% we expect the payment txn to remain as its nonce is too far ahead
                     case FilteredTxns of
-                        [{SignedTxn2, {_Callback, _RecvBlockHeight, _Acceptions, _Rejections, _Dialers}}] -> true;
+                        #{SignedTxn2 := _TxnData} -> true;
                         _ -> false
                     end
             end
-        end, 20, 5000),
+        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
 
     %% now submit the other txn which will have the missing nonce
@@ -194,10 +194,10 @@ txn_out_of_sequence_nonce_test(Config) ->
     Result2 = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                [] -> true;
+                                                #{} -> true;
                                                 _ -> false
                                             end
-                                        end, 20, 5000),
+                                        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
@@ -245,10 +245,10 @@ txn_invalid_nonce_test(Config) ->
     Result1 = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                [] -> true;
+                                                #{} -> true;
                                                 _ -> false
                                             end
-                                        end, 20, 5000),
+                                        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
 
     %% now send the second txn ( with the dup nonce )
@@ -259,10 +259,10 @@ txn_invalid_nonce_test(Config) ->
     Result2 = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                [] -> true;
+                                                #{} -> true;
                                                 _ -> false
                                             end
-                                        end, 20, 5000),
+                                        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
@@ -304,10 +304,10 @@ txn_dependent_test(Config) ->
     Result1 = miner_ct_utils:wait_until(
                                         fun()->
                                             case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                [] -> true;
+                                                #{} -> true;
                                                 _ -> false
                                             end
-                                        end, 60, 5000),
+                                        end, 60, 2000),
     ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
 
     %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
@@ -334,10 +334,10 @@ handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain)->
 
 get_cached_txns_with_exclusions(Miner, Exclusions)->
     case ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []) of
-        [] -> [];
+        #{} -> #{};
         Txns ->
-            lists:filter(
-                fun({Txn, {_Callback, _RecvBlockHeight, _Acceptions, _Rejections, _Dialers}})->
+            maps:filter(
+                fun(Txn, _TxnData)->
                     not lists:member(blockchain_txn:type(Txn), Exclusions) end, Txns)
     end.
 
@@ -350,4 +350,4 @@ nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners)->
                             Nonce == ExpectedNonce
                           end, ConMiners),
             [true] == lists:usort(HaveNoncesIncremented)
-        end, 100, 500).
+        end, 100, 1000).
