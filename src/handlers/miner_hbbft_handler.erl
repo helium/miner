@@ -401,7 +401,7 @@ enough_signatures(#state{sig_phase = Phase, artifact = Artifact, members = Membe
                 sig ->
                     case length(ValidSignatures) >= Threshold0 of
                         true ->
-                            {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+                            {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold0)};
                         false ->
                             {ok, gossip, lists:sort(ValidSignatures)}
                     end
