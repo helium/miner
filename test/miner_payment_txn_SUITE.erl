@@ -295,7 +295,7 @@ dependent_payment_test(Config) ->
                                                                        TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
                                                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
                                                                        H = ct_rpc:call(Miner, blockchain, height, [C]),
-                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [Miner, Nonce, length(TxnList), H]),
+                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [Miner, Nonce, maps:size(TxnList), H]),
                                                                        false
                                                                end
                                                        end, Miners),
