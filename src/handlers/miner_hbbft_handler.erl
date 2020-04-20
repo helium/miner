@@ -15,6 +15,7 @@
         ]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include("miner_util.hrl").
 
 -record(state,
         {
@@ -52,6 +53,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain]) ->
 init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
     %% if we're first starting up, we don't know anything about the
     %% metadata.
+    ?mark(init),
     Ledger0 = blockchain:ledger(Chain),
     Version = md_version(Ledger0),
     HBBFT = hbbft:init(SK, N, F, Id-1, BatchSize, 1500,
@@ -72,8 +74,10 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
         {_HBBFT, already_started} ->
+            ?mark(start_acs_already),
             {reply, ok, ignore};
         {NewHBBFT, {send, Msgs}} ->
+            ?mark(start_acs_new),
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
@@ -110,6 +114,7 @@ handle_command({skip, Ref, Worker}, State) ->
     Chain = blockchain_worker:blockchain(),
     Version = md_version(blockchain:ledger(Chain)),
     HBBFT = hbbft:set_stamp_fun(?MODULE, metadata, [Version, #{}, Chain], State#state.hbbft),
+    ?mark(skip),
     case hbbft:next_round(HBBFT) of
         {NextHBBFT, ok} ->
             Worker ! {Ref, ok},
@@ -128,6 +133,7 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
             %% transactions to remove any that have become invalid
             lager:info("Advancing from PreviousRound: ~p to NextRound ~p and emptying hbbft buffer",
                        [PrevRound, NextRound]),
+            ?mark(next_round),
             HBBFT1 =
                 case get(filtered) of
                     Done when Done == NextRound ->
@@ -195,6 +201,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
             NewState = State#state{signatures = Sigs},
             case enough_signatures(NewState) of
                 {ok, done, Signatures} when Round > NewState#state.signed ->
+                    ?mark(done_sigs),
                     %% no point in doing this more than once
                     ok = miner:signed_block(Signatures, State#state.artifact),
                     {NewState#state{signed = Round, sig_phase = done},
@@ -210,11 +217,13 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
                     case enough_signatures(NewState) of
                         {ok, done, Signatures} when Round > NewState#state.signed ->
+                            ?mark(done_sigs),
                             %% no point in doing this more than once
                             ok = miner:signed_block(Signatures, State#state.artifact),
                             {NewState#state{signed = Round, sig_phase = done},
                              [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                         {ok, gossip, Signatures} ->
+                            ?mark(gossip_sigs),
                             {NewState#state{sig_phase = gossip, signatures = Signatures},
                              [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                         _ ->
@@ -246,6 +255,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     Metadata = lists:map(fun({Id, BMap}) -> {Id, binary_to_term(BMap)} end, Metadata0),
                     Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus ~p ~p", [Index, Round]),
+                    ?mark(done_protocol),
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer
@@ -253,6 +263,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     Before = erlang:monotonic_time(millisecond),
                     case miner:create_block(Metadata, Txns, NewRound) of
                         {ok, Address, Artifact, Signature, PendingTxns, InvalidTxns} ->
+                            ?mark(block_success),
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
                             lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
@@ -266,9 +277,12 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             put(filtered, NewRound),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
                             BBA = make_bba(State#state.n, Metadata),
-                            {filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
-                                                           seen = Seen, artifact = Artifact}), fixup_msgs(Msgs)};
+                            State2 = filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
+                                                                   seen = Seen, artifact = Artifact}),
+                            ?mark(finalize_round),
+                            {State2, fixup_msgs(Msgs)};
                         {error, Reason} ->
+                            ?mark(block_failure),
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
                             lager:warning("failed to create new block ~p", [Reason]),
