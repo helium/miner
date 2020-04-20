@@ -153,7 +153,13 @@ handle_call({prefilter_round, Buf, PendingTxns}, _From, #state{chain = Chain} = 
     Ledger = blockchain:ledger(Chain),
     blockchain_ledger_v1:reset_context(Ledger),
     %% pre-seed the ledger with the pending txns from the next block
-    [ ok = blockchain_txn:absorb(P, Chain) || P <- PendingTxns ],
+    try
+        [ ok = blockchain_txn:absorb(P, Chain) || P <- PendingTxns ]
+    catch _:_ ->
+              %% if this doesn't work, it means the ledger advanced out from under us
+              %% so just reset the ledger and continue
+              blockchain_ledger_v1:reset_context(Ledger)
+    end,
     %% filter the buffer in light of the pending next block
     Buf2 = filter_txn_buffer(Buf, Chain),
     {reply, Buf2, State};
