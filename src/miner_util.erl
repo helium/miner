@@ -8,7 +8,8 @@
 -export([
          index_of/2,
          h3_index/3,
-         median/1
+         median/1,
+         mark/2
         ]).
 
 %%--------------------------------------------------------------------
@@ -43,4 +44,21 @@ median(List) ->
         true ->
             %% average the 2 middle values
             (lists:nth(Length div 2, Sorted) + lists:nth((Length div 2) + 1, Sorted)) div 2
+    end.
+
+mark(Module, Mark) ->
+    ActiveModules = application:get_env(miner, mark_mods, []),
+    case lists:member(Module, ActiveModules) of
+        true ->
+            case get({Module, mark}) of
+                undefined ->
+                    lager:info("starting ~p mark at ~p", [Module, Mark]),
+                    put({Module, mark}, {Mark, erlang:monotonic_time(millisecond)});
+                {Prev, Start} ->
+                    End = erlang:monotonic_time(millisecond),
+                    put({Module, mark}, {Mark, End}),
+                    lager:info("~p interval ~p to ~p was ~pms",
+                               [Module, Prev, Mark, End - Start])
+            end;
+        _ -> ok
     end.
