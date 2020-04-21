@@ -384,7 +384,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
-    lager:info("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
+    lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
     StampHashes =
         lists:foldl(fun({_, {Stamp, Hash}}, Acc) -> % old tuple vsn
@@ -453,13 +453,12 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                seen_votes => SeenVectors,
                                bba_completion => BBA
                               }),
-                lager:debug("newblock ~p", [NewBlock]),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
-                lager:info("Worker:~p, Created Block: ~p, Txns: ~p",
-                           [self(), NewBlock, TxnsToInsert]),
+                lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
+                            [self(), NewBlock, TxnsToInsert]),
                 %% return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
                  Signature, TxnsToInsert, InvalidTransactions};
@@ -517,7 +516,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         Txns = blockchain_block:transactions(Block),
                         case blockchain_election:has_new_group(Txns) of
                             false ->
-                                lager:info("reg round c ~p", [Height]),
+                                lager:debug("reg round c ~p", [Height]),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,

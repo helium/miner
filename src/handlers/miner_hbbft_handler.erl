@@ -237,19 +237,15 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
             case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
                 ignore -> ignore;
                 {NewHBBFT, ok} ->
-                    %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT, seen = Seen}, []};
                 {_, defer} ->
                     defer;
                 {NewHBBFT, {send, Msgs}} ->
-                    %lager:debug("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     {State#state{hbbft=NewHBBFT, seen = Seen}, fixup_msgs(Msgs)};
                 {NewHBBFT, {result, {transactions, Metadata0, BinTxns}}} ->
                     Metadata = lists:map(fun({Id, BMap}) -> {Id, binary_to_term(BMap)} end, Metadata0),
                     Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
                     lager:info("Reached consensus ~p ~p", [Index, Round]),
-                    %% lager:info("stamps ~p~n", [Stamps]),
-                    %lager:info("HBBFT Status: ~p", [hbbft:status(NewHBBFT)]),
                     %% send agreed upon Txns to the parent blockchain worker
                     %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
                     %% transactions depending on its buffer

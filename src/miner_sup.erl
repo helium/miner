@@ -94,15 +94,6 @@ init(_Args) ->
     ],
 
     %% Miner Options
-    Curve = application:get_env(miner, curve, 'SS512'),
-    BatchSize = application:get_env(miner, batch_size, 500),
-
-    ElectOpts =
-        [
-         {curve, Curve},
-         {batch_size, BatchSize}
-        ],
-
     POCOpts = #{
         base_dir => BaseDir
     },
@@ -136,7 +127,7 @@ init(_Args) ->
          ?SUP(blockchain_sup, [BlockchainOpts]),
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, []),
-         ?WORKER(miner_consensus_mgr, [ElectOpts])
+         ?WORKER(miner_consensus_mgr, [ignored])
         ] ++
         EbusServer ++
         OnionServer ++
