@@ -200,12 +200,15 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
             Sigs = dedup_signatures(Signatures, State),
             NewState = State#state{signatures = Sigs},
             case enough_signatures(NewState) of
-                {ok, done, Signatures} when Round > NewState#state.signed ->
+                {ok, done, MySignatures} when Round > NewState#state.signed ->
                     ?mark(done_sigs),
                     %% no point in doing this more than once
-                    ok = miner:signed_block(Signatures, State#state.artifact),
+                    ok = miner:signed_block(MySignatures, State#state.artifact),
                     {NewState#state{signed = Round, sig_phase = done},
-                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                     [{multicast, term_to_binary({signatures, Round, MySignatures})}]};
+                {ok, gossip, MySignatures} ->
+                    {NewState#state{sig_phase = gossip},
+                     [{multicast, term_to_binary({signatures, Round, MySignatures})}]};
                 _ ->
                     {NewState, []}
             end;
@@ -224,7 +227,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                              [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                         {ok, gossip, Signatures} ->
                             ?mark(gossip_sigs),
-                            {NewState#state{sig_phase = gossip, signatures = Signatures},
+                            {NewState#state{sig_phase = gossip},
                              [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                         _ ->
                             {NewState, []}
@@ -277,10 +280,22 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             put(filtered, NewRound),
                             Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
                             BBA = make_bba(State#state.n, Metadata),
-                            State2 = filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
-                                                                   seen = Seen, artifact = Artifact}),
+                            NewState = filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
+                                                                     signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature}),
+                                                                     seen = Seen, artifact = Artifact}),
                             ?mark(finalize_round),
-                            {State2, fixup_msgs(Msgs)};
+                            case enough_signatures(NewState) of
+                                {ok, done, Signatures} when Round > NewState#state.signed ->
+                                    %% no point in doing this more than once
+                                    ok = miner:signed_block(Signatures, State#state.artifact),
+                                    {NewState#state{signed = Round, sig_phase = done},
+                                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                                {ok, gossip, Signatures} ->
+                                    {NewState#state{sig_phase = gossip},
+                                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                                _ ->
+                                    {NewState, fixup_msgs(Msgs)}
+                            end;
                         {error, Reason} ->
                             ?mark(block_failure),
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
@@ -407,7 +422,7 @@ enough_signatures(#state{sig_phase = Phase, artifact = Artifact, members = Membe
             %% it should be ok as long as we disregard the signatures for testing equality but check them for validity
             case Phase of
                 gossip ->
-                    {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold)};
+                    {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold0)};
                 sig ->
                     case length(ValidSignatures) >= Threshold0 of
                         true ->
