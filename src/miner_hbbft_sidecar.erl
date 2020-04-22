@@ -74,7 +74,8 @@ init(State) ->
             erlang:send_after(500, self(), chain_check),
             {ok, State#state{}};
         Chain ->
-            Ledger = blockchain_ledger_v1:new_context(blockchain:ledger(Chain)),
+            Ledger0 = blockchain:ledger(Chain),
+            Ledger = blockchain_ledger_v1:new_context(Ledger0),
             Chain1 = blockchain:ledger(Ledger, Chain),
             {ok, State#state{chain = Chain1}}
     end.
