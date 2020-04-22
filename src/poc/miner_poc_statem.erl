@@ -394,7 +394,8 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
             lager:warning("poc no challenger location, back to requesting"),
             {next_state, requesting, save_data(Data#data{state=requesting, retry=?CHALLENGE_RETRY})};
         ChallengerLoc ->
-            Vars = blockchain_utils:vars_binary_keys_to_atoms(blockchain_ledger_v1:all_vars(Ledger)),
+            Vars = blockchain_utils:vars_binary_keys_to_atoms(
+                     maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
 
             case blockchain:config(?poc_version, Ledger) of
                 {ok, V} when V < 4 ->

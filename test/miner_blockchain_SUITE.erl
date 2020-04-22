@@ -26,7 +26,9 @@ all() -> [
           group_change_test,
           master_key_test,
           version_change_test,
-          election_v3_test
+          election_v3_test,
+          snapshot_test,
+          high_snapshot_test
          ].
 
 init_per_suite(Config) ->
@@ -59,6 +61,14 @@ init_per_testcase(TestCase, Config0) ->
             dkg_restart_test ->
                 #{?election_interval => 10,
                   ?election_restart_interval => 99};
+            T when T == snapshot_test;
+                   T == high_snapshot_test;
+                   T == group_change_test ->
+                #{?snapshot_version => 1,
+                  ?snapshot_interval => 5,
+                  ?election_bba_penalty => 0.01,
+                  ?election_seen_penalty => 0.05,
+                  ?election_version => 3};
             _ ->
                 #{}
         end,
@@ -91,7 +101,7 @@ init_per_testcase(TestCase, Config0) ->
     InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
+    DKGResults = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     %% Get both consensus and non consensus miners
@@ -120,7 +130,7 @@ restart_test(Config) ->
     %% wait till the chain reaches height 2 for all miners
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 60),
 
-    ok = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
+    Env = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
 
     [begin
           ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
@@ -130,7 +140,7 @@ restart_test(Config) ->
     %% just kill the consensus groups, we should be able to restore them
     ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
 
-    ok = miner_ct_utils:start_miners(lists:sublist(Miners, 1, 2)),
+    ok = miner_ct_utils:start_miners(Env),
 
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
@@ -160,7 +170,7 @@ dkg_restart_test(Config) ->
     %% make sure that everyone has accepted the epoch block
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 2),
 
-    miner_ct_utils:stop_miners(NCMiners ++ Stoppers, 60),
+    Stop1 = miner_ct_utils:stop_miners(NCMiners ++ Stoppers, 60),
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
@@ -169,15 +179,15 @@ dkg_restart_test(Config) ->
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
     ct:pal("stopping restarters ~p", [Restarters]),
-    miner_ct_utils:stop_miners(Restarters, 60),
+    Stop2 = miner_ct_utils:stop_miners(Restarters, 60),
 
     %% restore that half
     ct:pal("starting restarters ~p", [Restarters]),
-    miner_ct_utils:start_miners(Restarters, 60),
+    miner_ct_utils:start_miners(Stop2, 60),
 
     %% restore the last two
     ct:pal("starting blockers"),
-    miner_ct_utils:start_miners(NCMiners ++ Stoppers, 60),
+    miner_ct_utils:start_miners(Stop1, 60),
 
     %% make sure that we elect again
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3, any, 90),
@@ -228,7 +238,7 @@ election_test(Config) ->
 
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),
-    miner_ct_utils:stop_miners(TargetMiners),
+    Stop = miner_ct_utils:stop_miners(TargetMiners),
 
     %% confirm miner is stopped
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
@@ -237,7 +247,7 @@ election_test(Config) ->
     ok = miner_ct_utils:delete_dirs(BaseDir ++ "_{1,2,3,4}*", "/blockchain_swarm/groups/*"),
 
     %% start the stopped miners back up again
-    miner_ct_utils:start_miners(TargetMiners),
+    miner_ct_utils:start_miners(Stop),
 
     %% second: make sure we're not making blocks anymore
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -310,12 +320,12 @@ election_test(Config) ->
     %% stop some nodes and restart them to check group restore works
     StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
     ct:pal("stop list ~p", [StopList]),
-    miner_ct_utils:stop_miners(StopList),
+    Stop = miner_ct_utils:stop_miners(StopList),
 
     %% sleep a lil then start the nodes back up again
-    timer:sleep(5000),
+    timer:sleep(2000),
 
-    miner_ct_utils:start_miners(StopList),
+    miner_ct_utils:start_miners(Stop),
 
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1),
@@ -325,6 +335,7 @@ election_test(Config) ->
 group_change_test(Config) ->
     %% get all the miners
     Miners = ?config(miners, Config),
+    BaseDir = ?config(base_dir, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
 
     ?assertNotEqual([], ConsensusMiners),
@@ -358,17 +369,28 @@ group_change_test(Config) ->
     %% wait until height has increased by 20
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20, all, 80),
 
+    [{Target, TargetEnv}] = miner_ct_utils:stop_miners([lists:last(Miners)]),
+
+    Miners1 = Miners -- [Target],
+
+    ct:pal("stopped target: ~p", [Target]),
+
     %% make sure we still haven't executed it
     C = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     L = ct_rpc:call(hd(Miners), blockchain, ledger, [C]),
     {ok, Members} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, consensus_members, [L]),
     ?assertEqual(4, length(Members)),
 
-    %% alter the "version" for all of them.
+    %% take a snapshot to load *before* the threshold is processed
+    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {SnapshotBlockHeight, _SnapshotBlockHash, SnapshotHash} =
+        ct_rpc:call(hd(Miners), blockchain, find_last_snapshot, [Chain]),
+
+    %% alter the "version" for all of them that are up.
     lists:foreach(
       fun(Miner) ->
               ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
-      end, Miners),
+      end, Miners1),
 
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -377,11 +399,61 @@ group_change_test(Config) ->
                                NewVersion = ct_rpc:call(Miner, miner, test_version, [], 1000),
                                ct:pal("test version ~p ~p", [Miner, NewVersion]),
                                NewVersion > 1
-                       end, Miners)
+                       end, Miners1)
              end),
 
     %% wait for the change to take effect
-    ok = miner_ct_utils:wait_for_in_consensus(Miners, 7),
+    Timeout = 200,
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     lists:all(
+                       fun(Miner) ->
+                               C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                               L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
+                               case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
+                                   {ok, Sz} ->
+                                       ct:pal("size = ~p", [Sz]),
+                                       Sz == 7;
+                                   _ ->
+                                       %% badrpc
+                                       false
+                               end
+                       end, Miners1)
+             end, 120, 1000),
+
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{8}*/*", ""),
+    [EightDir] = filelib:wildcard(BaseDir ++ "_*{8}*"),
+
+    BlockchainR = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [BlockchainR]),
+
+    GenSer = blockchain_block:serialize(GenesisBlock),
+    ok = file:make_dir(EightDir ++ "/update"),
+    ok = file:write_file(EightDir ++ "/update/genesis", GenSer),
+
+    %% clean out everything from the stopped node
+
+    BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
+    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
+                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+
+    MinerEnv = proplists:get_value(miner, TargetEnv),
+    NewMinerEnv = [{update_dir, EightDir ++ "/update"} | MinerEnv],
+
+    NewTargetEnv0 = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
+    NewTargetEnv = lists:keyreplace(miner, 1, NewTargetEnv0, {miner, NewMinerEnv}),
+
+    %% restart it
+    miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
+
+    Swarm = ct_rpc:call(Target, blockchain_swarm, swarm, [], 2000),
+    [H|_] = ct_rpc:call(Target, libp2p_swarm, listen_addrs, [Swarm], 2000),
+
+    miner_ct_utils:pmap(
+      fun(M) ->
+              Sw = ct_rpc:call(M, blockchain_swarm, swarm, [], 2000),
+              ct_rpc:call(M, libp2p_swarm, connect, [Sw, H], 2000)
+      end, Miners1),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
@@ -393,6 +465,15 @@ group_change_test(Config) ->
     ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
     %% TODO: probably need to parameterize this via the delay
     ?assert(Height2 > Height + 20 + 10),
+
+    %% do some additional checks to make sure that we restored across.
+
+    ok = miner_ct_utils:wait_for_gte(height, [Target], Height2, all, 120),
+
+    TC = ct_rpc:call(Target, blockchain_worker, blockchain, [], Timeout),
+    TL = ct_rpc:call(Target, blockchain, ledger, [TC], Timeout),
+    {ok, TSz} = ct_rpc:call(Target, blockchain, config, [num_consensus_members, TL], Timeout),
+    ?assertEqual(TSz, 7),
 
     ok.
 
@@ -626,7 +707,7 @@ election_v3_test(Config) ->
     %% that block production is still happening
     StopList = lists:sublist(Miners, 7, 2),
     ct:pal("stop list ~p", [StopList]),
-    miner_ct_utils:stop_miners(StopList),
+    _Stop = miner_ct_utils:stop_miners(StopList),
 
     {ok, Start2} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
     %% try a skip to move past the occasional stuck group
@@ -673,6 +754,94 @@ election_v3_test(Config) ->
      || N <- lists:seq(Start2 + 2, Start2 + 10)],
 
     ok.
+
+snapshot_test(Config) ->
+    %% get all the miners
+    Miners0 = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
+
+    [Target | Miners] = Miners0,
+
+    ct:pal("target ~p", [Target]),
+
+    ?assertNotEqual([], ConsensusMiners),
+    ?assertEqual(7, length(ConsensusMiners)),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 7),
+    [{Target, TargetEnv}] = miner_ct_utils:stop_miners([Target]),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 15),
+    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {SnapshotBlockHeight, SnapshotBlockHash, SnapshotHash} =
+        ct_rpc:call(hd(Miners), blockchain, find_last_snapshot, [Chain]),
+    ?assert(is_binary(SnapshotHash)),
+    ?assert(is_binary(SnapshotBlockHash)),
+    ?assert(is_integer(SnapshotBlockHeight)),
+    ct:pal("Snapshot hash is ~p at height ~p~n in block ~p",
+           [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]),
+
+    BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
+    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
+                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
+
+    ct:pal("new blockchain env ~p", [NewTargetEnv]),
+
+    miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
+
+    timer:sleep(5000),
+    ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
+
+    ok = miner_ct_utils:wait_for_gte(height, Miners0, 25, all, 20),
+    ok.
+
+
+high_snapshot_test(Config) ->
+    %% get all the miners
+    Miners0 = ?config(miners, Config),
+    ConsensusMiners = ?config(consensus_miners, Config),
+
+    [Target | Miners] = Miners0,
+
+    ct:pal("target ~p", [Target]),
+
+    ?assertNotEqual([], ConsensusMiners),
+    ?assertEqual(7, length(ConsensusMiners)),
+
+    %% make sure that elections are rolling
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 7),
+    [{Target, TargetEnv}] = miner_ct_utils:stop_miners([Target]),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 70, all, 600),
+    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {SnapshotBlockHeight, SnapshotBlockHash, SnapshotHash} =
+        ct_rpc:call(hd(Miners), blockchain, find_last_snapshot, [Chain]),
+    ?assert(is_binary(SnapshotHash)),
+    ?assert(is_binary(SnapshotBlockHash)),
+    ?assert(is_integer(SnapshotBlockHeight)),
+    ct:pal("Snapshot hash is ~p at height ~p~n in block ~p",
+           [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]),
+
+    %% TODO: probably at this step we should delete all the blocks
+    %% that the downed node has
+
+
+    BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
+    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
+                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
+
+    ct:pal("new blockchain env ~p", [NewTargetEnv]),
+
+    miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
+
+    timer:sleep(5000),
+    ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
+
+    ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 20),
+    ok.
+
 
 
 

@@ -385,5 +385,7 @@ make_vars() ->
       ?min_assert_h3_res => 12,
       ?h3_neighbor_res => 12,
       ?h3_max_grid_distance => 120,
-      ?h3_exclusion_ring_dist => 6
+      ?h3_exclusion_ring_dist => 6,
+      ?snapshot_version => 1,
+      ?snapshot_interval => 5
      }.

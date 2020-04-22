@@ -346,6 +346,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
+    CurrentBlockHeight = blockchain_block:height(CurrentBlock),
+    NewHeight = CurrentBlockHeight + 1,
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
@@ -369,6 +371,31 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                     end,
                     [],
                     Metadata),
+    %% TODO what do we do about snapshot disagreements?
+    %% IIRC we had agreed to omit
+    SnapshotHash=
+        case blockchain:config(?snapshot_interval, blockchain:ledger(Chain)) of
+            {ok, Interval} ->
+                case (NewHeight - 1) rem Interval == 0 of
+                    true ->
+                        lager:info("XXX trying to add hash ~p", [NewHeight]),
+                        [SH] = lists:foldl(
+                                 fun({_Idx, #{snapshot_hash := SH}}, Acc) -> % new map vsn
+                                         lists:usort([SH | Acc]);
+                                    (_, Acc) ->
+                                         lists:usort([<<>> |Acc])
+                                 end,
+                                 [],
+                                 Metadata),
+                        SH;
+                    _ ->
+                        lager:info("XXX not the right round ~p", [NewHeight]),
+                        <<>>
+                end;
+            _ ->
+                lager:info("XXX not configured ~p", [NewHeight]),
+                <<>>
+        end,
     {Stamps, Hashes} = lists:unzip(StampHashes),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
@@ -377,14 +404,20 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
         case lists:usort(Hashes) of
             [CurrentBlockHash] ->
                 SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
-                CurrentBlockHeight = blockchain_block:height(CurrentBlock),
-                NewHeight = CurrentBlockHeight + 1,
+                lager:info("metadata snapshot hash for ~p is ~p", [NewHeight, SnapshotHash]),
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
-                LastBlockTimestamp = blockchain_block:time(CurrentBlock),
-                BlockTime = miner_util:median([ X || X <- Stamps,
-                                                     X > LastBlockTimestamp]),
-
+                LastBlockTime = blockchain_block:time(CurrentBlock),
+                BlockTime =
+                    case miner_util:median([ X || X <- Stamps,
+                                                  X >= LastBlockTime]) of
+                        0 ->
+                            LastBlockTime + 1;
+                        LastBlockTime ->
+                            LastBlockTime + 1;
+                        NewTime ->
+                            NewTime
+                    end,
                 {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, Chain),
 
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
@@ -414,7 +447,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                election_epoch => ElectionEpoch,
                                epoch_start => EpochStart,
                                seen_votes => SeenVectors,
-                               bba_completion => BBA
+                               bba_completion => BBA,
+                               snapshot_hash => SnapshotHash
                               }),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
