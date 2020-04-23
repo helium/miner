@@ -14,8 +14,6 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/0,
-    add_gateway_txn/4,
-    assert_loc_txn/6,
     p2p_status/0,
     block_age/0,
     relcast_info/1,
@@ -149,44 +147,6 @@ p2p_status() ->
                           {CheckPublicAddr, "dialable"},
                           {CheckNatType, "nat_type"},
                           {CheckHeight, "height"}]).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec add_gateway_txn(OwnerB58::string(),
-                      PayerB58::string(),
-                      Fee::pos_integer(),
-                      StakingFee::non_neg_integer()) -> {ok, binary()}.
-add_gateway_txn(OwnerB58, PayerB58, Fee, StakingFee) ->
-    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
-    Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Payer, StakingFee, Fee),
-    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
-    {ok, blockchain_txn:serialize(SignedTxn)}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec assert_loc_txn(H3String::string(),
-                     OwnerB58::string(),
-                     PayerB58::string(),
-                     Nonce::non_neg_integer(),
-                     StakingFee::pos_integer(),
-                     Fee::pos_integer()
-                    ) -> {ok, binary()}.
-assert_loc_txn(H3String, OwnerB58, PayerB58, Nonce, StakingFee, Fee) ->
-    H3Index = h3:from_string(H3String),
-    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
-    Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, Payer, H3Index, Nonce, StakingFee, Fee),
-    SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
-    {ok, blockchain_txn:serialize(SignedTxn)}.
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -52,9 +52,3 @@ devrel:
 
 devrelease:
 	$(REBAR) as dev release
-
-startdevrel:
-	./_build/default/rel/miner/bin/miner ping && ./_build/default/rel/miner/bin/miner restart || ./_build/default/rel/miner/bin/miner start
-
-stopdevrel:
-	./_build/default/rel/miner/bin/miner stop
