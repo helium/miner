@@ -300,7 +300,7 @@ dependent_payment_test(Config) ->
                                                                end
                                                        end, Miners),
                                              [true] == lists:usort(HaveNoncesIncremented)
-                                     end, 60, 5000),
+                                     end, 100, 5000),
     case Result of
         true ->
             ok;

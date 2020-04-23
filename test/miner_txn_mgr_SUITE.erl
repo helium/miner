@@ -350,4 +350,4 @@ nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners)->
                             Nonce == ExpectedNonce
                           end, ConMiners),
             [true] == lists:usort(HaveNoncesIncremented)
-        end, 100, 1000).
+        end, 200, 1000).
