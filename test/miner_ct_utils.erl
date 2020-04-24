@@ -59,8 +59,9 @@
          submit_txn/2,
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
          get_txn_block_details/2, get_txn_block_details/3,
-         get_txn/2
-
+         get_txn/2,
+         get_genesis_block/2,
+         load_genesis_block/3
         ]).
 
 
@@ -1000,3 +1001,49 @@ handle_gte_type(height_exactly, Miner, Threshold)->
     {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
     ct:pal("miner ~p height ~p Exact Threshold ~p", [Miner, Ht, Threshold]),
     Ht == Threshold.
+
+get_genesis_block(Miners, Config) ->
+    RPCTimeout = ?config(rpc_timeout, Config),
+    ct:pal("RPCTimeout: ~p", [RPCTimeout]),
+    %% obtain the genesis block
+    GenesisBlock = get_genesis_block_(Miners, RPCTimeout),
+    ?assertNotEqual(undefined, GenesisBlock),
+    GenesisBlock.
+
+get_genesis_block_([Miner|Miners], RPCTimeout) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+        {badrpc, Reason} ->
+            ct:fail(Reason),
+            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
+        undefined ->
+            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
+        Chain ->
+            {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain], RPCTimeout),
+            GBlock
+    end.
+
+load_genesis_block(GenesisBlock, Miners, Config) ->
+    RPCTimeout = ?config(rpc_timeout, Config),
+    %% load the genesis block on all the nodes
+    lists:foreach(
+        fun(Miner) ->
+                %% wait for the consensus manager to be booted
+                true = miner_ct_utils:wait_until(
+                  fun() ->
+                          is_boolean(ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout))
+                  end),
+                case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
+                    true ->
+                        ok;
+                    false ->
+                        Res = ct_rpc:call(Miner, blockchain_worker,
+                                          integrate_genesis_block, [GenesisBlock], RPCTimeout),
+                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res]);
+                    {badrpc, Reason} ->
+                        ct:pal("failed to load genesis block on ~p: ~p", [Miner, Reason])
+                end
+        end,
+        Miners
+    ),
+
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).

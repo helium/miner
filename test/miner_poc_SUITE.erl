@@ -666,10 +666,10 @@ setup_dist_test(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
     MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
-    GenesisBlock = get_genesis_block(Miners, Config),
+    GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
     miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000, lists:zip(RadioPorts, Locations)),
-    ok = load_genesis_block(GenesisBlock, Miners, Config),
+    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 10
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
@@ -739,53 +739,6 @@ initialize_chain(Miners, TestCase, Config, VarMap) ->
     ct:pal("results ~p", [DKGResults]),
     ?assert(lists:all(fun(Res) -> Res == ok end, DKGResults)),
     AddressesWithClaimedLocations.
-
-get_genesis_block(Miners, Config) ->
-    RPCTimeout = ?config(rpc_timeout, Config),
-    ct:pal("RPCTimeout: ~p", [RPCTimeout]),
-    %% obtain the genesis block
-    GenesisBlock = get_genesis_block_(Miners, RPCTimeout),
-    ?assertNotEqual(undefined, GenesisBlock),
-    GenesisBlock.
-
-get_genesis_block_([Miner|Miners], RPCTimeout) ->
-    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
-        {badrpc, Reason} ->
-            ct:fail(Reason),
-            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
-        undefined ->
-            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
-        Chain ->
-            {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain], RPCTimeout),
-            GBlock
-    end.
-
-
-load_genesis_block(GenesisBlock, Miners, Config) ->
-    RPCTimeout = ?config(rpc_timeout, Config),
-    %% load the genesis block on all the nodes
-    lists:foreach(
-        fun(Miner) ->
-                %% wait for the consensus manager to be booted
-                true = miner_ct_utils:wait_until(
-                  fun() ->
-                          is_boolean(ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout))
-                  end),
-                case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
-                    true ->
-                        ok;
-                    false ->
-                        Res = ct_rpc:call(Miner, blockchain_worker,
-                                          integrate_genesis_block, [GenesisBlock], RPCTimeout),
-                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res]);
-                    {badrpc, Reason} ->
-                        ct:pal("failed to load genesis block on ~p: ~p", [Miner, Reason])
-                end
-        end,
-        Miners
-    ),
-
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).
 
 find_requests(Miners) ->
     [M | _] = Miners,

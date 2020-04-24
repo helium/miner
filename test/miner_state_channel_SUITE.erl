@@ -51,14 +51,14 @@ init_per_testcase(_TestCase, Config0) ->
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
 
-    SCVars = #{max_open_sc => 2,
-               min_expire_within => 10,
-               max_xor_filter_size => 1024*100,
-               max_xor_filter_num => 5,
-               max_subnet_size => 65536,
-               min_subnet_size => 8,
-               max_subnet_num => 20,
-               sc_grace_blocks => 5},
+    SCVars = #{?max_open_sc => 2,                    %% Max open state channels per router, set to 2
+               ?min_expire_within => 10,             %% Min state channel expiration (# of blocks)
+               ?max_xor_filter_size => 1024*100,     %% Max xor filter size, set to 1024*100
+               ?max_xor_filter_num => 5,             %% Max number of xor filters, set to 5
+               ?max_subnet_size => 65536,            %% Max subnet size
+               ?min_subnet_size => 8,                %% Min subnet size
+               ?max_subnet_num => 20,                %% Max subnet num
+               ?sc_grace_blocks => 5},               %% Grace period (in num of blocks) for state channels to get GCd
 
     DefaultVars = #{?block_time => BlockTime,
                     %% rule out rewards
@@ -109,6 +109,8 @@ no_packets_expiry_test(Config) ->
     ct:pal("Height before oui: ~p", [miner_ct_utils:height(RouterNode)]),
 
     EUIs = [{16#deadbeef, 16#deadc0de}],
+    %% Construct an exor filter to check membership where to route a packet based on their deveui and appeui
+    %% Additionaly hash the inputs and convert the filter to a binary for sending over the wire
     {Filter, _} = xor16:to_bin(xor16:new([ <<DevEUI:64/integer-unsigned-little,
                                              AppEUI:64/integer-unsigned-little>> || {DevEUI, AppEUI} <- EUIs],
                                          fun xxhash:hash64/1)),
