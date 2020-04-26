@@ -70,8 +70,9 @@ stop_miners(Miners) ->
 
 stop_miners(Miners, Retries) ->
     [begin
-          ct_rpc:call(Miner, application, stop, [miner], 300),
-          ct_rpc:call(Miner, application, stop, [blockchain], 300)
+         ct_rpc:call(Miner, application, stop, [blockchain], 300),
+         ct_rpc:call(Miner, application, stop, [miner], 300)
+
      end
      || Miner <- Miners],
     ok = miner_ct_utils:wait_for_app_stop(Miners, miner, Retries),
@@ -205,8 +206,8 @@ wait_for_gte(height_exactly = Type, Miners, Threshold)->
     wait_for_gte(Type, Miners, Threshold, all, 60).
 
 wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
-    Res = ?assertAsync(begin
-                     Result = lists:Mod(
+    Res = ?noAssertAsync(begin
+                     lists:Mod(
                         fun(Miner) ->
                              try
                                  handle_gte_type(Type, Miner, Threshold)
@@ -214,13 +215,13 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
                                      false
                              end
                         end, miner_ct_utils:shuffle(Miners))
-                 end,
-        Result == true, Retries, timer:seconds(1)),
-
+                    end,
+        Retries, timer:seconds(1)),
     case Res of
         true -> ok;
         false -> {error, false}
     end.
+
 
 wait_for_registration(Miners, Mod) ->
     wait_for_registration(Miners, Mod, 300).
@@ -317,7 +318,7 @@ wait_for_chain_var_update(Miners, Key, Value, Timeout)->
 delete_dirs(DirWildcard, SubDir)->
     Dirs = filelib:wildcard(DirWildcard),
     [begin
-         ct:pal("rm dir ~s", [Dir]),
+         ct:pal("rm dir ~s", [Dir ++ SubDir]),
          os:cmd("rm -r " ++ Dir ++ SubDir)
      end
      || Dir <- Dirs],
