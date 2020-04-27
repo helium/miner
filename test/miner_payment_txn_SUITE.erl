@@ -16,14 +16,16 @@
 
 -export([
          single_payment_test/1,
-         self_payment_test/1
+         self_payment_test/1,
+         bad_payment_test/1
         ]).
 
 %% common test callbacks
 
 all() -> [
           single_payment_test,
-          self_payment_test
+          self_payment_test,
+          bad_payment_test
          ].
 
 init_per_suite(Config) ->
@@ -53,7 +55,8 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?election_interval => infinity,
                                                    ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+                                                   ?dkg_curve => Curve,
+                                                   ?allow_zero_amount => false}),
 
     DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
@@ -159,7 +162,6 @@ self_payment_test(Config) ->
     PayeeAddr = PayerAddr,
 
     %% check initial balances
-    %% FIXME: really need to be setting the balances elsewhere
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
@@ -197,8 +199,59 @@ self_payment_test(Config) ->
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
 
+bad_payment_test(Config) ->
+    Miners = ?config(miners, Config),
+    [Payer, Payee | _Tail] = Miners,
+    PayerAddr = ct_rpc:call(Payer, blockchain_swarm, pubkey_bin, []),
+    PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+
+    %% check initial balances
+    5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
+    5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
+
+    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
+
+    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
+
+    %% Create a zero amount payment txn
+    Amount = 0,
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount, Fee, 1]),
+
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+
+    SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
+
+    {error, invalid_transaction} = ct_rpc:call(Payer, blockchain_txn, is_valid, [SignedTxn, Chain]),
+
+    %% Create a negative amount payment txn
+    Amount2 = -100,
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount2, Fee, 1]),
+
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+
+    SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+
+    {error, invalid_transaction} = ct_rpc:call(Payer, blockchain_txn, is_valid, [SignedTxn2, Chain]),
+
+    ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn2]),
+
+    %% XXX: presumably the transaction wouldn't have made it to the blockchain yet
+    %% get the current height here
+    Chain2 = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
+    {ok, CurrentHeight} = ct_rpc:call(Payer, blockchain, height, [Chain2]),
+
+    %% XXX: wait till the blockchain grows by 2 blocks
+    %% assuming that the transaction makes it within 2 blocks
+    miner_ct_utils:wait_for_gte(height, Miners, CurrentHeight + 2),
 
 
-%% ------------------------------------------------------------------
-%% Local Helper functions
-%% ------------------------------------------------------------------
+    PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
+    PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
+
+    %% No change in balances since the payment should have failed, fee=0 anyway
+    5000 = PayerBalance + Fee,
+    5000 = PayeeBalance,
+
+    ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
+    ok.

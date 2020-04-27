@@ -1,0 +1,1 @@
+-define(mark(Mark), miner_util:mark(?MODULE, Mark)).
