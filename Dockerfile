@@ -1,4 +1,4 @@
-FROM erlang:22.3.2-alpine as builder
+FROM arm64v8/erlang:22.3.2-alpine as builder
 
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
@@ -24,9 +24,10 @@ RUN mkdir -p /opt/rel/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/rel/update/genesis
 
-FROM erlang:22.3.2-alpine as runner
+FROM arm64v8/erlang:22.3.2-alpine as runner
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
+RUN ulimit -n 64000
 
 WORKDIR /opt/miner
 
@@ -36,5 +37,4 @@ ENV COOKIE=miner \
 
 COPY --from=builder /opt/rel /opt/miner
 
-ENTRYPOINT ["/opt/miner/bin/miner"]
-CMD ["foreground"]
+CMD tail -f /dev/null
