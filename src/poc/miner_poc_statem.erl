@@ -43,7 +43,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
 -define(SERVER, ?MODULE).
--define(MINING_TIMEOUT, 5).
+-define(MINING_TIMEOUT, 30).
 -define(CHALLENGE_RETRY, 3).
 -define(RECEIVING_TIMEOUT, 10).
 -define(RECEIPTS_TIMEOUT, 10).
@@ -74,7 +74,8 @@
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
-    poc_restarts = ?POC_RESTARTS :: non_neg_integer()
+    poc_restarts = ?POC_RESTARTS :: non_neg_integer(),
+    txn_ref = make_ref() :: reference()
 }).
 
 -type state() :: requesting | mining | receiving | waiting.
@@ -176,11 +177,13 @@ requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
                             <<ID:10/binary, _/binary>> = libp2p_crypto:pubkey_to_bin(PubKey),
                             lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
                             lager:info("request allowed @ ~p", [BlockHash]),
-                            ok = blockchain_worker:submit_txn(Txn),
+                            Self = self(),
+                            TxnRef = make_ref(),
+                            ok = blockchain_worker:submit_txn(Txn, fun(Result) -> Self ! {TxnRef, Result} end),
                             lager:info("submitted poc request ~p", [Txn]),
                             {next_state, mining, save_data(Data#data{state=mining, secret=Secret,
                                                                      onion_keys=Keys, responses=#{},
-                                                                     poc_hash=BlockHash})}
+                                                                     poc_hash=BlockHash, txn_ref=TxnRef})}
                     end;
                 true ->
                     handle_event(info, Msg, Data)
@@ -206,6 +209,9 @@ mining(enter, _State, Data)->
     {keep_state, Data};
 mining(info, Msg, #data{blockchain=undefined}=Data) ->
     handle_event(info, Msg, Data);
+mining(info, {TxnRef, Result}, #data{txn_ref=TxnRef}=Data) ->
+    lager:info("PoC request submission result ~p", [Result]),
+    {keep_state, Data};
 mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
        #data{blockchain = _Chain, address = Challenger,
              mining_timeout = MiningTimeout, secret = Secret} = Data) ->
@@ -220,13 +226,13 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
-                                Data#data{mining_timeout = ?MINING_TIMEOUT});
+                                Data#data{mining_timeout = Data#data.poc_interval});
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
                     {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
                 false ->
-                    lager:error("did not see PoC request in last ~p block, giving up on this POC", [?MINING_TIMEOUT]),
+                    lager:error("did not see PoC request in last ~p block, giving up on this POC", [Data#data.poc_interval]),
                     {next_state, requesting, save_data(Data#data{state=requesting})}
             end
     end;
@@ -250,8 +256,8 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
             {next_state, requesting, save_data(Data#data{state=requesting})};
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
-            ok = submit_receipts(Data),
-            {next_state, waiting, save_data(Data#data{state=waiting})}
+            Ref = submit_receipts(Data),
+            {next_state, waiting, save_data(Data#data{state=waiting, txn_ref=Ref})}
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
@@ -341,6 +347,9 @@ waiting(enter, _State, Data)->
 waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
     {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+waiting(info, {TxnRef, Result}, #data{txn_ref=TxnRef}=Data) ->
+    lager:info("PoC receipt submission result ~p", [Result]),
+    {keep_state, Data};
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
@@ -630,7 +639,6 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                             lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
                             true;
                         LastChallenge ->
-                            lager:info("got block ~p @ height ~p (~p)", [BlockHash, Height, LastChallenge]),
                             case (Height - LastChallenge) > POCInterval of
                                 true -> 1 == rand:uniform(trunc(POCInterval / 4));
                                 false -> false
@@ -686,7 +694,7 @@ find_request(BlockHash, #data{blockchain=Blockchain,
             end
     end.
 
--spec submit_receipts(data()) -> ok.
+-spec submit_receipts(data()) -> reference().
 submit_receipts(#data{address=Challenger,
                       responses=Responses0,
                       secret=Secret,
@@ -707,7 +715,10 @@ submit_receipts(#data{address=Challenger,
     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     lager:info("submitting blockchain_txn_poc_receipts_v1 ~p", [Txn0]),
-    ok = blockchain_worker:submit_txn(Txn1).
+    TxnRef = make_ref(),
+    Self = self(),
+    blockchain_worker:submit_txn(Txn1, fun(Result) -> Self ! {TxnRef, Result} end),
+    TxnRef.
 
 
 -spec find_receipts(binary(), data()) -> ok | {error, any()}.
