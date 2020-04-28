@@ -118,9 +118,13 @@ handle_command({skip, Ref, Worker}, State) ->
     case hbbft:next_round(HBBFT) of
         {NextHBBFT, ok} ->
             Worker ! {Ref, ok},
-            {reply, ok, [new_epoch], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}};
+            {reply, ok, [new_epoch],
+             State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
+                         bba = <<>>, seen = #{}}};
         {NextHBBFT, {send, NextMsgs}} ->
-            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent}}
+            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)],
+             State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
+                         bba = <<>>, seen = #{}}}
     end;
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
@@ -288,20 +292,20 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                                 {ok, done, Signatures} when Round > NewState#state.signed ->
                                     %% no point in doing this more than once
                                     ok = miner:signed_block(Signatures, State#state.artifact),
-                                    {NewState#state{signed = Round, sig_phase = done},
+                                    {NewState#state{signed = Round, sig_phase = done, seen = Seen},
                                      [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                                 {ok, gossip, Signatures} ->
-                                    {NewState#state{sig_phase = gossip},
+                                    {NewState#state{sig_phase = gossip, seen = Seen},
                                      [{multicast, term_to_binary({signatures, Round, Signatures})}]};
                                 _ ->
-                                    {NewState, fixup_msgs(Msgs)}
+                                    {NewState#state{seen = Seen}, fixup_msgs(Msgs)}
                             end;
                         {error, Reason} ->
                             ?mark(block_failure),
                             %% this is almost certainly because we got the new block gossipped before we completed consensus locally
                             %% which is harmless
                             lager:warning("failed to create new block ~p", [Reason]),
-                            {State#state{hbbft=NewHBBFT}, []}
+                            {State#state{hbbft=NewHBBFT, seen = Seen}, []}
                     end
             end
     end.
