@@ -142,8 +142,7 @@ restart_test(Config) ->
 dkg_restart_test(Config) ->
     Miners = ?config(miners, Config),
     Interval = ?config(election_interval, Config),
-
-    AddrList = miner_ct_utils:addr_list(Miners),
+    AddrList = ?config(tagged_miner_addresses, Config),
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
@@ -191,7 +190,7 @@ election_test(Config) ->
     BaseDir = ?config(base_dir, Config),
     %% get all the miners
     Miners = ?config(miners, Config),
-    AddrList = miner_ct_utils:addr_list(Miners),
+    AddrList = ?config(tagged_miner_addresses, Config),
 
     Me = self(),
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
