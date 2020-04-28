@@ -16,7 +16,7 @@ steps:
       queue: "erlang"
     commands:
       - "git fetch -t"
-      - "./buildkite/scripts/make_docker.sh"
+      - ".buildkite/scripts/make_docker.sh"
 
 
 
