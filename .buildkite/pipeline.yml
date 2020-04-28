@@ -1,7 +1,7 @@
 steps:
   - commands:
       - ". $HOME/.asdf/asdf.sh"
-      - "asdf local erlang 21.3"
+      - "asdf local erlang 22.1.8"
       - "make compile"
       - "make ci"
     name: ":hammer: build"

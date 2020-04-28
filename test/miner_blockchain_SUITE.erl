@@ -224,7 +224,8 @@ election_test(Config) ->
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3, any, 90),
+    %% we wait until we have seen all miners hit an epoch of 3
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 3, all, 90),
 
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),
@@ -234,7 +235,7 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
 
     %% delete the groups
-    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2,3,4}*", "/blockchain_swarm/groups/*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_{1,2,3,4}*", "/blockchain_swarm/groups/*"),
 
     %% start the stopped miners back up again
     miner_ct_utils:start_miners(TargetMiners),
@@ -243,8 +244,8 @@ election_test(Config) ->
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
-    %% wait until height has increased by 5
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
+    %% height might go up by one, but it should not go up by 5
+    {_, false} = miner_ct_utils:wait_for_gte(height, Miners, Height + 5),
 
     %% third: mint and submit the rescue txn, shrinking the group at
     %% the same time.
@@ -254,7 +255,9 @@ election_test(Config) ->
 
     HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, HeadBlock} = ct_rpc:call(hd(Miners), blockchain, head_block, [HChain2]),
+
     NewHeight = blockchain_block:height(HeadBlock) + 1,
+    ct:pal("new height is ~p", [NewHeight]),
     Hash = blockchain_block:hash_block(HeadBlock),
 
     Vars = #{num_consensus_members => 4},
@@ -266,10 +269,9 @@ election_test(Config) ->
     VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
 
     {ElectionEpoch, _EpochStart} = blockchain_block_v1:election_info(HeadBlock),
+    ct:pal("current election epoch: ~p", [ElectionEpoch]),
 
     GrpTxn = blockchain_txn_consensus_group_v1:new(NewGroup, <<>>, Height, 0),
-
-    ct:pal("new height is ~p", [NewHeight]),
 
     RescueBlock = blockchain_block_v1:rescue(
                     #{prev_hash => Hash,
@@ -298,10 +300,10 @@ election_test(Config) ->
     ct:pal("FirstNode Swarm: ~p", [Swarm]),
     N = length(Miners),
     ct:pal("N: ~p", [N]),
-     _ = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [Swarm, SignedBlock, Chain, self()]),
+    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain, self()]),
 
-    %% wait until height has increased by 5
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
+    %% wait until height has increased by 3
+    ok = miner_ct_utils:wait_for_gte(height, Miners, NewHeight),
 
     %% check consensus and non consensus miners
     {NewConsensusMiners, NewNonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
@@ -311,15 +313,13 @@ election_test(Config) ->
     ct:pal("stop list ~p", [StopList]),
     miner_ct_utils:stop_miners(StopList),
 
-
-    %% sleel a lil then start the nodes back up again
+    %% sleep a lil then start the nodes back up again
     timer:sleep(5000),
 
     miner_ct_utils:start_miners(StopList),
 
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1),
-
     ok.
 
 
