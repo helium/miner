@@ -254,7 +254,7 @@ basic_test(Config) ->
 
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
-    meck:expect(blockchain_worker, submit_txn, fun(Txn) ->
+    meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
         add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
@@ -270,7 +270,7 @@ basic_test(Config) ->
     meck:new(blockchain_txn_poc_receipts_v1, [passthrough]),
     meck:expect(blockchain_txn_poc_receipts_v1, is_valid, fun(_, _) -> ok end),
 
-    ?assertEqual(5, erlang:element(14, erlang:element(2, sys:get_state(Statem)))),
+    ?assertEqual(30, erlang:element(14, erlang:element(2, sys:get_state(Statem)))),
 
     % Add some block to start process
     ok = add_block(Chain, ConsensusMembers, []),
@@ -408,7 +408,7 @@ restart_test(Config) ->
 
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
-    meck:expect(blockchain_worker, submit_txn, fun(Txn) ->
+    meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
         add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
@@ -424,7 +424,7 @@ restart_test(Config) ->
     meck:new(blockchain_txn_poc_receipts_v1, [passthrough]),
     meck:expect(blockchain_txn_poc_receipts_v1, is_valid, fun(_, _) -> ok end),
 
-    ?assertEqual(5, erlang:element(14, erlang:element(2, sys:get_state(Statem0)))),
+    ?assertEqual(30, erlang:element(14, erlang:element(2, sys:get_state(Statem0)))),
 
     % Add some block to start process
     ok = add_block(Chain, ConsensusMembers, []),
