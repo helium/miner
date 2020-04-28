@@ -9,3 +9,14 @@ steps:
       queue: "erlang"
     artifact_paths:
       - "artifacts/*"
+
+  - if: build.tag != null
+    name: ":whale: docker"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - "./buildkite/scripts/make_docker.sh"
+
+
+
