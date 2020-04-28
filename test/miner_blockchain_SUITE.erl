@@ -615,9 +615,7 @@ election_v3_test(Config) ->
                          ?assertNotEqual(<<>>, blockchain_block_v1:bba_completion(Block));
                      %% first post-election block has no info
                      _ ->
-                         ?assertEqual([{0,<<>>}, {1,<<>>}, {2,<<>>}, {3,<<>>}, {4,<<>>},
-                                       {5,<<>>}, {6,<<>>}],
-                                      blockchain_block_v1:seen_votes(Block)),
+                         ?assertEqual([<<>>], lists:usort([X || {_, X} <- blockchain_block_v1:seen_votes(Block)])),
                          ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
                  end
          end
