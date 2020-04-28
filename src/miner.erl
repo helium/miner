@@ -14,8 +14,6 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/0,
-    add_gateway_txn/4,
-    assert_loc_txn/6,
     p2p_status/0,
     block_age/0,
     relcast_info/1,
@@ -154,44 +152,6 @@ p2p_status() ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec add_gateway_txn(OwnerB58::string(),
-                      PayerB58::string(),
-                      Fee::pos_integer(),
-                      StakingFee::non_neg_integer()) -> {ok, binary()}.
-add_gateway_txn(OwnerB58, PayerB58, Fee, StakingFee) ->
-    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
-    Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_add_gateway_v1:new(Owner, PubKeyBin, Payer, StakingFee, Fee),
-    SignedTxn = blockchain_txn_add_gateway_v1:sign_request(Txn, SigFun),
-    {ok, blockchain_txn:serialize(SignedTxn)}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
--spec assert_loc_txn(H3String::string(),
-                     OwnerB58::string(),
-                     PayerB58::string(),
-                     Nonce::non_neg_integer(),
-                     StakingFee::pos_integer(),
-                     Fee::pos_integer()
-                    ) -> {ok, binary()}.
-assert_loc_txn(H3String, OwnerB58, PayerB58, Nonce, StakingFee, Fee) ->
-    H3Index = h3:from_string(H3String),
-    Owner = libp2p_crypto:b58_to_bin(OwnerB58),
-    Payer = libp2p_crypto:b58_to_bin(PayerB58),
-    {ok, PubKey, SigFun, _ECDHFun} =  libp2p_swarm:keys(blockchain_swarm:swarm()),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Txn = blockchain_txn_assert_location_v1:new(PubKeyBin, Owner, Payer, H3Index, Nonce, StakingFee, Fee),
-    SignedTxn = blockchain_txn_assert_location_v1:sign_request(Txn, SigFun),
-    {ok, blockchain_txn:serialize(SignedTxn)}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 relcast_info(Group) ->
     Mod = case Group of
@@ -247,10 +207,11 @@ relcast_queue(Group) ->
                    Txns :: blockchain_txn:txns(),
                    HBBFTRound :: non_neg_integer())
                   -> {ok,
-                      libp2p_crypto:pubkey_bin(),
-                      binary(),
-                      binary(),
-                      blockchain_txn:txns()} |
+                      Address :: libp2p_crypto:pubkey_bin(),
+                      UsignedBinaryBlock :: binary(),
+                      Signature :: binary(),
+                      PendingTxns :: blockchain_txn:txns(),
+                      InvalidTxns :: blockchain_txn:txns()} |
                      {error, term()}.
 create_block(Metadata, Txns, HBBFTRound) ->
     try
@@ -383,7 +344,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
-    lager:info("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
+    lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
     StampHashes =
         lists:foldl(fun({_, {Stamp, Hash}}, Acc) -> % old tuple vsn
@@ -452,16 +413,15 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                seen_votes => SeenVectors,
                                bba_completion => BBA
                               }),
-                lager:debug("newblock ~p", [NewBlock]),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
-                lager:info("Worker:~p, Created Block: ~p, Txns: ~p",
-                           [self(), NewBlock, TxnsToInsert]),
+                lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
+                            [self(), NewBlock, TxnsToInsert]),
                 %% return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
-                 Signature, TxnsToInsert ++ InvalidTransactions};
+                 Signature, TxnsToInsert, InvalidTransactions};
             [_OtherBlockHash] ->
                 {error, stale_hash};
             List ->
@@ -516,7 +476,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                         Txns = blockchain_block:transactions(Block),
                         case blockchain_election:has_new_group(Txns) of
                             false ->
-                                lager:info("reg round c ~p", [Height]),
+                                lager:debug("reg round c ~p", [Height]),
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,

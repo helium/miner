@@ -9,7 +9,8 @@
          start_link/0,
          submit/1,
          set_group/1,
-         new_round/2
+         new_round/2,
+         prefilter_round/2
         ]).
 
 %% gen_server callbacks
@@ -53,8 +54,13 @@ set_group(Group) ->
     lager:debug("setting group to ~p", [Group]),
     gen_server:call(?SERVER, {set_group, Group}, infinity).
 
-new_round(Buf, Txns) ->
-    gen_server:call(?SERVER, {new_round, Buf, Txns}, infinity).
+-spec new_round([binary()], [binary()]) -> [binary()].
+new_round(Buf, BinTxns) ->
+    gen_server:call(?SERVER, {new_round, Buf, BinTxns}, infinity).
+
+-spec prefilter_round([binary()], blockchain_txn:txns()) -> [binary()].
+prefilter_round(Buf, Txns) ->
+    gen_server:call(?SERVER, {prefilter_round, Buf, Txns}, infinity).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -141,6 +147,23 @@ handle_call({new_round, Buf, RemoveTxns}, _From, #state{chain = Chain} = State) 
     Buf1 = Buf -- RemoveTxns,
     Buf2 = filter_txn_buffer(Buf1, Chain),
     {reply, Buf2, State};
+handle_call({prefilter_round, _Buf, _RemoveTxns}, _From, #state{chain = undefined} = State) ->
+    {reply, [], State};
+handle_call({prefilter_round, Buf, PendingTxns}, _From, #state{chain = Chain} = State) ->
+    Ledger = blockchain:ledger(Chain),
+    blockchain_ledger_v1:reset_context(Ledger),
+    %% pre-seed the ledger with the pending txns from the next block
+    try
+        [ ok = blockchain_txn:absorb(P, Chain) || P <- PendingTxns ]
+    catch _:_ ->
+              %% if this doesn't work, it means the ledger advanced out from under us
+              %% so just reset the ledger and continue
+              blockchain_ledger_v1:reset_context(Ledger)
+    end,
+    %% filter the buffer in light of the pending next block
+    Buf2 = filter_txn_buffer(Buf, Chain),
+    {reply, Buf2, State};
+
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
     Reply = ok,

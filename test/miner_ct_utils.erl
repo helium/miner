@@ -281,9 +281,15 @@ wait_for_in_consensus(Miners, NumInConsensus, Timeout)->
                          fun(Miner) ->
                              C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
                              L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
-                             {ok, Sz} = ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout),
-                             ct:pal("size ~p", [Sz]),
-                             true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+
+                             case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
+                                 {ok, Sz} ->
+                                     ct:pal("size ~p", [Sz]),
+                                     true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []);
+                                 _ ->
+                                     %% badrpc
+                                     false
+                             end
                          end, Miners)
                  end,
         NumInConsensus == length(Result), 60, timer:seconds(1)),
