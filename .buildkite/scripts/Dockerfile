@@ -1,5 +1,7 @@
 FROM arm64v8/erlang:22.3.2-alpine as builder
 
+COPY qemu-arm-static /usr/bin
+
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
     dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
@@ -26,6 +28,8 @@ RUN cp genesis /opt/rel/update/genesis
 
 FROM arm64v8/erlang:22.3.2-alpine as runner
 
+COPY qemu-arm-static /usr/bin
+
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
 
@@ -37,4 +41,4 @@ ENV COOKIE=miner \
 
 COPY --from=builder /opt/rel /opt/miner
 
-CMD tail -f /dev/null
+#CMD tail -f /dev/null
