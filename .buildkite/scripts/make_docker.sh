@@ -1,4 +1,6 @@
-et -euo pipefail
+#!/bin/bash
+
+set -euo pipefail
 
 MINER_REGISTRY_NAME="quay.io/team-helium/miner"
 DOCKER_NAME="$(basename $(pwd))_${BUILDKITE_TAG}"
