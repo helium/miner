@@ -1,6 +1,6 @@
 FROM arm64v8/erlang:22.3.2-alpine as builder
 
-COPY qemu-arm-static /usr/bin
+COPY /usr/bin/qemu-arm-static /usr/bin
 
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
@@ -28,7 +28,7 @@ RUN cp genesis /opt/rel/update/genesis
 
 FROM arm64v8/erlang:22.3.2-alpine as runner
 
-COPY qemu-arm-static /usr/bin
+COPY /usr/bin/qemu-arm-static /usr/bin
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
