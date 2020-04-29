@@ -1,7 +1,5 @@
 FROM arm64v8/erlang:22.3.2-alpine as builder
 
-COPY /usr/bin/qemu-arm-static /usr/bin
-
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
     dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
@@ -27,8 +25,6 @@ RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/rel/update/genesis
 
 FROM arm64v8/erlang:22.3.2-alpine as runner
-
-COPY /usr/bin/qemu-arm-static /usr/bin
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
