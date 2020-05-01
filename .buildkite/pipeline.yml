@@ -11,13 +11,25 @@ steps:
       - "artifacts/*"
 
   - if: build.tag != null
-    name: ":whale: docker"
+    name: ":whale: ARM64 docker"
     agents:
       queue: "erlang"
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_arm64_docker.sh"
+
+  - if: build.tag != null
+    name: ":whale: ARM32 docker"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
       - ".buildkite/scripts/make_arm32_docker.sh"
 
-
-
+  - if: build.tag != null
+    name: ":whale: AMD64 docker"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_amd64_docker.sh"

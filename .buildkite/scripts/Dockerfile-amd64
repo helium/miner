@@ -1,4 +1,4 @@
-FROM arm32v7/erlang:22.3.3-alpine as builder
+FROM erlang:22.3.2-alpine as builder
 
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
@@ -7,9 +7,7 @@ RUN apk add --no-cache --update \
 
 WORKDIR /usr/src/miner
 
-# The no-psabi flag comes from:
-# https://stackoverflow.com/a/48149400
-ENV CC=gcc CXX=g++ CFLAGS="-U__sun__ -Wno-psabi" \
+ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
     ERLANG_ROCKSDB_OPTS="-DWITH_BUNDLE_SNAPPY=ON -DWITH_BUNDLE_LZ4=ON" \
     ERL_COMPILER_OPTIONS="[deterministic]"
 
@@ -26,7 +24,7 @@ RUN mkdir -p /opt/rel/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/rel/update/genesis
 
-FROM arm32v7/erlang:22.3.3-alpine as runner
+FROM erlang:22.3.2-alpine as runner
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
@@ -39,3 +37,4 @@ ENV COOKIE=miner \
 
 COPY --from=builder /opt/rel /opt/miner
 
+#CMD tail -f /dev/null
