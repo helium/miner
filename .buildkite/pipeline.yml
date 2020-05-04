@@ -5,7 +5,36 @@ steps:
       - "make compile"
       - "make ci"
     name: ":hammer: build"
+    key: "tests"
     agents:
       queue: "erlang"
     artifact_paths:
       - "artifacts/*"
+
+  - if: build.tag != null
+    name: ":whale: ARM64 docker"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_arm64_docker.sh"
+
+# There is some kind of compiler bug in 32 bit ARM
+# and rocksdb, so comment out for now. Can revisit
+# later if need be.
+#
+#  - if: build.tag != null
+#    name: ":whale: ARM32 docker"
+#   agents:
+#     queue: "erlang"
+#   commands:
+#     - "git fetch -t"
+#     - ".buildkite/scripts/make_arm32_docker.sh"
+
+  - if: build.tag != null
+    name: ":whale: AMD64 docker"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_amd64_docker.sh"
