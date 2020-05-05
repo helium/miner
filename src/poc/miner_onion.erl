@@ -31,11 +31,10 @@ dial_framed_stream(Swarm, Address, Args) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec add_stream_handler(pid()) -> ok.
-add_stream_handler(Swarm) ->
-    TID = libp2p_swarm:tid(Swarm),
+-spec add_stream_handler(pid() | ets:tab()) -> ok.
+add_stream_handler(SwarmTID) ->
     libp2p_swarm:add_stream_handler(
-        TID,
+        SwarmTID,
         ?ONION_VERSION,
-        {libp2p_framed_stream, server, [miner_onion_handler, self(), TID]}
+        {libp2p_framed_stream, server, [miner_onion_handler, self(), SwarmTID]}
     ).

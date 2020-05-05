@@ -201,7 +201,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                                       []],
                 [{create, true}]],
     Name = consensus_group_name(1, 0, Members),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(), Name,
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(), Name,
                                          libp2p_group_relcast, GroupArg),
     lager:info("started initial hbbft group: ~p~n", [Group]),
     %% NOTE: I *think* this is the only place to store the chain reference in the miner state
@@ -262,7 +262,7 @@ handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
                 [{create, true}]],
     %% while this won't reflect the actual height, it has to be deterministic
     Name = consensus_group_name(max(0, Height), Delay, Members),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
 
@@ -301,7 +301,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
                 [{create, true}]], % gets filled later
     %% while this won't reflect the actual height, it has to be deterministic
     Name = consensus_group_name(max(0, Height), 0, Members),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
     Ref = erlang:monitor(process, Group),
@@ -584,7 +584,7 @@ handle_info(timeout, State) ->
                                                               Chain]],
                             %% while this won't reflect the actual height, it has to be deterministic
                             lager:info("restoring consensus group ~p", [Name]),
-                            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                                                  Name,
                                                                  libp2p_group_relcast, GroupArg),
                             Round = blockchain_block:hbbft_round(HeadBlock),
@@ -595,7 +595,7 @@ handle_info(timeout, State) ->
                                     State#state{active_group = Group, ag_monitor = Ref};
                                 {error, cannot_start} ->
                                     lager:info("didn't restore consensus group, missing"),
-                                    ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
+                                    ok = libp2p_swarm:remove_group(blockchain_swarm:tid(), Name),
                                     case BlockHeight < (ElectionHeight+ElectionDelay+10) of
                                         true ->
                                             restore_dkg(ElectionHeight, ElectionDelay, BlockHeight, Round, State);
@@ -604,7 +604,7 @@ handle_info(timeout, State) ->
                                     end;
                                 {error, Reason} ->
                                     lager:info("didn't restore consensus group: ~p", [Reason]),
-                                    ok = libp2p_swarm:remove_group(blockchain_swarm:swarm(), Name),
+                                    ok = libp2p_swarm:remove_group(blockchain_swarm:tid(), Name),
                                     State
                             end;
                         false ->
@@ -662,7 +662,7 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
                                       undefined,
                                       Chain]],
     lager:info("restoring down consensus group ~p", [Name]),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
     Round = blockchain_block:hbbft_round(Block),
@@ -778,7 +778,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
                                 [{create, true}]],
                     %% while this won't reflect the actual height, it has to be deterministic
                     Name = consensus_group_name(max(0, Height), Delay, Members),
-                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+                    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                                          Name,
                                                          libp2p_group_relcast, GroupArg),
 
@@ -864,7 +864,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
                                             Delay],
                        [{create, Create}]],
 
-            {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+            {ok, DKGGroup} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                                     DKGGroupName,
                                                     libp2p_group_relcast,
                                                     GroupArg),
@@ -900,7 +900,7 @@ start_hbbft(DKG, Height, Delay, Chain, Retries) ->
                         [{create, true}]],
             %% while this won't reflect the actual height, it has to be deterministic
             Name = consensus_group_name(max(0, Height), Delay, Members),
-            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:swarm(),
+            {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                                  Name,
                                                  libp2p_group_relcast, GroupArg),
 

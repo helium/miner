@@ -99,8 +99,8 @@ witness(Data) ->
 %% ------------------------------------------------------------------
 init(Args) ->
     ok = blockchain_event:add_handler(self()),
-    ok = miner_poc:add_stream_handler(blockchain_swarm:swarm()),
-    ok = miner_onion:add_stream_handler(blockchain_swarm:swarm()),
+    ok = miner_poc:add_stream_handler(blockchain_swarm:tid()),
+    ok = miner_onion:add_stream_handler(blockchain_swarm:tid()),
     Address = blockchain_swarm:pubkey_bin(),
     Blockchain = blockchain_worker:blockchain(),
     BaseDir = maps:get(base_dir, Args, undefined),

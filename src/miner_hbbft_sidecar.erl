@@ -87,12 +87,12 @@ handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
         {P1, P2} when is_pid(P1) andalso is_pid(P2)  ->
             ok;
         {undefined, P} when is_pid(P) ->
-            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL,
+            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL,
                                                  {libp2p_framed_stream, server,
                                                   [blockchain_txn_handler, self(),
                                                    fun(T) -> miner_hbbft_sidecar:submit(T) end]});
         {P, undefined} when is_pid(P) ->
-            libp2p_swarm:remove_stream_handler(blockchain_swarm:swarm(), ?TX_PROTOCOL)
+            libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL)
     end,
     {reply, ok, State#state{group = Group}};
 handle_call({submit, _}, _From, #state{chain = undefined} = State) ->

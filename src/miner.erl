@@ -109,9 +109,9 @@ block_age() ->
 %%--------------------------------------------------------------------
 -spec p2p_status() -> [{Check::string(), Result::string()}].
 p2p_status() ->
-    Swarm = blockchain_swarm:swarm(),
+    SwarmTID = blockchain_swarm:tid(),
     CheckSessions = fun() ->
-                            case (catch length(libp2p_swarm:sessions(Swarm)) > 5) of
+                            case (catch length(libp2p_swarm:sessions(SwarmTID)) > 5) of
                                 true -> "yes";
                                 _  -> "no"
                             end
@@ -120,15 +120,15 @@ p2p_status() ->
                               case (catch lists:any(fun(Addr) ->
                                                             libp2p_relay:is_p2p_circuit(Addr) orelse
                                                                 libp2p_transport_tcp:is_public(Addr)
-                                                    end, libp2p_swarm:listen_addrs(Swarm))) of
+                                                    end, libp2p_swarm:listen_addrs(SwarmTID))) of
                                   true -> "yes";
                                   _ -> "no"
                               end
                       end,
     CheckNatType = fun() ->
                            try
-                               case libp2p_peerbook:get(libp2p_swarm:peerbook(Swarm),
-                                                        libp2p_swarm:pubkey_bin(Swarm)) of
+                               case libp2p_peerbook:get(libp2p_swarm:peerbook(SwarmTID),
+                                                        libp2p_swarm:pubkey_bin(SwarmTID)) of
                                    {ok, Peer} -> atom_to_list(libp2p_peer:nat_type(Peer));
                                    {error, _} -> "unknown"
                                end
@@ -277,10 +277,11 @@ signed_block(Signatures, BinBlock) ->
         ok ->
             lager:info("sending the gossiped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
+            SwarmTID = blockchain_swarm:tid(),
             libp2p_group_gossip:send(
-              libp2p_swarm:gossip_group(Swarm),
+              libp2p_swarm:gossip_group(SwarmTID),
               ?GOSSIP_PROTOCOL,
-              blockchain_gossip_handler:gossip_data(Swarm, Block)
+              blockchain_gossip_handler:gossip_data(SwarmTID, Block)
              ),
             {Signatories, _} = lists:unzip(blockchain_block:signatures(Block)),
             {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(Chain)),
