@@ -126,9 +126,21 @@ info_in_consensus_usage() ->
     ].
 
 info_in_consensus(["info", "in_consensus"], [], []) ->
-    [clique_status:text(atom_to_list(miner_consensus_mgr:in_consensus()))];
+    [clique_status:text(atom_to_list(in_consensus()))];
 info_in_consensus([_, _, _], [], []) ->
     usage.
+
+
+-spec in_consensus() -> boolean().
+in_consensus()->
+    case blockchain_worker:blockchain() of
+        undefined -> no_chain;
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
+            MyAddr = blockchain_swarm:pubkey_bin(),
+            lists:member(MyAddr, ConsensusGroup)
+    end.
 
 %%
 %% info name
