@@ -13,11 +13,29 @@ steps:
 
   - if: build.tag != null
     name: ":whale: ARM64 docker"
+    env:
+      MINER_REGISTRY_NAME: "quay.io/team-helium/miner"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "amd64"
     agents:
       queue: "erlang"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_arm64_docker.sh"
+      - ".buildkite/scripts/make_image.sh"
+
+  - if: build.tag != null
+    name: ":open file folder: ARM64 open container image"
+    artifact_paths: "*-oci.tar"
+    env:
+      MINER_REGISTRY_NAME: "quay.io/team-helium/oci-miner"
+      IMAGE_FORMAT: "oci"
+      IMAGE_ARCH: "amd64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_image.sh"
+
 
 # There is some kind of compiler bug in 32 bit ARM
 # and rocksdb, so comment out for now. Can revisit
@@ -27,14 +45,35 @@ steps:
 #    name: ":whale: ARM32 docker"
 #   agents:
 #     queue: "erlang"
+#    env:
+#      MINER_REGISTRY_NAME: "quay.io/team-helium/miner"
+#      IMAGE_FORMAT: "docker"
+#      IMAGE_ARCH: "arm32"
 #   commands:
 #     - "git fetch -t"
-#     - ".buildkite/scripts/make_arm32_docker.sh"
+#     - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null
     name: ":whale: AMD64 docker"
     agents:
       queue: "erlang"
+    env:
+      MINER_REGISTRY_NAME: "quay.io/team-helium/miner"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "arm64"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_amd64_docker.sh"
+      - ".buildkite/scripts/make_image.sh"
+
+  - if: build.tag != null
+    name: ":open file folder: ARM64 open container image"
+    artifact_paths: "*-oci.tar"
+    env:
+      MINER_REGISTRY_NAME: "quay.io/team-helium/oci-miner"
+      IMAGE_FORMAT: "oci"
+      IMAGE_ARCH: "arm64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_image.sh"
