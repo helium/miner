@@ -364,12 +364,6 @@ route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _AD
 route_non_longfi(_) ->
     error.
 
--spec reverse(binary()) -> binary().
-reverse(Bin) -> reverse(Bin, <<>>).
-reverse(<<>>, Acc) -> Acc;
-reverse(<<H:1/binary, Rest/binary>>, Acc) ->
-    reverse(Rest, <<H/binary, Acc/binary>>).
-
 maybe_mirror({undefined, undefined}, _) ->
     ok;
 maybe_mirror({_, undefined}, _) ->

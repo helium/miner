@@ -180,7 +180,6 @@ no_packets_expiry_test(Config) ->
 
 packets_expiry_test(Config) ->
     Miners = ?config(miners, Config),
-    DefaultRouters = ?config(default_routers, Config),
 
     [RouterNode, ClientNode | _] = Miners,
 
@@ -284,7 +283,6 @@ packets_expiry_test(Config) ->
 
 multi_clients_packets_expiry_test(Config) ->
     Miners = ?config(miners, Config),
-    DefaultRouters = ?config(default_routers, Config),
 
     [RouterNode, ClientNode1, ClientNode2 | _] = Miners,
 
@@ -408,8 +406,6 @@ multi_clients_packets_expiry_test(Config) ->
 
 replay_test(Config) ->
     Miners = ?config(miners, Config),
-    DefaultRouters = ?config(default_routers, Config),
-
     [RouterNode, ClientNode | _] = Miners,
 
     %% setup
