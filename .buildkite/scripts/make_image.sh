@@ -7,11 +7,12 @@ set -euo pipefail
 # IMAGE_FORMAT
 # all come from pipeline.yml
 
+MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
 DOCKER_NAME="$(basename $(pwd))-{$IMAGE_ARCH}_${BUILDKITE_TAG}"
 DOCKERFILE_NAME=".buildkite/scripts/Dockerfile-${IMAGE_ARCH}"
 TARNAME="${DOCKER_NAME}-oci.tar"
 
-docker login -u="team-helium+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}"
+docker login -u="team-helium+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
 
 if [ "$IMAGE_FORMAT" -eq "oci" ]; then
     docker buildx build -o type=oci,dest="${TARNAME}" -f "${DOCKERFILE_NAME}" .
