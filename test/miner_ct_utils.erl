@@ -58,10 +58,12 @@
          wait_for_gte/3, wait_for_gte/5,
 
          submit_txn/2,
-         wait_for_txn/2, wait_for_txn/3,
-         format_txn_mgr_list/1
-
-
+         wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
+         format_txn_mgr_list/1,
+         get_txn_block_details/2, get_txn_block_details/3,
+         get_txn/2,
+         get_genesis_block/2,
+         load_genesis_block/3
         ]).
 
 
@@ -211,7 +213,8 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
                         fun(Miner) ->
                              try
                                  handle_gte_type(Type, Miner, Threshold)
-                             catch _:_ ->
+                             catch What:Why ->
+                                       ct:pal("Failed to check GTE ~p ~p ~p: ~p:~p", [Type, Miner, Threshold, What, Why]),
                                      false
                              end
                         end, miner_ct_utils:shuffle(Miners))
@@ -564,44 +567,49 @@ init_per_testcase(Mod, TestCase, Config0) ->
                      {Miner, Ports, GECDH, GPub, GAddr, GSigFun}
              end, MinersAndPorts),
 
-
+    {_Miner, {_TCPPort, _UDPPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
+    DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
     ConfigResult = miner_ct_utils:pmap(
         fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
                 ct:pal("Miner ~p", [Miner]),
-            ct_rpc:call(Miner, cover, start, []),
-            ct_rpc:call(Miner, application, load, [lager]),
-            ct_rpc:call(Miner, application, load, [miner]),
-            ct_rpc:call(Miner, application, load, [blockchain]),
-            ct_rpc:call(Miner, application, load, [libp2p]),
-            %% give each miner its own log directory
-            LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
-            ct:pal("MinerLogRoot: ~p", [LogRoot]),
-            ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
-            ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
-            %% set blockchain configuration
-            Key = {PubKey, ECDH, SigFun},
+                ct_rpc:call(Miner, cover, start, []),
+                ct_rpc:call(Miner, application, load, [lager]),
+                ct_rpc:call(Miner, application, load, [miner]),
+                ct_rpc:call(Miner, application, load, [blockchain]),
+                ct_rpc:call(Miner, application, load, [libp2p]),
+                %% give each miner its own log directory
+                LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerLogRoot: ~p", [LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
 
-            MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
-            ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
-            %% set blockchain env
-            ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
-            ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
-            %% set miner configuration
-            ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
-            ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
-            ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+                %% set blockchain configuration
+                Key = {PubKey, ECDH, SigFun},
 
-            {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+                MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
+                %% set blockchain env
+                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
+                %ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
+                %% set miner configuration
+                ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+                ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
+                ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+                ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
+
+                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
         end,
         Keys
@@ -931,32 +939,21 @@ init_base_dir_config(Mod, TestCase, Config)->
 %% @end
 %%-------------------------------------------------------------------
 wait_for_txn(Miners, PredFun) ->
-    wait_for_txn(Miners, PredFun, timer:seconds(30)).
+    wait_for_txn(Miners, PredFun, timer:seconds(30), true).
 
-wait_for_txn(Miners, PredFun, Timeout)->
+wait_for_txn(Miners, PredFun, Timeout) ->
+    wait_for_txn(Miners, PredFun, Timeout, true).
+
+wait_for_txn(Miners, PredFun, Timeout, ExpectedResult)->
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
-                                        C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                                        {ok, H} = ct_rpc:call(Miner, blockchain, height, [C], Timeout),
-                                        Blocks = ct_rpc:call(Miner, blockchain, blocks, [C], Timeout),
-
-                                        Res = lists:filter(fun({_Hash, Block}) ->
-                                                                   BH = blockchain_block:height(Block),
-                                                                   Txns = blockchain_block:transactions(Block),
-                                                                   ToFind = lists:filter(fun(T) ->
-                                                                                                 PredFun(T)
-                                                                                         end,
-                                                                                         Txns),
-                                                                   ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
-                                                                   ToFind /= []
-                                                           end,
-                                                           maps:to_list(Blocks)),
-                                        ct:pal("ChainHeight: ~p, Res: ~p", [H, Res]),
+                                        Res = get_txn_block_details(Miner, PredFun, Timeout),
                                         Res /= []
+
                                 end, miner_ct_utils:shuffle(Miners))
                  end,
-                 Result == true, 40, timer:seconds(1)),
+                 Result == ExpectedResult, 40, timer:seconds(1)),
     ok.
 
 format_txn_mgr_list(TxnList) ->
@@ -977,6 +974,37 @@ format_txn_mgr_list(TxnList) ->
                       | Acc]
               end, [], TxnList).
 
+get_txn_block_details(Miner, PredFun) ->
+    get_txn_block_details(Miner, PredFun, timer:seconds(5)).
+
+get_txn_block_details(Miner, PredFun, Timeout) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, blocks, [Chain], Timeout) of
+                {badrpc, Error} ->
+                    Error;
+                Blocks ->
+                    lists:filter(fun({_Hash, Block}) ->
+                                               %% BH = blockchain_block:height(Block),
+                                               Txns = blockchain_block:transactions(Block),
+                                               ToFind = lists:filter(fun(T) ->
+                                                                             PredFun(T)
+                                                                     end,
+                                                                     Txns),
+                                               %% ct:pal("BlockHeight: ~p, ToFind: ~p", [BH, ToFind]),
+                                               ToFind /= []
+                                       end,
+                                       maps:to_list(Blocks))
+            end
+    end.
+
+get_txn([{_, B}], PredFun) ->
+    hd(lists:filter(fun(T) ->
+                            PredFun(T)
+                    end,
+                    blockchain_block:transactions(B))).
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
@@ -1002,8 +1030,13 @@ handle_miners_by_consensus(Mod, Bool, Miners)->
 handle_gte_type(height, Miner, Threshold)->
     C0 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 2000),
     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [C0], 2000),
-    ct:pal("miner ~p height ~p  Threshold ~p", [Miner, Height, Threshold]),
-    Height >= Threshold;
+    case Height >= Threshold of
+        false ->
+            ct:pal("miner ~p height ~p  Threshold ~p", [Miner, Height, Threshold]),
+            false;
+        true ->
+            true
+    end;
 handle_gte_type(epoch, Miner, Threshold)->
     {Height, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 2000),
     ct:pal("miner ~p Height ~p Epoch ~p Threshold ~p", [Miner, Height, Epoch, Threshold]),
@@ -1013,3 +1046,49 @@ handle_gte_type(height_exactly, Miner, Threshold)->
     {ok, Ht} = ct_rpc:call(Miner, blockchain, height, [C]),
     ct:pal("miner ~p height ~p Exact Threshold ~p", [Miner, Ht, Threshold]),
     Ht == Threshold.
+
+get_genesis_block(Miners, Config) ->
+    RPCTimeout = ?config(rpc_timeout, Config),
+    ct:pal("RPCTimeout: ~p", [RPCTimeout]),
+    %% obtain the genesis block
+    GenesisBlock = get_genesis_block_(Miners, RPCTimeout),
+    ?assertNotEqual(undefined, GenesisBlock),
+    GenesisBlock.
+
+get_genesis_block_([Miner|Miners], RPCTimeout) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, [], RPCTimeout) of
+        {badrpc, Reason} ->
+            ct:fail(Reason),
+            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
+        undefined ->
+            get_genesis_block_(Miners ++ [Miner], RPCTimeout);
+        Chain ->
+            {ok, GBlock} = rpc:call(Miner, blockchain, genesis_block, [Chain], RPCTimeout),
+            GBlock
+    end.
+
+load_genesis_block(GenesisBlock, Miners, Config) ->
+    RPCTimeout = ?config(rpc_timeout, Config),
+    %% load the genesis block on all the nodes
+    lists:foreach(
+        fun(Miner) ->
+                %% wait for the consensus manager to be booted
+                true = miner_ct_utils:wait_until(
+                  fun() ->
+                          is_boolean(ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout))
+                  end),
+                case ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [], RPCTimeout) of
+                    true ->
+                        ok;
+                    false ->
+                        Res = ct_rpc:call(Miner, blockchain_worker,
+                                          integrate_genesis_block, [GenesisBlock], RPCTimeout),
+                        ct:pal("loading genesis ~p block on ~p ~p", [GenesisBlock, Miner, Res]);
+                    {badrpc, Reason} ->
+                        ct:pal("failed to load genesis block on ~p: ~p", [Miner, Reason])
+                end
+        end,
+        Miners
+    ),
+
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).
