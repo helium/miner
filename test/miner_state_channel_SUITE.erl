@@ -681,9 +681,10 @@ multi_oui_test(Config) ->
     {error, not_found} = get_ledger_state_channel(RouterNode2, ID2, RouterPubkeyBin2),
 
     %% Check whether the balances are updated in the eventual sc close txn
-    BlockDetails = miner_ct_utils:get_txn_block_details(RouterNode1, CheckSCClose1),
-    SCCloseTxn1 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose1),
-    SCCloseTxn2 = miner_ct_utils:get_txn(BlockDetails, CheckSCClose2),
+    BlockDetails1 = miner_ct_utils:get_txn_block_details(RouterNode1, CheckSCClose1),
+    BlockDetails2 = miner_ct_utils:get_txn_block_details(RouterNode1, CheckSCClose2),
+    SCCloseTxn1 = miner_ct_utils:get_txn(BlockDetails1, CheckSCClose1),
+    SCCloseTxn2 = miner_ct_utils:get_txn(BlockDetails2, CheckSCClose2),
     ct:pal("SCCloseTxn1: ~p", [SCCloseTxn1]),
     ct:pal("SCCloseTxn2: ~p", [SCCloseTxn2]),
 
