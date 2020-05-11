@@ -639,16 +639,19 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                     end
             end,
         LocationOK = true,
-            case miner_lora:position() of
-                {error, _Error} ->
-                    lager:debug("pos err ~p", [_Error]),
-                    false;
-                {ok, _} ->
-                    true;
-                %% fix but too far from assert
-                {ok, _, _} ->
-                    false
-            end,
+        %% the below code is tested and working.  we're going to roll
+        %% out the metadata update so app users can see their status
+        %% before it is enforced.
+            %% case miner_lora:position() of
+            %%     {error, _Error} ->
+            %%         lager:debug("pos err ~p", [_Error]),
+            %%         false;
+            %%     {ok, _} ->
+            %%         true;
+            %%     %% fix but too far from assert
+            %%     {ok, _, _} ->
+            %%         false
+            %% end,
         ChallengeOK andalso LocationOK
     catch Class:Err:Stack ->
             lager:warning("error determining if request allowed: ~p:~p ~p",
