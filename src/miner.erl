@@ -214,12 +214,7 @@ relcast_queue(Group) ->
                       InvalidTxns :: blockchain_txn:txns()} |
                      {error, term()}.
 create_block(Metadata, Txns, HBBFTRound) ->
-    try
-        gen_server:call(?MODULE, {create_block, Metadata, Txns, HBBFTRound}, infinity)
-    catch exit:{noproc, _} ->
-            %% if the miner noprocs, we're likely shutting down
-            {error, no_miner}
-    end.
+    gen_server:call(?MODULE, {create_block, Metadata, Txns, HBBFTRound}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
