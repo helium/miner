@@ -49,7 +49,8 @@
 -define(RECEIPTS_TIMEOUT, 10).
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
-
+%% in meters
+-define(MAX_WANDER_DIST, 75).
 
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
@@ -624,28 +625,43 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                 POCInterval0
         end,
 
-    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        {error, Error} ->
-            lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
-            false;
-        {ok, GwInfo} ->
-            case blockchain:get_block(BlockHash, Blockchain) of
-                {error, Error} ->
-                    lager:warning("failed to get block ~p : ~p", [BlockHash, Error]),
-                    false;
-                {ok, Block} ->
-                    Height = blockchain_block:height(Block),
-                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                        undefined ->
-                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                            true;
-                        LastChallenge ->
-                            case (Height - LastChallenge) > POCInterval of
-                                true -> 1 == rand:uniform(trunc(POCInterval / 4));
-                                false -> false
-                            end
+    try
+        {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(Address, Ledger),
+        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+        Height = blockchain_block:height(Block),
+        ChallengeOK =
+            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                undefined ->
+                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                    true;
+                LastChallenge ->
+                    case (Height - LastChallenge) > POCInterval of
+                        true -> 1 == rand:uniform(trunc(POCInterval / 4));
+                        false -> false
                     end
-            end
+            end,
+        LocationOK =
+            case miner_lora:position() of
+                {error, _} ->
+                    false;
+                {ok, {Lat, Long}} ->
+                    %% we have a fix, is it good enough?
+                    H3Loc = blockchain_ledger_gateway_v2:location(GwInfo),
+                    case vincenty:distance(h3:to_geo(H3Loc), Lat, Long) of
+                        {error, _} ->
+                            %% hard to tell which is more wrong here since vincenty should only fail for antipodal points
+                            false;
+                        {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
+                            false;
+                        {ok, _} ->
+                            true
+                    end
+            end,
+        ChallengeOK andalso LocationOK
+    catch Class:Err ->
+            lager:warning("error determining if request allowed: ~p:~p",
+                          [Class, Err]),
+            false
     end.
 
 -spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->

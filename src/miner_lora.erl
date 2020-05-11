@@ -7,7 +7,8 @@
     handle_response/1,
     send/1,
     send_poc/5,
-    port/0
+    port/0,
+    position/0
 ]).
 
 -export([
@@ -40,7 +41,8 @@
     packet_timers = #{}, %% keyed by token
     sig_fun,
     pubkey_bin,
-    mirror_socket
+    mirror_socket,
+    latlong
 }).
 
 -type state() :: #state{}.
@@ -75,6 +77,10 @@ send_poc(Payload, When, Freq, DataRate, Power) ->
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
     gen_server:call(?MODULE, port, 11000).
+
+-spec position() -> {ok, {float(), float()}} | {error, any()}.
+position() ->
+    gen_server:call(?MODULE, position, infinity).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -131,6 +137,10 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
     end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
+handle_call(position, _From, #state{latlong = undefined} = State) ->
+    {reply, {error, no_fix}, State};
+handle_call(position, _From, State) ->
+    {reply, {ok, State#state.latlong}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
@@ -286,8 +296,20 @@ handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gatewa
     lager:info("got status ~p", [Status]),
     lager:info("Gateway ~p", [lager:pr(Gateway1, ?MODULE)]),
     Mac = Gateway1#gateway.mac,
-    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1, State#state{gateways=maps:put(Mac, Gateway1, Gateways)});
+    State1 = maybe_update_gps(Status, State),
+    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1,
+                     State1#state{gateways=maps:put(Mac, Gateway1, Gateways)});
 handle_json_data(_, _Gateway, State) ->
+    State.
+
+%% cache GPS the state with each update.  I'm not sure if this will
+%% lead to a lot of wander, but I do want to be able to refine if we
+%% have a poor quality initial lock.  we might want to keep track of
+%% server boot time and lock it down after some period of time.
+-spec maybe_update_gps(#{}, state()) -> state().
+maybe_update_gps(#{<<"lati">> := Lat, <<"long">> := Long}, State) ->
+    State#state{latlong = {Lat, Long}};
+maybe_update_gps(_Status, State) ->
     State.
 
 -spec sort_packets(list()) -> list().
