@@ -642,25 +642,29 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
             end,
         LocationOK =
             case miner_lora:position() of
-                {error, _} ->
+                {error, _Error} ->
+                    lager:debug("pos err ~p", [_Error]),
                     false;
                 {ok, {Lat, Long}} ->
                     %% we have a fix, is it good enough?
                     H3Loc = blockchain_ledger_gateway_v2:location(GwInfo),
-                    case vincenty:distance(h3:to_geo(H3Loc), Lat, Long) of
-                        {error, _} ->
+                    case vincenty:distance(h3:to_geo(H3Loc), {Lat, Long}) of
+                        {error, _E} ->
                             %% hard to tell which is more wrong here since vincenty should only fail for antipodal points
+                            lager:debug("fix error! ~p", [_E]),
                             false;
                         {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
+                            lager:debug("fix too far! ~p", [Distance]),
                             false;
-                        {ok, _} ->
+                        {ok, _D} ->
+                            lager:debug("fix good! ~p", [_D]),
                             true
                     end
             end,
         ChallengeOK andalso LocationOK
-    catch Class:Err ->
-            lager:warning("error determining if request allowed: ~p:~p",
-                          [Class, Err]),
+    catch Class:Err:Stack ->
+            lager:warning("error determining if request allowed: ~p:~p ~p",
+                          [Class, Err, Stack]),
             false
     end.
 

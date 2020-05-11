@@ -28,6 +28,7 @@
     poc_dist_v8_test/1,
     poc_dist_v8_partitioned_test/1,
     poc_dist_v8_partitioned_lying_test/1,
+    no_status_v8_test/1,
     restart_test/1
 ]).
 
@@ -66,6 +67,7 @@ all() ->
      poc_dist_v8_test,
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
+     no_status_v8_test,
      restart_test].
 
 init_per_testcase(basic_test = TestCase, Config) ->
@@ -175,6 +177,11 @@ poc_dist_v8_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(poc_v8),
     run_dist_with_params(poc_dist_v8_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+no_status_v8_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v8),
+    run_dist_with_params(poc_dist_v8_test, Config, maps:merge(CommonPOCVars, ExtraVars), false).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -598,9 +605,12 @@ new_random_key(Curve) ->
     {PrivKey, PubKey}.
 
 run_dist_with_params(TestCase, Config, VarMap) ->
-    ok = setup_dist_test(TestCase, Config, VarMap),
+    run_dist_with_params(TestCase, Config, VarMap, true).
+
+run_dist_with_params(TestCase, Config, VarMap, Status) ->
+    ok = setup_dist_test(TestCase, Config, VarMap, Status),
     %% Execute the test
-    ok = exec_dist_test(TestCase, Config, VarMap),
+    ok = exec_dist_test(TestCase, Config, VarMap, Status),
     %% show the final receipt counter
     Miners = ?config(miners, Config),
     FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
@@ -608,67 +618,74 @@ run_dist_with_params(TestCase, Config, VarMap) ->
     %% The test endeth here
     ok.
 
-exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v8_partitioned_test, Config);
-exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v7_partitioned_test, Config);
-exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v6_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v6_partitioned_test, Config);
-exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v5_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v5_partitioned_test, Config);
-exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap) ->
+exec_dist_test(poc_dist_v4_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v4_partitioned_test, Config);
-exec_dist_test(TestCase, Config, VarMap) ->
+exec_dist_test(TestCase, Config, VarMap, Status) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
     %% check that every miner has issued a challenge
-    ?assert(check_all_miners_can_challenge(Miners)),
-    %% Check that the receipts are growing ONLY for poc_v4
-    %% More specifically, first receipt can have a single element path (beacon)
-    %% but subsequent ones must have more than one element in the path, reason being
-    %% the first receipt would have added witnesses and we should be able to make
-    %% a next hop.
-    case maps:get(?poc_version, VarMap, 1) of
-        V when V > 3 ->
-            miner_ct_utils:wait_until(
-              fun() ->
-                      %% Check that we have atleast more than one request
-                      %% If we have only one request, there's no guarantee
-                      %% that the paths would eventually grow
-                      check_multiple_requests(Miners) andalso
-                      %% Now we can check whether we have path growth
-                          check_eventual_path_growth(TestCase, Miners)
-              end,
-              40, 5000),
-            FinalScores = gateway_scores(Config),
-            ct:pal("FinalScores: ~p", [FinalScores]),
-            ok;
-        _ ->
-            %% By this point, we have ensured that every miner
-            %% has a valid request atleast once, we just check
-            %% that we have N (length(Miners)) receipts.
-            ?assert(check_atleast_k_receipts(Miners, length(Miners))),
-            ok
+    case Status of
+        %% expect failure and exit
+        false ->
+            ?assertEqual(false, check_all_miners_can_challenge(Miners));
+        true ->
+            ?assert(check_all_miners_can_challenge(Miners)),
+            %% Check that the receipts are growing ONLY for poc_v4
+            %% More specifically, first receipt can have a single element path (beacon)
+            %% but subsequent ones must have more than one element in the path, reason being
+            %% the first receipt would have added witnesses and we should be able to make
+            %% a next hop.
+            case maps:get(?poc_version, VarMap, 1) of
+                V when V > 3 ->
+                    miner_ct_utils:wait_until(
+                      fun() ->
+                              %% Check that we have atleast more than one request
+                              %% If we have only one request, there's no guarantee
+                              %% that the paths would eventually grow
+                              check_multiple_requests(Miners) andalso
+                              %% Now we can check whether we have path growth
+                                  check_eventual_path_growth(TestCase, Miners)
+                      end,
+                      40, 5000),
+                    FinalScores = gateway_scores(Config),
+                    ct:pal("FinalScores: ~p", [FinalScores]),
+                    ok;
+                _ ->
+                    %% By this point, we have ensured that every miner
+                    %% has a valid request atleast once, we just check
+                    %% that we have N (length(Miners)) receipts.
+                    ?assert(check_atleast_k_receipts(Miners, length(Miners))),
+                    ok
+            end
     end,
     ok.
 
-setup_dist_test(TestCase, Config, VarMap) ->
+setup_dist_test(TestCase, Config, VarMap, Status) ->
     Miners = ?config(miners, Config),
     MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
-    miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000, lists:zip(RadioPorts, Locations)),
+    miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
+                                          lists:zip(RadioPorts, Locations), Status),
     ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 10

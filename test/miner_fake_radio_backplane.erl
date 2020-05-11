@@ -2,7 +2,8 @@
 
 -behaviour(gen_server).
 
--export([start_link/3, init/1, handle_call/3, handle_cast/2, handle_info/2]).
+-export([start_link/3, start_link/4,
+         init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -export([transmit/3, get_next_packet/0]).
 
@@ -28,7 +29,10 @@
 -define(ABS_RSSI, -48).
 
 start_link(POCVersion, MyPort, UDPPorts) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [POCVersion, MyPort, UDPPorts], []).
+    start_link(POCVersion, MyPort, UDPPorts, true).
+
+start_link(POCVersion, MyPort, UDPPorts, Status) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [POCVersion, MyPort, UDPPorts, Status], []).
 
 transmit(Payload, Frequency, TxLocation) ->
     gen_server:cast(?MODULE, {transmit, Payload, Frequency, TxLocation}).
@@ -36,11 +40,24 @@ transmit(Payload, Frequency, TxLocation) ->
 get_next_packet() ->
     gen_server:cast(?MODULE, {get_next, self()}).
 
-init([POCVersion, MyPort, UDPPorts]) ->
+init([POCVersion, MyPort, UDPPorts, Status]) ->
     %% create UDP client port
     {ok, Sock} = gen_udp:open(MyPort, [binary, {active, true}, {reuseaddr, true}]),
     Token = <<0, 0>>,
-    [ gen_udp:send(Sock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, 16#deadbeef:64/integer>>) || {Port, _} <- UDPPorts],
+    [gen_udp:send(Sock, {127, 0, 0, 1}, Port,
+                  <<?PROTOCOL_2:8/integer-unsigned,
+                    Token:2/binary,
+                    ?PULL_DATA:8/integer-unsigned,
+                    16#deadbeef:64/integer>>)
+     || {Port, _} <- UDPPorts],
+    case Status of
+        true ->
+            %% short initial tick, as we need to race the first request :/
+            erlang:send_after(0, self(), status_tick);
+        _ ->
+            %% just don't start the tick
+            ok
+    end,
     {ok, #state{poc_version=POCVersion, udp_sock=Sock, udp_ports=UDPPorts}}.
 
 handle_call(Msg, _From, State) ->
@@ -115,6 +132,10 @@ handle_info({udp, _UDPSock, _IP, _SrcPort, <<?PROTOCOL_2:8/integer-unsigned, _To
     {noreply, State};
 handle_info({udp, _UDPSock, _IP, _SrcPort, <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_ACK:8/integer-unsigned>>}, State) ->
     {noreply, State};
+handle_info(status_tick, State) ->
+    erlang:send_after(1000, self(), status_tick),
+    _ = send_status_packets(State),
+    {noreply, State};
 handle_info(Msg, State) ->
     ct:pal("unhandled info ~p", [Msg]),
     {noreply, State}.
@@ -122,6 +143,23 @@ handle_info(Msg, State) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
+
+send_status_packets(#state{udp_sock = Sock, udp_ports = UDPPorts}) ->
+    [begin
+         {Lat, Long} = h3:to_geo(Loc),
+         Token = <<0, 0>>,
+         Data = jsx:encode(#{<<"stat">> =>
+                                 #{<<"lati">> => Lat,
+                                   <<"long">> => Long}}),
+         gen_udp:send(Sock, {127, 0, 0, 1}, Port,
+                  <<?PROTOCOL_2:8/integer-unsigned,
+                    Token:2/binary,
+                    ?PUSH_DATA:8/integer-unsigned,
+                    16#deadbeef:64/integer,
+                    Data/binary>>)
+     end
+     || {Port, Loc} <- UDPPorts].
+
 approx_rssi(Distance) ->
     ?ABS_RSSI - ?ETA * (10 * math:log10(Distance * 1000)).
 
