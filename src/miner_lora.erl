@@ -49,6 +49,9 @@
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
 
+%% in meters
+-define(MAX_WANDER_DIST, 75).
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -139,8 +142,34 @@ handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
 handle_call(position, _From, #state{latlong = undefined} = State) ->
     {reply, {error, no_fix}, State};
-handle_call(position, _From, State) ->
-    {reply, {ok, State#state.latlong}, State};
+handle_call(position, _From, #state{pubkey_bin = Addr} = State) ->
+    try
+        Chain = blockchain_worker:blockchain(),
+        Ledger = blockchain:ledger(Chain),
+        {ok, Gw} = blockchain_ledger_v1:find_gateway_info(Addr, Ledger),
+        Ret =
+            case blockchain_ledger_gateway_v2:location(Gw) of
+                undefined ->
+                    {error, not_asserted};
+                H3Loc ->
+                    case vincenty:distance(h3:to_geo(H3Loc), State#state.latlong) of
+                        {error, _E} ->
+                            lager:debug("fix error! ~p", [_E]),
+                            {error, bad_calculation};
+                        {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
+                            lager:debug("fix too far! ~p", [Distance]),
+                            {ok, bad_assert, State#state.latlong};
+                        {ok, _D} ->
+                            lager:debug("fix good! ~p", [_D]),
+                            {ok, State#state.latlong}
+                    end
+            end,
+        {reply, Ret, State}
+    catch C:E:S ->
+            lager:warning("error trying to get position: ~p:~p ~p",
+                          [C, E, S]),
+        {reply, {error, position_calc_error}, State}
+    end;
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.

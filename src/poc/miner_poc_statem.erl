@@ -49,8 +49,6 @@
 -define(RECEIPTS_TIMEOUT, 10).
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
-%% in meters
--define(MAX_WANDER_DIST, 75).
 
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
@@ -640,26 +638,16 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                         false -> false
                     end
             end,
-        LocationOK =
+        LocationOK = true,
             case miner_lora:position() of
                 {error, _Error} ->
                     lager:debug("pos err ~p", [_Error]),
                     false;
-                {ok, {Lat, Long}} ->
-                    %% we have a fix, is it good enough?
-                    H3Loc = blockchain_ledger_gateway_v2:location(GwInfo),
-                    case vincenty:distance(h3:to_geo(H3Loc), {Lat, Long}) of
-                        {error, _E} ->
-                            %% hard to tell which is more wrong here since vincenty should only fail for antipodal points
-                            lager:debug("fix error! ~p", [_E]),
-                            false;
-                        {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
-                            lager:debug("fix too far! ~p", [Distance]),
-                            false;
-                        {ok, _D} ->
-                            lager:debug("fix good! ~p", [_D]),
-                            true
-                    end
+                {ok, _} ->
+                    true;
+                %% fix but too far from assert
+                {ok, _, _} ->
+                    false
             end,
         ChallengeOK andalso LocationOK
     catch Class:Err:Stack ->
