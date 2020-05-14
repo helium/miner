@@ -611,11 +611,11 @@ multi_oui_test(Config) ->
 
     %% open state channel 2
     ID2 = crypto:strong_rand_bytes(32),
-    ExpireWithin = 25,
+    ExpireWithin2 = 35,
     SCOpenTxn2 = ct_rpc:call(RouterNode1,
                              blockchain_txn_state_channel_open_v1,
                              new,
-                             [ID2, RouterPubkeyBin2, ExpireWithin, 2, 1]),
+                             [ID2, RouterPubkeyBin2, ExpireWithin2, 2, 1]),
     ct:pal("SCOpenTxn2: ~p", [SCOpenTxn2]),
     SignedSCOpenTxn2 = ct_rpc:call(RouterNode2,
                                    blockchain_txn_state_channel_open_v1,
@@ -652,20 +652,52 @@ multi_oui_test(Config) ->
     Packet3 = blockchain_helium_packet_v1:new({devaddr, 1207959562}, Payload3), %% pretend this is a packet after join, only routes to oui 2
     Packet4 = blockchain_helium_packet_v1:new({eui, DevEUI2, AppEUI2}, Payload4), %% pretend this is a join, it will go to oui 2
     Packet5 = blockchain_helium_packet_v1:new({eui, DevEUI3, AppEUI3}, Payload5), %% pretend this is a join, it will go to nobody
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
 
-    %% wait ExpireWithin + 10 more blocks to be safe
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 10),
+    %% Wait till client has an active sc
+    true = miner_ct_utils:wait_until(fun() ->
+                                             TempID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+                                             ct:pal("TempID: ~p", [TempID]),
+                                             TempID /= undefined
+                                     end,
+                                     60, timer:seconds(1)),
+
+    ActiveSCID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+    ct:pal("ActiveSCID: ~p", [ActiveSCID]),
+
+    %% Sent two packets
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(2)),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
+
+    %% wait ExpireWithin + 10 more blocks to be safe, we expect sc1 to have closed
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 5),
 
     %% wait for the state_channel_close for sc open1 txn to appear
     CheckSCClose1 = fun(T) ->
+                            TempActiveID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
                             blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
-                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC1)
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC1) andalso
+                            TempActiveID /= ActiveSCID
                     end,
+    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose1, timer:seconds(30)),
+
+    %% we know whatever sc was active has closed now
+    %% so send three more packets
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
+    timer:sleep(timer:seconds(2)),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
+    timer:sleep(timer:seconds(2)),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
+
+    %% get this new active sc id
+    ActiveSCID2 = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+    ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
+
+    %% check that the ids differ
+    ActiveSCID /= ActiveSCID2,
+
+    %% wait ExpireWithin2 + 5 more blocks to be safe, we expect sc2 to have closed now
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin2 + 5),
 
     %% wait for the state_channel_close for sc open2 txn to appear
     CheckSCClose2 = fun(T) ->
@@ -673,7 +705,6 @@ multi_oui_test(Config) ->
                             blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC2)
                     end,
 
-    ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose1, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose2, timer:seconds(30)),
 
     %% check state_channel is removed once the close txn appears
