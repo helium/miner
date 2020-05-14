@@ -68,7 +68,7 @@ all() ->
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
      %% uncomment when poc placement enforcement starts.
-     no_status_v8_test,
+     %% no_status_v8_test,
      restart_test].
 
 init_per_testcase(basic_test = TestCase, Config) ->
