@@ -8,7 +8,8 @@
     send/1,
     send_poc/5,
     port/0,
-    position/0
+    position/0,
+    location_ok/0
 ]).
 
 -export([
@@ -84,6 +85,22 @@ port() ->
 -spec position() -> {ok, {float(), float()}} | {error, any()}.
 position() ->
     gen_server:call(?MODULE, position, infinity).
+
+-spec location_ok() -> true | false.
+location_ok() ->
+    %% the below code is tested and working.  we're going to roll
+    %% out the metadata update so app users can see their status
+    case position() of
+        {error, _Error} ->
+            lager:debug("pos err ~p", [_Error]),
+            false;
+        {ok, _} ->
+            true;
+        %% fix but too far from assert
+        {ok, _, _} ->
+            false
+    end.
+    %% true.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions

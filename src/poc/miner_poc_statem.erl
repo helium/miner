@@ -267,11 +267,15 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
-    case validate_witness(Witness, Ledger) of
-        false ->
+    LocationOK = miner_lora:location_ok(),
+    case {LocationOK, validate_witness(Witness, Ledger)} of
+        {false, Valid} ->
+            lager:warning("location is bad, validity: ~p", [Valid]),
+            {keep_state, Data};
+        {_, false} ->
             lager:warning("ignoring invalid witness ~p", [Witness]),
             {keep_state, Data};
-        true ->
+        {_, true} ->
             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
             GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
             %% check this is a known layer of the packet
@@ -305,11 +309,15 @@ receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Chal
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
-    case blockchain_poc_receipt_v1:is_valid(Receipt) of
-        false ->
+    LocationOK = miner_lora:location_ok(),
+    case {LocationOK, blockchain_poc_receipt_v1:is_valid(Receipt)} of
+        {false, Valid} ->
+            lager:warning("location is bad, validity: ~p", [Valid]),
+            {keep_state, Data};
+        {_, false} ->
             lager:warning("ignoring invalid receipt ~p", [Receipt]),
             {keep_state, Data};
-        true ->
+        {_, true} ->
             %% Also check onion layer secret
             case lists:keyfind(Gateway, 1, Challengees) of
                 {Gateway, LayerData} ->
@@ -639,19 +647,7 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                     end
             end,
         LocationOK = true,
-        %% the below code is tested and working.  we're going to roll
-        %% out the metadata update so app users can see their status
-        %% before it is enforced.
-            %% case miner_lora:position() of
-            %%     {error, _Error} ->
-            %%         lager:debug("pos err ~p", [_Error]),
-            %%         false;
-            %%     {ok, _} ->
-            %%         true;
-            %%     %% fix but too far from assert
-            %%     {ok, _, _} ->
-            %%         false
-            %% end,
+        LocationOK = miner_lora:location_ok(),
         ChallengeOK andalso LocationOK
     catch Class:Err:Stack ->
             lager:warning("error determining if request allowed: ~p:~p ~p",
@@ -773,9 +769,6 @@ send_onion(P2P, Onion, Retry) ->
             timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
-
-
-
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
