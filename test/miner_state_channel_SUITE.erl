@@ -250,6 +250,7 @@ packets_expiry_test(Config) ->
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -355,6 +356,7 @@ multi_clients_packets_expiry_test(Config) ->
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1, []]), %% duplicate from client 2
     timer:sleep(1000), %% this should help prevent a race condition over merkle tree order
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4, []]),
 
     %% check state_channel appears on the ledger
@@ -473,6 +475,7 @@ replay_test(Config) ->
     Packet1 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p1">>),
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
