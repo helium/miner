@@ -666,6 +666,7 @@ multi_oui_test(Config) ->
 
     %% Sent two packets
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(2)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 10 more blocks to be safe, we expect sc1 to have closed
@@ -683,7 +684,9 @@ multi_oui_test(Config) ->
     %% we know whatever sc was active has closed now
     %% so send three more packets
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
+    timer:sleep(timer:seconds(2)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
+    timer:sleep(timer:seconds(2)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
 
     %% get this new active sc id
