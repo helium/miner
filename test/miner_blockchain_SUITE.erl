@@ -299,7 +299,7 @@ election_test(Config) ->
     ct:pal("FirstNode Swarm: ~p", [Swarm]),
     N = length(Miners),
     ct:pal("N: ~p", [N]),
-    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain, self()]),
+    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain, self(), blockchain_swarm:tid()]),
 
     %% wait until height has increased by 3
     ok = miner_ct_utils:wait_for_gte(height, Miners, NewHeight),

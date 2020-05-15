@@ -8,6 +8,7 @@
 -behavior(gen_server).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -52,8 +53,6 @@
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
-
--include_lib("blockchain/include/blockchain.hrl").
 
 -ifdef(TEST).
 
@@ -280,21 +279,24 @@ signed_block(Signatures, BinBlock) ->
             SwarmTID = blockchain_swarm:tid(),
             libp2p_group_gossip:send(
               libp2p_swarm:gossip_group(SwarmTID),
-              ?GOSSIP_PROTOCOL,
+              ?GOSSIP_PROTOCOL_V1,
               blockchain_gossip_handler:gossip_data(SwarmTID, Block)
              ),
             {Signatories, _} = lists:unzip(blockchain_block:signatures(Block)),
+
             {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(Chain)),
-            lists:foreach(fun(Member) ->
-                                  spawn(fun() ->
-                                                libp2p_swarm:dial_framed_stream(Swarm, libp2p_crypto:pubkey_bin_to_p2p(Member), ?FASTFORWARD_PROTOCOL, blockchain_fastforward_handler, [Chain])
-                                        end)
-                          end, ConsensusAddrs -- Signatories);
+            %% FF non signatory consensus members
+            lists:foreach(
+              fun(Member) ->
+                      spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, Chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
+              end, ConsensusAddrs -- Signatories);
 
         Error ->
             lager:error("signed_block, error: ~p", [Error])
     end,
     ok.
+
+
 
 %%--------------------------------------------------------------------
 %% @doc
