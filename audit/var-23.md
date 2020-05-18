@@ -10,8 +10,8 @@ This transaction updates a few existing chain variables detailed below.
 |--------------------------	|-----------	|-------	|------------------------------------------------------------------------------	|
 | batch_size               	| 200       	| 400   	| Increase batch_size to allow bigger blocks with more txns                    	|
 | election_selection_pct   	| 20        	| 1     	| Allow greater score variance for selecting potential consensus members       	|
-| poc_good_bucket_high     	| -118      	| -130  	| Relax the upper bound for POC witness RSSI for custom antenna configurations 	|
-| poc_good_bucket_low      	| -115      	| -70   	| Relax the lower bound for POC witness RSSI for custom antenna configurations 	|
+| poc_good_bucket_low     	| -118      	| -130  	| Relax the lower bound for POC witness RSSI for custom antenna configurations 	|
+| poc_good_bucket_high    	| -80        	| -70   	| Relax the upper bound for POC witness RSSI for custom antenna configurations 	|
 | witness_refresh_interval 	| undefined 	| 10080 	| Probabilistically clean witnesses over the course of ~1 week                 	|
 | witness_refresh_rand_n   	| undefined 	| 1000  	| Set on chain for making sure witness refresh is deterministic                	|
 
