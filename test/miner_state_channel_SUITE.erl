@@ -705,7 +705,7 @@ multi_oui_test(Config) ->
     ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
 
     %% check that the ids differ
-    ActiveSCID /= ActiveSCID2,
+    ?assertNotEqual(ActiveSCID, ActiveSCID2),
 
     %% wait ExpireWithin2 + 5 more blocks to be safe, we expect sc2 to have closed now
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin2 + 5),
