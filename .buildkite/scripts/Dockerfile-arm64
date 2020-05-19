@@ -41,5 +41,3 @@ COPY --from=builder /opt/rel /opt/miner
 
 ENTRYPOINT ["/opt/miner/bin/miner"]
 CMD ["foreground"]
-
-#CMD tail -f /dev/null
