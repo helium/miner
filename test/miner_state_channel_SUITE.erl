@@ -118,10 +118,11 @@ no_packets_expiry_test(Config) ->
                                              AppEUI:64/integer-unsigned-little>> || {DevEUI, AppEUI} <- EUIs],
                                          fun xxhash:hash64/1)),
 
+    OUI = 1,
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
+                         [OUI, RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -197,10 +198,11 @@ packets_expiry_test(Config) ->
                                              AppEUI:64/integer-unsigned-little>> || {DevEUI, AppEUI} <- EUIs],
                                          fun xxhash:hash64/1)),
 
+    OUI = 1,
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
+                         [OUI, RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -250,6 +252,7 @@ packets_expiry_test(Config) ->
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -299,10 +302,11 @@ multi_clients_packets_expiry_test(Config) ->
                                           <<16#dead:64/integer-unsigned-little, 16#beef:64/integer-unsigned-little>>
                                          ], fun xxhash:hash64/1)),
 
+    OUI = 1,
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
+                         [OUI, RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -351,10 +355,13 @@ multi_clients_packets_expiry_test(Config) ->
     Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, <<"p3">>), %% second device joining
     Packet4 = blockchain_helium_packet_v1:new({devaddr, 1207959554}, <<"p4">>), %% second device transmitting
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1, []]), %% duplicate from client 2
-    timer:sleep(1000), %% this should help prevent a race condition over merkle tree order
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4, []]),
 
     %% check state_channel appears on the ledger
@@ -421,10 +428,11 @@ replay_test(Config) ->
                                              AppEUI:64/integer-unsigned-little>> || {DevEUI, AppEUI} <- EUIs],
                                          fun xxhash:hash64/1)),
 
+    OUI = 1,
     OUITxn = ct_rpc:call(RouterNode,
                          blockchain_txn_oui_v1,
                          new,
-                         [RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
+                         [OUI, RouterPubkeyBin, [RouterPubkeyBin], Filter, 8, 1, 0]),
     ct:pal("OUITxn: ~p", [OUITxn]),
     SignedOUITxn = ct_rpc:call(RouterNode,
                                blockchain_txn_oui_v1,
@@ -473,6 +481,7 @@ replay_test(Config) ->
     Packet1 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p1">>),
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -545,10 +554,11 @@ multi_oui_test(Config) ->
     ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
     ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
 
+    OUI1 = 1,
     OUITxn1 = ct_rpc:call(RouterNode1,
                           blockchain_txn_oui_v1,
                           new,
-                          [RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8, 1, 0]),
+                          [OUI1, RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8, 1, 0]),
     ct:pal("OUITxn1: ~p", [OUITxn1]),
     SignedOUITxn1 = ct_rpc:call(RouterNode1,
                                 blockchain_txn_oui_v1,
@@ -575,10 +585,11 @@ multi_oui_test(Config) ->
     ?assert(xor16:contain({Filter2, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
     ?assertNot(xor16:contain({Filter2, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
 
+    OUI2 = 2,
     OUITxn2 = ct_rpc:call(RouterNode2,
                           blockchain_txn_oui_v1,
                           new,
-                          [RouterPubkeyBin2, [RouterPubkeyBin2], Filter2, 8, 1, 0]),
+                          [OUI2, RouterPubkeyBin2, [RouterPubkeyBin2], Filter2, 8, 1, 0]),
     ct:pal("OUITxn2: ~p", [OUITxn2]),
     SignedOUITxn2 = ct_rpc:call(RouterNode2,
                                 blockchain_txn_oui_v1,
@@ -666,7 +677,7 @@ multi_oui_test(Config) ->
 
     %% Sent two packets
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
-    timer:sleep(timer:seconds(2)),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
 
     %% wait ExpireWithin + 10 more blocks to be safe, we expect sc1 to have closed
@@ -684,9 +695,9 @@ multi_oui_test(Config) ->
     %% we know whatever sc was active has closed now
     %% so send three more packets
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
-    timer:sleep(timer:seconds(2)),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
-    timer:sleep(timer:seconds(2)),
+    timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
 
     %% get this new active sc id
