@@ -35,7 +35,9 @@ WORKDIR /opt/miner
 
 ENV COOKIE=miner \
     # Write files generated during startup to /tmp
-    RELX_OUT_FILE_PATH=/tmp
+    RELX_OUT_FILE_PATH=/tmp \
+    # add miner to path, for easy interactions
+    PATH=$PATH:/opt/miner/bin
 
 COPY --from=builder /opt/rel /opt/miner
 

@@ -28,12 +28,14 @@ FROM erlang:22.3.2-alpine as runner
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
-
-WORKDIR /opt/miner
+RUN echo -e '#!/bin/bash\necho hello' > /usr/bin/hi && \
+    chmod +x /usr/bin/hi
 
 ENV COOKIE=miner \
     # Write files generated during startup to /tmp
-    RELX_OUT_FILE_PATH=/tmp
+    RELX_OUT_FILE_PATH=/tmp \
+    # make miner interactions easier
+    PATH=$PATH:/opt/miner/bin
 
 COPY --from=builder /opt/rel /opt/miner
 
