@@ -75,15 +75,9 @@ init(State) ->
             {ok, State#state{}};
         Chain ->
             Ledger0 = blockchain:ledger(Chain),
-            case Ledger0 of
-                undefined ->
-                    erlang:send_after(500, self(), chain_check),
-                    {ok, State#state{}};
-                _ ->
-                    Ledger = blockchain_ledger_v1:new_context(Ledger0),
-                    Chain1 = blockchain:ledger(Ledger, Chain),
-                    {ok, State#state{chain = Chain1}}
-            end
+            Ledger = blockchain_ledger_v1:new_context(Ledger0),
+            Chain1 = blockchain:ledger(Ledger, Chain),
+            {ok, State#state{chain = Chain1}}
     end.
 
 handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
