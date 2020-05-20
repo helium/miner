@@ -49,8 +49,8 @@ metadata(Version, Meta, Chain) ->
             Ledger = blockchain:ledger(Chain),
             ChainMeta = case blockchain:config(?snapshot_interval, Ledger) of
                             {ok, Interval} ->
-                                lager:info("snapshot interval is ~p h ~p rem ~p",
-                                           [Interval, Height, Height rem Interval]),
+                                lager:debug("snapshot interval is ~p h ~p rem ~p",
+                                            [Interval, Height, Height rem Interval]),
                                 case Height rem Interval == 0 of
                                     true ->
                                         DLedger = blockchain_ledger_v1:mode(delayed, Ledger),

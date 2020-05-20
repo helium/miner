@@ -373,28 +373,32 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                     Metadata),
     %% TODO what do we do about snapshot disagreements?
     %% IIRC we had agreed to omit
+    Ledger = blockchain:ledger(Chain),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    F = ((N - 1) div 3),
+
     SnapshotHash=
-        case blockchain:config(?snapshot_interval, blockchain:ledger(Chain)) of
+        case blockchain:config(?snapshot_interval, Ledger) of
             {ok, Interval} ->
                 case (NewHeight - 1) rem Interval == 0 of
                     true ->
-                        lager:info("XXX trying to add hash ~p", [NewHeight]),
-                        [SH] = lists:foldl(
-                                 fun({_Idx, #{snapshot_hash := SH}}, Acc) -> % new map vsn
-                                         lists:usort([SH | Acc]);
-                                    (_, Acc) ->
-                                         lists:usort([<<>> |Acc])
-                                 end,
-                                 [],
-                                 Metadata),
-                        SH;
-                    _ ->
-                        lager:info("XXX not the right round ~p", [NewHeight]),
-                        <<>>
+                        SHCt =
+                            lists:foldl(
+                              fun({_Idx, #{snapshot_hash := SH}}, Acc) -> % new map vsn
+                                      maps:update_with(SH, fun(V) -> V + 1 end, 1, Acc);
+                                 (_, Acc) ->
+                                      Acc
+                              end,
+                              #{},
+                              Metadata),
+                        case lists:reverse(lists:keysort(2, maps:to_list(SHCt))) of
+                            [] -> <<>>;
+                            [{_, Ct} | _ ] when Ct < ((2*F)+1) -> <<>>;
+                            [{SH, _Ct} | _ ] -> SH
+                        end;
+                    _ -> <<>>
                 end;
-            _ ->
-                lager:info("XXX not configured ~p", [NewHeight]),
-                <<>>
+            _ -> <<>>
         end,
     {Stamps, Hashes} = lists:unzip(StampHashes),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
