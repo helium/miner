@@ -19,3 +19,12 @@ Test
 -----
 
     $ make test
+
+docker
+=====
+
+Build a miner-test image locally:
+
+```
+docker build -t helium:miner-test -f .buildkite/scripts/Dockerfile-xxxNN .
+```
