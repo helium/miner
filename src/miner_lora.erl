@@ -9,7 +9,10 @@
     send_poc/5,
     port/0,
     position/0,
-    location_ok/0
+    location_ok/0,
+    reg_domain_data_for_addr/2,
+    reg_domain_data_for_countrycode/1,
+    region/0
 ]).
 
 -export([
@@ -43,12 +46,28 @@
     sig_fun,
     pubkey_bin,
     mirror_socket,
-    latlong
+    latlong,
+    reg_domain_confirmed = false :: boolean(),
+    reg_region :: atom(),
+    reg_geo_zone :: atom(),
+    reg_freq_list :: [float()]
+}).
+
+-record(country, {
+    short_code::binary(),
+    lat::binary(),
+    long::binary(),
+    name::binary(),
+    region::atom(),
+    geo_zone::atom()
 }).
 
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
+-type freq_data() :: {Region::atom(), GeoZone::atom(), Freqs::[float]}.
+
+-define(COUNTRY_FREQ_DATA, country_freq_data).
 
 %% in meters
 -define(MAX_WANDER_DIST, 75).
@@ -71,12 +90,15 @@ handle_response(Resp) ->
     end.
 
 -spec send(helium_packet()) -> ok | {error, any()}.
-send(#packet_pb{payload=Payload, timestamp=When, signal_strength=Power, frequency=Freq, datarate=DataRate}) ->
-    gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power, true}, 11000).
+send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength=Power, datarate=DataRate} = Packet) ->
+    lager:debug("got download packet ~p via freq ~p", [Packet, Freq]),
+    %% this is used for downlink packets that have been assigned a downlink frequency by the router, so just use the supplied frequency
+    ChannelSelectorFun = fun(_FreqList) -> Freq end,
+    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true}, 11000).
 
--spec send_poc(binary(), any(), float(), iolist(), any()) -> ok | {error, any()}.
-send_poc(Payload, When, Freq, DataRate, Power) ->
-    gen_server:call(?MODULE, {send, Payload, When, Freq, DataRate, Power, false}, 11000).
+-spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
+send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
+    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false}, 11000).
 
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
@@ -110,11 +132,48 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
+-spec reg_domain_data_for_addr(undefined | blockchain:blockchain(), libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(Chain, Addr)->
+    Ledger = blockchain:ledger(Chain),
+    {ok, Gw} = blockchain_ledger_v1:find_gateway_info(Addr, Ledger),
+    %% check if the miner has asserted its location, if not we will try other methods to determine this
+    case blockchain_ledger_gateway_v2:location(Gw) of
+        undefined ->
+            {error, location_not_asserted};
+        _H3Location ->
+            %% location has been asserted, we can proceed...
+            case country_code_for_addr(Addr) of
+                {ok, CC} ->
+                    %% use country code to get regulatory domain data
+                    ?MODULE:reg_domain_data_for_countrycode(CC);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
+
+-spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
+reg_domain_data_for_countrycode(CC)->
+    case ets:lookup(?COUNTRY_FREQ_DATA, CC) of
+        [{_Key, Res}] ->
+            lager:debug("found countrycode data ~p", [Res]),
+            FreqMap = application:get_env(miner, frequency_data, #{}),
+            freq_data(Res, FreqMap);
+        _ ->
+            lager:warning("Country code ~p not found",[CC]),
+            {error, countrycode_not_found}
+    end.
+
+-spec region() -> {ok, atom()}.
+region()->
+    gen_server:call(?MODULE, region, 5000).
+
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
 init(Args) ->
+    lager:info("init with args ~p", [Args]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
     {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
@@ -125,18 +184,50 @@ init(Args) ->
             {ok, S} = gen_udp:open(P, [binary, {active, true}]),
             S
     end,
+
+    %% cloud/miner pro will never assert location and so we dont want to
+    %% use regulatory domain checks for these miners
+    %% allow them to override the regulatory domain checks and be able to transmit from startup
+    %% default region and freq data is expected to be supplied by these miners
+    %% if not we will default to US902-928
+    {RegDomainConfirmed, DefaultRegRegion, DefaultRegGeoZone, DefaultRegFreqList} =
+        case maps:get(override_reg_domain_check, Args, false) of
+            true ->
+                lager:info("overriding regulatory domain checks, using values from Args", []),
+                {true, maps:get(default_reg_region, Args),
+                       maps:get(default_reg_geo_zone, Args),
+                       maps:get(default_reg_freq_list, Args)};
+            _ ->
+                %% not overriding domain checks, so initialize with source data and defaults
+                ets:new(?COUNTRY_FREQ_DATA, [named_table, public]),
+                ok = init_ets(),
+                erlang:send_after(5000, self(), reg_domain_timeout),
+                {false, undefined, undefined, undefined}
+        end,
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 mirror_socket = {MirrorSocket, undefined},
-                pubkey_bin = blockchain_swarm:pubkey_bin()}}.
+                pubkey_bin = blockchain_swarm:pubkey_bin(),
+                reg_domain_confirmed = RegDomainConfirmed,
+                reg_region = DefaultRegRegion,
+                reg_geo_zone = DefaultRegGeoZone,
+                reg_freq_list = DefaultRegFreqList}}.
 
-handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{socket=Socket,
-                                                                       gateways=Gateways,
-                                                                       packet_timers=Timers}=State) ->
+handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol}, _From,
+                #state{reg_domain_confirmed = false}=State) ->
+    lager:debug("ignoring send request as regulatory domain not yet confirmed", []),
+    {reply, {error, reg_domain_unconfirmed}, State};
+handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, From,
+                #state{ socket=Socket,
+                        gateways=Gateways,
+                        packet_timers=Timers,
+                        reg_freq_list = Freqs}=State) ->
     case select_gateway(Gateways) of
         {error, _}=Error ->
             {reply, Error, State};
         {ok, #gateway{ip=IP, port=Port}} ->
+            %% the fun is set by the sender and is used to deterministically route data via channels
+            LocalFreq = ChannelSelectorFun(Freqs),
             Token = mk_token(Timers),
             %% TODO we should check this for regulatory compliance
             BinJSX = jsx:encode(
@@ -147,7 +238,7 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
                              <<"powe">> => trunc(Power),
                              %% TODO gps time?
                              <<"tmst">> => When,
-                             <<"freq">> => Freq,
+                             <<"freq">> => LocalFreq,
                              <<"modu">> => <<"LORA">>,
                              <<"datr">> => list_to_binary(DataRate),
                              <<"codr">> => <<"4/5">>,
@@ -158,6 +249,7 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
                         }),
             Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
             maybe_mirror(State#state.mirror_socket, Packet),
+            lager:debug("sending packet via channel: ~p",[LocalFreq]),
             ok = gen_udp:send(Socket, IP, Port, Packet),
             %% TODO a better timeout would be good here
             Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
@@ -195,6 +287,9 @@ handle_call(position, _From, #state{pubkey_bin = Addr} = State) ->
                           [C, E, S]),
         {reply, {error, position_calc_error}, State}
     end;
+handle_call(region, _From, #state{reg_region = Region} = State) ->
+    {reply, {ok, Region}, State};
+
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
@@ -203,6 +298,30 @@ handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
 
+handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr} = State) ->
+    lager:debug("checking regulatory domain for address ~p", [Addr]),
+    %% dont crash if any of this goes wrong, just try again in a bit
+    try
+        Chain = blockchain_worker:blockchain(),
+        case ?MODULE:reg_domain_data_for_addr(Chain, Addr) of
+            {error, Reason}->
+                lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
+                %% the hotspot has not yet asserted its location, transmits will remain disabled
+                %% we will check again after a period
+                erlang:send_after(30000, self(), reg_domain_timeout),
+                {noreply, State};
+            {ok, {Region, GeoZone, FrequencyList}} ->
+                lager:info("confirmed regulatory domain for miner ~p.  region: ~p, geozone: ~p, freqlist: ~p",
+                    [Addr, Region, GeoZone, FrequencyList]),
+                {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
+                        reg_geo_zone = GeoZone, reg_freq_list = FrequencyList}}
+        end
+    catch
+        _Type:Exception ->
+            lager:warning("error whilst checking regulatory domain: ~p.  Will try again...",[Exception]),
+            erlang:send_after(30000, self(), reg_domain_timeout),
+            {noreply, State}
+    end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     case maps:find(Token, Timers) of
         {ok, {send, _Ref, From}} ->
@@ -261,7 +380,8 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PUSH_DATA:8/integer-unsigned,
                     MAC:64/integer,
-                    JSON/binary>>, IP, Port, #state{socket=Socket, gateways=Gateways}=State) ->
+                    JSON/binary>>, IP, Port, #state{socket=Socket, gateways=Gateways,
+                                                    reg_domain_confirmed = RegDomainConfirmed}=State) ->
     lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
@@ -272,15 +392,16 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
         end,
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
-    ok = gen_udp:send(Socket, IP, Port, Packet),
+    maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
     handle_json_data(jsx:decode(JSON, [return_maps]), Gateway, State);
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PULL_DATA:8/integer-unsigned,
-                    MAC:64/integer>>, IP, Port, #state{socket=Socket, gateways=Gateways}=State) ->
+                    MAC:64/integer>>, IP, Port, #state{socket=Socket, gateways=Gateways,
+                                                        reg_domain_confirmed = RegDomainConfirmed}=State) ->
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
-    ok = gen_udp:send(Socket, IP, Port, Packet),
+    maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
     lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
@@ -365,6 +486,10 @@ maybe_update_gps(#{<<"lati">> := Lat, <<"long">> := Long}, State) ->
     State#state{latlong = {Lat, Long}};
 maybe_update_gps(_Status, State) ->
     State.
+maybe_send_udp_ack(_Socket, _IP, _Port, _Packet, false = _RegDomainConfirmed)->
+    ok;
+maybe_send_udp_ack(Socket, IP, Port, Packet, _RegDomainConfirmed)->
+    ok = gen_udp:send(Socket, IP, Port, Packet).
 
 -spec sort_packets(list()) -> list().
 sort_packets(Packets) ->
@@ -378,7 +503,9 @@ sort_packets(Packets) ->
 -spec handle_packets(list(), gateway(), state()) -> state().
 handle_packets([], _Gateway, State) ->
     State;
-handle_packets([Packet|Tail], Gateway, State) ->
+handle_packets(_Packets, _Gateway, #state{reg_domain_confirmed = false} = State) ->
+    State;
+handle_packets([Packet|Tail], Gateway, #state{reg_region = Region} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -396,12 +523,12 @@ handle_packets([Packet|Tail], Gateway, State) ->
             );
         {Type, RoutingInfo} ->
             lager:notice("Routing ~p", [RoutingInfo]),
-            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet) end)
+            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
     end,
     handle_packets(Tail, Gateway, State).
 
 -spec route(binary()) -> any().
-route(Pkt) ->
+ route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
             route_non_longfi(Pkt);
@@ -447,8 +574,8 @@ maybe_mirror({_, undefined}, _) ->
 maybe_mirror({Sock, Destination}, Packet) ->
     gen_udp:send(Sock, Destination, Packet).
 
--spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map()) -> ok.
-send_to_router(Type, RoutingInfo, Packet) ->
+-spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
+send_to_router(Type, RoutingInfo, Packet, Region) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     RSSI = maps:get(<<"rssi">>, Packet),
     SNR = maps:get(<<"lsnr">>, Packet),
@@ -457,4 +584,59 @@ send_to_router(Type, RoutingInfo, Packet) ->
     Freq = maps:get(<<"freq">>, Packet),
     DataRate = maps:get(<<"datr">>, Packet),
     HeliumPacket = blockchain_helium_packet_v1:new(RoutingInfo, Type, Data, Time, RSSI, Freq, DataRate, SNR),
-    blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, [])).
+    blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
+
+-spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
+country_code_for_addr(Addr)->
+    B58Addr = libp2p_crypto:bin_to_b58(Addr),
+    URL = "https://api.helium.io/v1/hotspots/" ++ B58Addr,
+    case httpc:request(get, {URL, []}, [{timeout, 5000}],[]) of
+        {ok, {{_HTTPVersion, 200, _RespBody}, _Headers, JSONBody}} = Resp ->
+            lager:debug("hotspot info response: ~p", [Resp]),
+            %% body will be a list of geocode info of which one key will be the country code
+            Body = jsx:decode(list_to_binary(JSONBody), [return_maps]),
+            %% return the country code from the returned response
+            CC = maps:get(<<"short_country">>, maps:get(<<"geocode">>, maps:get(<<"data">>, Body)), undefined),
+            {ok, CC};
+        _ ->
+            {error, failed_to_find_geodata_for_addr}
+    end.
+
+-spec freq_data(#country{}, map())-> {ok, freq_data()}.
+freq_data(#country{region = undefined} = _Country, _FreqMap)->
+    {error, region_not_set};
+freq_data(#country{region = Region, geo_zone = Zone}= _Country, FreqMap)->
+    case maps:get(Region, FreqMap, undefined) of
+        undefined ->
+            lager:warning("frequency data not found for region ~p",[Region]),
+            {error, frequency_not_found_for_region};
+        F->
+            {ok, {Region, Zone, F}}
+    end.
+
+-spec init_ets() -> ok.
+init_ets() ->
+    PrivDir = code:priv_dir(miner),
+    File = application:get_env(miner, reg_domains_file, "countries_reg_domains.csv"),
+    lager:debug("loading csv file from ~p", [PrivDir ++ "/" ++ File]),
+    {ok, F} = file:open(PrivDir ++ "/" ++ File, [read, raw, binary, {read_ahead, 8192}]),
+    ok = csv_rows_to_ets(F),
+    ok = file:close(F).
+
+-spec csv_rows_to_ets(pid())-> ok | {error, any()}.
+csv_rows_to_ets(F) ->
+  try file:read_line(F) of
+    {ok, Line} ->
+        CP = binary:compile_pattern([<<$,>>, <<$\n>>]),
+        [ShortCode, Lat, Long, Country, Region, GeoZone] = binary:split(Line, CP, [global, trim]),
+        Rec = #country{short_code=ShortCode, lat=Lat, long=Long, name=Country,
+                        region=binary_to_atom(Region, utf8), geo_zone=binary_to_atom(GeoZone, utf8)},
+        ets:insert(?COUNTRY_FREQ_DATA, {ShortCode, Rec}),
+        csv_rows_to_ets(F);
+    eof ->
+        ok
+    catch
+        error:Reason ->
+            lager:warning("failed to read file ~p, error: ~p", [F, Reason]),
+            {error, Reason}
+  end.

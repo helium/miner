@@ -104,13 +104,24 @@ init(_Args) ->
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
             {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
+                %% check if we are overriding domain checks ( for lora )
+                %% If true then we expect default config data to be supplied, otherwise it defaults to undefined
+                %% and will be set by miner lora based on geolocation data of the miners asserted location
+                MaybeOverrideRegDomainChecks = application:get_env(miner, override_reg_domain_check, false),
+                DefaultRegRegion = application:get_env(miner, default_reg_region, undefined),
+                DefaultRegGeoZone = application:get_env(miner, default_reg_geo_zone, undefined),
+                DefaultRegFreqList = application:get_env(miner, default_reg_freq_list, undefined),
                 OnionOpts = #{
                     radio_udp_bind_ip => RadioBindIP,
                     radio_udp_bind_port => RadioBindPort,
                     radio_udp_send_ip => RadioSendIP,
                     radio_udp_send_port => RadioSendPort,
                     ecdh_fun => ECDHFun,
-                    sig_fun => SigFun
+                    sig_fun => SigFun,
+                    override_reg_domain_check => MaybeOverrideRegDomainChecks,
+                    default_reg_region => DefaultRegRegion,
+                    default_reg_geo_zone => DefaultRegGeoZone,
+                    default_reg_freq_list => DefaultRegFreqList
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
                  ?WORKER(miner_lora, [OnionOpts])];

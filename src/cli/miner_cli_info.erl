@@ -30,7 +30,8 @@ register_all_usage() ->
                    info_name_usage(),
                    info_block_age_usage(),
                    info_p2p_status_usage(),
-                   info_summary_usage()
+                   info_summary_usage(),
+                   info_region_usage()
                   ]).
 
 register_all_cmds() ->
@@ -44,7 +45,8 @@ register_all_cmds() ->
                    info_name_cmd(),
                    info_block_age_cmd(),
                    info_p2p_status_cmd(),
-                   info_summary_cmd()
+                   info_summary_cmd(),
+                   info_region_cmd()
                   ]).
 %%
 %% info
@@ -199,6 +201,33 @@ info_p2p_status(["info", "p2p_status"], [], []) ->
 info_p2p_status([_, _, _], [], []) ->
     usage.
 
+%%
+%% info region
+%%
+
+info_region_cmd() ->
+    [
+     [["info", "region"], [], [], fun info_region/3]
+    ].
+
+info_region_usage() ->
+    [["info", "region"],
+     ["info region \n\n",
+      "  Get the frequency region this miner is operating in \n\n"
+      "  If undefined, the region has not yet been confirmed or cannot be determined\n"
+      "  Until a region is confirmed, the miner will block tx\n"
+     ]
+    ].
+
+info_region(["info", "region"], [], []) ->
+    case miner_lora:region() of
+        {ok, undefined} ->
+            {exit_status, 1, [clique_status:text("undefined")]};
+        {ok, Region} ->
+             [clique_status:text(atom_to_list(Region))]
+    end;
+info_region([_, _, _], [], []) ->
+    usage.
 
 %%
 %% info summary
