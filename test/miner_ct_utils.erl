@@ -14,7 +14,7 @@
          pmap/2, pmap/3,
          wait_until/1, wait_until/3,
          wait_until_disconnected/2,
-         start_node/3,
+         start_node/1,
          partition_cluster/2,
          heal_cluster/2,
          connect/1,
@@ -52,7 +52,7 @@
          wait_for_in_consensus/2, wait_for_in_consensus/3,
          wait_for_chain_var_update/3, wait_for_chain_var_update/4,
          delete_dirs/2,
-         inital_dkg/5, inital_dkg/6,
+         initial_dkg/5, initial_dkg/6,
          confirm_balance/3,
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5,
@@ -71,24 +71,43 @@ stop_miners(Miners) ->
     stop_miners(Miners, 60).
 
 stop_miners(Miners, Retries) ->
-    [begin
-         ct_rpc:call(Miner, application, stop, [blockchain], 300),
-         ct_rpc:call(Miner, application, stop, [miner], 300)
-
-     end
-     || Miner <- Miners],
-    ok = miner_ct_utils:wait_for_app_stop(Miners, miner, Retries),
-    ok.
+    Res = [begin
+               ct:pal("capturing env for ~p", [Miner]),
+               LagerEnv = ct_rpc:call(Miner, application, get_all_env, [lager]),
+               P2PEnv = ct_rpc:call(Miner, application, get_all_env, [libp2p]),
+               BlockchainEnv = ct_rpc:call(Miner, application, get_all_env, [blockchain]),
+               MinerEnv = ct_rpc:call(Miner, application, get_all_env, [miner]),
+               ct:pal("stopping ~p", [Miner]),
+               erlang:monitor_node(Miner, true),
+               ct_slave:stop(Miner),
+               receive
+                   {nodedown, Miner} ->
+                       ok
+               after timer:seconds(Retries) ->
+                       error(stop_timeout)
+               end,
+               ct:pal("stopped ~p", [Miner]),
+               {Miner, [{lager, LagerEnv}, {libp2p, P2PEnv}, {blockchain, BlockchainEnv}, {miner, MinerEnv}]}
+           end
+           || Miner <- Miners],
+    Res.
 
 start_miners(Miners) ->
     start_miners(Miners, 60).
 
-start_miners(Miners, Retries) ->
+start_miners(MinersAndEnv, Retries) ->
     [begin
-          ct_rpc:call(Miner, application, start, [blockchain], 300),
-          ct_rpc:call(Miner, application, start, [miner], 300)
+         ct:pal("starting ~p", [Miner]),
+         start_node(Miner),
+         ct:pal("loading env ~p", [Miner]),
+         ok = ct_rpc:call(Miner, application, set_env, [Env]),
+         ct:pal("starting miner on ~p", [Miner]),
+         {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+         ct:pal("started miner on ~p : ~p", [Miner, _StartedApps])
      end
-     || Miner <- Miners],
+     || {Miner, Env} <- MinersAndEnv],
+    {Miners, _Env} = lists:unzip(MinersAndEnv),
+    ct:pal("waiting for blockchain worker to start on ~p", [Miners]),
     ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker, Retries),
     ok.
 
@@ -214,7 +233,7 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
                              try
                                  handle_gte_type(Type, Miner, Threshold)
                              catch What:Why ->
-                                       ct:pal("Failed to check GTE ~p ~p ~p: ~p:~p", [Type, Miner, Threshold, What, Why]),
+                                     ct:pal("Failed to check GTE ~p ~p ~p: ~p:~p", [Type, Miner, Threshold, What, Why]),
                                      false
                              end
                         end, miner_ct_utils:shuffle(Miners))
@@ -230,35 +249,37 @@ wait_for_registration(Miners, Mod) ->
     wait_for_registration(Miners, Mod, 300).
 wait_for_registration(Miners, Mod, Timeout) ->
     ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                             case ct_rpc:call(Miner, erlang, whereis, [Mod], Timeout) of
-                                 P when is_pid(P) ->
-                                     true;
-                                 Other ->
-                                     ct:pal("Other ~p~n", [Other]),
+                     RegistrationResult
+                         = lists:all(
+                             fun(Miner) ->
+                                     case ct_rpc:call(Miner, erlang, whereis, [Mod], Timeout) of
+                                         P when is_pid(P) ->
+                                             true;
+                                         Other ->
+                                             ct:pal("Other ~p~n", [Other]),
                                      false
-                             end
-                         end, Miners)
+                                     end
+                             end, Miners)
                  end,
-        Result == true, 90, timer:seconds(1)),
+        RegistrationResult, 90, timer:seconds(1)),
     ok.
 
 wait_for_app_start(Miners, App) ->
     wait_for_app_start(Miners, App, 60).
 wait_for_app_start(Miners, App, Retries) ->
     ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                             case ct_rpc:call(Miner, application, which_applications, []) of
-                                 {badrpc, _} ->
-                                     false;
-                                 Apps ->
-                                     lists:keymember(App, 1, Apps)
-                             end
-                         end, Miners)
+                     AppStartResult =
+                         lists:all(
+                           fun(Miner) ->
+                                   case ct_rpc:call(Miner, application, which_applications, []) of
+                                       {badrpc, _} ->
+                                           false;
+                                       Apps ->
+                                           lists:keymember(App, 1, Apps)
+                                   end
+                           end, Miners)
                  end,
-        Result == true, Retries, 500),
+        AppStartResult, Retries, 500),
     ok.
 
 wait_for_app_stop(Miners, App) ->
@@ -290,14 +311,15 @@ wait_for_in_consensus(Miners, NumInConsensus, Timeout)->
                              L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
 
                              case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
-                                 {ok, Sz} ->
-                                     ct:pal("size ~p", [Sz]),
+                                 {ok, _Sz} ->
                                      true == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []);
                                  _ ->
                                      %% badrpc
                                      false
                              end
-                         end, Miners)
+                         end, Miners),
+                     ct:pal("size ~p", [length(Result)]),
+                     Result
                  end,
         NumInConsensus == length(Result), 60, timer:seconds(1)),
     ok.
@@ -327,9 +349,9 @@ delete_dirs(DirWildcard, SubDir)->
      || Dir <- Dirs],
     ok.
 
-inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
-    inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
-inital_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
+initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
+    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
+initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
     DKGResults = miner_ct_utils:pmap(
                    fun(Miner) ->
                            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
@@ -394,7 +416,7 @@ wait_until_connected(Node1, Node2) ->
                        pong == rpc:call(Node1, net_adm, ping, [Node2])
                end, 60*2, 500).
 
-start_node(Name, Config, Case) ->
+start_node(Name) ->
     CodePath = lists:filter(fun filelib:is_dir/1, code:get_path()),
     %% have the slave nodes monitor the runner node, so they can't outlive it
     NodeConfig = [
@@ -413,12 +435,12 @@ start_node(Name, Config, Case) ->
         {error, already_started, Node} ->
             ct_slave:stop(Name),
             wait_until_offline(Node),
-            start_node(Name, Config, Case);
+            start_node(Name);
         {error, started_not_connected, Node} ->
             connect(Node),
             ct_slave:stop(Name),
             wait_until_offline(Node),
-            start_node(Name, Config, Case)
+            start_node(Name)
     end.
 
 partition_cluster(ANodes, BNodes) ->
@@ -551,14 +573,14 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {miner_ct_utils:start_node(MinerName, Config, miner_dist_SUITE), {45000, 0}}
+            {miner_ct_utils:start_node(MinerName), {45000, 0}}
         end,
         lists:seq(1, TotalMiners)
     ),
 
     Keys = miner_ct_utils:pmap(
              fun({Miner, Ports}) ->
-                     miner_ct_utils:start_node(Miner, Config, miner_dist_SUITE),
+                     miner_ct_utils:start_node(Miner),
                      #{secret := GPriv, public := GPub} =
                      libp2p_crypto:generate_keys(ecc_compact),
                      GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
@@ -802,7 +824,7 @@ make_vars(Keys, Map, Mode) ->
               ?dkg_curve => 'SS512',
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
-              ?predicate_threshold => 0.85,
+              ?predicate_threshold => 0.60,
               ?monthly_reward => 50000 * 1000000,
               ?securities_percent => 0.35,
               ?dc_percent => 0.0,

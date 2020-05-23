@@ -44,7 +44,28 @@ metadata(Version, Meta, Chain) ->
         tuple ->
             term_to_binary({erlang:system_time(seconds), HeadHash});
         map ->
-            ChainMeta = #{timestamp => erlang:system_time(seconds), head_hash => HeadHash},
+            ChainMeta0 = #{timestamp => erlang:system_time(seconds), head_hash => HeadHash},
+            {ok, Height} = blockchain:height(Chain),
+            Ledger = blockchain:ledger(Chain),
+            ChainMeta = case blockchain:config(?snapshot_interval, Ledger) of
+                            {ok, Interval} ->
+                                lager:debug("snapshot interval is ~p h ~p rem ~p",
+                                            [Interval, Height, Height rem Interval]),
+                                case Height rem Interval == 0 of
+                                    true ->
+                                        Blocks = blockchain_ledger_snapshot_v1:get_blocks(Chain),
+                                        {ok, Snapshot} = blockchain_ledger_snapshot_v1:snapshot(Ledger, Blocks),
+                                        ok = blockchain:add_snapshot(Snapshot, Chain),
+                                        SHA = blockchain_ledger_snapshot_v1:hash(Snapshot),
+                                        lager:info("snapshot hash is ~p", [SHA]),
+                                        maps:put(snapshot_hash, SHA, ChainMeta0);
+                                    false ->
+                                        ChainMeta0
+                                end;
+                            _ ->
+                                lager:info("no snapshot interval configured"),
+                                ChainMeta0
+                        end,
             term_to_binary(maps:merge(Meta, ChainMeta))
     end.
 

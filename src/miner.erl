@@ -346,6 +346,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
+    CurrentBlockHeight = blockchain_block:height(CurrentBlock),
+    NewHeight = CurrentBlockHeight + 1,
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
@@ -369,6 +371,43 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                     end,
                     [],
                     Metadata),
+    Ledger = blockchain:ledger(Chain),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    F = ((N - 1) div 3),
+
+    %% find a snapshot hash.  if not enabled or we're unable to determine or agree on one, just
+    %% leave it blank, so other nodes can absorb it.
+    SnapshotHash =
+        case blockchain:config(?snapshot_interval, Ledger) of
+            {ok, Interval} ->
+                %% if we're expecting a snapshot
+                case (NewHeight - 1) rem Interval == 0 of
+                    true ->
+                        %% iterate through the metadata collecting them
+                        SHCt =
+                            lists:foldl(
+                              %% we have one, so count unique instances of it
+                              fun({_Idx, #{snapshot_hash := SH}}, Acc) ->
+                                      maps:update_with(SH, fun(V) -> V + 1 end, 1, Acc);
+                                 (_, Acc) ->
+                                      Acc
+                              end,
+                              #{},
+                              Metadata),
+                        %% flatten the map into a list, sorted by hash count, highest first. take
+                        %% the most common one and make sure that enough nodes agree on that
+                        %% snapshot. if not, don't return anything.
+                        case lists:reverse(lists:keysort(2, maps:to_list(SHCt))) of
+                            [] -> <<>>;
+                            %% head should be the node with the highest count.  don't include it if
+                            %% we have too much disagreement or not enough reports
+                            [{_, Ct} | _ ] when Ct < ((2*F)+1) -> <<>>;
+                            [{SH, _Ct} | _ ] -> SH
+                        end;
+                    _ -> <<>>
+                end;
+            _ -> <<>>
+        end,
     {Stamps, Hashes} = lists:unzip(StampHashes),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
@@ -377,14 +416,20 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
         case lists:usort(Hashes) of
             [CurrentBlockHash] ->
                 SortedTransactions = lists:sort(fun blockchain_txn:sort/2, Txns),
-                CurrentBlockHeight = blockchain_block:height(CurrentBlock),
-                NewHeight = CurrentBlockHeight + 1,
+                lager:info("metadata snapshot hash for ~p is ~p", [NewHeight, SnapshotHash]),
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
-                LastBlockTimestamp = blockchain_block:time(CurrentBlock),
-                BlockTime = miner_util:median([ X || X <- Stamps,
-                                                     X > LastBlockTimestamp]),
-
+                LastBlockTime = blockchain_block:time(CurrentBlock),
+                BlockTime =
+                    case miner_util:median([ X || X <- Stamps,
+                                                  X >= LastBlockTime]) of
+                        0 ->
+                            LastBlockTime + 1;
+                        LastBlockTime ->
+                            LastBlockTime + 1;
+                        NewTime ->
+                            NewTime
+                    end,
                 {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, Chain),
 
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
@@ -414,7 +459,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                election_epoch => ElectionEpoch,
                                epoch_start => EpochStart,
                                seen_votes => SeenVectors,
-                               bba_completion => BBA
+                               bba_completion => BBA,
+                               snapshot_hash => SnapshotHash
                               }),
                 {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
