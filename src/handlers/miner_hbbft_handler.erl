@@ -60,7 +60,8 @@ metadata(Version, Meta, Chain) ->
                                                 SHA = blockchain_ledger_snapshot_v1:hash(Snapshot),
                                                 lager:info("snapshot hash is ~p", [SHA]),
                                                 maps:put(snapshot_hash, SHA, ChainMeta0);
-                                            _ ->
+                                            _Err ->
+                                                lager:warning("error constructing snapshot ~p", [_Err]),
                                                 ChainMeta0
                                         end;
                                     false ->
