@@ -74,7 +74,7 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, maps:merge(DefaultVars, SCVars)),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners,
+    DKGResults = miner_ct_utils:initial_dkg(Miners,
                                            InitialVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns,
                                            Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),

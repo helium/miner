@@ -46,7 +46,7 @@ initial_dkg_test(Config) ->
     NumConsensusMembers = ?config(num_consensus_members, Config),
     Curve = ?config(dkg_curve, Config),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialTransactions, Addresses,
+    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialTransactions, Addresses,
                                             NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 

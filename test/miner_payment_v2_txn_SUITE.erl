@@ -57,7 +57,7 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?max_payments => 10,
                                                    ?allow_zero_amount => false}),
 
-    DKGResults = miner_ct_utils:inital_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                            Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
