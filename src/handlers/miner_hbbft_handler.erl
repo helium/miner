@@ -54,11 +54,15 @@ metadata(Version, Meta, Chain) ->
                                 case Height rem Interval == 0 of
                                     true ->
                                         Blocks = blockchain_ledger_snapshot_v1:get_blocks(Chain),
-                                        {ok, Snapshot} = blockchain_ledger_snapshot_v1:snapshot(Ledger, Blocks),
-                                        ok = blockchain:add_snapshot(Snapshot, Chain),
-                                        SHA = blockchain_ledger_snapshot_v1:hash(Snapshot),
-                                        lager:info("snapshot hash is ~p", [SHA]),
-                                        maps:put(snapshot_hash, SHA, ChainMeta0);
+                                        case blockchain_ledger_snapshot_v1:snapshot(Ledger, Blocks) of
+                                            {ok, Snapshot} ->
+                                                ok = blockchain:add_snapshot(Snapshot, Chain),
+                                                SHA = blockchain_ledger_snapshot_v1:hash(Snapshot),
+                                                lager:info("snapshot hash is ~p", [SHA]),
+                                                maps:put(snapshot_hash, SHA, ChainMeta0);
+                                            _ ->
+                                                ChainMeta0
+                                        end;
                                     false ->
                                         ChainMeta0
                                 end;
