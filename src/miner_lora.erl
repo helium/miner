@@ -82,7 +82,9 @@ send_poc(Payload, When, Freq, DataRate, Power) ->
 port() ->
     gen_server:call(?MODULE, port, 11000).
 
--spec position() -> {ok, {float(), float()}} | {error, any()}.
+-spec position() -> {ok, {float(), float()}} |
+                    {ok, bad_assert, {float(), float()}} |
+                    {error, any()}.
 position() ->
     try
         gen_server:call(?MODULE, position, infinity)
@@ -104,7 +106,9 @@ location_ok() ->
     %%     {ok, _, _} ->
     %%         false
     %% end.
-    true.
+
+    %% this terrible thing is to fake out dialyzer
+    application:get_env(miner, loc_ok_default, true).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions

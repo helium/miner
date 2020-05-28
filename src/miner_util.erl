@@ -85,7 +85,6 @@ metadata_fun() ->
             _ ->
                 Map#{<<"gps_fix_quality">> => <<"no_fix">>}
         end
-    catch C:E:S ->
-            lager:info("fuuu ~p ~p ~p", [C, E, S]),
+    catch _:_ ->
             #{}
     end.
