@@ -83,8 +83,9 @@ metadata_fun() ->
                 Map#{<<"gps_fix_quality">> => <<"not_asserted">>};
             %% got nonsense or a hopefully transient error, return nothing
             _ ->
-                Map
+                Map#{<<"gps_fix_quality">> => <<"no_fix">>}
         end
-    catch _:_ ->
+    catch C:E:S ->
+            lager:info("fuuu ~p ~p ~p", [C, E, S]),
             #{}
     end.

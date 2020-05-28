@@ -84,7 +84,11 @@ port() ->
 
 -spec position() -> {ok, {float(), float()}} | {error, any()}.
 position() ->
-    gen_server:call(?MODULE, position, infinity).
+    try
+        gen_server:call(?MODULE, position, infinity)
+    catch _:_ ->
+            {error, no_fix}
+    end.
 
 -spec location_ok() -> true | false.
 location_ok() ->
