@@ -75,9 +75,14 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream) ->
 
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok | {error, any()}.
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
-    <<ID:10/binary, _/binary>> = OnionCompactKey,
-    lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
-    send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT).
+    case miner_lora:location_ok() of
+        true ->
+            <<ID:10/binary, _/binary>> = OnionCompactKey,
+            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
+            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT);
+        false ->
+            ok
+    end.
 
 -spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok | {error, any()}.
 send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _Stream, 0) ->
@@ -125,9 +130,14 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
 
 -spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
 send_witness(_Data, OnionCompactKey, Time, RSSI) ->
-    <<ID:10/binary, _/binary>> = OnionCompactKey,
-    lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
-    send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT).
+    case miner_lora:location_ok() of
+        true ->
+            <<ID:10/binary, _/binary>> = OnionCompactKey,
+            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
+            send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT);
+        false ->
+            ok
+    end.
 
 -spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
@@ -276,8 +286,13 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             <<IntData:16/integer-unsigned-little>> = Data,
             Freq = lists:nth((IntData rem 8) + 1, ?CHANNELS),
             %% TODO calculate some kind of delay here
-            erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
-            erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)end),
+            case miner_lora:location_ok() of
+                true ->
+                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
+                    erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)end);
+                false ->
+                    ok
+            end,
             State;
         {error, Reason} ->
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),

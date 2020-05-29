@@ -50,7 +50,6 @@
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
 
-
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
 -else.
@@ -268,11 +267,15 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
-    case validate_witness(Witness, Ledger) of
-        false ->
+    LocationOK = miner_lora:location_ok(),
+    case {LocationOK, validate_witness(Witness, Ledger)} of
+        {false, Valid} ->
+            lager:warning("location is bad, validity: ~p", [Valid]),
+            {keep_state, Data};
+        {_, false} ->
             lager:warning("ignoring invalid witness ~p", [Witness]),
             {keep_state, Data};
-        true ->
+        {_, true} ->
             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
             GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
             %% check this is a known layer of the packet
@@ -306,11 +309,15 @@ receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Chal
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
-    case blockchain_poc_receipt_v1:is_valid(Receipt) of
-        false ->
+    LocationOK = miner_lora:location_ok(),
+    case {LocationOK, blockchain_poc_receipt_v1:is_valid(Receipt)} of
+        {false, Valid} ->
+            lager:warning("location is bad, validity: ~p", [Valid]),
+            {keep_state, Data};
+        {_, false} ->
             lager:warning("ignoring invalid receipt ~p", [Receipt]),
             {keep_state, Data};
-        true ->
+        {_, true} ->
             %% Also check onion layer secret
             case lists:keyfind(Gateway, 1, Challengees) of
                 {Gateway, LayerData} ->
@@ -624,28 +631,28 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                 POCInterval0
         end,
 
-    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-        {error, Error} ->
-            lager:warning("failed to get gateway info for ~p : ~p", [Address, Error]),
-            false;
-        {ok, GwInfo} ->
-            case blockchain:get_block(BlockHash, Blockchain) of
-                {error, Error} ->
-                    lager:warning("failed to get block ~p : ~p", [BlockHash, Error]),
-                    false;
-                {ok, Block} ->
-                    Height = blockchain_block:height(Block),
-                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                        undefined ->
-                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                            true;
-                        LastChallenge ->
-                            case (Height - LastChallenge) > POCInterval of
-                                true -> 1 == rand:uniform(trunc(POCInterval / 4));
-                                false -> false
-                            end
+    try
+        {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(Address, Ledger),
+        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+        Height = blockchain_block:height(Block),
+        ChallengeOK =
+            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                undefined ->
+                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                    true;
+                LastChallenge ->
+                    case (Height - LastChallenge) > POCInterval of
+                        true -> 1 == rand:uniform(trunc(POCInterval / 4));
+                        false -> false
                     end
-            end
+            end,
+        LocationOK = true,
+        LocationOK = miner_lora:location_ok(),
+        ChallengeOK andalso LocationOK
+    catch Class:Err:Stack ->
+            lager:warning("error determining if request allowed: ~p:~p ~p",
+                          [Class, Err, Stack]),
+            false
     end.
 
 -spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->
@@ -762,9 +769,6 @@ send_onion(P2P, Onion, Retry) ->
             timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
-
-
-
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

@@ -7,7 +7,9 @@
     handle_response/1,
     send/1,
     send_poc/5,
-    port/0
+    port/0,
+    position/0,
+    location_ok/0
 ]).
 
 -export([
@@ -40,12 +42,16 @@
     packet_timers = #{}, %% keyed by token
     sig_fun,
     pubkey_bin,
-    mirror_socket
+    mirror_socket,
+    latlong
 }).
 
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
+
+%% in meters
+-define(MAX_WANDER_DIST, 75).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -75,6 +81,34 @@ send_poc(Payload, When, Freq, DataRate, Power) ->
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
     gen_server:call(?MODULE, port, 11000).
+
+-spec position() -> {ok, {float(), float()}} |
+                    {ok, bad_assert, {float(), float()}} |
+                    {error, any()}.
+position() ->
+    try
+        gen_server:call(?MODULE, position, infinity)
+    catch _:_ ->
+            {error, no_fix}
+    end.
+
+-spec location_ok() -> true | false.
+location_ok() ->
+    %% the below code is tested and working.  we're going to roll
+    %% out the metadata update so app users can see their status
+    %% case position() of
+    %%     {error, _Error} ->
+    %%         lager:debug("pos err ~p", [_Error]),
+    %%         false;
+    %%     {ok, _} ->
+    %%         true;
+    %%     %% fix but too far from assert
+    %%     {ok, _, _} ->
+    %%         false
+    %% end.
+
+    %% this terrible thing is to fake out dialyzer
+    application:get_env(miner, loc_ok_default, true).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -131,6 +165,36 @@ handle_call({send, Payload, When, Freq, DataRate, Power, IPol}, From, #state{soc
     end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
+handle_call(position, _From, #state{latlong = undefined} = State) ->
+    {reply, {error, no_fix}, State};
+handle_call(position, _From, #state{pubkey_bin = Addr} = State) ->
+    try
+        Chain = blockchain_worker:blockchain(),
+        Ledger = blockchain:ledger(Chain),
+        {ok, Gw} = blockchain_ledger_v1:find_gateway_info(Addr, Ledger),
+        Ret =
+            case blockchain_ledger_gateway_v2:location(Gw) of
+                undefined ->
+                    {error, not_asserted};
+                H3Loc ->
+                    case vincenty:distance(h3:to_geo(H3Loc), State#state.latlong) of
+                        {error, _E} ->
+                            lager:debug("fix error! ~p", [_E]),
+                            {error, bad_calculation};
+                        {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
+                            lager:debug("fix too far! ~p", [Distance]),
+                            {ok, bad_assert, State#state.latlong};
+                        {ok, _D} ->
+                            lager:debug("fix good! ~p", [_D]),
+                            {ok, State#state.latlong}
+                    end
+            end,
+        {reply, Ret, State}
+    catch C:E:S ->
+            lager:warning("error trying to get position: ~p:~p ~p",
+                          [C, E, S]),
+        {reply, {error, position_calc_error}, State}
+    end;
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
@@ -286,8 +350,20 @@ handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gatewa
     lager:info("got status ~p", [Status]),
     lager:info("Gateway ~p", [lager:pr(Gateway1, ?MODULE)]),
     Mac = Gateway1#gateway.mac,
-    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1, State#state{gateways=maps:put(Mac, Gateway1, Gateways)});
+    State1 = maybe_update_gps(Status, State),
+    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1,
+                     State1#state{gateways=maps:put(Mac, Gateway1, Gateways)});
 handle_json_data(_, _Gateway, State) ->
+    State.
+
+%% cache GPS the state with each update.  I'm not sure if this will
+%% lead to a lot of wander, but I do want to be able to refine if we
+%% have a poor quality initial lock.  we might want to keep track of
+%% server boot time and lock it down after some period of time.
+-spec maybe_update_gps(#{}, state()) -> state().
+maybe_update_gps(#{<<"lati">> := Lat, <<"long">> := Long}, State) ->
+    State#state{latlong = {Lat, Long}};
+maybe_update_gps(_Status, State) ->
     State.
 
 -spec sort_packets(list()) -> list().
