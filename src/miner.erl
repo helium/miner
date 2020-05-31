@@ -604,8 +604,12 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                          undefined ->
                              case Height > StartHeight of
                                  true ->
-                                     {ok, StartBlock} = blockchain:get_block(StartHeight, Chain),
-                                     blockchain_block:time(StartBlock);
+                                     case blockchain:get_block(StartHeight, Chain) of
+                                         {ok, StartBlock} ->
+                                             blockchain_block:time(StartBlock);
+                                         _ ->
+                                             undefined
+                                     end;
                                  false ->
                                      undefined
                              end;
