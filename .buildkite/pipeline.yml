@@ -11,7 +11,7 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  - if: build.tag != null
+  - if: build.tag =~ /\/_GA$$/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -24,7 +24,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null
+  - if: build.tag =~ /\/_GA$$/
     name: ":open_file_folder: AMD64 open container image"
     artifact_paths: "*-oci.tar"
     env:
