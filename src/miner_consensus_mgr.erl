@@ -368,10 +368,14 @@ handle_call(in_consensus, _From, #state{chain = Chain} = State) ->
     %%   3) does that miner group have a valid key to the larger group
     %% 2 and especially 3 are hard to do and harder to trust, so just
     %% do 1 for now
-    Ledger = blockchain:ledger(Chain),
-    {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
-    MyAddr = blockchain_swarm:pubkey_bin(),
-    {reply, lists:member(MyAddr, ConsensusGroup), State};
+    try
+        Ledger = blockchain:ledger(Chain),
+        {ok, ConsensusGroup} = blockchain_ledger_v1:consensus_members(Ledger),
+        MyAddr = blockchain_swarm:pubkey_bin(),
+        {reply, lists:member(MyAddr, ConsensusGroup), State}
+    catch _:_ ->
+                {reply, false, State}
+    end;
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
     Reply = ok,
