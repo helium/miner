@@ -11,8 +11,8 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  - if: build.tag != null
-    name: ":whale: ARM64 docker"
+  - if: build.tag =~ /\_GA$$/
+    name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
@@ -24,8 +24,8 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null
-    name: ":open_file_folder: ARM64 open container image"
+  - if: build.tag =~ /\_GA$$/
+    name: ":open_file_folder: AMD64 open container image"
     artifact_paths: "*-oci.tar"
     env:
       REGISTRY_HOST: "quay.io"
@@ -54,9 +54,8 @@ steps:
 #   commands:
 #     - "git fetch -t"
 #     - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag != null
-    name: ":whale: AMD64 docker"
+  - if: build.tag =~ /\_GA$$/
+    name: ":whale: ARM64 docker"
     agents:
       queue: "erlang"
     env:
@@ -68,7 +67,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null
+  - if: build.tag =~ /\_GA$$/
     name: ":open_file_folder: ARM64 open container image"
     artifact_paths: "*-oci.tar"
     env:
