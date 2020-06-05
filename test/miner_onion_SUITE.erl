@@ -37,6 +37,8 @@ all() ->
 %%--------------------------------------------------------------------
 basic(Config) ->
     application:ensure_all_started(lager),
+    lager:set_loglevel(lager_console_backend, debug),
+    lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
 
     BaseDir = ?config(base_dir, Config),
     Ledger = blockchain_ledger_v1:new(BaseDir),
@@ -76,7 +78,11 @@ basic(Config) ->
         radio_udp_bind_port => 5678,
         radio_udp_send_ip => {127,0,0,1},
         radio_udp_send_port => Port,
-        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey)
+        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey),
+        override_reg_domain_check => true,
+        default_reg_region => 'US915',
+        default_reg_geo_zone => 'zone2',
+        default_reg_freq_list => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]
     }),
 
 
@@ -154,7 +160,11 @@ basic(Config) ->
         radio_udp_bind_port => 5678,
         radio_udp_send_ip => {127,0,0,1},
         radio_udp_send_port => Port,
-        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey2)
+        sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey2),
+        override_reg_domain_check => true,
+        default_reg_region => 'US915',
+        default_reg_geo_zone => 'zone2',
+        default_reg_freq_list => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]
     }),
 
     %% set up the gateway

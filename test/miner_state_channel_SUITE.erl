@@ -251,9 +251,9 @@ packets_expiry_test(Config) ->
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
 
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
@@ -354,15 +354,15 @@ multi_clients_packets_expiry_test(Config) ->
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>), %% first device transmitting
     Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, <<"p3">>), %% second device joining
     Packet4 = blockchain_helium_packet_v1:new({devaddr, 1207959554}, <<"p4">>), %% second device transmitting
-    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1, []]), %% duplicate from client 2
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet1, [], 'US915']), %% duplicate from client 2
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3, []]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet3, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4, []]),
+    ok = ct_rpc:call(ClientNode2, blockchain_state_channels_client, packet, [Packet4, [], 'US915']),
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -480,9 +480,9 @@ replay_test(Config) ->
     %% Use client node to send some packets
     Packet1 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p1">>),
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
 
     %% wait ExpireWithin + 3 more blocks to be safe
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 3),
@@ -676,9 +676,9 @@ multi_oui_test(Config) ->
     ct:pal("ActiveSCID: ~p", [ActiveSCID]),
 
     %% Sent two packets
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
 
     %% wait ExpireWithin + 10 more blocks to be safe, we expect sc1 to have closed
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 5),
@@ -694,11 +694,11 @@ multi_oui_test(Config) ->
 
     %% we know whatever sc was active has closed now
     %% so send three more packets
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet4, [], 'US915']),
     timer:sleep(timer:seconds(1)),
-    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, []]),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet5, [], 'US915']),
 
     %% get this new active sc id
     ActiveSCID2 = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),

@@ -284,11 +284,12 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
             Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 0, 1, 0, NextPacket, #{})),
             %% deterministally pick a channel based on the layerdata
             <<IntData:16/integer-unsigned-little>> = Data,
-            Freq = lists:nth((IntData rem 8) + 1, ?CHANNELS),
             %% TODO calculate some kind of delay here
             case miner_lora:location_ok() of
                 true ->
-                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, Freq, "SF10BW125", ?TX_POWER) end),
+                    %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
+                    ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
+                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, "SF10BW125", ?TX_POWER) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)end);
                 false ->
                     ok
