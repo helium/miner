@@ -273,7 +273,7 @@ handle_call(position, _From, #state{pubkey_bin = Addr} = State) ->
                         {error, _E} ->
                             lager:debug("fix error! ~p", [_E]),
                             {error, bad_calculation};
-                        {ok, Distance} when Distance > ?MAX_WANDER_DIST ->
+                        {ok, Distance} when (Distance / 1000) > ?MAX_WANDER_DIST ->
                             lager:debug("fix too far! ~p", [Distance]),
                             {ok, bad_assert, State#state.latlong};
                         {ok, _D} ->
