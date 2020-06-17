@@ -94,8 +94,6 @@ txn_in_sequence_nonce_test(Config) ->
     Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
@@ -107,10 +105,10 @@ txn_in_sequence_nonce_test(Config) ->
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
-    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+1]),
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
     SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     %% the second txn
-    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+2]),
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+2]),
     SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     %% send the txns
     ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn1]),
@@ -147,8 +145,6 @@ txn_out_of_sequence_nonce_test(Config) ->
     Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
@@ -159,10 +155,10 @@ txn_out_of_sequence_nonce_test(Config) ->
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
-    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+1]),
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
     SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     %% the second txn
-    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+2]),
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+2]),
     SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
 
     %% send txn 2 first
@@ -220,8 +216,6 @@ txn_invalid_nonce_test(Config) ->
     Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
@@ -232,10 +226,10 @@ txn_invalid_nonce_test(Config) ->
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
-    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+1]),
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
     SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     %% the second txn - with the same nonce as the first
-    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, StartNonce+1]),
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
     SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     %% send txn1
     ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn1]),
@@ -284,8 +278,6 @@ txn_dependent_test(Config) ->
     Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    {ok, Fee} = ct_rpc:call(Miner, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
@@ -297,7 +289,7 @@ txn_dependent_test(Config) ->
 
     %% send a bunch of dependant txns and ensure they are processed by the txn mgr
     %% and dont hang around it its cache
-    UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
+    UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Nonce]) || Nonce <- lists:seq(1, Count) ],
     SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
     [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ],
 

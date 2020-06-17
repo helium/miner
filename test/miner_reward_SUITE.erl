@@ -93,13 +93,8 @@ basic_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% send some helium tokens from payer to payee
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 

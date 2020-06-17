@@ -95,13 +95,9 @@ single_payment_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-    ct:pal("Fee: ~p", [Fee]),
 
     %% send some helium tokens from payer to payee
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
@@ -111,16 +107,16 @@ single_payment_test(Config) ->
 
     %% wait until all the nodes agree the payment has happened
     %% NOTE: Fee is zero
-    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 4000 + Fee, 6000),
+    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 4000, 6000),
 
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
-    4000 = PayerBalance + Fee,
+    4000 = PayerBalance,
     6000 = PayeeBalance,
 
     %% put the transaction into and then suspend one of the consensus group members
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 2]),
 
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
 
@@ -142,7 +138,7 @@ single_payment_test(Config) ->
     PayerBalance2 = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance2 = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
-    ?assertEqual(4000, PayerBalance2 + Fee),
+    ?assertEqual(4000, PayerBalance2),
     ?assertEqual(6000, PayeeBalance2),
 
     ct_rpc:call(Candidate, sys, resume, [Group]),
@@ -154,7 +150,7 @@ single_payment_test(Config) ->
     %%               If we pass in the new expected balances from after the txns clear, these too work
     %%               as the assertAsync will retry N times until it gets returns for these balances
     %%               ( assuming of course the txns do clear )
-    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 3000 + Fee, 7000),
+    ok = miner_ct_utils:confirm_balance_both_sides(Miners, PayerAddr, PayeeAddr, 3000, 7000),
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
     ok.
@@ -171,13 +167,9 @@ self_payment_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     %% send some helium tokens from payer to payee
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
@@ -199,7 +191,7 @@ self_payment_test(Config) ->
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
     %% No change in balances since the payment should have failed, fee=0 anyway
-    5000 = PayerBalance + Fee,
+    5000 = PayerBalance,
     5000 = PayeeBalance,
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
@@ -216,13 +208,10 @@ bad_payment_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     %% Create a zero amount payment txn
     Amount = 0,
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount, Fee, 1]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
@@ -232,7 +221,7 @@ bad_payment_test(Config) ->
 
     %% Create a negative amount payment txn
     Amount2 = -100,
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount2, Fee, 1]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount2, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
@@ -256,7 +245,7 @@ bad_payment_test(Config) ->
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
     %% No change in balances since the payment should have failed, fee=0 anyway
-    5000 = PayerBalance + Fee,
+    5000 = PayerBalance,
     5000 = PayeeBalance,
 
     ct:comment("FinalPayerBalance: ~p, FinalPayeeBalance: ~p", [PayerBalance, PayeeBalance]),
@@ -266,16 +255,13 @@ dependent_payment_test(Config) ->
     Miners = ?config(miners, Config),
     AddrList = ?config(tagged_miner_addresses, Config),
     Count = 50,
-    Chain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Chain]),
-    {ok, Fee} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, transaction_fee, [Ledger]),
 
     lists:foreach(fun(Miner) ->
                         PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
                         Payee = hd(miner_ct_utils:shuffle(Miners -- [Miner])),
                         PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
                         {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
-                        UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Fee, Nonce]) || Nonce <- lists:seq(1, Count) ],
+                        UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Nonce]) || Nonce <- lists:seq(1, Count) ],
                         SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
                         put(a_txn, {Miner, lists:last(SignedTxns)}),
                         [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- lists:reverse(SignedTxns) ]

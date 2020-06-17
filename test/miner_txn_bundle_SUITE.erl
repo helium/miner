@@ -105,18 +105,13 @@ basic_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn
-    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     ct:pal("SignedTxn1: ~p", [SignedTxn1]),
     %% Create second payment txn
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 2]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     ct:pal("SignedTxn2: ~p", [SignedTxn2]),
@@ -144,19 +139,14 @@ negative_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn
-    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     ct:pal("SignedTxn1: ~p", [SignedTxn1]),
 
     %% Create second payment txn
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 2]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     ct:pal("SignedTxn2: ~p", [SignedTxn2]),
@@ -190,19 +180,14 @@ double_spend_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
     5000 = miner_ct_utils:get_balance(Other, OtherAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn
-    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     ct:pal("SignedTxn1: ~p", [SignedTxn1]),
 
     %% Create second payment txn, where payer is trying to double spend (same nonce).
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, OtherAddr, 1000, Fee, 1]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, OtherAddr, 1000, 1]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     ct:pal("SignedTxn2: ~p", [SignedTxn2]),
@@ -241,19 +226,14 @@ successive_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
-    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(MinerA, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, Fee, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, 1]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, Fee, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
@@ -292,19 +272,14 @@ invalid_successive_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
-    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(MinerA, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 4000, Fee, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 4000, 1]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, Fee, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
@@ -342,19 +317,14 @@ single_payer_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
-    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(MinerA, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, Fee, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, 1]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 3000, Fee, 2]),
+    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 3000, 2]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToC, SigFunA]),
     ct:pal("SignedTxnAToC: ~p", [SignedTxnAToC]),
@@ -392,19 +362,14 @@ single_payer_invalid_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
-    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(MinerA, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, Fee, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, 1]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 4000, Fee, 2]),
+    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 4000, 2]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToC, SigFunA]),
     ct:pal("SignedTxnAToC: ~p", [SignedTxnAToC]),
@@ -444,25 +409,20 @@ full_circle_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
-    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(MinerA, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, Fee, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, 1]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, Fee, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
 
     %% Create third payment txn from C -> A
-    TxnCToA = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerCPubkeyBin, MinerAPubkeyBin, 15000, Fee, 1]),
+    TxnCToA = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerCPubkeyBin, MinerAPubkeyBin, 15000, 1]),
     {ok, _PubkeyC, SigFunC, _ECDHFunC} = ct_rpc:call(MinerC, blockchain_swarm, keys, []),
     SignedTxnCToA = ct_rpc:call(MinerC, blockchain_txn_payment_v1, sign, [TxnCToA, SigFunC]),
     ct:pal("SignedTxnCToA: ~p", [SignedTxnCToA]),
@@ -499,14 +459,14 @@ add_assert_test(Config) ->
 
     %% Create add_gateway txn
     [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(1),
-    AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin, 1, 0),
+    AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin),
     SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
     SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
     ct:pal("SignedAddGatewayTxn: ~p", [SignedAddGatewayTxn]),
 
     %% Create assert loc txn
     Index = 631210968910285823,
-    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1, 1, 0),
+    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1),
     PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
     SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
     ct:pal("SignedAssertLocationTxn: ~p", [SignedAssertLocationTxn]),
@@ -547,14 +507,14 @@ invalid_add_assert_test(Config) ->
 
     %% Create add_gateway txn
     [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(1),
-    AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin, 1, 0),
+    AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin),
     SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
     SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
     ct:pal("SignedAddGatewayTxn: ~p", [SignedAddGatewayTxn]),
 
     %% Create assert loc txn
     Index = 631210968910285823,
-    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1, 1, 0),
+    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1),
     PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
     SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
     ct:pal("SignedAssertLocationTxn: ~p", [SignedAssertLocationTxn]),
@@ -589,13 +549,8 @@ single_txn_bundle_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Create first payment txn
-    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
     SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     ct:pal("SignedTxn1: ~p", [SignedTxn1]),
@@ -625,23 +580,18 @@ bundleception_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-
     %% Payer Sigfun
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
     %% --------------------------------------------------------------
     %% Bundle 1 contents
     %% Create first payment txn
-    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 1]),
+    Txn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
     SignedTxn1 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
     ct:pal("SignedTxn1: ~p", [SignedTxn1]),
 
     %% Create second payment txn
-    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 2]),
+    Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 2]),
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
     ct:pal("SignedTxn2: ~p", [SignedTxn2]),
 
@@ -653,12 +603,12 @@ bundleception_test(Config) ->
     %% --------------------------------------------------------------
     %% Bundle 2 contents
     %% Create third payment txn
-    Txn3 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 3]),
+    Txn3 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 3]),
     SignedTxn3 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn3, SigFun]),
     ct:pal("SignedTxn3: ~p", [SignedTxn3]),
 
     %% Create fourth payment txn
-    Txn4 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, Fee, 4]),
+    Txn4 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 4]),
     SignedTxn4 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn4, SigFun]),
     ct:pal("SignedTxn4: ~p", [SignedTxn4]),
 
