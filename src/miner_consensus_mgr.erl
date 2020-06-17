@@ -715,7 +715,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     Chain = blockchain_worker:blockchain(),
-    Ledger = blockchain:ledger(Chain),
+    {ok, Ledger} = blockchain:ledger_at(Height + Delay, Chain),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
@@ -731,7 +731,7 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 restart_election(#state{delay = Delay,
                         chain=Chain} = State, Hash, Height) ->
 
-    Ledger = blockchain:ledger(Chain),
+    {ok, Ledger} = blockchain:ledger_at(Height + Delay, Chain),
     lager:warning("restarting election at ~p delay ~p", [Height, Delay]),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
@@ -893,7 +893,7 @@ start_hbbft(DKG, Height, Delay, Chain) ->
     start_hbbft(DKG, Height, Delay, Chain, 3).
 
 start_hbbft(DKG, Height, Delay, Chain, Retries) ->
-    Ledger = blockchain:ledger(Chain),
+    {ok, Ledger} = blockchain:ledger_at(Height + Delay, Chain),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     F = ((N - 1) div 3),
