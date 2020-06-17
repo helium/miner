@@ -543,7 +543,7 @@ build_asserts(LatLongs, {PrivKey, PubKey}) ->
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
             Index = h3:from_geo(LatLong, 12),
-            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1, 1, 0),
+            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
             SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
             [SignedAssertLocationTx|Acc]
@@ -561,7 +561,7 @@ build_gateways(LatLongs, {PrivKey, PubKey}) ->
             OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
             Owner = libp2p_crypto:pubkey_to_bin(PubKey),
 
-            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway, 1, 0),
+            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
             SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
             SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
             [SignedGatewayAddGatewayTx|Acc]
