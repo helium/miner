@@ -99,16 +99,10 @@ basic_test(Config) ->
                        end,
                        lists:zip(Payees, PayeeAddrs)),
 
-    Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-    ct:pal("Fee: ~p", [Fee]),
-
     %% send some helium tokens from payer to payees
     PayeeAmount = 100,
     Payments = [blockchain_payment_v2:new(P, PayeeAmount) || P <- PayeeAddrs],
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1, Fee]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
@@ -164,16 +158,12 @@ zero_amt_test(Config) ->
                        lists:zip(Payees, PayeeAddrs)),
 
     Chain = ct_rpc:call(Payer, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Payer, blockchain, ledger, [Chain]),
     {ok, Height} = ct_rpc:call(Payer, blockchain, height, [Chain]),
-
-    {ok, Fee} = ct_rpc:call(Payer, blockchain_ledger_v1, transaction_fee, [Ledger]),
-    ct:pal("Fee: ~p", [Fee]),
 
     %% send 0 amount
     PayeeAmount = 0,
     Payments = [blockchain_payment_v2:new(P, PayeeAmount) || P <- PayeeAddrs],
-    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1, Fee]),
+    Txn = ct_rpc:call(Payer, blockchain_txn_payment_v2, new, [PayerAddr, Payments, 1]),
 
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
