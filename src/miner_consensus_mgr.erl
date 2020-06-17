@@ -15,7 +15,7 @@
          genesis_block_done/6,
          election_done/6,
          rescue_done/6,
-         sign_genesis_block/2,
+         sign_artifact/2,
 
          %% info
          consensus_pos/0,
@@ -79,10 +79,13 @@ in_consensus() ->
 initial_dkg(GenesisTransactions, Addrs, N, Curve) ->
     gen_server:call(?MODULE, {initial_dkg, GenesisTransactions, Addrs, N, Curve}, infinity).
 
--spec sign_genesis_block(GenesisBlock :: binary(), PrivKey :: tpke_privkey:privkey()) ->
-                                {ok, libp2p_crypto:pubkey_bin(), binary()}.
-sign_genesis_block(GenesisBlock, PrivKey) ->
-    gen_server:call(?MODULE, {sign_genesis_block, GenesisBlock, PrivKey}).
+-spec sign_artifact(Artifact :: binary(), any()) ->
+                           {ok, libp2p_crypto:pubkey_bin(), binary()}.
+sign_artifact(Artifact, _DeprecatedBackCompat) ->
+    {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
+    Signature = SignFun(Artifact),
+    Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
+    {ok, Address, Signature}.
 
 -spec genesis_block_done(GenesisBLock :: binary(),
                          Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
@@ -172,11 +175,6 @@ init(_Args) ->
 
 %% in the call handlers, we wait for the dkg to return, and then once
 %% it does, we communicate with the miner
-handle_call({sign_genesis_block, GenesisBlock, _PrivateKey}, _From, State) ->
-    {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
-    Signature = SignFun(GenesisBlock),
-    Address = libp2p_crypto:pubkey_to_bin(MyPubKey),
-    {reply, {ok, Address, Signature}, State};
 handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKey, _Height, _Delay}, _From,
             State) ->
     GenesisBlock = blockchain_block:deserialize(BinaryGenesisBlock),
@@ -723,7 +721,7 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),
 
-    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
                          election_done, N, Curve, true, State#state{initial_height = Height}),
 
     State1.
@@ -740,7 +738,7 @@ restart_election(#state{delay = Delay,
     case length(ConsensusAddrs) == N of
         true ->
             Artifact = term_to_binary(ConsensusAddrs),
-            {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+            {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
                                  election_done, N, Curve, true, State#state{delay = Delay}),
             State1;
         false ->
@@ -753,7 +751,7 @@ rescue_dkg(Members, Artifact, State) ->
     {ok, Curve} = blockchain:config(dkg_curve, Ledger),
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
 
-    {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_genesis_block},
+    {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_artifact},
                          rescue_done, length(Members), Curve, true,
                          State#state{initial_height = Height,
                                      delay = 0}),
@@ -766,7 +764,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
     Artifact = term_to_binary(ConsensusAddrs),
-    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+    {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
                          election_done, length(ConsensusAddrs), Curve, false,
                          State#state{initial_height = Height,
                                      delay = Delay}),
@@ -827,7 +825,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     GenesisBlockTransactions = GenesisTransactions ++
         [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
     Artifact = blockchain_block:serialize(blockchain_block:new_genesis_block(GenesisBlockTransactions)),
-    do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_genesis_block},
+    do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
            genesis_block_done, N, Curve, true, State).
 
 do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
