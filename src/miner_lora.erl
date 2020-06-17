@@ -70,7 +70,7 @@
 -define(COUNTRY_FREQ_DATA, country_freq_data).
 
 %% in meters
--define(MAX_WANDER_DIST, 75).
+-define(MAX_WANDER_DIST, 200).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
