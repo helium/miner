@@ -39,6 +39,9 @@
          chain :: undefined | blockchain:blockchain(),
          stats :: undefined | #stats{},
          height = 0 :: integer(),
+         %% before we merge this, get it from the env
+         start_block = 187000,
+         start_time :: undefined | pos_integer(),
          fd :: undefined | file:io_device()
         }).
 
@@ -73,9 +76,12 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, _) ->
     Chain = blockchain_worker:blockchain(),
+    {ok, BAgo} = blockchain:get_block(187000, Chain),
+    TAgo = blockchain_block:time(BAgo),
+
     {ok, Interval} = blockchain:config(?election_interval, blockchain:ledger(Chain)),
     {ok, CurrHeight} = blockchain:height(Chain),
-    Start = max(1, CurrHeight - ?days(3)),
+    Start = max(1, CurrHeight - ?days(1)),
     %% trunc any existing file for now
     Filename = application:get_env(miner, stats_file, "/tmp/miner-chain-stats"),
     {ok, File} = file:open(Filename, [write]),
@@ -84,8 +90,15 @@ handle_info(timeout, _) ->
              {ok, B} = blockchain:get_block(H, Chain),
              Time = blockchain_block:time(B),
              Txns = blockchain_block:transactions(B),
+             Size = byte_size(blockchain_block:serialize(B)),
+             %% Txns = lists:filter(
+             %%          fun(T) ->
+             %%                  blockchain_txn:type(T) ==
+             %%                      blockchain_txn_poc_request_v1
+             %%          end, Txns0),
              Epoch = blockchain_block_v1:election_info(B),
-             {Time, Txns, Epoch, H, Interval}
+             Avg = ((Time - TAgo) / (H - 187000)) - 60,
+             {Time, Txns, Epoch, H, Avg, Size, Interval}
          end
          || H <- lists:seq(Start, CurrHeight)],
     %% calculate a moving average over the history of the blockchain
@@ -104,11 +117,13 @@ handle_info(timeout, _) ->
     {noreply, #state{chain = Chain,
                      stats = Stats,
                      height = CurrHeight,
+                     start_time = TAgo,
                      fd = File}};
 handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
             #state{chain = Chain,
                    height = CurrHeight,
                    fd = File,
+                   start_time = TAgo,
                    stats = Stats} = State) ->
     {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
@@ -118,8 +133,12 @@ handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
                 Height when Height > CurrHeight ->
                     Time = blockchain_block:time(Block),
                     Txns = blockchain_block:transactions(Block),
+                    Size = byte_size(blockchain_block:serialize(Block)),
                     Epoch = blockchain_block_v1:election_info(Block),
-                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height, Interval}, Stats),
+                    Avg = ((Time - TAgo) / (Height - 187000)) - 60,
+                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height,
+                                                     Avg, Size, Interval},
+                                                    Stats),
                     lager:debug("writing:~n ~s to dat file", [Iolist]),
                     file:write(File, Iolist),
                     {noreply, State#state{height = Height,
@@ -193,15 +212,15 @@ get_intervals(Prev, [H|T], Acc) ->
     Int = H - Prev,
     get_intervals(H, T, [Int | Acc]).
 
-process_line({0, _Txns, _Epoch, _Height, _Interval}, Acc) ->
+process_line({0, _Txns, _Epoch, _Height, _Size, _Interval}, Acc) ->
     {[], Acc};
-process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
+process_line({Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
              #stats{times = Times0,
                     last_rewards = Last,
                     tlens = TLens1}) ->
     TLen = length(Txns),
     TLens0 = TLens1 ++ [TLen],
-    Times = truncate(Time, Times0, 24 * 60 * 3), % two days in minutes
+    Times = truncate(Time, Times0, 24 * 60),
     {_, TLens} = lists:split(length(TLens0) - length(Times), TLens0),
     Interval =
         case Times0 of
@@ -213,33 +232,41 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Int},
     AvgInterval = avg_interval(Times),
     MedInterval = median_interval(Times),
     Delay = max(0, Height - (EpochStart + Int)),
-    AvgTxns = lists:sum(TLens) div length(TLens),
+    LTLens = length(TLens),
+    Offset = max(1, LTLens - 40),
+    TLens2 = lists:sublist(TLens, Offset, min(Offset, 40)),
+    AvgTxns = lists:sum(TLens2) div length(TLens2),
 
     ConsensusDelay = extract_delay(Txns),
     {HNTRatio, Last1}  =
         case ConsensusDelay of
             "" ->
                 {"", Last};
-            _ ->
-                Rwds = extract_rewards(Txns),
-                %% count up the tokens generated
-                Bones = get_bones(Rwds),
-                EpochSecs = Time - Last,
-                Ideal = ?bones_per_sec * EpochSecs,
-
-                {integer_to_list(trunc( (Bones/Ideal) * 100 )),
-                 Time}
+            _else ->
+                case extract_rewards(Txns) of
+                    {ok, Rwds} ->
+                        %% count up the tokens generated
+                        Bones = get_bones(Rwds),
+                        EpochSecs = Time - Last,
+                        Ideal = ?bones_per_sec * EpochSecs,
+                        {integer_to_list(trunc( (Bones/Ideal) * 100 )),
+                         Time};
+                    _ ->
+                        {"", Last}
+                end
         end,
 
     {[integer_to_list(Time), "\t",
       integer_to_list(Interval), "\t",
       integer_to_list(TLen), "\t",
+      integer_to_list(Size div 1024), "\t",
       integer_to_list(AvgInterval), "\t",
       integer_to_list(MedInterval), "\t",
       integer_to_list(AvgTxns), "\t",
       integer_to_list(Height), "\t",
       float_to_list(Height / Epoch), "\t",
       integer_to_list(Delay), "\t",
+      float_to_list(Avg), "\t",
       ConsensusDelay, "\t",
       HNTRatio, "\n"],
      #stats{times = Times, last_rewards = Last1, tlens = TLens}}.
@@ -261,7 +288,9 @@ extract_rewards(Txns) ->
                               blockchain_txn:type(T) == blockchain_txn_rewards_v1
                       end, Txns) of
         [Txn] ->
-            Txn
+            {ok, Txn};
+        _ ->
+            no_txn
     end.
 
 get_bones(T) ->
