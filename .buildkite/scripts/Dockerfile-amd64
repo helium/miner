@@ -20,6 +20,20 @@ RUN tar -zxvf _build/prod/rel/*/*.tar.gz -C /opt/rel
 RUN sed -i 's/^\s*{key,/%{key,/' /opt/rel/releases/0.1.0/sys.config
 RUN sed -i 's/{use_ebus, true},/{use_ebus, false},/' /opt/rel/releases/0.1.0/sys.config
 RUN sed -i 's/{radio_device, { {127,0,0,1}, 1680,/{radio_device, { {0,0,0,0}, 1680,/' /opt/rel/releases/0.1.0/sys.config
+
+# Place start script 
+COPY .buildkite/scripts/start.sh /opt/rel/start.sh
+# Make a "default" copy of the sys.config as it is now
+RUN cp /opt/rel/releases/0.1.0/sys.config /opt/rel/releases/0.1.0/default.sys.config
+# Make an EU copy that we will add EU defaults into
+RUN cp /opt/rel/releases/0.1.0/sys.config /opt/rel/releases/0.1.0/eu.sys.config
+# Make an US copy that we will add US defaults into
+RUN cp /opt/rel/releases/0.1.0/sys.config /opt/rel/releases/0.1.0/us.sys.config
+# Set regional domain check override and write in European defaults
+RUN sed -i 's/{reg_domains_file, "countries_reg_domains.csv"},/{override_reg_domain_check, true},\n   {default_reg_region, "EU868"},\n   {default_reg_geo_zone, "zone1"},\n   {default_reg_freq_list, [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5]},/' /opt/rel/releases/0.1.0/eu.sys.config
+# Set regional domain check override and write in US defaults
+RUN sed -i 's/{reg_domains_file, "countries_reg_domains.csv"},/{override_reg_domain_check, true},\n   {default_reg_region, "US915"},\n   {default_reg_geo_zone, "zone2"},\n   {default_reg_freq_list, [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]},/' /opt/rel/releases/0.1.0/us.sys.config
+
 RUN mkdir -p /opt/rel/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/rel/update/genesis
@@ -39,5 +53,7 @@ ENV COOKIE=miner \
 
 COPY --from=builder /opt/rel /opt/miner
 
-ENTRYPOINT ["/opt/miner/bin/miner"]
-CMD ["foreground"]
+# start script reads environmental variable REGION
+# and copies default, us, or eu.sys.config onto sys.config
+# before starting the miner
+ENTRYPOINT ["/opt/miner/start.sh"]
