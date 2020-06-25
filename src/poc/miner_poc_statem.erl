@@ -632,23 +632,28 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
         end,
 
     try
-        {ok, GwInfo} = blockchain_ledger_v1:find_gateway_info(Address, Ledger),
-        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
-        Height = blockchain_block:height(Block),
-        ChallengeOK =
-            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                undefined ->
-                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+        case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+            {ok, GwInfo} ->
+                {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+                Height = blockchain_block:height(Block),
+                ChallengeOK =
+                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                        undefined ->
+                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
                     true;
-                LastChallenge ->
-                    case (Height - LastChallenge) > POCInterval of
-                        true -> 1 == rand:uniform(trunc(POCInterval / 4));
-                        false -> false
-                    end
-            end,
-        LocationOK = true,
-        LocationOK = miner_lora:location_ok(),
-        ChallengeOK andalso LocationOK
+                        LastChallenge ->
+                            case (Height - LastChallenge) > POCInterval of
+                                true -> 1 == rand:uniform(trunc(POCInterval / 4));
+                                false -> false
+                            end
+                    end,
+                LocationOK = true,
+                LocationOK = miner_lora:location_ok(),
+                ChallengeOK andalso LocationOK;
+            %% mostly this is going to be unasserted full nodes
+            _ ->
+                false
+        end
     catch Class:Err:Stack ->
             lager:warning("error determining if request allowed: ~p:~p ~p",
                           [Class, Err, Stack]),
