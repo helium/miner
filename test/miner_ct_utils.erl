@@ -264,7 +264,7 @@ wait_for_registration(Miners, Mod, Timeout) ->
                                          P when is_pid(P) ->
                                              true;
                                          Other ->
-                                             ct:pal("Other ~p~n", [Other]),
+                                             ct:pal("~p result ~p~n", [Miner, Other]),
                                      false
                                      end
                              end, Miners)
@@ -291,15 +291,19 @@ wait_for_app_start(Miners, App, Retries) ->
     ok.
 
 wait_for_app_stop(Miners, App) ->
-    wait_for_app_stop(Miners, App, 60).
+    wait_for_app_stop(Miners, App, 30).
 wait_for_app_stop(Miners, App, Retries) ->
     ?assertAsync(begin
                      Result = lists:all(
                          fun(Miner) ->
                              case ct_rpc:call(Miner, application, which_applications, []) of
-                                 {badrpc, _} ->
+                                 {badrpc, nodedown} ->
                                      true;
+                                 {badrpc, _Which} ->
+                                     ct:pal("~p ~p", [Miner, _Which]),
+                                     false;
                                  Apps ->
+                                     ct:pal("~p ~p", [Miner, Apps]),
                                      not lists:keymember(App, 1, Apps)
                              end
                          end, Miners)
@@ -333,20 +337,25 @@ wait_for_in_consensus(Miners, NumInConsensus, Timeout)->
     ok.
 
 wait_for_chain_var_update(Miners, Key, Value)->
-    wait_for_chain_var_update(Miners, Key, Value, 1000).
-wait_for_chain_var_update(Miners, Key, Value, Timeout)->
-    ?assertAsync(begin
-                     Result = lists:all(
-                         fun(Miner) ->
-                                 C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                                 Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
-                                 R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], Timeout),
-                                 ct:pal("var = ~p", [R]),
-                                 {ok, Value} == R
-                         end, miner_ct_utils:shuffle(Miners))
-                 end,
-                 Result, 40, timer:seconds(1)),
-    ok.
+    wait_for_chain_var_update(Miners, Key, Value, 20).
+
+wait_for_chain_var_update(Miners, Key, Value, Retries)->
+    case wait_until(
+           fun() ->
+                   lists:all(
+                     fun(Miner) ->
+                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
+                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
+                             R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], 500),
+                             ct:pal("var = ~p", [R]),
+                             {ok, Value} == R
+                     end, miner_ct_utils:shuffle(Miners))
+           end,
+           Retries * 2, 500) of
+        %% back compat
+        true -> ok;
+        Else -> Else
+    end.
 
 delete_dirs(DirWildcard, SubDir)->
     Dirs = filelib:wildcard(DirWildcard),
@@ -876,7 +885,7 @@ make_vars(Keys, Map, Mode) ->
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
               ?batch_size => 2500,
-              ?vars_commit_delay => 5,
+              ?vars_commit_delay => 1,
               ?var_gw_inactivity_threshold => 20,
               ?block_version => v1,
               ?dkg_curve => 'SS512',
