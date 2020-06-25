@@ -370,6 +370,21 @@ select_gateway(Gateways) ->
             {ok, erlang:element(2, erlang:hd(maps:to_list(Gateways)))}
     end.
 
+%% Updates (IP, Port) for a given MAC, increments received packets from that MAC
+%% and creates gateway if necessary
+-spec update_gateway_record(map(), binary(), inet:ip_address(), inet:port_number()) -> gateway().
+update_gateway_record(
+    Gateways,
+    <<MAC:64/integer>>,
+    IP, 
+    Port) -> 
+    case maps:find(MAC, Gateways) of
+        {ok, #gateway{received=Received}=G} ->
+            G#gateway{ip=IP, port=Port, received=Received+1};
+        error ->
+            #gateway{mac=MAC, ip=IP, port=Port, received=1}
+    end.
+
 -spec handle_udp_packet(binary(), inet:ip_address(), inet:port_number(), state()) -> state().
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
@@ -378,13 +393,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     JSON/binary>>, IP, Port, #state{socket=Socket, gateways=Gateways,
                                                     reg_domain_confirmed = RegDomainConfirmed}=State) ->
     lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
-    Gateway =
-        case maps:find(MAC, Gateways) of
-            {ok, #gateway{received=Received}=G} ->
-                G#gateway{ip=IP, port=Port, received=Received+1};
-            error ->
-                #gateway{mac=MAC, ip=IP, port=Port, received=1}
-        end,
+    Gateway = update_gateway_record(Gateways, MAC, IP, Port),
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
@@ -398,13 +407,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
     lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
-    Gateway =
-        case maps:find(MAC, Gateways) of
-            {ok, #gateway{received=Received}=G} ->
-                G#gateway{ip=IP, port=Port, received=Received+1};
-            error ->
-                #gateway{mac=MAC, ip=IP, port=Port, received=1}
-        end,
+    Gateway = update_gateway_record(Gateways, MAC, IP, Port),
     State#state{gateways=maps:put(MAC, Gateway, Gateways)};
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
