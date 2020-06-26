@@ -24,21 +24,6 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag =~ /\_GA$$/
-    name: ":open_file_folder: AMD64 open container image"
-    artifact_paths: "*-oci.tar"
-    env:
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "oci-miner"
-      IMAGE_FORMAT: "oci"
-      IMAGE_ARCH: "amd64"
-    agents:
-      queue: "erlang"
-    commands:
-      - "git fetch -t"
-      - ".buildkite/scripts/make_image.sh"
-
-
 # There is some kind of compiler bug in 32 bit ARM
 # and rocksdb, so comment out for now. Can revisit
 # later if need be.
@@ -63,20 +48,6 @@ steps:
       REGISTRY_NAME: "miner"
       IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "arm64"
-    commands:
-      - "git fetch -t"
-      - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag =~ /\_GA$$/
-    name: ":open_file_folder: ARM64 open container image"
-    artifact_paths: "*-oci.tar"
-    env:
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "oci-miner"
-      IMAGE_FORMAT: "oci"
-      IMAGE_ARCH: "arm64"
-    agents:
-      queue: "erlang"
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
