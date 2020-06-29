@@ -373,14 +373,13 @@ pmap(F, L, Timeout) ->
                          end),
               N+1
       end, 0, L),
-    Ref = erlang:send_after(Timeout, self(), boom),
     L2 = [receive
               {pmap, N, R} ->
-                  {N,R};
-              boom ->
+                  {N,R}
+          after
+              Timeout ->
                   error(timeout_expired)
           end || _ <- L],
-    erlang:cancel_timer(Ref),
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
 
