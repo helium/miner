@@ -630,10 +630,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
                 ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
                 ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
-                ct_rpc:call(Miner, application, set_env, [miner, override_reg_domain_check, true]),
-                ct_rpc:call(Miner, application, set_env, [miner, default_reg_region, 'US915']),
-                ct_rpc:call(Miner, application, set_env, [miner, default_reg_geo_zone, 'zone2']),
-                ct_rpc:call(Miner, application, set_env, [miner, default_reg_freq_list, [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]]),
+                ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
                 {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
             ok
         end,
