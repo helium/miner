@@ -10,7 +10,7 @@
     port/0,
     position/0,
     location_ok/0,
-    reg_domain_data_for_addr/2,
+    reg_domain_data_for_addr/1,
     reg_domain_data_for_countrycode/1,
     region/0
 ]).
@@ -132,23 +132,14 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr(undefined | blockchain:blockchain(), libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
-reg_domain_data_for_addr(Chain, Addr)->
-    Ledger = blockchain:ledger(Chain),
-    {ok, Gw} = blockchain_ledger_v1:find_gateway_info(Addr, Ledger),
-    %% check if the miner has asserted its location, if not we will try other methods to determine this
-    case blockchain_ledger_gateway_v2:location(Gw) of
-        undefined ->
-            {error, location_not_asserted};
-        _H3Location ->
-            %% location has been asserted, we can proceed...
-            case country_code_for_addr(Addr) of
-                {ok, CC} ->
-                    %% use country code to get regulatory domain data
-                    ?MODULE:reg_domain_data_for_countrycode(CC);
-                {error, Reason} ->
-                    {error, Reason}
-            end
+-spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(Addr)->
+    case country_code_for_addr(Addr) of
+        {ok, CC} ->
+            %% use country code to get regulatory domain data
+            ?MODULE:reg_domain_data_for_countrycode(CC);
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
@@ -302,8 +293,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     lager:debug("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        Chain = blockchain_worker:blockchain(),
-        case ?MODULE:reg_domain_data_for_addr(Chain, Addr) of
+        case ?MODULE:reg_domain_data_for_addr(Addr) of
             {error, Reason}->
                 lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
                 %% the hotspot has not yet asserted its location, transmits will remain disabled
