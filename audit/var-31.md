@@ -1,8 +1,9 @@
-# Chain Variable Transaction 30
+# Chain Variable Transaction 31
 
 ## Changes
 
-This txn enables support for transaction fees for most blockchain transactions. Additionally we've retired one price oracle key and replaced it with a new one.
+This transaction limits how many Hotspots are considered in either targeting or pathing steps when constructing or validating a poc transaction.
+This limits how many things we have to pull off the disk, which was causing transactions to take ages to process.
 
 ## Rationale
 

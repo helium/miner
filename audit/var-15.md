@@ -1,9 +1,8 @@
-# Chain Variable Transaction 13
+# Chain Variable Transaction 15
 
 ## Changes
 
-This transaction updates `poc_version` from 5 to 6.
-Also introudces `poc_typo_fixes` chain variable and sets it to `true`.
+This increases the challenge interval so as to make challenges less common, since there are likely too many of them given the side and density of the network.
 
 ## Rationale
 
