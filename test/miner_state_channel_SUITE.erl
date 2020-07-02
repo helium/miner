@@ -11,7 +11,10 @@
          end_per_suite/1,
          init_per_testcase/2,
          end_per_testcase/2,
-         all/0
+         all/0,
+         groups/0,
+         init_per_group/2,
+         end_per_group/2
         ]).
 
 -export([
@@ -24,34 +27,45 @@
 
 %% common test callbacks
 
-all() -> [
-          no_packets_expiry_test,
-          packets_expiry_test,
-          multi_clients_packets_expiry_test,
-          multi_oui_test,
-          replay_test
-         ].
+groups() ->
+    [{sc_v1,
+      [],
+      test_cases()
+     },
+     {sc_v2,
+      [],
+      test_cases()
+     }].
+
+all() ->
+    [{group, sc_v1}, {group, sc_v2}].
+
+test_cases() ->
+    [no_packets_expiry_test,
+     packets_expiry_test,
+     multi_clients_packets_expiry_test,
+     multi_oui_test,
+     replay_test
+    ].
+
+init_per_group(sc_v1, Config) ->
+    %% This is only for configuration and checking purposes
+    [{sc_version, 1} | Config];
+init_per_group(sc_v2, Config) ->
+    SCVars = ?config(sc_vars, Config),
+    %% NOTE: SC V2 also needs to have an election for reward payout
+    SCV2Vars = maps:merge(SCVars,
+                          #{?sc_version => 2,
+                            ?sc_overcommit => 2,
+                            ?election_interval => 30
+                           }),
+    [{sc_vars, SCV2Vars}, {sc_version, 2} | Config].
+
+end_per_group(_, _Config) ->
+    ok.
 
 init_per_suite(Config) ->
-    Config.
-
-end_per_suite(Config) ->
-    Config.
-
-init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
-    Miners = ?config(miners, Config),
-    Addresses = ?config(addresses, Config),
-    Balance = 5000,
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
-    InitialDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
-
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
+    %% init_per_suite is the FIRST thing that runs and is common for both groups
 
     SCVars = #{?max_open_sc => 2,                    %% Max open state channels per router, set to 2
                ?min_expire_within => 10,             %% Min state channel expiration (# of blocks)
@@ -62,21 +76,41 @@ init_per_testcase(_TestCase, Config0) ->
                ?max_subnet_num => 20,                %% Max subnet num
                ?dc_payload_size => 24,               %% DC payload size for calculating DCs
                ?sc_grace_blocks => 5},               %% Grace period (in num of blocks) for state channels to get GCd
+    [{sc_vars, SCVars} | Config].
 
-    DefaultVars = #{?block_time => BlockTime,
-                    %% rule out rewards
-                    ?election_interval => infinity,
-                    ?num_consensus_members => NumConsensusMembers,
-                    ?batch_size => BatchSize,
-                    ?dkg_curve => Curve},
+end_per_suite(_Config) ->
+    ok.
+
+init_per_testcase(TestCase, Config0) ->
+    Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
+    BlockTime = ?config(block_time, Config),
+    BatchSize = ?config(batch_size, Config),
+    Curve = ?config(dkg_curve, Config),
+    Balance = 5000,
+    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
+    InitialDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
+    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
+                 || Addr <- Addresses],
+
+    BaseVars = #{?block_time => BlockTime,
+                 %% rule out rewards
+                 ?election_interval => infinity,
+                 ?num_consensus_members => NumConsensusMembers,
+                 ?batch_size => BatchSize,
+                 ?dkg_curve => Curve},
+    SCVars = ?config(sc_vars, Config),
+    ct:pal("SCVars: ~p", [SCVars]),
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, maps:merge(DefaultVars, SCVars)),
+    AllVars = miner_ct_utils:make_vars(Keys, maps:merge(BaseVars, SCVars)),
 
     DKGResults = miner_ct_utils:initial_dkg(Miners,
-                                           InitialVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns,
-                                           Addresses, NumConsensusMembers, Curve),
+                                            AllVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns,
+                                            Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     %% Get both consensus and non consensus miners
@@ -92,8 +126,8 @@ init_per_testcase(_TestCase, Config0) ->
      {default_routers, application:get_env(miner, default_routers, [])}
      | Config].
 
-end_per_testcase(_TestCase, Config) ->
-    miner_ct_utils:end_per_testcase(_TestCase, Config).
+end_per_testcase(TestCase, Config) ->
+    miner_ct_utils:end_per_testcase(TestCase, Config).
 
 no_packets_expiry_test(Config) ->
     Miners = ?config(miners, Config),
@@ -144,10 +178,13 @@ no_packets_expiry_test(Config) ->
     %% open a state channel
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 11,
+    Amount = 1,
+    Nonce = 1,
+    OUI = 1,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, ExpireWithin, 1, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, OUI, Nonce, Amount]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -164,7 +201,7 @@ no_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -173,6 +210,8 @@ no_packets_expiry_test(Config) ->
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTxnSCOpen, timer:seconds(30)),
+
+    ok = wait_for_gc(Config),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -222,10 +261,13 @@ packets_expiry_test(Config) ->
     %% open a state channel
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
+    Nonce = 1,
+    OUI = 1,
+    Amount = 1,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, ExpireWithin, 1, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, OUI, Nonce, Amount]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -242,7 +284,7 @@ packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -260,6 +302,8 @@ packets_expiry_test(Config) ->
     %% for the state_channel_close txn to appear
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(30)),
+
+    ok = wait_for_gc(Config),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -325,10 +369,13 @@ multi_clients_packets_expiry_test(Config) ->
     %% open a state channel
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
+    OUI = 1,
+    Nonce = 1,
+    Amount = 1,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, ExpireWithin, 1, 1]),
+                            [ID, RouterPubkeyBin, ExpireWithin, OUI, Nonce, Amount]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -366,7 +413,7 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -380,6 +427,8 @@ multi_clients_packets_expiry_test(Config) ->
               [ ct:pal("Hbbft buf ~p ~p", [Miner, print_hbbft_buf(ct_rpc:call(Miner, miner_consensus_mgr, txn_buf, []))]) || Miner <- Miners],
               ct:fail("failed")
     end,
+
+    ok = wait_for_gc(Config),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
@@ -453,10 +502,12 @@ replay_test(Config) ->
     ID = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
     SCOpenNonce = 1,
+    OUI = 1,
+    Amount = 1,
     SCOpenTxn = ct_rpc:call(RouterNode,
                             blockchain_txn_state_channel_open_v1,
                             new,
-                            [ID, RouterPubkeyBin, ExpireWithin, 1, SCOpenNonce]),
+                            [ID, RouterPubkeyBin, ExpireWithin, OUI, SCOpenNonce, Amount]),
     ct:pal("SCOpenTxn: ~p", [SCOpenTxn]),
     SignedSCOpenTxn = ct_rpc:call(RouterNode,
                                   blockchain_txn_state_channel_open_v1,
@@ -473,7 +524,7 @@ replay_test(Config) ->
 
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
-    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID),
+    true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -490,6 +541,8 @@ replay_test(Config) ->
     CheckTypeSCClose = fun(T) -> blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckTypeSCClose, timer:seconds(120)),
 
+    ok = wait_for_gc(Config),
+
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
 
@@ -505,10 +558,12 @@ replay_test(Config) ->
     %% re-create the sc open txn with the same nonce
     NewID = crypto:strong_rand_bytes(32),
     NewExpireWithin = 5,
+    OUI = 1,
+    Amount = 1,
     NewSCOpenTxn = ct_rpc:call(RouterNode,
                                blockchain_txn_state_channel_open_v1,
                                new,
-                               [NewID, RouterPubkeyBin, NewExpireWithin, 1, SCOpenNonce]),
+                               [NewID, RouterPubkeyBin, NewExpireWithin, OUI, SCOpenNonce, Amount]),
 
     ct:pal("NewSCOpenTxn: ~p", [NewSCOpenTxn]),
     NewSignedSCOpenTxn = ct_rpc:call(RouterNode,
@@ -608,10 +663,13 @@ multi_oui_test(Config) ->
     %% open state channel 1
     ID1 = crypto:strong_rand_bytes(32),
     ExpireWithin = 25,
+    OUI = 1,
+    Nonce = 1,
+    Amount = 1,
     SCOpenTxn1 = ct_rpc:call(RouterNode1,
                              blockchain_txn_state_channel_open_v1,
                              new,
-                             [ID1, RouterPubkeyBin1, ExpireWithin, 1, 1]),
+                             [ID1, RouterPubkeyBin1, ExpireWithin, OUI, Nonce, Amount]),
     ct:pal("SCOpenTxn1: ~p", [SCOpenTxn1]),
     SignedSCOpenTxn1 = ct_rpc:call(RouterNode1,
                                    blockchain_txn_state_channel_open_v1,
@@ -623,10 +681,12 @@ multi_oui_test(Config) ->
     %% open state channel 2
     ID2 = crypto:strong_rand_bytes(32),
     ExpireWithin2 = 35,
+    OUI2 = 2,
     SCOpenTxn2 = ct_rpc:call(RouterNode1,
                              blockchain_txn_state_channel_open_v1,
                              new,
-                             [ID2, RouterPubkeyBin2, ExpireWithin2, 2, 1]),
+                             %% same nonce and amount as the first open txn (should be fine)
+                             [ID2, RouterPubkeyBin2, ExpireWithin2, OUI2, Nonce, Amount]),
     ct:pal("SCOpenTxn2: ~p", [SCOpenTxn2]),
     SignedSCOpenTxn2 = ct_rpc:call(RouterNode2,
                                    blockchain_txn_state_channel_open_v1,
@@ -646,8 +706,8 @@ multi_oui_test(Config) ->
     %% check state_channels from both nodes appears on the ledger
     {ok, SC1} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
     {ok, SC2} = get_ledger_state_channel(RouterNode2, ID2, RouterPubkeyBin2),
-    true = check_ledger_state_channel(SC1, RouterPubkeyBin1, ID1),
-    true = check_ledger_state_channel(SC2, RouterPubkeyBin2, ID2),
+    true = check_ledger_state_channel(SC1, RouterPubkeyBin1, ID1, Config),
+    true = check_ledger_state_channel(SC2, RouterPubkeyBin2, ID2, Config),
     ct:pal("SC1: ~p", [SC1]),
     ct:pal("SC2: ~p", [SC2]),
 
@@ -683,11 +743,13 @@ multi_oui_test(Config) ->
     %% wait ExpireWithin + 10 more blocks to be safe, we expect sc1 to have closed
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin + 5),
 
+    LedgerSCMod = ledger_sc_mod(Config),
+
     %% wait for the state_channel_close for sc open1 txn to appear
     CheckSCClose1 = fun(T) ->
                             TempActiveID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
                             blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
-                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC1) andalso
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == LedgerSCMod:id(SC1) andalso
                             TempActiveID /= ActiveSCID
                     end,
     ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose1, timer:seconds(30)),
@@ -710,13 +772,17 @@ multi_oui_test(Config) ->
     %% wait ExpireWithin2 + 5 more blocks to be safe, we expect sc2 to have closed now
     ok = miner_ct_utils:wait_for_gte(height, Miners, Height + ExpireWithin2 + 5),
 
+    LedgerSCMod = ledger_sc_mod(Config),
+
     %% wait for the state_channel_close for sc open2 txn to appear
     CheckSCClose2 = fun(T) ->
                             blockchain_txn:type(T) == blockchain_txn_state_channel_close_v1 andalso
-                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == blockchain_ledger_state_channel_v1:id(SC2)
+                            blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(T)) == LedgerSCMod:id(SC2)
                     end,
 
     ok = miner_ct_utils:wait_for_txn(Miners, CheckSCClose2, timer:seconds(30)),
+
+    ok = wait_for_gc(Config),
 
     %% check state_channel is removed once the close txn appears
     {error, not_found} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
@@ -761,9 +827,10 @@ get_ledger_state_channel(Node, SCID, PubkeyBin) ->
     RouterLedger = ct_rpc:call(Node, blockchain, ledger, [RouterChain]),
     ct_rpc:call(Node, blockchain_ledger_v1, find_state_channel, [SCID, PubkeyBin, RouterLedger]).
 
-check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, SCID) ->
-    CheckId = SCID == blockchain_ledger_state_channel_v1:id(LedgerSC),
-    CheckOwner = OwnerPubkeyBin == blockchain_ledger_state_channel_v1:owner(LedgerSC),
+check_ledger_state_channel(LedgerSC, OwnerPubkeyBin, SCID, Config) ->
+    LedgerSCMod = ledger_sc_mod(Config),
+    CheckId = SCID == LedgerSCMod:id(LedgerSC),
+    CheckOwner = OwnerPubkeyBin == LedgerSCMod:owner(LedgerSC),
     CheckId andalso CheckOwner.
 
 print_hbbft_buf({ok, Txns}) ->
@@ -781,3 +848,28 @@ check_sc_num_dcs(SCCloseTxn, ClientPubkeyBin, ExpectedNumDCs) ->
     SC = blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn),
     {ok, NumDCs} = blockchain_state_channel_v1:num_dcs_for(ClientPubkeyBin, SC),
     ExpectedNumDCs == NumDCs.
+
+ledger_sc_mod(Config) ->
+    case ?config(sc_version, Config) of
+        1 -> blockchain_ledger_state_channel_v1;
+        2 -> blockchain_ledger_state_channel_v2
+    end.
+
+wait_for_gc(Config) ->
+    %% If we are not running sc_version=1, we need to wait for the gc to trigger
+    case ?config(sc_version, Config) of
+        1 ->
+            ok;
+        _ ->
+            Miners = ?config(miners, Config),
+            ok = miner_ct_utils:wait_for_gte(height, Miners, 101, all, 120)
+    end.
+
+%% debug(Node) ->
+%%     Chain = ct_rpc:call(Node, blockchain_worker, blockchain, []),
+%%     Blocks = ct_rpc:call(Node, blockchain, blocks, [Chain]),
+%%     lists:foreach(fun(Block) ->
+%%                           H = blockchain_block:height(Block),
+%%                           Ts = blockchain_block:transactions(Block),
+%%                           ct:pal("H: ~p, Ts: ~p", [H, Ts])
+%%                   end, maps:values(Blocks)).

@@ -1,7 +1,11 @@
 -module(miner_test_sc_packet_handler).
 
--export([handle_packet/2]).
+-export([handle_packet/2, handle_offer/2]).
 
 handle_packet(Packet, HandlerPid) ->
     lager:info("Packet: ~p, HandlerPid: ~p", [Packet, HandlerPid]),
+    ok.
+
+handle_offer(Offer, HandlerPid) ->
+    lager:info("Offer: ~p, HandlerPid: ~p", [Offer, HandlerPid]),
     ok.
