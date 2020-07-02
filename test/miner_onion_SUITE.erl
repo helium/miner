@@ -79,10 +79,7 @@ basic(Config) ->
         radio_udp_send_ip => {127,0,0,1},
         radio_udp_send_port => Port,
         sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey),
-        override_reg_domain_check => true,
-        default_reg_region => 'US915',
-        default_reg_geo_zone => 'zone2',
-        default_reg_freq_list => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]
+        region_override => 'US915'
     }),
 
 
@@ -161,10 +158,7 @@ basic(Config) ->
         radio_udp_send_ip => {127,0,0,1},
         radio_udp_send_port => Port,
         sig_fun => libp2p_crypto:mk_sig_fun(PrivateKey2),
-        override_reg_domain_check => true,
-        default_reg_region => 'US915',
-        default_reg_geo_zone => 'zone2',
-        default_reg_freq_list => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]
+        region_override => 'US915'
     }),
 
     %% set up the gateway

@@ -104,13 +104,8 @@ init(_Args) ->
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
             {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
-                %% check if we are overriding domain checks ( for lora )
-                %% If true then we expect default config data to be supplied, otherwise it defaults to undefined
-                %% and will be set by miner lora based on geolocation data of the miners asserted location
-                MaybeOverrideRegDomainChecks = application:get_env(miner, override_reg_domain_check, false),
-                DefaultRegRegion = application:get_env(miner, default_reg_region, undefined),
-                DefaultRegGeoZone = application:get_env(miner, default_reg_geo_zone, undefined),
-                DefaultRegFreqList = application:get_env(miner, default_reg_freq_list, undefined),
+                %% check if we are overriding/forcing the region ( for lora )
+                RegionOverRide = check_for_region_override(),
                 OnionOpts = #{
                     radio_udp_bind_ip => RadioBindIP,
                     radio_udp_bind_port => RadioBindPort,
@@ -118,10 +113,7 @@ init(_Args) ->
                     radio_udp_send_port => RadioSendPort,
                     ecdh_fun => ECDHFun,
                     sig_fun => SigFun,
-                    override_reg_domain_check => MaybeOverrideRegDomainChecks,
-                    default_reg_region => DefaultRegRegion,
-                    default_reg_geo_zone => DefaultRegGeoZone,
-                    default_reg_freq_list => DefaultRegFreqList
+                    region_override => RegionOverRide
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
                  ?WORKER(miner_lora, [OnionOpts])];
@@ -147,3 +139,20 @@ init(_Args) ->
         OnionServer ++
         [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.
+
+
+%% check if the region is being supplied to us
+%% can be supplied either via the sys config or via an optional OS env var
+%% with sys config taking priority if both exist
+-spec check_for_region_override() -> atom().
+check_for_region_override()->
+    check_for_region_override(application:get_env(miner, region_override, undefined)).
+
+-spec check_for_region_override(atom()) -> atom().
+check_for_region_override(undefined)->
+    case os:getenv("REGION_OVERRIDE") of
+        false -> undefined;
+        Region -> list_to_atom(Region)
+    end;
+check_for_region_override(SysConfigRegion)->
+    SysConfigRegion.

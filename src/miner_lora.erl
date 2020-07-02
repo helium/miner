@@ -49,7 +49,6 @@
     latlong,
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
-    reg_geo_zone :: atom(),
     reg_freq_list :: [float()]
 }).
 
@@ -65,7 +64,7 @@
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
--type freq_data() :: {Region::atom(), GeoZone::atom(), Freqs::[float]}.
+-type freq_data() :: {Region::atom(), Freqs::[float]}.
 
 -define(COUNTRY_FREQ_DATA, country_freq_data).
 
@@ -176,24 +175,28 @@ init(Args) ->
             S
     end,
 
-    %% cloud/miner pro will never assert location and so we dont want to
-    %% use regulatory domain checks for these miners
-    %% allow them to override the regulatory domain checks and be able to transmit from startup
-    %% default region and freq data is expected to be supplied by these miners
-    %% if not we will default to US902-928
-    {RegDomainConfirmed, DefaultRegRegion, DefaultRegGeoZone, DefaultRegFreqList} =
-        case maps:get(override_reg_domain_check, Args, false) of
-            true ->
-                lager:info("overriding regulatory domain checks, using values from Args", []),
-                {true, maps:get(default_reg_region, Args),
-                       maps:get(default_reg_geo_zone, Args),
-                       maps:get(default_reg_freq_list, Args)};
-            _ ->
+    %% cloud/miner pro will never assert location and so we dont  use regulatory domain checks for these miners
+    %% instead they will supply a region value, use this if it exists
+    {RegDomainConfirmed, DefaultRegRegion, DefaultRegFreqList} =
+        case maps:get(region_override, Args, undefined) of
+            undefined ->
                 %% not overriding domain checks, so initialize with source data and defaults
                 ets:new(?COUNTRY_FREQ_DATA, [named_table, public]),
                 ok = init_ets(),
                 erlang:send_after(5000, self(), reg_domain_timeout),
-                {false, undefined, undefined, undefined}
+                {false, undefined, undefined};
+            Region ->
+                lager:info("using region specifed in config: ~p", [Region]),
+                %% get the freq map from config and use Region to get our required data
+                FreqMap = application:get_env(miner, frequency_data, #{}),
+                case maps:get(Region, FreqMap, undefined) of
+                    undefined ->
+                        lager:warning("specified region ~p not supported", [Region]),
+                        {false, undefined, undefined};
+                    FreqList ->
+                        lager:info("using freq list ~p", [FreqList]),
+                        {true, Region, FreqList}
+                end
         end,
     {ok, #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
@@ -201,7 +204,6 @@ init(Args) ->
                 pubkey_bin = blockchain_swarm:pubkey_bin(),
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
-                reg_geo_zone = DefaultRegGeoZone,
                 reg_freq_list = DefaultRegFreqList}}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol}, _From,
@@ -300,11 +302,11 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
                 %% we will check again after a period
                 erlang:send_after(30000, self(), reg_domain_timeout),
                 {noreply, State};
-            {ok, {Region, GeoZone, FrequencyList}} ->
-                lager:info("confirmed regulatory domain for miner ~p.  region: ~p, geozone: ~p, freqlist: ~p",
-                    [Addr, Region, GeoZone, FrequencyList]),
+            {ok, {Region, FrequencyList}} ->
+                lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
+                    [Addr, Region, FrequencyList]),
                 {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
-                        reg_geo_zone = GeoZone, reg_freq_list = FrequencyList}}
+                        reg_freq_list = FrequencyList}}
         end
     catch
         _Type:Exception ->
@@ -595,13 +597,13 @@ country_code_for_addr(Addr)->
 -spec freq_data(#country{}, map())-> {ok, freq_data()}.
 freq_data(#country{region = undefined} = _Country, _FreqMap)->
     {error, region_not_set};
-freq_data(#country{region = Region, geo_zone = Zone}= _Country, FreqMap)->
+freq_data(#country{region = Region}= _Country, FreqMap)->
     case maps:get(Region, FreqMap, undefined) of
         undefined ->
             lager:warning("frequency data not found for region ~p",[Region]),
             {error, frequency_not_found_for_region};
         F->
-            {ok, {Region, Zone, F}}
+            {ok, {Region, F}}
     end.
 
 -spec init_ets() -> ok.
