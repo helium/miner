@@ -7,6 +7,8 @@
 
 -behavior(gen_server).
 
+-include_lib("blockchain/include/blockchain_vars.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -14,9 +16,9 @@
     start_link/1,
     decrypt_p2p/2,
     decrypt_radio/6,
-    retry_decrypt/7,
-    send_receipt/6,
-    send_witness/4
+    retry_decrypt/9,
+    send_receipt/9,
+    send_witness/7
 ]).
 
 -ifdef(TEST).
@@ -43,7 +45,6 @@
     handle_info/2
 ]).
 
-
 -record(state, {
     compact_key :: ecc_compact:compact_key(),
     ecdh_fun,
@@ -56,6 +57,8 @@
 -define(BLOCK_RETRY_COUNT, 10).
 -define(CHANNELS, [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]).
 -define(TX_POWER, 27). %% 27 db
+
+-type state() :: #state{}.
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -70,26 +73,42 @@ decrypt_p2p(Onion, Stream) ->
 decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Spreading) ->
     gen_server:cast(?MODULE, {decrypt_radio, Packet, RSSI, SNR, Timestamp, Freq, Spreading}).
 
-retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream) ->
-    gen_server:cast(?MODULE, {retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}).
+retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream) ->
+    gen_server:cast(?MODULE, {retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream}).
 
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid()) -> ok | {error, any()}.
-send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream) ->
+-spec send_receipt(Data :: binary(),
+                   OnionCompactKey :: libp2p_crypto:pubkey_bin(),
+                   Type :: radio | p2p,
+                   Time :: pos_integer(),
+                   RSSI :: integer(),
+                   SNR :: float(),
+                   Frequency :: float(),
+                   Stream :: undefined | pid(),
+                   State :: state()) -> ok | {error, any()}.
+send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, State) ->
     case miner_lora:location_ok() of
         true ->
             <<ID:10/binary, _/binary>> = OnionCompactKey,
             lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
-            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, Stream, ?BLOCK_RETRY_COUNT);
+            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
     end.
 
--spec send_receipt(binary(), libp2p_crypto:pubkey_bin(), radio | p2p, pos_integer(), integer(), undefined | pid(), non_neg_integer()) -> ok | {error, any()}.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _Stream, 0) ->
+-spec send_receipt(Data :: binary(),
+                   OnionCompactKey :: libp2p_crypto:pubkey_bin(),
+                   Type :: radio | p2p,
+                   Time :: pos_integer(),
+                   RSSI :: integer(),
+                   SNR :: float(),
+                   Frequency :: float(),
+                   Stream :: undefined | pid(),
+                   State :: state(),
+                   Retry :: non_neg_integer()) -> ok | {error, any()}.
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Stream, _State, 0) ->
     lager:error("failed to send receipts, max retry"),
     {error, too_many_retries};
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
-    Chain = blockchain_worker:blockchain(),
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
@@ -97,7 +116,14 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
         fun(PoC, Acc) ->
             Challenger = blockchain_ledger_poc_v2:challenger(PoC),
             Address = blockchain_swarm:pubkey_bin(),
-            Receipt0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type),
+
+            Receipt0 = case blockchain:config(?data_aggregation_version, Ledger) of
+                           {ok, 1} ->
+                               blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
+                           _ ->
+                               blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
+                       end,
+
             {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
             Receipt1 = blockchain_poc_receipt_v1:sign(Receipt0, SigFun),
             EncodedReceipt = blockchain_poc_response_v1:encode(Receipt1),
@@ -125,25 +151,37 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry) ->
             ok;
         false ->
             timer:sleep(timer:seconds(30)),
-            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, Stream, Retry-1)
+            send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, State, Retry-1)
     end.
 
--spec  send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer()) -> ok.
-send_witness(_Data, OnionCompactKey, Time, RSSI) ->
+-spec  send_witness(Data :: binary(),
+                    OnionCompactKey :: libp2p_crypto:pubkey_bin(),
+                    Time :: pos_integer(),
+                    RSSI :: integer(),
+                    SNR :: float(),
+                    Frequency :: float(),
+                    State :: state()) -> ok.
+send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, State) ->
     case miner_lora:location_ok() of
         true ->
             <<ID:10/binary, _/binary>> = OnionCompactKey,
             lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
-            send_witness(_Data, OnionCompactKey, Time, RSSI, ?BLOCK_RETRY_COUNT);
+            send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
     end.
 
--spec send_witness(binary(), libp2p_crypto:pubkey_bin(), pos_integer(), integer(), non_neg_integer()) -> ok.
-send_witness(_Data, _OnionCompactKey, _Time, _RSSI, 0) ->
+-spec send_witness(Data :: binary(),
+                   OnionCompactKey :: libp2p_crypto:pubkey_bin(),
+                   Time :: pos_integer(),
+                   RSSI :: integer(),
+                   SNR :: float(),
+                   Frequency :: float(),
+                   State :: state(),
+                   Retry :: non_neg_integer()) -> ok.
+send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _State, 0) ->
     lager:error("failed to send witness, max retry");
-send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
-    Chain = blockchain_worker:blockchain(),
+send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
@@ -151,7 +189,14 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
     lists:foreach(
         fun(PoC) ->
             Challenger = blockchain_ledger_poc_v2:challenger(PoC),
-            Witness0 = blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data),
+
+            Witness0 = case blockchain:config(?data_aggregation_version, Ledger) of
+                           {ok, 1} ->
+                               blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
+                           _ ->
+                               blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
+                       end,
+
             {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
             Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
             case SelfPubKeyBin =:= Challenger of
@@ -165,7 +210,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, Retry) ->
                         {error, _Reason} ->
                             lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
                             timer:sleep(timer:seconds(30)),
-                            send_witness(Data, OnionCompactKey, Time, RSSI, Retry-1);
+                            send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, State, Retry-1);
                         {ok, Stream} ->
                             _ = miner_poc_handler:send(Stream, EncodedWitness)
                     end
@@ -205,16 +250,17 @@ handle_cast({decrypt_p2p, <<IV:2/binary,
                             OnionCompactKey:33/binary,
                             Tag:4/binary,
                             CipherText/binary>>, Pid}, State) ->
-    NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, Pid, State),
+    NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, undefined, undefined, Pid, State),
     {noreply, NewState};
 handle_cast({decrypt_radio, <<IV:2/binary,
                               OnionCompactKey:33/binary,
                               Tag:4/binary,
-                              CipherText/binary>>, RSSI, _SNR, _Timestamp, _Frequency, _Spreading}, State) ->
-    NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, undefined, State),
+                              CipherText/binary>>,
+             RSSI, SNR, _Timestamp, Frequency, _Spreading}, State) ->
+    NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, undefined, State),
     {noreply, NewState};
-handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream}, State) ->
-    NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, State),
+handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream}, State) ->
+    NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream, State),
     {noreply, NewState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -250,7 +296,7 @@ wait_for_block_(Fun, Count) ->
             wait_for_block_(Fun, Count - 1)
     end.
 
-decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
+decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
     <<POCID:10/binary, _/binary>> = OnionCompactKey,
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
@@ -265,7 +311,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                             false
                     end
                 end, 10),
-                ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream)
+                ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream)
             end),
             State;
         {error, fail_decrypt} ->
@@ -274,7 +320,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                 send_witness,
                 [crypto:hash(sha256, <<Tag/binary, CipherText/binary>>),
                  OnionCompactKey,
-                 os:system_time(nanosecond), RSSI]
+                 os:system_time(nanosecond), RSSI, SNR, Frequency, State]
             ),
             lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: treating as a witness", [Type]),
             State;
@@ -290,7 +336,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, Stream, #state{ecdh_fu
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, "SF10BW125", ?TX_POWER) end),
-                    erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond), RSSI, Stream)end);
+                    erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                               RSSI, SNR, Frequency, Stream, State) end);
                 false ->
                     ok
             end,
