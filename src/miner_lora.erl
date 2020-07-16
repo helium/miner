@@ -49,7 +49,8 @@
     latlong,
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
-    reg_freq_list :: [float()]
+    reg_freq_list :: [float()],
+    reg_throttle :: miner_lora_throttle:handle()
 }).
 
 -record(country, {
@@ -204,7 +205,8 @@ init(Args) ->
                 pubkey_bin = blockchain_swarm:pubkey_bin(),
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
-                reg_freq_list = DefaultRegFreqList}}.
+                reg_freq_list = DefaultRegFreqList,
+                reg_throttle = miner_lora_throttle:new(DefaultRegRegion)}}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol}, _From,
                 #state{reg_domain_confirmed = false}=State) ->
@@ -214,7 +216,8 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
                 #state{ socket=Socket,
                         gateways=Gateways,
                         packet_timers=Timers,
-                        reg_freq_list = Freqs}=State) ->
+                        reg_freq_list = Freqs,
+                        reg_throttle = Throttle}=State) ->
     case select_gateway(Gateways) of
         {error, _}=Error ->
             {reply, Error, State};
@@ -238,10 +241,23 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
                              <<"data">> => base64:encode(Payload)
                             }
                         },
-            %% TODO we should check this for regulatory compliance
+
             BinJSX = jsx:encode(DecodedJSX),
 
             lager:info("PULL_RESP ~p to ~p:~p", [DecodedJSX, IP, Port]),
+
+            %% Check this transmission for regulatory compliance.
+            {SpreadingFactor, Bandwidth} = parse_datarate(DataRate),
+            TimeOnAir = miner_lora_throttle:time_on_air(Bandwidth, SpreadingFactor, 5, 8, true, byte_size(Payload)),
+            %% TODO: replace `monotonic_time' with monotonic time derived from concentrator's counter.
+            %%
+            %% It's not as simple as it sounds because the counter is only 32 bits
+            %% and rolls over every 134 seconds.
+            SentAt = erlang:monotonic_time(millisecond),
+            case miner_lora_throttle:can_send(Throttle, SentAt, LocalFreq, TimeOnAir) of
+                false -> lager:warning("This transmission should have been rejected");
+                true -> ok
+            end,
 
             Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
             maybe_mirror(State#state.mirror_socket, Packet),
@@ -249,7 +265,7 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
             ok = gen_udp:send(Socket, IP, Port, Packet),
             %% TODO a better timeout would be good here
             Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-            {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From}, Timers)}}
+            {noreply, State#state{packet_timers = maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}, Timers)}}
     end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
@@ -309,7 +325,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
                 lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
                     [Addr, Region, FrequencyList]),
                 {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
-                        reg_freq_list = FrequencyList}}
+                        reg_freq_list = FrequencyList, reg_throttle = miner_lora_throttle:new(Region)}}
         end
     catch
         _Type:Exception ->
@@ -319,7 +335,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     case maps:find(Token, Timers) of
-        {ok, {send, _Ref, From}} ->
+        {ok, {send, _Ref, From, _SentAt, _LocalFreq, _TimeOnAir}} ->
             gen_server:reply(From, {error, timeout});
         error ->
             ok
@@ -414,46 +430,47 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?TX_ACK:8/integer-unsigned,
                     _MAC:64/integer,
-                    MaybeJSON/binary>>, _IP, _Port, #state{packet_timers=Timers}=State) ->
+                    MaybeJSON/binary>>, _IP, _Port, #state{packet_timers=Timers, reg_throttle=Throttle}=State) ->
     lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
     case maps:find(Token, Timers) of
-        {ok, {send, Ref, From}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
+        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
             _ = erlang:cancel_timer(Ref),
             _ = gen_server:reply(From, ok),
-            State#state{packet_timers=maps:remove(Token, Timers)};
-        {ok, {send, Ref, From}} ->
+            State#state{packet_timers=maps:remove(Token, Timers),
+                        reg_throttle=miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
+        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}} ->
             %% likely some kind of error here
             _ = erlang:cancel_timer(Ref),
-            Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
+            {Reply, NewThrottle} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
                     lager:info("packet sent ok"),
-                    ok;
+                    {ok, miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
                     lager:info("collision"),
-                    {error, collision};
+                    {{error, collision}, Throttle};
                 <<"TOO_LATE">> ->
                     lager:info("too late"),
-                    {error, too_late};
+                    {{error, too_late}, Throttle};
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
-                    {error, too_early};
+                    {{error, too_early}, Throttle};
                 <<"TX_FREQ">> ->
                     lager:info("tx frequency not supported"),
                     {error, bad_tx_frequency};
                 <<"TX_POWER">> ->
                     lager:info("tx power not supported"),
-                    {error, bad_tx_power};
+                    {{error, bad_tx_power}, Throttle};
                 <<"GPL_UNLOCKED">> ->
                     lager:info("transmitting on GPS time not supported because no GPS lock"),
-                    {error, no_gps_lock};
+                    {{error, no_gps_lock}, Throttle};
                 Error ->
                     %% any other errors are pretty severe
                     lager:error("Failure enqueing packet for gateway ~p", [Error]),
-                    {error, {unknown, Error}}
+                    {{error, {unknown, Error}}, Throttle}
             end,
             gen_server:reply(From, Reply),
-            State#state{packet_timers=maps:remove(Token, Timers)};
+            State#state{packet_timers=maps:remove(Token, Timers), reg_throttle=NewThrottle};
         error ->
             State
     end;
@@ -651,4 +668,16 @@ channel(Freq, [H|T], Acc) ->
             Acc;
         false ->
             channel(Freq, T, Acc+1)
+    end.
+
+%% @doc returns a tuple of {SpreadingFactor, Bandwidth} from strings like "SFdBWddd"
+%%
+%% Example: `{7, 125} = scratch:parse_datarate("SF7BW125")'
+-spec parse_datarate(string()) -> {integer(), integer()}.
+parse_datarate(Datarate) ->
+    case Datarate of
+        [$S, $F, SF1, SF2, $B, $W, BW1, BW2, BW3] ->
+            {erlang:list_to_integer([SF1, SF2]), erlang:list_to_integer([BW1, BW2, BW3])};
+        [$S, $F, SF1, $B, $W, BW1, BW2, BW3] ->
+            {erlang:list_to_integer([SF1]), erlang:list_to_integer([BW1, BW2, BW3])}
     end.
