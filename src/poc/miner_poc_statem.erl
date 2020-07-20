@@ -255,8 +255,13 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
             {next_state, requesting, save_data(Data#data{state=requesting})};
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
-            Ref = submit_receipts(Data),
-            {next_state, waiting, save_data(Data#data{state=waiting, txn_ref=Ref})}
+            try
+                Ref = submit_receipts(Data),
+                {next_state, waiting, save_data(Data#data{state=waiting, txn_ref=Ref})}
+            catch C:E:S ->
+                    lager:warning("error ~p:~p submitting requests: ~p", [C, E, S]),
+                    {next_state, requesting, save_data(Data#data{state=requesting})}
+            end
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
