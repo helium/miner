@@ -302,8 +302,9 @@ packets_expiry_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    DevNonce1 = crypto:strong_rand_bytes(2),
+    Payload1 = miner_ct_utils:join_payload(?APPKEY, DevNonce1),
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
@@ -1126,7 +1127,7 @@ reject_test(Config) ->
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
     ct:pal("SC: ~p", [SC]),
 
-    InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    _InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
