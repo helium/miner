@@ -1006,7 +1006,8 @@ conflict_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
+    DevNonce1 = crypto:strong_rand_bytes(2),
+    Payload1 = miner_ct_utils:join_payload(?APPKEY, DevNonce1),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Payload3 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
@@ -1131,7 +1132,8 @@ reject_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
+    DevNonce1 = crypto:strong_rand_bytes(2),
+    Payload1 = miner_ct_utils:join_payload(?APPKEY, DevNonce1),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Payload3 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
