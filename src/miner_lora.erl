@@ -222,9 +222,7 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
             %% the fun is set by the sender and is used to deterministically route data via channels
             LocalFreq = ChannelSelectorFun(Freqs),
             Token = mk_token(Timers),
-            %% TODO we should check this for regulatory compliance
-            BinJSX = jsx:encode(
-                       #{<<"txpk">> => #{
+            DecodedJSX = #{<<"txpk">> => #{
                              %% IPol for downlink to devices only, not poc packets
                              <<"ipol">> => IPol,
                              <<"imme">> => When == immediate,
@@ -239,7 +237,12 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
                              <<"rfch">> => 0,
                              <<"data">> => base64:encode(Payload)
                             }
-                        }),
+                        },
+            %% TODO we should check this for regulatory compliance
+            BinJSX = jsx:encode(DecodedJSX),
+
+            lager:info("PULL_RESP ~p to ~p:~p", [DecodedJSX, IP, Port]),
+
             Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
             maybe_mirror(State#state.mirror_socket, Packet),
             lager:debug("sending packet via channel: ~p",[LocalFreq]),
