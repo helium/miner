@@ -411,9 +411,13 @@ multi_clients_packets_expiry_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client nodes to send some packets
-    Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, <<"p1">>), %% first device joining
+    DevNonce1 = crypto:strong_rand_bytes(2),
+    DevNonce3 = crypto:strong_rand_bytes(2),
+    Payload1 = miner_ct_utils:join_payload(?APPKEY, DevNonce1),
+    Payload3 = miner_ct_utils:join_payload(?APPKEY, DevNonce3),
+    Packet1 = blockchain_helium_packet_v1:new({eui, 1234, 5678}, Payload1), %% first device joining
     Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>), %% first device transmitting
-    Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, <<"p3">>), %% second device joining
+    Packet3 = blockchain_helium_packet_v1:new({eui, 16#dead, 16#beef}, Payload3), %% second device joining
     Packet4 = blockchain_helium_packet_v1:new({devaddr, 1207959554}, <<"p4">>), %% second device transmitting
     ok = ct_rpc:call(ClientNode1, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
@@ -637,8 +641,10 @@ replay_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Packet1 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p1">>),
-    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, <<"p2">>),
+    Payload1 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    Packet1 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload1),
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(timer:seconds(1)),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
