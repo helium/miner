@@ -64,7 +64,7 @@
          get_txn/2,
          get_genesis_block/2,
          load_genesis_block/3,
-         join_payload/2
+         join_payload/4, join_payload/2
         ]).
 
 
@@ -1113,6 +1113,16 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
     ),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).
+
+join_payload(AppKey, AppEUI0, DevEUI0, DevNonce) ->
+    MType = ?JOIN_REQ,
+    MHDRRFU = 0,
+    Major = 0,
+    AppEUI = reverse(AppEUI0),
+    DevEUI = reverse(DevEUI0),
+    Payload0 = <<MType:3, MHDRRFU:3, Major:2, AppEUI:8/binary, DevEUI:8/binary, DevNonce:2/binary>>,
+    MIC = crypto:cmac(aes_cbc128, AppKey, Payload0, 4),
+    <<Payload0/binary, MIC:4/binary>>.
 
 join_payload(AppKey, DevNonce) ->
     MType = ?JOIN_REQ,

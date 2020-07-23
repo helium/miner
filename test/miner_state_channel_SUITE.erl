@@ -832,11 +832,26 @@ multi_oui_test(Config) ->
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
-    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
+    %% Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Payload3 = crypto:strong_rand_bytes(24+rand:uniform(23)),
-    Payload4 = crypto:strong_rand_bytes(rand:uniform(23)),
-    Payload5 = crypto:strong_rand_bytes(rand:uniform(23)),
+    %% Payload4 = crypto:strong_rand_bytes(rand:uniform(23)),
+    %% Payload5 = crypto:strong_rand_bytes(rand:uniform(23)),
+    DevNonce1 = crypto:strong_rand_bytes(2),
+    DevNonce4 = crypto:strong_rand_bytes(2),
+    DevNonce5 = crypto:strong_rand_bytes(2),
+    Payload1 = miner_ct_utils:join_payload(?APPKEY,
+                                           integer_to_binary(AppEUI1),
+                                           integer_to_binary(DevEUI1),
+                                           DevNonce1),
+    Payload4 = miner_ct_utils:join_payload(?APPKEY,
+                                           integer_to_binary(AppEUI2),
+                                           integer_to_binary(DevEUI2),
+                                           DevNonce4),
+    Payload5 = miner_ct_utils:join_payload(?APPKEY,
+                                           integer_to_binary(AppEUI3),
+                                           integer_to_binary(DevEUI3),
+                                           DevNonce5),
     Packet1 = blockchain_helium_packet_v1:new({eui, DevEUI1, AppEUI1}, Payload1), %% pretend this is a join, it will go to both ouis
     Packet2 = blockchain_helium_packet_v1:new({devaddr, Addr1}, Payload2), %% pretend this is a packet after join, only routes to oui 1
     Packet3 = blockchain_helium_packet_v1:new({devaddr, Addr2}, Payload3), %% pretend this is a packet after join, only routes to oui 2
