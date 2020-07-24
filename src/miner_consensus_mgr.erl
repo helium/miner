@@ -954,9 +954,10 @@ animalize(L) ->
               end,
               L).
 
-%% TODO: redo this using proper time accounting
+%% the retry total time here is 6s per retry.  I've seen stuff locked
+%% for over 30, so increasing the timeout to 90s.
 wait_for_group(Group) ->
-    wait_for_group(Group, 5).
+    wait_for_group(Group, 15).
 
 wait_for_group(_Group, 0) ->
     {error, could_not_check};
