@@ -375,7 +375,7 @@ select_gateway(Gateways) ->
 -spec update_gateway_record(map(), binary(), inet:ip_address(), inet:port_number()) -> gateway().
 update_gateway_record(
     Gateways,
-    <<MAC:64/integer>>,
+    MAC,
     IP, 
     Port) -> 
     case maps:find(MAC, Gateways) of
