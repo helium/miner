@@ -381,7 +381,11 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     Gateway =
         case maps:find(MAC, Gateways) of
             {ok, #gateway{received=Received}=G} ->
-                G#gateway{ip=IP, port=Port, received=Received+1};
+                %% We purposely do not update gateway's addr/port
+                %% here. They should only be updated when handling
+                %% PULL_DATA, otherwise we may send downlink packets
+                %% to the wrong place.
+                G#gateway{received=Received+1};
             error ->
                 #gateway{mac=MAC, ip=IP, port=Port, received=1}
         end,
