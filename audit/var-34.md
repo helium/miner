@@ -6,6 +6,8 @@ This transaction unsets sc_version and sc_overcommit chain variables.
 
 ## Rationale
 
+While doing router maintenance the team realized we had stale v1 state channels open with no corresponding close transactions. We cannot activate V2 state channels without ensuring that we have properly cleaned up stale state channels on chain.
+
 | Var           	| Existing 	| New       	| Rationale           	|
 |---------------	|----------	|-----------	|---------------------	|
 | sc_version    	| 2        	| undefined 	| Unset sc_version    	|
