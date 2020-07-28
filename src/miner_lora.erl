@@ -393,6 +393,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     JSON/binary>>, IP, Port, #state{socket=Socket, gateways=_Gateways,
                                                     reg_domain_confirmed = RegDomainConfirmed}=State) ->
     lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
+    %% a PUSH_DATA leads to a PUSH_ACK to the same Ip:Port that sent the PUSH_DATA frame
     Gateway = #gateway{mac=MAC, ip=IP, port=Port, received=0},
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
@@ -407,6 +408,8 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
     lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
+    %% a PULL_DATA leads to updating the gateway_record so it can be used
+    %% for dispatching PULL_RESP frames
     Gateway = update_gateway_record(Gateways, MAC, IP, Port),
     State#state{gateways=maps:put(MAC, Gateway, Gateways)};
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
