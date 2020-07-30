@@ -52,7 +52,7 @@ git clone https://github.com/helium/miner.git
 
 ### Install Erlang
 
-Miner has been tested against Erlang OTP 21.3.3.
+Miner has been tested against Erlang OTP 22.3.1.
 
 To install OTP 21.3.3 in Raspian, we'll first acquire the Erlang package from [Erlang Solutions](https://www.erlang-solutions.com/resources/download.html):
 
