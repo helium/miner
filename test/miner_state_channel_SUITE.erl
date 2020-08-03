@@ -70,7 +70,9 @@ init_per_group(sc_v2, Config) ->
     SCV2Vars = maps:merge(SCVars,
                           #{?sc_version => 2,
                             ?sc_overcommit => 2,
-                            ?election_interval => 30
+                            ?election_interval => 30,
+                            ?sc_open_validation_bugfix => 1,
+                            ?sc_causality_fix => 1
                            }),
     [{sc_vars, SCV2Vars}, {sc_version, 2} | Config].
 
