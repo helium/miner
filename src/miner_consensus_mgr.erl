@@ -490,6 +490,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                                 error ->
                                                     lager:info("starting hbbft ~p+~p at block height ~p",
                                                                [ElectionHeight, ElectionDelay, BlockHeight]),
+                                                    %% I want to just stop, but it's hard to untangle the code flow here.
                                                     {ok, HGrp} = start_hbbft(ElectionGroup, ElectionHeight,
                                                                              ElectionDelay, State2#state.chain),
                                                     HGrp
@@ -888,7 +889,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
     end.
 
 start_hbbft(DKG, Height, Delay, Chain) ->
-    start_hbbft(DKG, Height, Delay, Chain, 3).
+    start_hbbft(DKG, Height, Delay, Chain, 12).
 
 start_hbbft(DKG, Height, Delay, Chain, Retries) ->
     {ok, Ledger} = blockchain:ledger_at(Height + Delay, Chain),
@@ -957,7 +958,7 @@ animalize(L) ->
 %% the retry total time here is 6s per retry.  I've seen stuff locked
 %% for over 30, so increasing the timeout to 90s.
 wait_for_group(Group) ->
-    wait_for_group(Group, 15).
+    wait_for_group(Group, 25).
 
 wait_for_group(_Group, 0) ->
     {error, could_not_check};
