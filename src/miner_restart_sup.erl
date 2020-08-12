@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,13 +33,13 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+start_link(SigFun, ECDHFun) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [SigFun, ECDHFun]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init(_Args) ->
+init([SigFun, ECDHFun]) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 4,
@@ -50,21 +50,6 @@ init(_Args) ->
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
     BaseDir = application:get_env(blockchain, base_dir, "data"),
-    case application:get_env(blockchain, key, undefined) of
-        undefined ->
-            #{ ecdh_fun := ECDHFun,
-               sig_fun := SigFun
-             } = miner_keys:keys({file, BaseDir}),
-            ok;
-        {ecc, Props} when is_list(Props) ->
-            #{ ecdh_fun := ECDHFun,
-               sig_fun := SigFun
-             } = miner_keys:keys({ecc, Props}),
-            ok;
-        {_PublicKey, ECDHFun, SigFun} ->
-            ok
-    end,
-
     %% Miner Options
 
     POCOpts = #{

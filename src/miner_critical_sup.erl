@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/4]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,13 +33,13 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+start_link(PublicKey, SigFun, ECDHFun, ECCWorker) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [PublicKey, SigFun, ECDHFun, ECCWorker]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init(_Args) ->
+init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 0,
@@ -65,25 +65,6 @@ init(_Args) ->
 
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
-
-    case application:get_env(blockchain, key, undefined) of
-        undefined ->
-            #{ pubkey := PublicKey,
-               ecdh_fun := ECDHFun,
-               sig_fun := SigFun
-             } = miner_keys:keys({file, BaseDir}),
-            ECCWorker = [];
-        {ecc, Props} when is_list(Props) ->
-            #{ pubkey := PublicKey,
-               key_slot := KeySlot,
-               ecdh_fun := ECDHFun,
-               sig_fun := SigFun
-             } = miner_keys:keys({ecc, Props}),
-            ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot])];
-        {PublicKey, ECDHFun, SigFun} ->
-            ECCWorker = [],
-            ok
-    end,
 
     BlockchainOpts = [
         {key, {PublicKey, SigFun, ECDHFun}},
