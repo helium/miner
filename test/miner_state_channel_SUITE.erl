@@ -217,6 +217,9 @@ no_packets_expiry_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -300,6 +303,10 @@ packets_expiry_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    %% wait for the state channel server to init
+    true = miner_ct_utils:wait_until(fun() ->
+                                           undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                   end),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -429,6 +436,9 @@ multi_clients_packets_expiry_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% wait ExpireWithin + 3 more blocks to be safe
@@ -540,6 +550,9 @@ excess_spend_fail_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -634,6 +647,9 @@ replay_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -817,6 +833,10 @@ multi_oui_test(Config) ->
     {ok, SC2} = get_ledger_state_channel(RouterNode2, ID2, RouterPubkeyBin2),
     true = check_ledger_state_channel(SC1, RouterPubkeyBin1, ID1, Config),
     true = check_ledger_state_channel(SC2, RouterPubkeyBin2, ID2, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []) andalso
+                                             undefined /= ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC1: ~p", [SC1]),
     ct:pal("SC2: ~p", [SC2]),
 
@@ -1001,6 +1021,9 @@ conflict_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
@@ -1126,6 +1149,9 @@ reject_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
@@ -1246,6 +1272,9 @@ server_doesnt_close_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
@@ -1363,6 +1392,9 @@ client_reports_overspend_test(Config) ->
     %% check state_channel appears on the ledger
     {ok, SC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
     true = check_ledger_state_channel(SC, RouterPubkeyBin, ID, Config),
+    true = miner_ct_utils:wait_until(fun() ->
+                                             undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                                     end),
     ct:pal("SC: ~p", [SC]),
 
     %% At this point, we're certain that sc is open
