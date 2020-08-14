@@ -1154,8 +1154,6 @@ reject_test(Config) ->
                                      end),
     ct:pal("SC: ~p", [SC]),
 
-    InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
-
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
     Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
