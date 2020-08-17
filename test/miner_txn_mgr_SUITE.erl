@@ -19,7 +19,8 @@
          txn_out_of_sequence_nonce_test/1,
          txn_invalid_nonce_test/1,
          txn_dependent_test/1,
-         txn_dup_txn_test/1
+         txn_dup_txn_test/1,
+         txn_dup_payment_txn_test/1
 
         ]).
 
@@ -33,7 +34,8 @@ all() -> [
           txn_out_of_sequence_nonce_test,
           txn_invalid_nonce_test,
           txn_dependent_test,
-          txn_dup_txn_test
+          txn_dup_txn_test,
+          txn_dup_payment_txn_test
          ].
 
 init_per_suite(Config) ->
@@ -56,6 +58,7 @@ init_per_testcase(_TestCase, Config0) ->
     BlockTime =
         case _TestCase of
             txn_dup_txn_test -> 5000;
+            txn_dup_payment_txn_test -> 5000;
             _ -> ?config(block_time, Config)
         end,
     BatchSize = ?config(batch_size, Config),
@@ -275,7 +278,6 @@ txn_invalid_nonce_test(Config) ->
 
     ok.
 
-
 txn_dependent_test(Config) ->
     %% send a bunch of dependent txns
     %% give them time to be accepted by the CG group and
@@ -322,6 +324,7 @@ txn_dependent_test(Config) ->
 txn_dup_txn_test(Config) ->
     %% send two OUI txns with the same values
     %% this is to test txn mgr does not dedup, the client is deliberately sending two txns with same data
+    %% in the case of OUIs, the dup txns will not fail validations as there is no nonce or other unique key required
     %% we will submit the txns and subsequently check for 2 txns in the txn mgr cache ( subject to them being absorbed )
     Miner = hd(?config(non_consensus_miners, Config)),
     AddrList = ?config(tagged_miner_addresses, Config),
@@ -395,6 +398,64 @@ txn_dup_txn_test(Config) ->
 
     ok.
 
+txn_dup_payment_txn_test(Config) ->
+    %% send two payment txns with the same values
+    %% this is to test txn mgr does not dedup, the client is deliberately sending two txns with same data
+    %% in the case of payments, the dup txn WILL fail validations due to the invalid nonce
+    %% this will result in the first txn passing validation and the second failing
+    %% we want to ensure that only 1 of the payments is accepted/absorbed
+
+    Miner = hd(?config(non_consensus_miners, Config)),
+    ConMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
+    IgnoredTxns = [],
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
+
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+
+    PayerAddr = Addr,
+    Payee = hd(miner_ct_utils:shuffle(ConMiners)),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+
+    StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+
+    %% the first txn
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
+    SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
+    %% the second txn - with the same nonce as the first
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
+    SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+
+    %% send txn1
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn1]),
+
+    timer:sleep(200),
+
+    %% now send the second txn ( which is a clone of the first )
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn2]),
+
+    %% confirm both txns are cleared out of the txn mgr cache
+    Result2 = miner_ct_utils:wait_until(
+                                        fun()->
+                                            case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
+                                                X when map_size(X) == 0 -> true;
+                                                _ -> false
+                                            end
+                                        end, 60, 2000),
+    ok = handle_get_cached_txn_result(Result2, Miner, IgnoredTxns, Chain),
+
+    timer:sleep(5000),
+    %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
+    %% in this case the nonce value should have increased by 1 only
+    ExpectedNonce = StartNonce +1,
+    true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
+
+    ok.
+
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
@@ -402,6 +463,7 @@ txn_dup_txn_test(Config) ->
 handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain)->
     case Result of
         true ->
+            ct:pal("Success, miner was ~p",[Miner]),
             ok;
         false ->
           TxnList = get_cached_txns_with_exclusions(Miner, IgnoredTxns),
