@@ -599,13 +599,14 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                                  blockchain_block:time(HeadBlock)
                          end,
 
-    {ok, StartHeight} = application:get_env(miner, stabilization_period_start),
+    {ok, StartHeight0} = application:get_env(miner, stabilization_period),
+    StartHeight = max(1, Height - StartHeight0),
     StartBlockTime = case StartBlockTime0 of
                          undefined ->
                              case Height > StartHeight of
                                  true ->
-                                     case blockchain:get_block(StartHeight, Chain) of
-                                         {ok, StartBlock} ->
+                                     case blockchain:find_first_block_after(StartHeight, Chain) of
+                                         {ok, _, StartBlock} ->
                                              blockchain_block:time(StartBlock);
                                          _ ->
                                              undefined
