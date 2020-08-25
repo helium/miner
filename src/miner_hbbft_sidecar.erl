@@ -19,7 +19,7 @@
 
 -define(SERVER, ?MODULE).
 
--define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 100,
+-define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 125,
                     blockchain_txn_consensus_group_v1 => 10000}).
 
 -record(validation,
