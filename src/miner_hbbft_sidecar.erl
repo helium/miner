@@ -249,7 +249,7 @@ code_change(_OldVsn, State, _Extra) ->
 filter_txn_buffer(Buf, Chain) ->
     lists:filter(fun(BinTxn) ->
                          Txn = blockchain_txn:deserialize(BinTxn),
-                         IsSlow = lists:member(blockchain_txn:type(Txn), ?SlowTxns),
+                         IsSlow = error /= maps:find(blockchain_txn:type(Txn), ?SlowTxns),
                          case IsSlow orelse blockchain_txn:is_valid(Txn, Chain) == ok of
                              true ->
                                  case blockchain_txn:absorb(Txn, Chain) of
