@@ -249,7 +249,7 @@ code_change(_OldVsn, State, _Extra) ->
 filter_txn_buffer(Buf, Chain) ->
     lists:filter(fun(BinTxn) ->
                          Txn = blockchain_txn:deserialize(BinTxn),
-                         IsSlow = error /= maps:find(blockchain_txn:type(Txn), ?SlowTxns),
+                         IsSlow = maps:is_key(blockchain_txn:type(Txn), ?SlowTxns),
                          case IsSlow orelse blockchain_txn:is_valid(Txn, Chain) == ok of
                              true ->
                                  case blockchain_txn:absorb(Txn, Chain) of
@@ -285,7 +285,7 @@ maybe_start_validation(#state{queue = Queue, chain = Chain,
             State;
         [{From, Txn} | Queue1] ->
             Type = blockchain_txn:type(Txn),
-            Timeout = maps:get(Type, ?SlowTxns, 10000),
+            Timeout = maps:get(Type, ?SlowTxns, application:get_env(miner, txn_validation_budget_ms, 10000)),
             {Attempt, V} = start_validation(Txn, From, Timeout, Chain),
             Validations1 = Validations#{Attempt => V},
             State#state{validations = Validations1, queue = Queue1}
