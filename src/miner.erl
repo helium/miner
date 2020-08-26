@@ -599,7 +599,7 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
                                  blockchain_block:time(HeadBlock)
                          end,
 
-    {ok, StartHeight0} = application:get_env(miner, stabilization_period),
+    StartHeight0 = application:get_env(miner, stabilization_period, 0),
     StartHeight = max(1, Height - StartHeight0),
     StartBlockTime = case StartBlockTime0 of
                          undefined ->
