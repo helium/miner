@@ -76,8 +76,10 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, _) ->
     Chain = blockchain_worker:blockchain(),
-    {ok, BAgo} = blockchain:get_block(187000, Chain),
-    TAgo = blockchain_block:time(BAgo),
+    {ok, Height} = blockchain:height(Chain),
+    %% rewrite this eventually
+    {ok, BAgo0} = blockchain:get_block(Height - 100000, Chain),
+    TAgo0 = blockchain_block:time(BAgo0),
 
     {ok, Interval} = blockchain:config(?election_interval, blockchain:ledger(Chain)),
     {ok, CurrHeight} = blockchain:height(Chain),
@@ -91,13 +93,17 @@ handle_info(timeout, _) ->
              Time = blockchain_block:time(B),
              Txns = blockchain_block:transactions(B),
              Size = byte_size(blockchain_block:serialize(B)),
+             %% rewrite this eventually
+             {ok, BAgo} = blockchain:get_block(H - 100000, Chain),
+             TAgo = blockchain_block:time(BAgo),
+
              %% Txns = lists:filter(
              %%          fun(T) ->
              %%                  blockchain_txn:type(T) ==
              %%                      blockchain_txn_poc_request_v1
              %%          end, Txns0),
              Epoch = blockchain_block_v1:election_info(B),
-             Avg = ((Time - TAgo) / (H - 187000)) - 60,
+             Avg = ((Time - TAgo) / 100000),
              {Time, Txns, Epoch, H, Avg, Size, Interval}
          end
          || H <- lists:seq(Start, CurrHeight)],
@@ -117,13 +123,12 @@ handle_info(timeout, _) ->
     {noreply, #state{chain = Chain,
                      stats = Stats,
                      height = CurrHeight,
-                     start_time = TAgo,
+                     start_time = TAgo0,
                      fd = File}};
 handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
             #state{chain = Chain,
                    height = CurrHeight,
                    fd = File,
-                   start_time = TAgo,
                    stats = Stats} = State) ->
     {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
@@ -131,11 +136,13 @@ handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
         {ok, Block} ->
             case blockchain_block:height(Block) of
                 Height when Height > CurrHeight ->
+                    {ok, BAgo} = blockchain:get_block(Height - 100000, Chain),
+                    TAgo = blockchain_block:time(BAgo),
                     Time = blockchain_block:time(Block),
                     Txns = blockchain_block:transactions(Block),
                     Size = byte_size(blockchain_block:serialize(Block)),
                     Epoch = blockchain_block_v1:election_info(Block),
-                    Avg = ((Time - TAgo) / (Height - 187000)) - 60,
+                    Avg = ((Time - TAgo) / 100000),
                     {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height,
                                                      Avg, Size, Interval},
                                                     Stats),
