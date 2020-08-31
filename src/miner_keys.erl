@@ -10,6 +10,23 @@
                      }.
 -export_type([key_info/0]).
 
+get_onboarding_filename() ->
+    case application:get_env(blockchain, onboarding_dir) of
+        undefined -> undefined;
+        {ok, OnboardingDir} ->
+            filename:join([OnboardingDir, "onboarding_key"])
+    end.
+
+get_onboarding_key() ->
+    case get_onboarding_filename() of
+        undefined -> undefined;
+        OnboardingKey ->
+            case file:read_file(OnboardingKey) of
+                {ok, Bin} -> Bin;
+                {error, _Reason} -> undefined
+            end
+    end.
+
 %% @doc Fetch the miner key, onboarding key, keyslot and associated
 %% signing and ecdh functions from either a file (for non-hardware
 %% based hotspots)or the ECC.
@@ -20,8 +37,6 @@
 -spec keys({file, BaseDir::string()} |
            {ecc, proplists:proplist()}) -> key_info().
 keys({file, BaseDir}) ->
-    BootDir = "/mnt/uboot",
-    OnboardingKey = filename:join([BootDir, "onboarding_key"]),
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
     case libp2p_crypto:load_keys(SwarmKey) of
@@ -30,14 +45,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => case filelib:ensure_dir(OnboardingKey) of
-                                     ok ->
-                                         case file:read_file(OnboardingKey) of
-                                             {ok, Bin} -> Bin;
-                                             {error, _Reason} -> undefined
-                                         end;
-                                     {error, _Reason} -> undefined
-                                 end
+               onboarding_key => get_onboarding_key()
              };
         {error, enoent} ->
             KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -46,14 +54,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => case filelib:ensure_dir(OnboardingKey) of
-                                     ok ->
-                                         case file:read_file(OnboardingKey) of
-                                             {ok, Bin} -> Bin;
-                                             {error, _Reason} -> undefined
-                                         end;
-                                     {error, _Reason} -> undefined
-                                 end
+               onboarding_key => get_onboarding_key()
              }
     end;
 keys({ecc, Props}) when is_list(Props) ->
@@ -113,7 +114,8 @@ print_keys(_) ->
     MaybeUUIDv4 = fun(undefined) -> undefined;
                   (Key) ->
                       %% only production blackspots read onboarding_key from a file
-                      case filelib:is_file("/mnt/uboot/onboarding_key") of
+                      OnboardingKey = get_onboarding_filename(),
+                      case filelib:is_file(OnboardingKey) of
                           true ->
                               string:trim(binary_to_list(Key));
                           false ->
