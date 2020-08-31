@@ -10,6 +10,23 @@
                      }.
 -export_type([key_info/0]).
 
+get_onboarding_filename() ->
+    case application:get_env(blockchain, onboarding_dir) of
+        undefined -> undefined;
+        {ok, OnboardingDir} ->
+            filename:join([OnboardingDir, "onboarding_key"])
+    end.
+
+get_onboarding_key() ->
+    case get_onboarding_filename() of
+        undefined -> undefined;
+        OnboardingKey ->
+            case file:read_file(OnboardingKey) of
+                {ok, Bin} -> Bin;
+                {error, _Reason} -> undefined
+            end
+    end.
+
 %% @doc Fetch the miner key, onboarding key, keyslot and associated
 %% signing and ecdh functions from either a file (for non-hardware
 %% based hotspots)or the ECC.
@@ -28,7 +45,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => undefined
+               onboarding_key => get_onboarding_key()
              };
         {error, enoent} ->
             KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -37,7 +54,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => undefined
+               onboarding_key => get_onboarding_key()
              }
     end;
 keys({ecc, Props}) when is_list(Props) ->
@@ -94,8 +111,19 @@ print_keys(_) ->
     MaybeB58 = fun(undefined) -> undefined;
                   (Key) -> libp2p_crypto:pubkey_to_b58(Key)
                end,
+    MaybeUUIDv4 = fun(undefined) -> undefined;
+                  (Key) ->
+                      %% only production blackspots read onboarding_key from a file
+                      OnboardingKey = get_onboarding_filename(),
+                      case filelib:is_file(OnboardingKey) of
+                          true ->
+                              string:trim(binary_to_list(Key));
+                          false ->
+                              libp2p_crypto:pubkey_to_b58(Key)
+                      end
+               end,
     Props = [{pubkey, MaybeB58(PubKey)},
-             {onboarding_key, MaybeB58(OnboardingKey)}
+             {onboarding_key, MaybeUUIDv4(OnboardingKey)}
             ] ++ [ {animal_name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:pubkey_to_b58(PubKey)))} || PubKey /= undefined ],
     lists:foreach(fun(Term) -> io:format("~tp.~n", [Term]) end, Props).
 
