@@ -114,8 +114,8 @@ print_keys(_) ->
     MaybeUUIDv4 = fun(undefined) -> undefined;
                   (Key) ->
                       %% only production blackspots read onboarding_key from a file
-                      OnboardingKey = get_onboarding_filename(),
-                      case filelib:is_file(OnboardingKey) of
+                      OnboardingFilename = get_onboarding_filename(),
+                      case filelib:is_file(OnboardingFilename) of
                           true ->
                               string:trim(binary_to_list(Key));
                           false ->
