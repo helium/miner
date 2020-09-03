@@ -601,27 +601,28 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
 
     StartHeight0 = application:get_env(miner, stabilization_period, 0),
     StartHeight = max(1, Height - StartHeight0),
-    StartBlockTime = case StartBlockTime0 of
-                         undefined ->
-                             case Height > StartHeight of
-                                 true ->
-                                     case blockchain:find_first_block_after(StartHeight, Chain) of
-                                         {ok, _, StartBlock} ->
-                                             blockchain_block:time(StartBlock);
-                                         _ ->
-                                             undefined
-                                     end;
-                                 false ->
-                                     undefined
-                             end;
-                         Time ->
-                             Time
-                     end,
+    {ActualStartHeight, StartBlockTime} =
+        case StartBlockTime0 of
+            undefined ->
+                case Height > StartHeight of
+                    true ->
+                        case blockchain:find_first_block_after(StartHeight, Chain) of
+                            {ok, Actual, StartBlock} ->
+                                {Actual, blockchain_block:time(StartBlock)};
+                            _ ->
+                                {0, undefined}
+                        end;
+                    false ->
+                        {0, undefined}
+                end;
+            Time ->
+                {StartHeight, Time}
+        end,
     AvgBlockTime = case StartBlockTime of
                        undefined ->
                            BlockTime;
                        _ ->
-                           (LastBlockTimestamp - StartBlockTime) / (Height - StartHeight)
+                           (LastBlockTimestamp - StartBlockTime) / (Height - ActualStartHeight)
                    end,
     BlockTimeDeviation0 = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),

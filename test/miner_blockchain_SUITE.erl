@@ -105,6 +105,12 @@ init_per_testcase(TestCase, Config0) ->
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     %% Get both consensus and non consensus miners
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+                     length(NCMiners) == 1
+             end, 25, 200),
+
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
     ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
 
@@ -790,8 +796,17 @@ snapshot_test(Config) ->
 
     miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
 
-    timer:sleep(5000),
+    miner_ct_utils:wait_until(
+      fun() ->
+              try
+                  undefined =/= ct_rpc:call(Target, blockchain_worker, blockchain, [])
+              catch _:_ ->
+                       false
+              end
+      end, 50, 200),
+
     ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
+
 
     ok = miner_ct_utils:wait_for_gte(height, Miners0, 25, all, 20),
     ok.
