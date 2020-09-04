@@ -48,8 +48,7 @@
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
-    blockchain_ref = make_ref() :: reference(),
-    start_block_time=undefined :: undefined | pos_integer()
+    blockchain_ref = make_ref() :: reference()
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -585,7 +584,7 @@ terminate(Reason, _State) ->
 %% Internal functions
 %% =================================================================
 
-set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockTime0}) ->
+set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
@@ -601,27 +600,23 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
 
     StartHeight0 = application:get_env(miner, stabilization_period, 0),
     StartHeight = max(1, Height - StartHeight0),
-    StartBlockTime = case StartBlockTime0 of
-                         undefined ->
-                             case Height > StartHeight of
-                                 true ->
-                                     case blockchain:find_first_block_after(StartHeight, Chain) of
-                                         {ok, _, StartBlock} ->
-                                             blockchain_block:time(StartBlock);
-                                         _ ->
-                                             undefined
-                                     end;
-                                 false ->
-                                     undefined
-                             end;
-                         Time ->
-                             Time
-                     end,
+    {ActualStartHeight, StartBlockTime} =
+        case Height > StartHeight of
+            true ->
+                case blockchain:find_first_block_after(StartHeight, Chain) of
+                    {ok, Actual, StartBlock} ->
+                        {Actual, blockchain_block:time(StartBlock)};
+                    _ ->
+                        {0, undefined}
+                end;
+            false ->
+                {0, undefined}
+        end,
     AvgBlockTime = case StartBlockTime of
                        undefined ->
                            BlockTime;
                        _ ->
-                           (LastBlockTimestamp - StartBlockTime) / (Height - StartHeight)
+                           (LastBlockTimestamp - StartBlockTime) / (Height - ActualStartHeight)
                    end,
     BlockTimeDeviation0 = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
@@ -638,7 +633,7 @@ set_next_block_timer(State=#state{blockchain=Chain, start_block_time=StartBlockT
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
-    State#state{start_block_time=StartBlockTime, block_timer=Timer}.
+    State#state{block_timer=Timer}.
 
 process_bbas(N, BBAs) ->
     %% 2f + 1 = N - ((N - 1) div 3)
