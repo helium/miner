@@ -16,6 +16,8 @@
 
 start(_StartType, _StartArgs) ->
 
+    persistent_term:put(ospid, os:getpid()),
+
     GlobalOpts = application:get_env(rocksdb, global_opts, []),
     {ok, Cache} = rocksdb:new_cache(lru, 4 * 1024 * 1024),
     {ok, BufferMgr} = rocksdb:new_write_buffer_manager(4 * 1024 * 1024, Cache),
