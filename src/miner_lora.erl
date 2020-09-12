@@ -50,7 +50,9 @@
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
     reg_freq_list :: [float()],
-    reg_throttle :: miner_lora_throttle:handle()
+    reg_throttle :: miner_lora_throttle:handle(),
+    last_tmst_us = undefined :: undefined | integer(), % last concentrator tmst reported by the packet forwarder
+    last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
 }).
 
 -record(country, {
@@ -71,6 +73,22 @@
 
 %% in meters
 -define(MAX_WANDER_DIST, 200).
+
+%% Maximum `tmst` counter value reported by an SX130x concentrator
+%% IC. This is a raw [1] counter value with the following
+%% characteristics:
+%%
+%% - unsigned
+%% - counts upwards
+%% - 32 bits
+%% - increments at 1 MHz
+%%
+%% [1]: On SX1301 it is a raw value. On SX1302 it is a 32 bit value
+%% counting at 32 MHz, but the SX1302 HAL throws away 5 bits to match
+%% SX1301's behavior.
+%%
+%% Equivalent `(2^32)-1`
+-define(MAX_TMST_VAL, 4294967295).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -217,7 +235,9 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
                         gateways=Gateways,
                         packet_timers=Timers,
                         reg_freq_list = Freqs,
-                        reg_throttle = Throttle}=State) ->
+                        reg_throttle = Throttle,
+                        last_tmst_us = PrevTmst_us,
+                        last_mono_us = PrevMono_us }=State) ->
     case select_gateway(Gateways) of
         {error, _}=Error ->
             {reply, Error, State};
@@ -249,11 +269,8 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, Fr
             %% Check this transmission for regulatory compliance.
             {SpreadingFactor, Bandwidth} = parse_datarate(DataRate),
             TimeOnAir = miner_lora_throttle:time_on_air(Bandwidth, SpreadingFactor, 5, 8, true, byte_size(Payload)),
-            %% TODO: replace `monotonic_time' with monotonic time derived from concentrator's counter.
-            %%
-            %% It's not as simple as it sounds because the counter is only 32 bits
-            %% and rolls over every 134 seconds.
-            SentAt = erlang:monotonic_time(millisecond),
+            AdjustedTmst_us = tmst_to_local_monotonic_time(When, PrevTmst_us, PrevMono_us),
+            SentAt = AdjustedTmst_us / 1000,
             case miner_lora_throttle:can_send(Throttle, SentAt, LocalFreq, TimeOnAir) of
                 false -> lager:warning("This transmission should have been rejected");
                 true -> ok
@@ -342,8 +359,9 @@ handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     end,
     {noreply, State#state{packet_timers=maps:remove(Token, Timers)}};
 handle_info({udp, Socket, IP, Port, Packet}, #state{socket=Socket}=State) ->
+    RxInstantLocal_us = erlang:monotonic_time(microsecond),
     maybe_mirror(State#state.mirror_socket, Packet),
-    State2 = handle_udp_packet(Packet, IP, Port, State),
+    State2 = handle_udp_packet(Packet, IP, Port, RxInstantLocal_us, State),
     {noreply, State2};
 handle_info({udp_passive, Socket}, #state{socket=Socket}=State) ->
     inet:setopts(Socket, [{active, 100}]),
@@ -386,13 +404,14 @@ select_gateway(Gateways) ->
             {ok, erlang:element(2, erlang:hd(maps:to_list(Gateways)))}
     end.
 
--spec handle_udp_packet(binary(), inet:ip_address(), inet:port_number(), state()) -> state().
+-spec handle_udp_packet(binary(), inet:ip_address(), inet:port_number(), integer(), state()) -> state().
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PUSH_DATA:8/integer-unsigned,
                     MAC:64/integer,
-                    JSON/binary>>, IP, Port, #state{socket=Socket, gateways=Gateways,
-                                                    reg_domain_confirmed = RegDomainConfirmed}=State) ->
+                    JSON/binary>>, IP, Port, RxInstantLocal_us,
+                    #state{socket=Socket, gateways=Gateways,
+                           reg_domain_confirmed = RegDomainConfirmed}=State) ->
     lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
@@ -408,12 +427,12 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
-    handle_json_data(jsx:decode(JSON, [return_maps]), Gateway, State);
+    handle_json_data(jsx:decode(JSON, [return_maps]), Gateway, RxInstantLocal_us, State);
 handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?PULL_DATA:8/integer-unsigned,
-                    MAC:64/integer>>, IP, Port, #state{socket=Socket, gateways=Gateways,
-                                                        reg_domain_confirmed = RegDomainConfirmed}=State) ->
+                    MAC:64/integer>>, IP, Port, _RxInstantLocal_us, #state{socket=Socket, gateways=Gateways,
+                                                                           reg_domain_confirmed = RegDomainConfirmed}=State) ->
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
@@ -430,7 +449,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?TX_ACK:8/integer-unsigned,
                     _MAC:64/integer,
-                    MaybeJSON/binary>>, _IP, _Port, #state{packet_timers=Timers, reg_throttle=Throttle}=State) ->
+                    MaybeJSON/binary>>, _IP, _Port, _RxInstantLocal_us, #state{packet_timers=Timers, reg_throttle=Throttle}=State) ->
     lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
     case maps:find(Token, Timers) of
         {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
@@ -474,23 +493,23 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
         error ->
             State
     end;
-handle_udp_packet(Packet, _IP, _Port, State) ->
+handle_udp_packet(Packet, _IP, _Port, _RxInstantLocal_us, State) ->
     lager:info("unhandled udp packet ~p", [Packet]),
     State.
 
--spec handle_json_data(map(), gateway(), state()) -> state().
-handle_json_data(#{<<"rxpk">> := Packets} = Map, Gateway, State0) ->
-    State1 = handle_packets(sort_packets(Packets), Gateway, State0),
-    handle_json_data(maps:remove(<<"rxpk">>, Map), Gateway, State1);
-handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, #state{gateways=Gateways}=State) ->
+-spec handle_json_data(map(), gateway(), integer(), state()) -> state().
+handle_json_data(#{<<"rxpk">> := Packets} = Map, Gateway, RxInstantLocal_us, State0) ->
+    State1 = handle_packets(sort_packets(Packets), Gateway, RxInstantLocal_us, State0),
+    handle_json_data(maps:remove(<<"rxpk">>, Map), Gateway, RxInstantLocal_us, State1);
+handle_json_data(#{<<"stat">> := Status} = Map, Gateway0, RxInstantLocal_us, #state{gateways=Gateways}=State) ->
     Gateway1 = Gateway0#gateway{status=Status},
     lager:info("got status ~p", [Status]),
     lager:info("Gateway ~p", [lager:pr(Gateway1, ?MODULE)]),
     Mac = Gateway1#gateway.mac,
     State1 = maybe_update_gps(Status, State),
-    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1,
+    handle_json_data(maps:remove(<<"stat">>, Map), Gateway1, RxInstantLocal_us,
                      State1#state{gateways=maps:put(Mac, Gateway1, Gateways)});
-handle_json_data(_, _Gateway, State) ->
+handle_json_data(_, _Gateway, _RxInstantLocal_us, State) ->
     State.
 
 %% cache GPS the state with each update.  I'm not sure if this will
@@ -516,12 +535,12 @@ sort_packets(Packets) ->
         Packets
     ).
 
--spec handle_packets(list(), gateway(), state()) -> state().
-handle_packets([], _Gateway, State) ->
+-spec handle_packets(list(), gateway(), integer(), state()) -> state().
+handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
-handle_packets(_Packets, _Gateway, #state{reg_domain_confirmed = false} = State) ->
+handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, #state{reg_region = Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -543,7 +562,7 @@ handle_packets([Packet|Tail], Gateway, #state{reg_region = Region} = State) ->
             lager:notice("Routing ~p", [RoutingInfo]),
             erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
     end,
-    handle_packets(Tail, Gateway, State).
+    handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
 -spec route(binary()) -> any().
  route(Pkt) ->
@@ -681,3 +700,25 @@ parse_datarate(Datarate) ->
         [$S, $F, SF1, $B, $W, BW1, BW2, BW3] ->
             {erlang:list_to_integer([SF1]), erlang:list_to_integer([BW1, BW2, BW3])}
     end.
+
+%% @doc adjusts concentrator timestamp (`tmst`) to a monotonic value.
+%%
+%% The returned value is a best-effort estimate of what
+%% `erlang:monotonic_time(microsecond)` would return if it was called
+%% at `Tmst_us`.
+-spec tmst_to_local_monotonic_time(immediate | integer(), undefined | integer(), undefined | integer()) -> integer().
+tmst_to_local_monotonic_time(immediate, _PrevTmst_us, _PrevMonoTime_us) ->
+    erlang:monotonic_time(microsecond);
+tmst_to_local_monotonic_time(When, undefined, undefined) ->
+    %% We haven't yet received a `tmst` from the packet forwarder, so
+    %% we don't have anything to track. Let's just use the current
+    %% time and hope for the best.
+    erlang:monotonic_time(microsecond);
+tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) when Tmst_us >= PrevTmst_us ->
+    Tmst_us - PrevTmst_us + PrevMonoTime_us;
+tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
+    %% Because `Tmst_us` is less than the last `tmst` we received from
+    %% the packet forwarder, we allow for the possibility one single
+    %% roll over of the clock has occurred, and that `Tmst_us` might
+    %% represent a time in the future.
+    Tmst_us + ?MAX_TMST_VAL - PrevTmst_us + PrevMonoTime_us.
