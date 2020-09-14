@@ -88,8 +88,7 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, 
 send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, State) ->
     case miner_lora:location_ok() of
         true ->
-            <<ID:10/binary, _/binary>> = OnionCompactKey,
-            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
+            lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
             send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
@@ -164,8 +163,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Stream, #s
 send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, State) ->
     case miner_lora:location_ok() of
         true ->
-            <<ID:10/binary, _/binary>> = OnionCompactKey,
-            lager:md([{poc_id, blockchain_utils:bin_to_hex(ID)}]),
+            lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
             send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
@@ -297,7 +295,7 @@ wait_for_block_(Fun, Count) ->
     end.
 
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
-    <<POCID:10/binary, _/binary>> = OnionCompactKey,
+    POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
         poc_not_found ->
@@ -322,10 +320,10 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream
                  OnionCompactKey,
                  os:system_time(nanosecond), RSSI, SNR, Frequency, State]
             ),
-            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: treating as a witness", [Type]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: treating as a witness", [Type]),
             State;
         {ok, Data, NextPacket} ->
-            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
+            lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
             %% fingerprint with a blank key
             Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 0, 1, 0, NextPacket, #{})),
             %% deterministally pick a channel based on the layerdata
@@ -343,7 +341,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Stream
             end,
             State;
         {error, Reason} ->
-            lager:info([{poc_id, blockchain_utils:bin_to_hex(POCID)}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
             State
     end,
     NewState.
