@@ -510,6 +510,7 @@ handle_packets([Packet|Tail], Gateway, #state{reg_region = Region} = State) ->
         error ->
             ok;
         {onion, Payload} ->
+            Freq = maps:get(<<"freq">>, Packet),
             %% onion server
             miner_onion_server:decrypt_radio(
                 Payload,
@@ -517,7 +518,8 @@ handle_packets([Packet|Tail], Gateway, #state{reg_region = Region} = State) ->
                 maps:get(<<"lsnr">>, Packet),
                 %% TODO we might want to send GPS time here, if available
                 maps:get(<<"tmst">>, Packet),
-                maps:get(<<"freq">>, Packet),
+                Freq,
+                channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
         {Type, RoutingInfo} ->
@@ -639,3 +641,14 @@ csv_rows_to_ets(F) ->
             lager:warning("failed to read file ~p, error: ~p", [F, Reason]),
             {error, Reason}
   end.
+
+channel(Freq, Frequencies) ->
+    channel(Freq, Frequencies, 0).
+
+channel(Freq, [H|T], Acc) ->
+    case abs(H - Freq) =< 0.001 of
+        true ->
+            Acc;
+        false ->
+            channel(Freq, T, Acc+1)
+    end.

@@ -29,7 +29,10 @@
     poc_dist_v8_partitioned_test/1,
     poc_dist_v8_partitioned_lying_test/1,
     no_status_v8_test/1,
-    restart_test/1
+    restart_test/1,
+    poc_dist_v9_test/1,
+    poc_dist_v9_partitioned_test/1,
+    poc_dist_v9_partitioned_lying_test/1
 ]).
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
@@ -67,6 +70,7 @@ all() ->
      poc_dist_v8_test,
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
+     poc_dist_v9_test,
      %% uncomment when poc placement enforcement starts.
      %% no_status_v8_test,
      restart_test].
@@ -183,6 +187,21 @@ no_status_v8_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(poc_v8),
     run_dist_with_params(poc_dist_v8_test, Config, maps:merge(CommonPOCVars, ExtraVars), false).
+
+poc_dist_v9_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v9),
+    run_dist_with_params(poc_dist_v9_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v9_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v9),
+    run_dist_with_params(poc_dist_v9_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v9_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v9),
+    run_dist_with_params(poc_dist_v9_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -615,10 +634,13 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% show the final receipt counter
     Miners = ?config(miners, Config),
     FinalReceiptMap = challenger_receipts_map(find_receipts(Miners)),
+    ct:pal("FinalReceiptMap: ~p", [FinalReceiptMap]),
     ct:pal("FinalReceiptCounter: ~p", [receipt_counter(FinalReceiptMap)]),
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v9_partitioned_lying_test, Config, _VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v9_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap, _Status) ->
@@ -627,6 +649,8 @@ exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
+exec_dist_test(poc_dist_v9_partitioned_test, Config, _VarMap, _Status) ->
+    do_common_partition_checks(poc_dist_v9_partitioned_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v8_partitioned_test, Config);
 exec_dist_test(poc_dist_v7_partitioned_test, Config, _VarMap, _Status) ->
@@ -656,18 +680,25 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
             %% a next hop.
             case maps:get(?poc_version, VarMap, 1) of
                 V when V > 3 ->
-                    miner_ct_utils:wait_until(
-                      fun() ->
-                              %% Check that we have atleast more than one request
-                              %% If we have only one request, there's no guarantee
-                              %% that the paths would eventually grow
-                              check_multiple_requests(Miners) andalso
-                              %% Now we can check whether we have path growth
-                                  check_eventual_path_growth(TestCase, Miners)
-                      end,
-                      40, 5000),
+                    true = miner_ct_utils:wait_until(
+                             fun() ->
+                                     %% Check that we have atleast more than one request
+                                     %% If we have only one request, there's no guarantee
+                                     %% that the paths would eventually grow
+                                     C1 = check_multiple_requests(Miners),
+                                     %% Now we can check whether we have path growth
+                                     C2 = (check_eventual_path_growth(TestCase, Miners) orelse
+                                           check_subsequent_path_growth(challenger_receipts_map(find_receipts(Miners)))),
+                                     %% Check there are some poc rewards
+                                     C3 = check_poc_rewards(get_rewards(Config)),
+                                     ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
+                                     C1 andalso C2 andalso C3
+                             end,
+                             40, 5000),
                     FinalScores = gateway_scores(Config),
                     ct:pal("FinalScores: ~p", [FinalScores]),
+                    FinalRewards = get_rewards(Config),
+                    ct:pal("FinalRewards: ~p", [FinalRewards]),
                     ok;
                 _ ->
                     %% By this point, we have ensured that every miner
@@ -685,14 +716,16 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
-    miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
-                                          lists:zip(RadioPorts, Locations), Status),
+    {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
+                                                                lists:zip(RadioPorts, Locations), Status),
     ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 10
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
     ok.
 
+gen_locations(poc_dist_v9_partitioned_lying_test, _, _) ->
+    {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
     {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v7_partitioned_lying_test, _, _) ->
@@ -701,6 +734,9 @@ gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v9_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
 gen_locations(poc_dist_v8_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
@@ -717,6 +753,9 @@ gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v8_test, _, _) ->
+    %% Actual locations are the same as the claimed locations for the dist test
+    {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
+gen_locations(poc_dist_v9_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
 gen_locations(_TestCase, Addresses, VarMap) ->
@@ -831,15 +870,18 @@ check_all_miners_can_challenge(Miners) ->
 
 check_eventual_path_growth(TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
+    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
     check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), false).
 
-check_partitioned_path_growth(TestCase, Miners) ->
+check_partitioned_path_growth(_TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), true).
+    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
+    check_subsequent_path_growth(ReceiptMap).
 
-check_partitioned_lying_path_growth(TestCase, Miners) ->
+check_partitioned_lying_path_growth(_TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    not check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), true).
+    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
+    not check_subsequent_path_growth(ReceiptMap).
 
 check_growing_paths(TestCase, ReceiptMap, ActiveGateways, PartitionFlag) ->
     Results = lists:foldl(fun({_Challenger, TaggedReceipts}, Acc) ->
@@ -856,10 +898,10 @@ check_growing_paths(TestCase, ReceiptMap, ActiveGateways, PartitionFlag) ->
                           end,
                           [],
                           maps:to_list(ReceiptMap)),
-    lists:all(fun(R) -> R == true end, Results).
+    lists:all(fun(R) -> R == true end, Results) andalso maps:size(ReceiptMap) == maps:size(ActiveGateways).
 
 check_remaining_grow([]) ->
-    true;
+    false;
 check_remaining_grow(TaggedReceipts) ->
     Res = lists:map(fun({_, Receipt}) ->
                             length(blockchain_txn_poc_receipts_v1:path(Receipt)) > 1
@@ -870,14 +912,16 @@ check_remaining_grow(TaggedReceipts) ->
     lists:any(fun(R) -> R == true end, Res).
 
 check_remaining_partitioned_grow(_TestCase, [], _ActiveGateways) ->
-    true;
+    false;
 check_remaining_partitioned_grow(TestCase, TaggedReceipts, ActiveGateways) ->
     Res = lists:map(fun({_, Receipt}) ->
                             Path = blockchain_txn_poc_receipts_v1:path(Receipt),
                             PathLength = length(Path),
+                            ct:pal("PathLength: ~p", [PathLength]),
                             PathLength > 1 andalso PathLength =< 4 andalso check_partitions(TestCase, Path, ActiveGateways)
                     end,
                     TaggedReceipts),
+    ct:pal("Res: ~p", [Res]),
     %% It's possible that even some of the remaining receipts have single path
     %% but there should eventually be some which have multi element paths
     lists:any(fun(R) -> R == true end, Res).
@@ -891,7 +935,6 @@ check_partitions(TestCase, Path, ActiveGateways) ->
                                           end,
                                           [],
                                           Path)),
-    ct:pal("PathLocs: ~p", [sets:to_list(PathLocs)]),
     {LocSet1, LocSet2} = location_sets(TestCase),
     case sets:is_subset(PathLocs, LocSet1) of
         true ->
@@ -982,23 +1025,28 @@ do_common_partition_checks(TestCase, Config) ->
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
-    miner_ct_utils:wait_until(
-      fun() ->
-              %% Check that every miner has issued a challenge
-              check_all_miners_can_challenge(Miners) andalso
-              %% Check that we have atleast more than one request
-              %% If we have only one request, there's no guarantee
-              %% that the paths would eventually grow
-                  check_multiple_requests(Miners) andalso
-              %% Since we have two static location partitioned networks, we
-              %% can assert that the subsequent path lengths must never be greater
-              %% than 4.
-                  check_partitioned_path_growth(TestCase, Miners)
-      end,
-      40, 5000),
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     %% Check that every miner has issued a challenge
+                     C1 = check_all_miners_can_challenge(Miners),
+                     %% Check that we have atleast more than one request
+                     %% If we have only one request, there's no guarantee
+                     %% that the paths would eventually grow
+                     C2 = check_multiple_requests(Miners),
+                     %% Since we have two static location partitioned networks, we
+                     %% can assert that the subsequent path lengths must never be greater
+                     %% than 4.
+                     C3 = check_partitioned_path_growth(TestCase, Miners),
+                     %% Check there are some poc rewards
+                     C4 = check_poc_rewards(get_rewards(Config)),
+                     ct:pal("C1: ~p, C2: ~p, C3: ~p, C4: ~p", [C1, C2, C3, C4]),
+                     C1 andalso C2 andalso C3 andalso C4
+             end, 60, 5000),
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
+    FinalRewards = get_rewards(Config),
+    ct:pal("FinalRewards: ~p", [FinalRewards]),
     ok.
 
 balances(Config) ->
@@ -1025,7 +1073,7 @@ get_rewards(Config) ->
               [],
               Blocks).
 
-check_no_poc_rewards(RewardsTxns) ->
+check_poc_rewards(RewardsTxns) ->
     %% Get all rewards types
     RewardTypes = lists:foldl(fun(RewardTxn, Acc) ->
                                       Types = [blockchain_txn_reward_v1:type(R) || R <- blockchain_txn_rewards_v1:rewards(RewardTxn)],
@@ -1033,11 +1081,10 @@ check_no_poc_rewards(RewardsTxns) ->
                               end,
                               [],
                               RewardsTxns),
-    %% none of the reward types should be poc_challengees or poc_witnesses
-    not lists:any(fun(T) ->
-                          T == poc_challengees orelse T == poc_witnesses
-                  end,
-                  RewardTypes).
+    lists:any(fun(T) ->
+                      T == poc_challengees orelse T == poc_witnesses
+              end,
+              RewardTypes).
 
 do_common_partition_lying_checks(TestCase, Config) ->
     Miners = ?config(miners, Config),
@@ -1048,20 +1095,20 @@ do_common_partition_lying_checks(TestCase, Config) ->
     InitialBalances = balances(Config),
     ct:pal("InitialBalances: ~p", [InitialBalances]),
 
-    miner_ct_utils:wait_until(
-      fun() ->
-              %% Check that every miner has issued a challenge
-              check_all_miners_can_challenge(Miners) andalso
-              %% Check that we have atleast more than one request
-              %% If we have only one request, there's no guarantee
-              %% that the paths would eventually grow
-                  check_multiple_requests(Miners) andalso
-              %% Since we have two static location partitioned networks, where
-              %% both are lying about their distances, the paths should
-              %% never get longer than 1
-                  check_partitioned_lying_path_growth(TestCase, Miners)
-      end,
-      40, 5000),
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     %% Check that every miner has issued a challenge
+                     check_all_miners_can_challenge(Miners) andalso
+                     %% Check that we have atleast more than one request
+                     %% If we have only one request, there's no guarantee
+                     %% that the paths would eventually grow
+                     check_multiple_requests(Miners) andalso
+                     %% Since we have two static location partitioned networks, where
+                     %% both are lying about their distances, the paths should
+                     %% never get longer than 1
+                     check_partitioned_lying_path_growth(TestCase, Miners)
+             end,
+             40, 5000),
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
@@ -1072,14 +1119,33 @@ do_common_partition_lying_checks(TestCase, Config) ->
     FinalBalances = balances(Config),
     ct:pal("FinalBalances: ~p", [FinalBalances]),
     %% There should be no poc_witness or poc_challengees rewards
-    ?assert(check_no_poc_rewards(Rewards)),
-    %% also check that the scores have not changed at all
-    ?assertEqual(lists:sort(maps:to_list(InitialScores)), lists:sort(maps:to_list(FinalScores))),
+    ?assert(not check_poc_rewards(Rewards)),
     ok.
 
+extra_vars(poc_v9) ->
+    maps:merge(extra_poc_vars(),
+               #{?poc_version => 9,
+                 ?data_aggregation_version => 2,
+                 ?consensus_percent => 0.06,
+                 ?dc_percent => 0.325,
+                 ?poc_challengees_percent => 0.18,
+                 ?poc_challengers_percent => 0.0095,
+                 ?poc_witnesses_percent => 0.0855,
+                 ?securities_percent => 0.34});
 extra_vars(poc_v8) ->
-    #{?poc_version => 8,
-      ?poc_good_bucket_low => -132,
+    maps:merge(extra_poc_vars(), #{?poc_version => 8});
+extra_vars(_) ->
+    {error, poc_v8_and_above_only}.
+
+location_sets(poc_dist_v9_partitioned_test) ->
+    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
+location_sets(poc_dist_v8_partitioned_test) ->
+    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
+location_sets(_TestCase) ->
+    {sets:from_list(?SFLOCS), sets:from_list(?NYLOCS)}.
+
+extra_poc_vars() ->
+    #{?poc_good_bucket_low => -132,
       ?poc_good_bucket_high => -80,
       ?poc_v5_target_prob_randomness_wt => 1.0,
       ?poc_v4_target_prob_edge_wt => 0.0,
@@ -1089,11 +1155,9 @@ extra_vars(poc_v8) ->
       ?poc_v4_randomness_wt => 0.5,
       ?poc_v4_prob_count_wt => 0.0,
       ?poc_centrality_wt => 0.5,
-      ?poc_max_hop_cells => 2000};
-extra_vars(_) ->
-    {error, poc_v8_and_above_only}.
+      ?poc_max_hop_cells => 2000}.
 
-location_sets(poc_dist_v8_partitioned_test) ->
-    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
-location_sets(_TestCase) ->
-    {sets:from_list(?SFLOCS), sets:from_list(?NYLOCS)}.
+check_subsequent_path_growth(ReceiptMap) ->
+    PathLengths = [ length(blockchain_txn_poc_receipts_v1:path(Txn)) || {_, Txn} <- lists:flatten(maps:values(ReceiptMap)) ],
+    ct:pal("PathLengths: ~p", [PathLengths]),
+    lists:any(fun(L) -> L > 1 end, PathLengths).

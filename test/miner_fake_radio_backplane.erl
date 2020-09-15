@@ -10,6 +10,8 @@
 -include("miner_ct_macros.hrl").
 -include("lora.hrl").
 
+-include_lib("blockchain/include/blockchain_utils.hrl").
+
 -record(state, {
           udp_sock,
           udp_ports,
@@ -58,7 +60,9 @@ init([POCVersion, MyPort, UDPPorts, Status]) ->
             %% just don't start the tick
             ok
     end,
-    {ok, #state{poc_version=POCVersion, udp_sock=Sock, udp_ports=UDPPorts}}.
+    State = #state{poc_version=POCVersion, udp_sock=Sock, udp_ports=UDPPorts},
+    ct:pal("starting fake_radio_backplane, state: ~p", [State]),
+    {ok, State}.
 
 handle_call(Msg, _From, State) ->
     lager:warning("unhandled call ~p", [Msg]),
@@ -73,19 +77,32 @@ handle_cast({transmit, Payload, Frequency, TxLocation}, State = #state{udp_sock=
         fun({Port, Location}) ->
                 Distance = blockchain_utils:distance(TxLocation, Location),
                 RSSI = case POCVersion of
-                             V when V < 8 ->
-                                 FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
-                                 FreeSpacePathLoss;
-                             _ ->
-                                 %% Use approx_rssi poc_version 8 onwards
-                                 approx_rssi(Distance)
-                         end,
+                           V when V =< 9 ->
+                               blockchain_utils:min_rcv_sig(blockchain_utils:free_space_path_loss(TxLocation, Location, Frequency));
+                           V when V =< 8 ->
+                               FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
+                               FreeSpacePathLoss;
+                           _ ->
+                               %% Use approx_rssi poc_version 8 onwards
+                               approx_rssi(Distance)
+                       end,
                 case Distance > 32 of
                     true -> ok;
                     false ->
-                        NewJSON = #{<<"rxpk">> => [#{<<"rssi">> => RSSI, <<"lsnr">> => 1.0, <<"tmst">> => erlang:system_time(seconds), <<"data">> => base64:encode(Payload), <<"freq">> => Frequency, <<"datr">> => <<"SF8BW125">>}]},
+                        NewJSON = #{<<"rxpk">> => [#{<<"rssi">> => RSSI,
+                                                     <<"lsnr">> => approx_snr(RSSI),
+                                                     <<"tmst">> => erlang:system_time(seconds),
+                                                     <<"data">> => base64:encode(Payload),
+                                                     <<"freq">> => Frequency,
+                                                     <<"datr">> => <<"SF8BW125">>}]},
                         ct:pal("Sending ~p", [NewJSON]),
-                        gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
+                        gen_udp:send(UDPSock, {127, 0, 0, 1},
+                                     Port,
+                                     <<?PROTOCOL_2:8/integer-unsigned,
+                                       Token:2/binary,
+                                       ?PUSH_DATA:8/integer-unsigned,
+                                       16#deadbeef:64/integer,
+                                       (jsx:encode(NewJSON))/binary>>)
                 end
         end,
         Ports
@@ -104,6 +121,8 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
             State = #state{udp_sock=UDPSock, udp_ports=Ports, poc_version=POCVersion}) ->
     gen_udp:send(UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?TX_ACK:8/integer-unsigned, 16#deadbeef:64/integer>>),
     #{<<"txpk">> := Packet} = jsx:decode(JSON, [return_maps]),
+    #{<<"freq">> := Frequency} = Packet,
+
     case State#state.mirror of
         Pid when is_pid(Pid) ->
             Pid ! {fake_radio_backplane, Packet};
@@ -116,14 +135,18 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
         fun({Port, Location}) ->
                 Distance = blockchain_utils:distance(OriginLocation, Location),
                 ToSend = case POCVersion of
+                             V when V =< 9 ->
+                                 FSPL = blockchain_utils:min_rcv_sig(blockchain_utils:free_space_path_loss(OriginLocation, Location, Frequency)),
+                                 {FSPL, approx_snr(FSPL)};
                              V when V < 8 ->
                                  FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
-                                 FreeSpacePathLoss;
+                                 {FreeSpacePathLoss, 1.0};
                              _ ->
                                  %% Use approx_rssi poc_version 8 onwards
-                                 approx_rssi(Distance)
+                                 {approx_rssi(Distance), 1.0}
                          end,
-                do_send(ToSend, Distance, OriginLocation, Location, Token, Packet, UDPSock, Port)
+                {ToSendRSSI, ToSendSNR} = ToSend,
+                do_send(ToSendRSSI, ToSendSNR, Distance, OriginLocation, Location, Token, Packet, UDPSock, Port)
         end,
         lists:keydelete(SrcPort, 1, Ports)
     ),
@@ -163,13 +186,23 @@ send_status_packets(#state{udp_sock = Sock, udp_ports = UDPPorts}) ->
 approx_rssi(Distance) ->
     ?ABS_RSSI - ?ETA * (10 * math:log10(Distance * 1000)).
 
-do_send(ToSend, Distance, _OriginLocation, _Location, Token, Packet, UDPSock, Port) ->
+do_send(ToSendRSSI, ToSendSNR, Distance, _OriginLocation, _Location, Token, Packet, UDPSock, Port) ->
     case Distance > 32 of
         true ->
             ct:pal("NOT sending from ~p to ~p -> ~p km", [_OriginLocation, _Location, Distance]),
             ok;
         false ->
-            NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ToSend, <<"lsnr">> => 1.0, <<"tmst">> => erlang:system_time(seconds)})]},
-            ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p", [NewJSON, _OriginLocation, _Location, Distance, ToSend]),
+            NewJSON = #{<<"rxpk">> => [maps:merge(maps:without([<<"imme">>, <<"rfch">>, <<"powe">>], Packet), #{<<"rssi">> => ToSendRSSI, <<"lsnr">> => ToSendSNR, <<"tmst">> => erlang:system_time(seconds)})]},
+            ct:pal("sending ~p from ~p to ~p -> ~p km RSSI ~p, SNR ~p", [NewJSON, _OriginLocation, _Location, Distance, ToSendRSSI, ToSendSNR]),
             gen_udp:send(UDPSock, {127, 0, 0, 1}, Port, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer, (jsx:encode(NewJSON))/binary>>)
+    end.
+
+approx_snr(FSPL) ->
+    PotentialSNRs = maps:keys(maps:filter(
+                                fun(_SNR, {Low, High}) ->
+                                        FSPL >= Low andalso FSPL =< High
+                                end, ?SNR_CURVE)),
+    case PotentialSNRs of
+        [] -> -20;
+        SNRs -> hd(SNRs)
     end.
