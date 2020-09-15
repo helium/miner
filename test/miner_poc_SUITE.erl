@@ -1081,7 +1081,6 @@ check_poc_rewards(RewardsTxns) ->
                               end,
                               [],
                               RewardsTxns),
-    %% none of the reward types should be poc_challengees or poc_witnesses
     lists:any(fun(T) ->
                       T == poc_challengees orelse T == poc_witnesses
               end,
