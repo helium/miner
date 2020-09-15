@@ -680,18 +680,25 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
             %% a next hop.
             case maps:get(?poc_version, VarMap, 1) of
                 V when V > 3 ->
-                    miner_ct_utils:wait_until(
-                      fun() ->
-                              %% Check that we have atleast more than one request
-                              %% If we have only one request, there's no guarantee
-                              %% that the paths would eventually grow
-                              check_multiple_requests(Miners) andalso
-                              %% Now we can check whether we have path growth
-                              check_eventual_path_growth(TestCase, Miners)
-                      end,
-                      40, 5000),
+                    true = miner_ct_utils:wait_until(
+                             fun() ->
+                                     %% Check that we have atleast more than one request
+                                     %% If we have only one request, there's no guarantee
+                                     %% that the paths would eventually grow
+                                     C1 = check_multiple_requests(Miners),
+                                     %% Now we can check whether we have path growth
+                                     C2 = (check_eventual_path_growth(TestCase, Miners) orelse
+                                           check_subsequent_path_growth(challenger_receipts_map(find_receipts(Miners)))),
+                                     %% Check there are some poc rewards
+                                     C3 = check_poc_rewards(get_rewards(Config)),
+                                     ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
+                                     C1 andalso C2 andalso C3
+                             end,
+                             40, 5000),
                     FinalScores = gateway_scores(Config),
                     ct:pal("FinalScores: ~p", [FinalScores]),
+                    FinalRewards = get_rewards(Config),
+                    ct:pal("FinalRewards: ~p", [FinalRewards]),
                     ok;
                 _ ->
                     %% By this point, we have ensured that every miner
@@ -1030,12 +1037,16 @@ do_common_partition_checks(TestCase, Config) ->
                      %% can assert that the subsequent path lengths must never be greater
                      %% than 4.
                      C3 = check_partitioned_path_growth(TestCase, Miners),
-                     ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
-                     C1 andalso C2 andalso C3
+                     %% Check there are some poc rewards
+                     C4 = check_poc_rewards(get_rewards(Config)),
+                     ct:pal("C1: ~p, C2: ~p, C3: ~p, C4: ~p", [C1, C2, C3, C4]),
+                     C1 andalso C2 andalso C3 andalso C4
              end, 60, 5000),
     %% Print scores after execution
     FinalScores = gateway_scores(Config),
     ct:pal("FinalScores: ~p", [FinalScores]),
+    FinalRewards = get_rewards(Config),
+    ct:pal("FinalRewards: ~p", [FinalRewards]),
     ok.
 
 balances(Config) ->
@@ -1062,7 +1073,7 @@ get_rewards(Config) ->
               [],
               Blocks).
 
-check_no_poc_rewards(RewardsTxns) ->
+check_poc_rewards(RewardsTxns) ->
     %% Get all rewards types
     RewardTypes = lists:foldl(fun(RewardTxn, Acc) ->
                                       Types = [blockchain_txn_reward_v1:type(R) || R <- blockchain_txn_rewards_v1:rewards(RewardTxn)],
@@ -1071,10 +1082,10 @@ check_no_poc_rewards(RewardsTxns) ->
                               [],
                               RewardsTxns),
     %% none of the reward types should be poc_challengees or poc_witnesses
-    not lists:any(fun(T) ->
-                          T == poc_challengees orelse T == poc_witnesses
-                  end,
-                  RewardTypes).
+    lists:any(fun(T) ->
+                      T == poc_challengees orelse T == poc_witnesses
+              end,
+              RewardTypes).
 
 do_common_partition_lying_checks(TestCase, Config) ->
     Miners = ?config(miners, Config),
@@ -1109,11 +1120,19 @@ do_common_partition_lying_checks(TestCase, Config) ->
     FinalBalances = balances(Config),
     ct:pal("FinalBalances: ~p", [FinalBalances]),
     %% There should be no poc_witness or poc_challengees rewards
-    ?assert(check_no_poc_rewards(Rewards)),
+    ?assert(not check_poc_rewards(Rewards)),
     ok.
 
 extra_vars(poc_v9) ->
-    maps:merge(extra_poc_vars(), #{?poc_version => 9, ?data_aggregation_version => 2});
+    maps:merge(extra_poc_vars(),
+               #{?poc_version => 9,
+                 ?data_aggregation_version => 2,
+                 ?consensus_percent => 0.06,
+                 ?dc_percent => 0.325,
+                 ?poc_challengees_percent => 0.18,
+                 ?poc_challengers_percent => 0.0095,
+                 ?poc_witnesses_percent => 0.0855,
+                 ?securities_percent => 0.34});
 extra_vars(poc_v8) ->
     maps:merge(extra_poc_vars(), #{?poc_version => 8});
 extra_vars(_) ->
