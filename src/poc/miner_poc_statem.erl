@@ -70,6 +70,7 @@
     responses = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     poc_hash  :: binary() | undefined,
+    request_block_hash  :: binary() | undefined,
     mining_timeout = ?MINING_TIMEOUT :: non_neg_integer(),
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
@@ -224,7 +225,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
-                                Data#data{mining_timeout = Data#data.poc_interval});
+                                Data#data{mining_timeout = Data#data.poc_interval, request_block_hash=BlockHash});
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
@@ -536,6 +537,7 @@ save_data(#data{base_dir = BaseDir,
                 responses = Responses,
                 receiving_timeout = RecTimeout,
                 poc_hash = PoCHash,
+                request_block_hash = BlockHash,
                 mining_timeout = MiningTimeout,
                 retry = Retry,
                 receipts_timeout = ReceiptTimeout} = State) ->
@@ -548,6 +550,7 @@ save_data(#data{base_dir = BaseDir,
                  responses => Responses,
                  receiving_timeout => RecTimeout,
                  poc_hash => PoCHash,
+                 request_block_hash => BlockHash,
                  mining_timeout => MiningTimeout,
                  retry => Retry,
                  receipts_timeout => ReceiptTimeout
@@ -577,6 +580,7 @@ load_data(BaseDir) ->
                       responses := Responses,
                       receiving_timeout := RecTimeout,
                       poc_hash := PoCHash,
+                      request_block_hash := BlockHash,
                       mining_timeout := MiningTimeout,
                       retry := Retry,
                       receipts_timeout := ReceiptTimeout} ->
@@ -590,13 +594,14 @@ load_data(BaseDir) ->
                                responses = Responses,
                                receiving_timeout = RecTimeout,
                                poc_hash = PoCHash,
+                               request_block_hash = BlockHash,
                                mining_timeout = MiningTimeout,
                                retry = Retry,
                                receipts_timeout = ReceiptTimeout}};
                     _ ->
                         {error, wrong_data}
             catch
-                error:bararg ->
+                error:badarg ->
                     {error, bad_term}
             end
 
@@ -716,6 +721,8 @@ submit_receipts(#data{address=Challenger,
                       responses=Responses0,
                       secret=Secret,
                       packet_hashes=LayerHashes,
+                      request_block_hash=BlockHash,
+                      blockchain=Chain,
                       onion_keys= #{public := OnionCompactKey}} = _Data) ->
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Path1 = lists:foldl(
@@ -728,7 +735,12 @@ submit_receipts(#data{address=Challenger,
         [],
         LayerHashes
     ),
-    Txn0 = blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1)),
+    Txn0 = case blockchain:config(?poc_version, blockchain:ledger(Chain)) of
+               {ok, PoCVersion} when PoCVersion >= 10 ->
+                   blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, BlockHash, lists:reverse(Path1));
+               _ ->
+                   blockchain_txn_poc_receipts_v1:new(Challenger, Secret, OnionKeyHash, lists:reverse(Path1))
+           end,
     {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
     lager:info("submitting blockchain_txn_poc_receipts_v1 ~p", [Txn0]),

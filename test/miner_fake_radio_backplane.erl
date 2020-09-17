@@ -77,9 +77,9 @@ handle_cast({transmit, Payload, Frequency, TxLocation}, State = #state{udp_sock=
         fun({Port, Location}) ->
                 Distance = blockchain_utils:distance(TxLocation, Location),
                 RSSI = case POCVersion of
-                           V when V =< 9 ->
+                           V when V >= 9 ->
                                blockchain_utils:min_rcv_sig(blockchain_utils:free_space_path_loss(TxLocation, Location, Frequency));
-                           V when V =< 8 ->
+                           V when V >= 8 ->
                                FreeSpacePathLoss = ?TRANSMIT_POWER - (32.44 + 20*math:log10(?FREQUENCY) + 20*math:log10(Distance) - ?MAX_ANTENNA_GAIN - ?MAX_ANTENNA_GAIN),
                                FreeSpacePathLoss;
                            _ ->
@@ -135,7 +135,7 @@ handle_info({udp, UDPSock, IP, SrcPort, <<?PROTOCOL_2:8/integer-unsigned, Token:
         fun({Port, Location}) ->
                 Distance = blockchain_utils:distance(OriginLocation, Location),
                 ToSend = case POCVersion of
-                             V when V =< 9 ->
+                             V when V >= 9 ->
                                  FSPL = blockchain_utils:min_rcv_sig(blockchain_utils:free_space_path_loss(OriginLocation, Location, Frequency)),
                                  {FSPL, approx_snr(FSPL)};
                              V when V < 8 ->
