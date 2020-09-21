@@ -94,7 +94,7 @@ basic(Config) ->
     ct:pal("constructed onion ~p", [Onion]),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _Stream) ->
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State) ->
         ?assertEqual(radio, Origin),
         ?assertEqual(Data1, Data0),
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
@@ -109,7 +109,7 @@ basic(Config) ->
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
                                                   (jsx:encode(#{<<"rxpk">> =>
                                                              [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
-                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 903.9,
                                                                 <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, _Token1:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON1/binary>>}} = gen_udp:recv(Sock, 0, 5000),
@@ -137,7 +137,7 @@ basic(Config) ->
     Parent = self(),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt, fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _Stream) ->
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State) ->
         ?assertEqual(radio, Origin),
         Passed = Data2 == Data0 andalso libp2p_crypto:pubkey_to_bin(OnionCompactKey) == OnionCompactKey0,
         Parent ! {passed, Passed},
@@ -169,7 +169,7 @@ basic(Config) ->
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
                                                   (jsx:encode(#{<<"rxpk">> =>
                                                              [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
-                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 903.9,
                                                                 <<"datr">> => <<"SF10BW125">>, <<"data">> => base64:encode(Packet)}]}))/binary>>),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
@@ -178,7 +178,7 @@ basic(Config) ->
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
                                                   (jsx:encode(#{<<"rxpk">> =>
                                                                 [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
-                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 903.9,
                                                                    <<"datr">> => <<"SF10BW125">>, <<"data">> => Packet1}]}))/binary>>),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token2:2/binary, ?PULL_RESP:8/integer-unsigned, PacketJSON2/binary>>}} = gen_udp:recv(Sock, 0, 5000),
@@ -193,7 +193,7 @@ basic(Config) ->
     ok = gen_udp:send(Sock, "127.0.0.1",  5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_DATA:8/integer-unsigned, 16#deadbeef:64/integer,
                                                   (jsx:encode(#{<<"rxpk">> =>
                                                                 [#{<<"rssi">> => -42, <<"lsnr">> => 1.0,
-                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 922.6,
+                                                                   <<"tmst">> => erlang:system_time(seconds), <<"freq">> => 903.9,
                                                                    <<"datr">> => <<"SF10BW125">>, <<"data">> => Packet2}]}))/binary>>),
     {ok, {{127,0,0,1}, 5678, <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>}} = gen_udp:recv(Sock, 0, 5000),
     ?assertEqual({error, timeout}, gen_udp:recv(Sock, 0, 1000)),
