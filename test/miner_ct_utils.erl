@@ -290,7 +290,7 @@ wait_for_app_stop(Miners, App, Retries) ->
                          fun(Miner) ->
                              case ct_rpc:call(Miner, application, which_applications, []) of
                                  {badrpc, _} ->
-                                     false;
+                                     true;
                                  Apps ->
                                      not lists:keymember(App, 1, Apps)
                              end
