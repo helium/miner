@@ -93,7 +93,7 @@ init_per_testcase(TestCase, Config0) ->
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
         fun(I, Acc) ->
-            [h3:from_geo({37.780586, -122.469470 + I/100}, 13)|Acc]
+            [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
         end,
         [],
         lists:seq(1, length(Addresses))
@@ -212,7 +212,7 @@ election_test(Config) ->
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
     fun Loop(0) ->
-            error(timeout);
+            error(seen_timeout);
         Loop(N) ->
             receive
                 seen_all ->
@@ -232,7 +232,7 @@ election_test(Config) ->
                     timer:sleep(500),
                     Loop(N - 1)
             after timer:seconds(30) ->
-                    error(timeout)
+                    error(message_timeout)
             end
     end(60),
 

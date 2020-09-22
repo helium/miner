@@ -165,10 +165,16 @@ election_check([], _Miners, _AddrList, Owner) ->
     Owner ! seen_all;
 election_check(NotSeen0, Miners, AddrList, Owner) ->
     timer:sleep(500),
-    Members = miner_ct_utils:consensus_members(Miners),
-    MinerNames = lists:map(fun(Member)-> miner_ct_utils:addr2node(Member, AddrList) end, Members),
-    NotSeen = NotSeen0 -- MinerNames,
-    Owner ! {not_seen, NotSeen},
+    NotSeen =
+        try
+            Members = miner_ct_utils:consensus_members(Miners),
+            MinerNames = lists:map(fun(Member)-> miner_ct_utils:addr2node(Member, AddrList) end, Members),
+            NotSeen1 = NotSeen0 -- MinerNames,
+            Owner ! {not_seen, NotSeen1},
+            NotSeen1
+        catch _:_ ->
+                NotSeen0
+        end,
     election_check(NotSeen, Miners, AddrList, Owner).
 
 integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
