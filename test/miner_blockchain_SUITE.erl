@@ -108,7 +108,7 @@ init_per_testcase(TestCase, Config0) ->
     true = miner_ct_utils:wait_until(
              fun() ->
                      {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-                     length(NCMiners) == 1
+                     length(NCMiners) == 1 orelse length(NCMiners) == 0
              end, 25, 200),
 
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
@@ -117,7 +117,7 @@ init_per_testcase(TestCase, Config0) ->
     %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
 
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
