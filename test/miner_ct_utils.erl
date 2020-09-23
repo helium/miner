@@ -679,23 +679,29 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
 
     %% make sure each node is gossiping with a majority of its peers
-    true = miner_ct_utils:wait_until(fun() ->
-                                      lists:all(fun(Miner) ->
-                                                        GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 2000),
-                                                        case length(GossipPeers) >= (length(Miners) / 2) + 1 of
-                                                            true -> true;
-                                                            false ->
-                                                                ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
-                                                                Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
-                                                                lists:foreach(
-                                                                  fun(A) ->
-                                                                          CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000),
-                                                                          ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
-                                                                  end, Addrs),
-                                                                false
-                                                        end
-                                                end, Miners)
-                              end),
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     lists:all(
+                       fun(Miner) ->
+                               try
+                                   GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 500),
+                                   case length(GossipPeers) >= (length(Miners) / 2) + 1 of
+                                       true -> true;
+                                       false ->
+                                           ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
+                                           Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 500),
+                                           lists:foreach(
+                                             fun(A) ->
+                                                     CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 500),
+                                                     ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
+                                             end, Addrs),
+                                           false
+                                   end
+                               catch _C:_E ->
+                                       false
+                               end
+                       end, Miners)
+             end, 200, 150),
 
     %% accumulate the address of each miner
     MinerTaggedAddresses = lists:foldl(
