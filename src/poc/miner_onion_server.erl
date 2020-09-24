@@ -345,7 +345,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
-                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, "SF10BW125", ?TX_POWER) end),
+                    Spreading = tx_params(erlang:byte_size(Packet)),
+                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, ?TX_POWER) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
                 false ->
@@ -391,3 +392,15 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
+-spec tx_params(integer()) -> atom().
+tx_params(Len) when Len < 12 ->
+    "SF10BW125";
+tx_params(Len) when Len < 54 ->
+    "SF9BW125";
+tx_params(Len) when Len < 126 ->
+    "SF8BW125";
+tx_params(Len) when Len < 243 ->
+    "SF7BW125";
+tx_params(_) ->
+    %% onion packets won't be this big, but this will top out around 180 bytes
+    "SF8BW500".
