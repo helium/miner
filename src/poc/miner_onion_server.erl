@@ -403,4 +403,4 @@ spreading(Len) when Len < 243 ->
     "SF7BW125";
 spreading(_) ->
     %% onion packets won't be this big, but this will top out around 180 bytes
-    "SF8BW500".
+    "SF7BW125".
