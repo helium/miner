@@ -63,7 +63,7 @@
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
          format_txn_mgr_list/1,
          get_txn_block_details/2, get_txn_block_details/3,
-         get_txn/2,
+         get_txn/2, get_txns/2,
          get_genesis_block/2,
          load_genesis_block/3
         ]).
@@ -1087,6 +1087,13 @@ get_txn([{_, B}], PredFun) ->
                             PredFun(T)
                     end,
                     blockchain_block:transactions(B))).
+
+get_txns(Blocks, PredFun) when is_map(Blocks) ->
+    lists:foldl(fun({_, B}, Acc) ->
+                        Acc ++ lists:filter(fun(T) -> PredFun(T) end,
+                                            blockchain_block:transactions(B))
+                end, [], maps:to_list(Blocks)).
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
