@@ -345,7 +345,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
-                    Spreading = spreading(erlang:byte_size(Packet)),
+                    Region = miner_lora:region(),
+                    Spreading = spreading(erlang:byte_size(Packet), Region),
                     erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, ?TX_POWER) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
@@ -392,15 +393,20 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
--spec spreading(integer()) -> string().
-spreading(Len) when Len < 12 ->
+-spec spreading(integer(), atom()) -> string().
+spreading(Len, _) when Len < 12 ->
     "SF10BW125";
-spreading(Len) when Len < 54 ->
+spreading(Len, 'EU868') when Len < 52 ->
+    "SF12BW125";
+spreading(Len, _) when Len < 54 ->
     "SF9BW125";
-spreading(Len) when Len < 126 ->
+spreading(Len, 'EU868') when Len < 116 ->
+    "SF9BW125";
+spreading(Len, _) when Len < 126 ->
     "SF8BW125";
-spreading(Len) when Len < 243 ->
+spreading(Len, 'EU868') when Len < 223 ->
+    "SF8BW125";
+spreading(Len, _) when Len < 243 ->
     "SF7BW125";
-spreading(_) ->
-    %% onion packets won't be this big, but this will top out around 180 bytes
+spreading(_, _) ->
     "SF7BW125".
