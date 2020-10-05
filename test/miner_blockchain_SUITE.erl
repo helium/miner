@@ -27,7 +27,9 @@ all() -> [
           master_key_test,
           version_change_test,
           election_v3_test,
-          snapshot_test,
+          %% this is an OK smoke test but doesn't hit every time, the
+          %% high test is more reliable
+          %% snapshot_test,
           high_snapshot_test
          ].
 
@@ -844,7 +846,6 @@ high_snapshot_test(Config) ->
     %% TODO: probably at this step we should delete all the blocks
     %% that the downed node has
 
-
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
     NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
                         {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
@@ -857,7 +858,7 @@ high_snapshot_test(Config) ->
     timer:sleep(5000),
     ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 30),
     ok.
 
 
