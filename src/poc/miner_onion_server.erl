@@ -22,6 +22,7 @@
 ]).
 
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 -define(TX_RAND_SLEEP, 1).
 -define(TX_MIN_SLEEP, 0).
 -define(TX_COUNT, 1).
@@ -346,7 +347,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
-                    Spreading = spreading(erlang:byte_size(Packet), Region),
+                    Spreading = spreading(Region, erlang:byte_size(Packet)),
                     erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, ?TX_POWER) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
@@ -393,20 +394,40 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
--spec spreading(integer(), atom()) -> string().
-spreading(Len, _) when Len < 12 ->
+-spec spreading(Region :: atom(),
+                Len :: pos_integer()) -> string().
+spreading(_, L) when L < 12 ->
     "SF10BW125";
-spreading(Len, 'EU868') when Len < 52 ->
+spreading('EU868', L) when L < 52 ->
     "SF12BW125";
-spreading(Len, _) when Len < 54 ->
+spreading('EU868', L) when L < 116 ->
     "SF9BW125";
-spreading(Len, 'EU868') when Len < 116 ->
+spreading('EU868', L) when L < 223 ->
+    "SF8BW125";
+spreading(_, L) when L < 54 ->
     "SF9BW125";
-spreading(Len, _) when Len < 126 ->
+spreading(_, L) when L < 126 ->
     "SF8BW125";
-spreading(Len, 'EU868') when Len < 223 ->
-    "SF8BW125";
-spreading(Len, _) when Len < 243 ->
-    "SF7BW125";
 spreading(_, _) ->
     "SF7BW125".
+
+-ifdef(TEST).
+
+spreading_test() ->
+    ?assertEqual("SF10BW125", spreading('EU868', 10)),
+    ?assertEqual("SF12BW125", spreading('EU868', 14)),
+    ?assertEqual("SF9BW125", spreading('EU868', 54)),
+    ?assertEqual("SF8BW125", spreading('EU868', 117)),
+    ?assertEqual("SF8BW125", spreading('EU868', 200)),
+    ?assertEqual("SF7BW125", spreading('EU868', 252)),
+    ?assertEqual("SF10BW125", spreading('US915', 10)),
+    ?assertEqual("SF9BW125", spreading('US915', 50)),
+    ?assertEqual("SF8BW125", spreading('US915', 55)),
+    ?assertEqual("SF8BW125", spreading('US915', 120)),
+    ?assertEqual("SF7BW125", spreading('US915', 127)),
+    ?assertEqual("SF7BW125", spreading('US915', 200)),
+    ?assertEqual("SF7BW125", spreading('US915', 242)),
+    ?assertEqual("SF7BW125", spreading('US915', 255)),
+    ok.
+
+-endif.
