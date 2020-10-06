@@ -623,12 +623,9 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     BlockTimeDeviation =
         case BlockTimeDeviation0 of
             N when N > 0 ->
-                min(ceil(N * N), 15);
+                catchup_time(N);
             N ->
-                %% to maintain sensitivity, and actually cap slowdown,
-                %% invert all the operations here, and use abs to
-                %% preserve sign.
-                max(floor(N * abs(N)), -15)
+                -1 * catchup_time(N)
         end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
@@ -652,3 +649,8 @@ process_bbas(N, BBAs) ->
                     <<>>
             end
     end.
+
+catchup_time(N) when N < 0.15 ->
+    1;
+catchup_time(_) ->
+    10.
