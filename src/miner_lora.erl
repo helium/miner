@@ -108,15 +108,15 @@ handle_response(Resp) ->
     end.
 
 -spec send(helium_packet()) -> ok | {error, any()}.
-send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength=Power, datarate=DataRate} = Packet) ->
+send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength=Power, datarate=DataRate}=Packet) ->
     lager:debug("got download packet ~p via freq ~p", [Packet, Freq]),
     %% this is used for downlink packets that have been assigned a downlink frequency by the router, so just use the supplied frequency
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
-    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true}, 11000).
+    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true, Packet}, 11000).
 
 -spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
 send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
-    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false}, 11000).
+    gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
 
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
@@ -226,64 +226,12 @@ init(Args) ->
                 reg_freq_list = DefaultRegFreqList,
                 reg_throttle = miner_lora_throttle:new(DefaultRegRegion)}}.
 
-handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol}, _From,
-                #state{reg_domain_confirmed = false}=State) ->
+handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
+            #state{reg_domain_confirmed = false}=State) ->
     lager:debug("ignoring send request as regulatory domain not yet confirmed", []),
     {reply, {error, reg_domain_unconfirmed}, State};
-handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol}, From,
-                #state{ socket=Socket,
-                        gateways=Gateways,
-                        packet_timers=Timers,
-                        reg_freq_list = Freqs,
-                        reg_throttle = Throttle,
-                        last_tmst_us = PrevTmst_us,
-                        last_mono_us = PrevMono_us }=State) ->
-    case select_gateway(Gateways) of
-        {error, _}=Error ->
-            {reply, Error, State};
-        {ok, #gateway{ip=IP, port=Port}} ->
-            %% the fun is set by the sender and is used to deterministically route data via channels
-            LocalFreq = ChannelSelectorFun(Freqs),
-            Token = mk_token(Timers),
-            DecodedJSX = #{<<"txpk">> => #{
-                             %% IPol for downlink to devices only, not poc packets
-                             <<"ipol">> => IPol,
-                             <<"imme">> => When == immediate,
-                             <<"powe">> => trunc(Power),
-                             %% TODO gps time?
-                             <<"tmst">> => When,
-                             <<"freq">> => LocalFreq,
-                             <<"modu">> => <<"LORA">>,
-                             <<"datr">> => list_to_binary(DataRate),
-                             <<"codr">> => <<"4/5">>,
-                             <<"size">> => byte_size(Payload),
-                             <<"rfch">> => 0,
-                             <<"data">> => base64:encode(Payload)
-                            }
-                        },
-
-            BinJSX = jsx:encode(DecodedJSX),
-
-            lager:info("PULL_RESP ~p to ~p:~p", [DecodedJSX, IP, Port]),
-
-            %% Check this transmission for regulatory compliance.
-            {SpreadingFactor, Bandwidth} = parse_datarate(DataRate),
-            TimeOnAir = miner_lora_throttle:time_on_air(Bandwidth, SpreadingFactor, 5, 8, true, byte_size(Payload)),
-            AdjustedTmst_us = tmst_to_local_monotonic_time(When, PrevTmst_us, PrevMono_us),
-            SentAt = AdjustedTmst_us / 1000,
-            case miner_lora_throttle:can_send(Throttle, SentAt, LocalFreq, TimeOnAir) of
-                false -> lager:warning("This transmission should have been rejected");
-                true -> ok
-            end,
-
-            Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>,
-            maybe_mirror(State#state.mirror_socket, Packet),
-            lager:debug("sending packet via channel: ~p",[LocalFreq]),
-            ok = gen_udp:send(Socket, IP, Port, Packet),
-            %% TODO a better timeout would be good here
-            Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-            {noreply, State#state{packet_timers = maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}, Timers)}}
-    end;
+handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket}, From, State) ->
+    send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State);
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
 handle_call(position, _From, #state{latlong = undefined} = State) ->
@@ -352,7 +300,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     case maps:find(Token, Timers) of
-        {ok, {send, _Ref, From, _SentAt, _LocalFreq, _TimeOnAir}} ->
+        {ok, {send, _Ref, From, _SentAt, _LocalFreq, _TimeOnAir, _HlmPacket}} ->
             gen_server:reply(From, {error, timeout});
         error ->
             ok
@@ -449,49 +397,64 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
                     ?TX_ACK:8/integer-unsigned,
                     _MAC:64/integer,
-                    MaybeJSON/binary>>, _IP, _Port, _RxInstantLocal_us, #state{packet_timers=Timers, reg_throttle=Throttle}=State) ->
+                    MaybeJSON/binary>>, _IP, _Port, _RxInstantLocal_us, #state{packet_timers=Timers, reg_throttle=Throttle}=State0) ->
     lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
     case maps:find(Token, Timers) of
-        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
+        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, _HlmPacket}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
             _ = erlang:cancel_timer(Ref),
             _ = gen_server:reply(From, ok),
-            State#state{packet_timers=maps:remove(Token, Timers),
-                        reg_throttle=miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
-        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir}} ->
+            State0#state{packet_timers=maps:remove(Token, Timers),
+                         reg_throttle=miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
+        {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}} ->
             %% likely some kind of error here
             _ = erlang:cancel_timer(Ref),
-            {Reply, NewThrottle} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
+            State1 = State0#state{packet_timers=maps:remove(Token, Timers)},
+            Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
                     lager:info("packet sent ok"),
                     {ok, miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
                     lager:info("collision"),
-                    {{error, collision}, Throttle};
+                    {error, collision};
                 <<"TOO_LATE">> ->
                     lager:info("too late"),
-                    {{error, too_late}, Throttle};
+                    case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
+                        undefined -> {error, too_late};
+                        _ -> retry_with_rx2(From, HlmPacket, State1)
+                    end;
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
-                    {{error, too_early}, Throttle};
+                    case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
+                        undefined -> {error, too_early};
+                        _ -> retry_with_rx2(From, HlmPacket, State1)
+                    end;
                 <<"TX_FREQ">> ->
                     lager:info("tx frequency not supported"),
                     {error, bad_tx_frequency};
                 <<"TX_POWER">> ->
                     lager:info("tx power not supported"),
-                    {{error, bad_tx_power}, Throttle};
+                    {error, bad_tx_power};
                 <<"GPL_UNLOCKED">> ->
                     lager:info("transmitting on GPS time not supported because no GPS lock"),
-                    {{error, no_gps_lock}, Throttle};
+                    {error, no_gps_lock};
                 Error ->
                     %% any other errors are pretty severe
                     lager:error("Failure enqueing packet for gateway ~p", [Error]),
-                    {{error, {unknown, Error}}, Throttle}
+                    {error, {unknown, Error}}
             end,
-            gen_server:reply(From, Reply),
-            State#state{packet_timers=maps:remove(Token, Timers), reg_throttle=NewThrottle};
+            case Reply of
+                {ok, Throttle1} ->
+                    gen_server:reply(From, ok),
+                    State1#state{reg_throttle=Throttle1};
+                {error, _} ->
+                    gen_server:reply(From, Reply),
+                    State1;
+                State2 ->
+                    State2
+            end;
         error ->
-            State
+            State0
     end;
 handle_udp_packet(Packet, _IP, _Port, _RxInstantLocal_us, State) ->
     lager:info("unhandled udp packet ~p", [Packet]),
@@ -620,7 +583,7 @@ send_to_router(Type, RoutingInfo, Packet, Region) ->
     Time = maps:get(<<"tmst">>, Packet),
     Freq = maps:get(<<"freq">>, Packet),
     DataRate = maps:get(<<"datr">>, Packet),
-    HeliumPacket = blockchain_helium_packet_v1:new(RoutingInfo, Type, Data, Time, RSSI, Freq, DataRate, SNR),
+    HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
     blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
 
 -spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
@@ -709,7 +672,7 @@ parse_datarate(Datarate) ->
 -spec tmst_to_local_monotonic_time(immediate | integer(), undefined | integer(), undefined | integer()) -> integer().
 tmst_to_local_monotonic_time(immediate, _PrevTmst_us, _PrevMonoTime_us) ->
     erlang:monotonic_time(microsecond);
-tmst_to_local_monotonic_time(When, undefined, undefined) ->
+tmst_to_local_monotonic_time(_When, undefined, undefined) ->
     %% We haven't yet received a `tmst` from the packet forwarder, so
     %% we don't have anything to track. Let's just use the current
     %% time and hope for the best.
@@ -764,3 +727,69 @@ packet_snr(Packet) ->
         LSNR ->
             LSNR
     end.
+
+send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
+            #state{socket=Socket,
+                   gateways=Gateways,
+                   packet_timers=Timers,
+                   reg_freq_list=Freqs,
+                   reg_throttle=Throttle,
+                   last_tmst_us=PrevTmst_us,
+                   last_mono_us=PrevMono_us}=State) ->
+    case select_gateway(Gateways) of
+        {error, _}=Error ->
+            {reply, Error, State};
+        {ok, #gateway{ip=IP, port=Port}} ->
+            lager:info("PULL_RESP to ~p:~p", [IP, Port]),
+            %% the fun is set by the sender and is used to deterministically route data via channels
+            LocalFreq = ChannelSelectorFun(Freqs),
+
+            %% Check this transmission for regulatory compliance.
+            {SpreadingFactor, Bandwidth} = parse_datarate(DataRate),
+            TimeOnAir = miner_lora_throttle:time_on_air(Bandwidth, SpreadingFactor, 5, 8, true, byte_size(Payload)),
+            AdjustedTmst_us = tmst_to_local_monotonic_time(When, PrevTmst_us, PrevMono_us),
+            SentAt = AdjustedTmst_us / 1000,
+            case miner_lora_throttle:can_send(Throttle, SentAt, LocalFreq, TimeOnAir) of
+                false -> lager:warning("This transmission should have been rejected");
+                true -> ok
+            end,
+
+            Token = mk_token(Timers),
+            Packet = create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token),
+            maybe_mirror(State#state.mirror_socket, Packet),
+            lager:debug("sending packet via channel: ~p",[LocalFreq]),
+            ok = gen_udp:send(Socket, IP, Port, Packet),
+            %% TODO a better timeout would be good here
+            Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+            {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers)}}
+    end.
+
+create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
+    DecodedJSX = #{<<"txpk">> => #{
+                        <<"ipol">> => IPol, %% IPol for downlink to devices only, not poc packets
+                        <<"imme">> => When == immediate,
+                        <<"powe">> => trunc(Power),
+                        <<"tmst">> => When, %% TODO gps time?
+                        <<"freq">> => LocalFreq,
+                        <<"modu">> => <<"LORA">>,
+                        <<"datr">> => list_to_binary(DataRate),
+                        <<"codr">> => <<"4/5">>,
+                        <<"size">> => byte_size(Payload),
+                        <<"rfch">> => 0,
+                        <<"data">> => base64:encode(Payload)
+                    }
+                },
+    BinJSX = jsx:encode(DecodedJSX),
+    lager:debug("PULL_RESP: ~p",[DecodedJSX]),
+    lager:debug("sending packet via channel: ~p",[LocalFreq]),
+    <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>.
+
+retry_with_rx2(HlmPacket0, From, State) ->
+    #window_pb{timestamp=TS,
+               frequency=Freq,
+               datarate=DataRate} = blockchain_helium_packet_v1:rx2_window(HlmPacket0),
+    Power = blockchain_helium_packet_v1:signal_strength(HlmPacket0),
+    Payload = blockchain_helium_packet_v1:payload(HlmPacket0),
+    ChannelSelectorFun = fun(_FreqList) -> Freq end,
+    HlmPacket1 = HlmPacket0#packet_pb{rx2_window=undefined},
+    send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
