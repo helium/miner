@@ -584,7 +584,7 @@ send_to_router(Type, RoutingInfo, Packet, Region) ->
     Time = maps:get(<<"tmst">>, Packet),
     Freq = maps:get(<<"freq">>, Packet),
     DataRate = maps:get(<<"datr">>, Packet),
-    HeliumPacket = blockchain_helium_packet_v1:new(RoutingInfo, Type, Data, Time, RSSI, Freq, DataRate, SNR),
+    HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
     blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
 
 -spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
