@@ -696,7 +696,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
-                             40, 5000),
+                             120, 1000),
                     FinalScores = gateway_scores(Config),
                     ct:pal("FinalScores: ~p", [FinalScores]),
                     FinalRewards = get_rewards(Config),

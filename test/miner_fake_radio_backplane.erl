@@ -95,7 +95,7 @@ handle_cast({transmit, Payload, Frequency, TxLocation}, State = #state{udp_sock=
                                                      <<"data">> => base64:encode(Payload),
                                                      <<"freq">> => Frequency,
                                                      <<"datr">> => <<"SF8BW125">>}]},
-                        ct:pal("Sending ~p", [NewJSON]),
+                        ct:pal("Sending ~p ~p", [Port, NewJSON]),
                         gen_udp:send(UDPSock, {127, 0, 0, 1},
                                      Port,
                                      <<?PROTOCOL_2:8/integer-unsigned,

@@ -986,15 +986,17 @@ wait_for_txn(Miners, PredFun, Timeout) ->
     wait_for_txn(Miners, PredFun, Timeout, true).
 
 wait_for_txn(Miners, PredFun, Timeout, ExpectedResult)->
+    %% timeout is in ms, we want to retry every 200
+    Count = Timeout div 200,
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
-                                        Res = get_txn_block_details(Miner, PredFun, Timeout),
+                                        Res = get_txn_block_details(Miner, PredFun, 500),
                                         Res /= []
 
                                 end, miner_ct_utils:shuffle(Miners))
                  end,
-                 Result == ExpectedResult, 40, timer:seconds(1)),
+                 Result == ExpectedResult, Count, 200),
     ok.
 
 format_txn_mgr_list(TxnList) ->
