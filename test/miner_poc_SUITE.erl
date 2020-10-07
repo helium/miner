@@ -453,7 +453,7 @@ restart_test(Config) ->
     meck:new(blockchain_txn_poc_receipts_v1, [passthrough]),
     meck:expect(blockchain_txn_poc_receipts_v1, is_valid, fun(_, _) -> ok end),
 
-    ?assertEqual(30, erlang:element(14, erlang:element(2, sys:get_state(Statem0)))),
+    ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem0)))),
 
     % Add some block to start process
     ok = add_block(Chain, ConsensusMembers, []),
