@@ -623,12 +623,9 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     BlockTimeDeviation =
         case BlockTimeDeviation0 of
             N when N > 0 ->
-                min(ceil(N * N), 15);
+                catchup_time(abs(N));
             N ->
-                %% to maintain sensitivity, and actually cap slowdown,
-                %% invert all the operations here, and use abs to
-                %% preserve sign.
-                max(floor(N * abs(N)), -15)
+                -1 * catchup_time(abs(N))
         end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
@@ -652,3 +649,23 @@ process_bbas(N, BBAs) ->
                     <<>>
             end
     end.
+
+%% input in fractional seconds, the number of seconds between the
+%% target block time and the average total time over the target period
+%% output in seconds of adjustment to apply to the block time target
+
+%% the constants here are by feel: currently at 100k target and 5sec
+%% adjustment it takes roughly a day of blocks to make up a tenth of a
+%% second. with the new 50k target we can expect double the adjustment
+%% leverage, so 1s adjustments will take roughly a day to make up the
+%% final 0.04 (twice as much leverage, but 20% of the rate).
+
+%% when drift is small or 0, let it accumulate for a bit
+catchup_time(N) when N < 0.0001 ->
+    0;
+%% when it's still relatively small, apply gentle adjustments
+catchup_time(N) when N < 0.04 ->
+    1;
+%% if it's large, jam on the gas
+catchup_time(_) ->
+    10.
