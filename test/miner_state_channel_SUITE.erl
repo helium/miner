@@ -27,7 +27,8 @@
          conflict_test/1,
          reject_test/1,
          server_doesnt_close_test/1,
-         client_reports_overspend_test/1
+         client_reports_overspend_test/1,
+         server_overspend_slash_test/1
         ]).
 
 %% common test callbacks
@@ -59,7 +60,8 @@ scv2_only_tests() ->
      conflict_test,
      reject_test,
      server_doesnt_close_test,
-     client_reports_overspend_test
+     client_reports_overspend_test,
+     server_overspend_slash_test
     ].
 
 init_per_group(sc_v1, Config) ->
@@ -72,8 +74,13 @@ init_per_group(sc_v2, Config) ->
                           #{?sc_version => 2,
                             ?sc_overcommit => 2,
                             ?election_interval => 8,
+                            ?txn_fee_multiplier => 1,
+                            ?dc_percent => 1.0,
+                            ?consensus_percent => 0.0,
+                            ?monthly_reward => 10000000 * 1000000,
                             ?sc_open_validation_bugfix => 1,
-                            ?sc_causality_fix => 1
+                            ?sc_causality_fix => 1,
+                            ?reward_version => 4
                            }),
     [{sc_vars, SCV2Vars}, {sc_version, 2} | Config].
 
@@ -109,6 +116,7 @@ init_per_testcase(TestCase, Config0) ->
     Balance = 5000,
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
     InitialDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
+    InitialPriceTxn = blockchain_txn_gen_price_oracle_v1:new(1000000),
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
@@ -126,7 +134,7 @@ init_per_testcase(TestCase, Config0) ->
     AllVars = miner_ct_utils:make_vars(Keys, maps:merge(BaseVars, SCVars)),
 
     DKGResults = miner_ct_utils:initial_dkg(Miners,
-                                            AllVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns,
+                                            AllVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns ++ [InitialPriceTxn],
                                             Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
@@ -896,6 +904,124 @@ client_reports_overspend_test(Config) ->
     ?assertEqual(dispute, blockchain_ledger_state_channel_v2:close_state(LSC)),
 
     ok.
+
+server_overspend_slash_test(Config) ->
+    Miners = ?config(miners, Config),
+    SCOvercommit = maps:get(?sc_overcommit, ?config(sc_vars, Config)),
+    {RouterNode, RouterPubkeyBin, RouterSigFun} = ?config(router_node, Config),
+
+    [ClientNode |_] = tl(Miners),
+
+    Ledger = ct_rpc:call(RouterNode, blockchain, ledger, []),
+
+    ?assertEqual({ok, 1000000}, ct_rpc:call(RouterNode, blockchain_ledger_v1, current_oracle_price, [Ledger])),
+
+    InitialBalance = miner_ct_utils:get_dc_balance(RouterNode, RouterPubkeyBin),
+
+    ClientPubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
+
+    %% open a state channel
+    ExpireWithin = 11,
+    Amount = 1, %% needs to be small to avoid proportional payout
+    ID = open_state_channel(Config, ExpireWithin, Amount),
+
+    InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+
+    %% find the block that this SC opened in, we need the hash
+    [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, fun check_type_sc_open/1),
+
+    NewSummary = blockchain_state_channel_summary_v1:new(ClientPubkeyBin, Amount * 2, Amount * 2),
+    OverSpentSC = blockchain_state_channel_v1:update_summary_for(ClientPubkeyBin, NewSummary, InitialSC),
+    SignedOverSpentSC = blockchain_state_channel_v1:sign(OverSpentSC, RouterSigFun),
+    ok = blockchain_state_channel_v1:validate(SignedOverSpentSC),
+
+    ct:pal("NSC: ~p", [SignedOverSpentSC]),
+
+    ct_rpc:call(RouterNode, blockchain_state_channels_server, insert_fake_sc_skewed, [SignedOverSpentSC, skewed:new(OpenHash)]),
+
+    SCCloseTxn =
+        receive
+            {blockchain_txn_state_channel_close_v1, CHT, CloseTxn} ->
+                ct:pal("close height ~p", [CHT]),
+                CloseTxn;
+            Other2 ->
+                error({bad_txn, Other2}),
+                unreachable
+        after timer:seconds(30) ->
+                error(sc_close_timeout),
+                unreachable
+    end,
+
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     {ok, SC2} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+                     ct:pal("close_state ~p ~p", [blockchain_ledger_state_channel_v2:close_state(SC2), SC2]),
+                     blockchain_ledger_state_channel_v2:close_state(SC2) == dispute
+             end, 120, 500),
+
+    {ok, LSC} = get_ledger_state_channel(RouterNode, ID, RouterPubkeyBin),
+
+    %% ok = wait_for_gc(RouterNode, ID, RouterPubkeyBin, Config),
+
+    %% Check whether the balances are updated in the eventual sc close txn
+    ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
+    ct:pal("LSC: ~p", [LSC]),
+
+    %% Check whether clientnode's balance is correct
+    ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_num_packets(blockchain_ledger_state_channel_v2:state_channel(LSC), ClientNodePubkeyBin, Amount * 2),
+
+
+    ok = block_listener:register_txns([blockchain_txn_rewards_v1]),
+
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2),
+
+    RwdTxn1 =
+        receive
+            {blockchain_txn_rewards_v1, CHT2, RwdTxn} ->
+                ct:pal("reward height ~p", [CHT2]),
+                RwdTxn;
+            Other3 ->
+                error({bad_txn, Other3}),
+                unreachable
+        after timer:seconds(30) ->
+                error(sc_close_timeout),
+                unreachable
+    end,
+
+    ?assertNotEqual(undefined, RwdTxn1),
+
+    ct:pal("Rwd: ~p", [RwdTxn1]),
+
+    [DCReward] = lists:filter(fun(R) ->
+                                      blockchain_txn_reward_v1:type(R) == data_credits andalso blockchain_txn_reward_v1:gateway(R) == ClientPubkeyBin
+                              end, blockchain_txn_rewards_v1:rewards(RwdTxn1)),
+
+    ct:pal("DC reward: ~p", [DCReward]),
+
+    %% check how much HNT the gateway earned
+    RewardInHNT = blockchain_txn_reward_v1:amount(DCReward),
+    {ok, RewardInDC} = ct_rpc:call(RouterNode, blockchain_ledger_v1, hnt_to_dc, [RewardInHNT, Ledger]),
+    {ok, SCAmountInHNT} = ct_rpc:call(RouterNode, blockchain_ledger_v1, dc_to_hnt, [Amount, Ledger]),
+    {ok, SCTotalInHNT} = ct_rpc:call(RouterNode, blockchain_ledger_v1, dc_to_hnt, [Amount*2, Ledger]),
+
+    ct:pal("RewardInDC ~p", [RewardInDC]),
+    ct:pal("SCAmountInHNT ~p", [SCAmountInHNT]),
+    ct:pal("SCTotalInHNT ~p", [SCTotalInHNT]),
+
+    %% check the state channel didn't pay out more than the max amount
+    ?assertEqual(RewardInHNT, SCAmountInHNT),
+
+    FinalBalance = miner_ct_utils:get_dc_balance(RouterNode, RouterPubkeyBin),
+
+    ct:pal("Initial ~p Final ~p", [InitialBalance, FinalBalance]),
+
+    %% check the router node balance is down by Amount * Overcommit
+    %% which means its overcommit got slashed
+    ?assertEqual(InitialBalance - (Amount * SCOvercommit), FinalBalance),
+
+    ok.
+
 
 %% Helper functions
 
