@@ -34,10 +34,10 @@ all() -> [
          ].
 
 init_per_suite(Config) ->
-    Config.
+    miner_ct_utils:init_per_suite(?MODULE, Config).
 
 end_per_suite(Config) ->
-    Config.
+    miner_ct_utils:end_per_suite(Config).
 
 init_per_testcase(TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
@@ -119,7 +119,7 @@ init_per_testcase(TestCase, Config0) ->
     %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 2, all, 15),
 
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
@@ -128,8 +128,6 @@ init_per_testcase(TestCase, Config0) ->
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
-
-
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -146,7 +144,7 @@ restart_test(Config) ->
      || Miner <- lists:sublist(Miners, 3, 4)],
 
     %% just kill the consensus groups, we should be able to restore them
-    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "/{1,2}*", "/blockchain_swarm/groups/consensus_*"),
 
     ok = miner_ct_utils:start_miners(Env),
 
@@ -253,7 +251,7 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
 
     %% delete the groups
-    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_{1,2,3,4}*", "/blockchain_swarm/groups/*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "/{1,2,3,4}*", "/blockchain_swarm/groups/*"),
 
     ct:pal("stopped and deleted"),
 
@@ -431,9 +429,10 @@ group_change_test(Config) ->
                                end
                        end, Miners1)
              end, 120, 1000),
+    ct:pal("base ~p", [BaseDir]),
 
-    ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{8}*/*", ""),
-    [EightDir] = filelib:wildcard(BaseDir ++ "_*{8}*"),
+    ok = miner_ct_utils:delete_dirs(BaseDir ++ "/{8}*/*", ""),
+    [EightDir] = filelib:wildcard(BaseDir ++ "/{8}*"),
 
     BlockchainR = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [BlockchainR]),
@@ -445,8 +444,7 @@ group_change_test(Config) ->
     %% clean out everything from the stopped node
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = update_bc_sync_env(SnapshotHash, SnapshotBlockHeight, BlockchainEnv),
 
     MinerEnv = proplists:get_value(miner, TargetEnv),
     NewMinerEnv = [{update_dir, EightDir ++ "/update"} | MinerEnv],
@@ -793,8 +791,7 @@ snapshot_test(Config) ->
            [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]),
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = update_bc_sync_env(SnapshotHash, SnapshotBlockHeight, BlockchainEnv),
     NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
 
     ct:pal("new blockchain env ~p", [NewTargetEnv]),
@@ -847,8 +844,7 @@ high_snapshot_test(Config) ->
     %% that the downed node has
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = update_bc_sync_env(SnapshotHash, SnapshotBlockHeight, BlockchainEnv),
     NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
 
     ct:pal("new blockchain env ~p", [NewTargetEnv]),
@@ -868,6 +864,15 @@ high_snapshot_test(Config) ->
 %% Local Helper functions
 %% ------------------------------------------------------------------
 
+update_bc_sync_env(SnapshotHash, SnapshotBlockHeight, BlockchainEnv) ->
+    lists:foldl(
+      fun({K, V}, Acc) ->
+              Acc1 = lists:keydelete(K, 1, Acc),
+              lists:keystore(K, 1, Acc1, {K, V})
+      end,
+      BlockchainEnv,
+      [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
+       {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}]).
 
 
 

@@ -9,6 +9,8 @@
 -define(BASE_TMP_DIR_TEMPLATE, "XXXXXXXXXX").
 
 -export([
+         init_per_suite/2,
+         end_per_suite/1,
          init_per_testcase/3,
          end_per_testcase/2,
          pmap/2, pmap/3,
@@ -93,6 +95,59 @@ stop_miners(Miners, Retries) ->
            end
            || Miner <- Miners],
     Res.
+
+envs(Miners) ->
+    [begin
+         ct:pal("capturing env for ~p", [Miner]),
+         LagerEnv = ct_rpc:call(Miner, application, get_all_env, [lager]),
+         P2PEnv = ct_rpc:call(Miner, application, get_all_env, [libp2p]),
+         BlockchainEnv = ct_rpc:call(Miner, application, get_all_env, [blockchain]),
+         MinerEnv = ct_rpc:call(Miner, application, get_all_env, [miner]),
+         {Miner, [{lager, LagerEnv}, {libp2p, P2PEnv}, {blockchain, BlockchainEnv}, {miner, MinerEnv}]}
+     end
+     || Miner <- Miners].
+
+maybe_restart(Envs) ->
+    Res =
+        [begin
+             %% are we up?
+             try ct_rpc:call(Miner, erlang, whereis, [miner]) of
+                 P when is_pid(P) ->
+                     %% reset the environment
+                     clean_env(Miner, Env),
+                     [];
+                 Down when Down == undefined orelse
+                           is_tuple(Down) andalso element(1, Down) == badrpc ->
+                     ct:pal("starting ~p", [Miner]),
+                     start_node(Miner),
+                     ct:pal("loading env ~p", [Miner]),
+                     clean_env(Miner, Env),
+                     ct:pal("starting miner on ~p", [Miner]),
+                     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+                     ct:pal("started miner on ~p : ~p", [Miner, _StartedApps]),
+                     Miner
+             catch C:E:S ->
+                     error({restart_exception, C, E, S})
+             end
+         end
+         || {Miner, Env} <- Envs],
+    Miners = lists:flatten(Res),
+    ct:pal("waiting for blockchain worker to start on ~p", [Miners]),
+    ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker, 30),
+    ok.
+
+clean_env(Miner, Env) ->
+    ok = ct_rpc:call(Miner, application, unset_env, [miner, update_dir]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, honor_quick_sync]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, quick_sync_mode]),
+    ok = ct_rpc:call(Miner, application, set_env, [Env]),
+    ok = ct_rpc:call(Miner, application, set_env, [blockchain, honor_quick_sync, false]),
+    ok = ct_rpc:call(Miner, application, set_env, [blockchain, quick_sync_mode, assumed_valid]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, blessed_snapshot_block_hash]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, blessed_snapshot_block_height]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, assumed_valid_block_hash]),
+    ok = ct_rpc:call(Miner, application, unset_env, [blockchain, assumed_valid_block_height]),
+    ok.
 
 start_miners(Miners) ->
     start_miners(Miners, 60).
@@ -246,7 +301,7 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
                              end
                         end, miner_ct_utils:shuffle(Miners))
                     end,
-        Retries, timer:seconds(1)),
+        Retries * 2, 500),
     case Res of
         true -> ok;
         false -> {error, false}
@@ -254,7 +309,7 @@ wait_for_gte(Type, Miners, Threshold, Mod, Retries)->
 
 
 wait_for_registration(Miners, Mod) ->
-    wait_for_registration(Miners, Mod, 300).
+    wait_for_registration(Miners, Mod, 500).
 wait_for_registration(Miners, Mod, Timeout) ->
     ?assertAsync(begin
                      RegistrationResult
@@ -269,7 +324,7 @@ wait_for_registration(Miners, Mod, Timeout) ->
                                      end
                              end, Miners)
                  end,
-        RegistrationResult, 90, timer:seconds(1)),
+        RegistrationResult, 30 * 5, 200),
     ok.
 
 wait_for_app_start(Miners, App) ->
@@ -537,10 +592,11 @@ partition_miners(Members, AddrList) ->
                             lists:member(Addr, Members)
                     end, Miners).
 
-init_per_testcase(Mod, TestCase, Config0) ->
-    Config = init_base_dir_config(Mod, TestCase, Config0),
-    BaseDir = ?config(base_dir, Config),
-    LogDir = ?config(log_dir, Config),
+init_per_suite(_Mod, Config) ->
+    ct:pal("config ~p", [Config]),
+
+    BaseDir = ?config(data_dir, Config),
+    LogDir = ?config(priv_dir, Config),
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -553,22 +609,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     end,
 
     %% Miner configuration, can be input from os env
-    TotalMiners =
-        case TestCase of
-            restart_test ->
-                4;
-            _ ->
-                get_config("T", 8)
-        end,
-    NumConsensusMembers =
-        case TestCase of
-            group_change_test ->
-                4;
-            restart_test ->
-                4;
-            _ ->
-                get_config("N", 7)
-        end,
+    TotalMiners = get_config("T", 8),
     SeedNodes = [],
     Port = get_config("PORT", 0),
     Curve = 'SS512',
@@ -607,7 +648,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 ct_rpc:call(Miner, application, load, [blockchain]),
                 ct_rpc:call(Miner, application, load, [libp2p]),
                 %% give each miner its own log directory
-                LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+                LogRoot = LogDir ++ atom_to_list(Miner),
                 ct:pal("MinerLogRoot: ~p", [LogRoot]),
                 ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
                 ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
@@ -615,7 +656,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 %% set blockchain configuration
                 Key = {PubKey, ECDH, SigFun},
 
-                MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+                MinerBaseDir = BaseDir ++ atom_to_list(Miner),
                 ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
                 %% set blockchain env
                 ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
@@ -663,6 +704,22 @@ init_per_testcase(Mod, TestCase, Config0) ->
         ConfigResult
     ),
 
+    Envs = envs(Miners),
+
+    [
+     {miners, Miners},
+     {envs, Envs},
+     {miners_ports, MinersAndPorts},
+     {keys, Keys},
+     {block_time, BlockTime},
+     {batch_size, BatchSize},
+     {dkg_curve, Curve},
+     {election_interval, Interval},
+     {rpc_timeout, timer:seconds(30)}
+     | Config
+    ].
+
+connect_all(Miners, MinersAndPorts) ->
     Addrs = miner_ct_utils:pmap(
               fun(Miner) ->
                       Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
@@ -732,25 +789,41 @@ init_per_testcase(Mod, TestCase, Config0) ->
                                               ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
                                               {Miner, {TCPPort, RandomPort}}
                                       end, MinersAndPorts),
+    [{ports, UpdatedMinersAndPorts},
+     {addresses, Addresses},
+     {tagged_miner_addresses, MinerTaggedAddresses}].
 
-    [
-        {miners, Miners},
-        {keys, Keys},
-        {ports, UpdatedMinersAndPorts},
-        {addresses, Addresses},
-        {tagged_miner_addresses, MinerTaggedAddresses},
-        {block_time, BlockTime},
-        {batch_size, BatchSize},
-        {dkg_curve, Curve},
-        {election_interval, Interval},
-        {num_consensus_members, NumConsensusMembers},
-        {rpc_timeout, timer:seconds(30)}
-        | Config
-    ].
+init_per_testcase(Mod, TestCase, Config0) ->
+    Config = init_base_dir_config(Mod, TestCase, Config0),
+    BaseDir = ?config(base_dir, Config),
+    LogDir = ?config(log_dir, Config),
+
+    ok = maybe_restart(?config(envs, Config)),
+
+    NumConsensusMembers =
+        case TestCase of
+            group_change_test ->
+                4;
+            restart_test ->
+                4;
+            _ ->
+                get_config("N", 7)
+        end,
+    [ct_rpc:call(Miner, miner, reset_chain,
+                 [BaseDir, LogDir, NumConsensusMembers])
+     || Miner <- ?config(miners, Config)],
+
+    PortConfigs = connect_all(?config(miners, Config),
+                              ?config(miners_ports, Config)),
+
+    Config1 = lists:keyreplace(base_dir, 1, Config, {base_dir, BaseDir}),
+
+    PortConfigs ++
+        [{num_consensus_members, NumConsensusMembers}
+         | Config1].
 
 end_per_testcase(TestCase, Config) ->
-    Miners = ?config(miners, Config),
-    miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
+    %% Stop the group from running and drop the chain
     case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
@@ -758,7 +831,11 @@ end_per_testcase(TestCase, Config) ->
         _ ->
             %% leave results alone for analysis
             ok
-    end,
+    end.
+
+end_per_suite(Config) ->
+    Miners = ?config(miners, Config),
+    miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
     {comment, done}.
 
 cleanup_per_testcase(_TestCase, Config) ->

@@ -57,7 +57,8 @@
 
 -define(tv, '$test_version').
 
--export([test_version/0, inc_tv/1]).
+
+-export([test_version/0, inc_tv/1, reset_chain/3]).
 
 test_version() ->
     case ets:info(?tv) of
@@ -81,6 +82,30 @@ inc_tv(Incr) ->
         _ ->
             ets:update_counter(?tv, ?tv, Incr)
     end.
+
+reset_chain(BaseDir, LogDir, N) ->
+    %% halt any running groups
+    %% shut down the chain, but don't clean
+    ok = application:stop(miner),
+
+    %% remove lager handlers
+    ok = application:stop(lager),
+
+    %% adjust the environment
+    application:set_env(lager, log_root, adjust_dir(node(), LogDir)),
+    application:set_env(blockchain, base_dir, adjust_dir(node(), BaseDir)),
+    application:set_env(miner, num_consensus_members, N),
+
+    %% reinstall lager handlers
+    ok = application:start(lager),
+
+    %% restart the new chain
+    ok = application:start(miner),
+
+    ok.
+
+adjust_dir(NodeAtom, Dir) ->
+    Dir ++ "/" ++ atom_to_list(NodeAtom) ++ "/".
 
 -endif.
 
