@@ -1091,6 +1091,8 @@ open_state_channel(Config, ExpireWithin, Amount, OUI) ->
     ID.
 
 ensure_dc_reward_during_grace_blocks(Config) ->
+    %% NOTE: This test may give a false positive because the check at the bottom doesn't truly verify that the state channel close is within next epoch start - grace period. However, it should always pass when reward_version=5 implying that the dc_reward would be paid out regardless of whether it was within the grace period or not.
+
     Miners = ?config(miners, Config),
     {RouterNode, _RouterPubkeyBin, _} = ?config(router_node, Config),
 
