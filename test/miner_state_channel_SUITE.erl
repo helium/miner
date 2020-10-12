@@ -28,7 +28,8 @@
          reject_test/1,
          server_doesnt_close_test/1,
          client_reports_overspend_test/1,
-         server_overspend_slash_test/1
+         server_overspend_slash_test/1,
+         ensure_dc_reward_during_grace_blocks/1
         ]).
 
 %% common test callbacks
@@ -61,7 +62,9 @@ scv2_only_tests() ->
      reject_test,
      server_doesnt_close_test,
      client_reports_overspend_test,
-     server_overspend_slash_test
+     server_overspend_slash_test,
+     server_doesnt_close_test,
+     ensure_dc_reward_during_grace_blocks
     ].
 
 init_per_group(sc_v1, Config) ->
@@ -120,18 +123,27 @@ init_per_testcase(TestCase, Config0) ->
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    BaseVars = #{?block_time => BlockTime,
-                 %% rule out rewards
-                 ?election_interval => infinity,
-                 ?num_consensus_members => NumConsensusMembers,
-                 ?batch_size => BatchSize,
-                 ?dkg_curve => Curve},
+    RewardVars = case TestCase of
+                     ensure_dc_reward_during_grace_blocks ->
+                         maps:merge(#{ ?reward_version => 5, ?sc_grace_blocks => 10, ?election_interval => 30 , ?sc_gc_interval => 10},
+                                    reward_vars()) ;
+                     _ ->
+                         %% rule out rewards
+                         #{ ?election_interval => infinity }
+                 end,
+
+    BaseVars0 = #{?block_time => BlockTime,
+                  ?num_consensus_members => NumConsensusMembers,
+                  ?batch_size => BatchSize,
+                  ?dkg_curve => Curve},
+
     SCVars = ?config(sc_vars, Config),
     ct:pal("SCVars: ~p", [SCVars]),
 
     Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    AllVars = miner_ct_utils:make_vars(Keys, maps:merge(BaseVars, SCVars)),
+    AllVars = miner_ct_utils:make_vars(Keys, maps:merge(BaseVars0, maps:merge(SCVars, RewardVars))),
+    ct:pal("AllVars: ~p", [AllVars]),
 
     DKGResults = miner_ct_utils:initial_dkg(Miners,
                                             AllVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns ++ [InitialPriceTxn],
@@ -1078,6 +1090,86 @@ open_state_channel(Config, ExpireWithin, Amount, OUI) ->
     ct:pal("SC: ~p", [SC]),
     ID.
 
+ensure_dc_reward_during_grace_blocks(Config) ->
+    %% NOTE: This test may give a false positive because the check at the bottom doesn't truly verify that the state channel close is within next epoch start - grace period. However, it should always pass when reward_version=5 implying that the dc_reward would be paid out regardless of whether it was within the grace period or not.
+
+    Miners = ?config(miners, Config),
+    {RouterNode, _RouterPubkeyBin, _} = ?config(router_node, Config),
+
+    [ClientNode | _] = tl(Miners),
+
+    %% open a state channel
+    _ID = open_state_channel(Config, 15, 10),
+    %% find the block that this SC opened in, we need the hash
+    [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, fun check_type_sc_open/1),
+    timer:sleep(200),
+
+    %% At this point, we're certain that sc is open
+    %% Use client node to send some packets
+    Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
+    Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
+    Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
+    timer:sleep(500),
+    ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
+    Height = miner_ct_utils:height(RouterNode),
+    ct:pal("height post packets ~p", [Height]),
+
+    %% for the state_channel_close txn to appear, ignore awful binding hack
+    SCCloseTxn =
+        receive
+            {blockchain_txn_state_channel_close_v1, CHT, CloseTxn} ->
+                ct:pal("close height ~p", [CHT]),
+                CloseTxn;
+            Other2 ->
+                error({bad_txn, Other2}),
+                unreachable
+        after timer:seconds(30) ->
+                error(sc_close_timeout),
+                unreachable
+    end,
+    ct:pal("saw closed"),
+
+    %% Check whether the balances are updated in the eventual sc close txn
+    ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
+
+    %% Check whether clientnode's balance is correct
+    ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
+    true = check_sc_num_packets(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn), ClientNodePubkeyBin, 2),
+    true = check_sc_num_dcs(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn), ClientNodePubkeyBin, 3),
+
+    %% construct what the skewed merkle tree should look like
+    Open = skewed:root_hash(skewed:new(OpenHash)),
+    One = skewed:root_hash(skewed:add(Payload1, skewed:new(OpenHash))),
+    ExpectedTree = skewed:add(Payload2, skewed:add(Payload1, skewed:new(OpenHash))),
+    ct:pal("open ~p~none ~p", [Open, One]),
+
+    %% assert the root hashes should match
+    ?assertEqual(skewed:root_hash(ExpectedTree),
+                 blockchain_state_channel_v1:root_hash(
+                   blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn))),
+
+    %% 2 epochs should have happened when we hit height 70
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 70, all, 60*5),
+
+    RewardTxns = get_reward_txns(ClientNode),
+    ct:pal("RewardTxns: ~p", [RewardTxns]),
+
+    DCRewards = lists:foldl(
+                  fun(E, Acc) ->
+                          Rewards = blockchain_txn_rewards_v1:rewards(E),
+                          [blockchain_txn_reward_v1:amount(R) || R <- Rewards,
+                                    blockchain_txn_reward_v1:type(R) == data_credits] ++ Acc
+                  end, [], RewardTxns),
+    ct:pal("DCRewards: ~p", [DCRewards]),
+
+    case length(DCRewards) > 0 of
+        false -> ct:fail("DC rewards contained no values");
+        true -> ok
+    end.
+
+%% Helper functions
 send_packet(N, Client, Addr) ->
     Nbin = integer_to_binary(N),
     Payload = <<"p", Nbin/binary>>,
@@ -1168,3 +1260,21 @@ check_type_sc_open(T) ->
 %%                           Ts = blockchain_block:transactions(Block),
 %%                           ct:pal("H: ~p, Ts: ~p", [H, Ts])
 %%                   end, maps:values(Blocks)).
+
+
+reward_vars() ->
+    %% Taken from the chain at height: 534504
+    #{ consensus_percent => 0.06,
+       dc_percent => 0.325,
+       poc_challengees_percent => 0.18,
+       poc_challengers_percent => 0.0095,
+       poc_witnesses_percent => 0.0855,
+       securities_percent => 0.34
+     }.
+
+get_reward_txns(Node) ->
+    Chain = ct_rpc:call(Node, blockchain_worker, blockchain, []),
+    Blocks = ct_rpc:call(Node, blockchain, blocks, [Chain]),
+
+    miner_ct_utils:get_txns(Blocks,
+                            fun(T) -> blockchain_txn:type(T) == blockchain_txn_rewards_v1 end).
