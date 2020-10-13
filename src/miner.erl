@@ -616,7 +616,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
                        undefined ->
                            BlockTime;
                        _ ->
-                           (LastBlockTimestamp - StartBlockTime) / (Height - ActualStartHeight)
+                           (LastBlockTimestamp - StartBlockTime) / max(Height - ActualStartHeight, 1)
                    end,
     BlockTimeDeviation0 = BlockTime - AvgBlockTime,
     lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
