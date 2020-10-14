@@ -29,6 +29,7 @@
          donemod :: atom(),
          donefun :: atom(),
          done_called = false :: boolean(),
+         done_acked = false :: boolean(),
          sent_conf = false :: boolean(),
          height :: pos_integer(),
          delay :: non_neg_integer()
@@ -68,13 +69,13 @@ handle_command(get_info, #state{privkey = undefined} = State) ->
     {reply, {error, not_done}, [], State};
 handle_command(get_info, #state{privkey = PKey, members = Members} = State) ->
     {reply, {ok, PKey, Members}, [], State};
-handle_command({stop, _Timeout}, #state{privkey = PKey, done_called = false} = State)
+handle_command({stop, _Timeout}, #state{privkey = PKey, done_acked = false} = State)
   when PKey /= undefined ->
     {reply, {error, not_done}, [], State};
 handle_command({stop, Timeout}, State) ->
     {reply, ok, [{stop, Timeout}], State};
 handle_command(mark_done, State) ->
-    {reply, ok, [], State#state{done_called = true}};
+    {reply, ok, [], State#state{done_called = true, done_acked = true}};
 handle_command(status, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
     Map1 = maps:merge(#{
@@ -112,9 +113,9 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
             NewState = State#state{signatures = Sigs1},
             case enough_signatures(conf, NewState) of
                 {ok, GoodSignatures} when State#state.done_called == false ->
-                    %% this needs to be a call so we know the callback succeeded so we
-                    %% can terminate
                     lager:debug("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
+                    %% This now an async cast but we don't consider the handoff complete until
+                    %% we have gotten a `mark_done' message from the consensus manager
                     ok = DoneMod:DoneFun(State#state.artifact, GoodSignatures,
                                          Members, State#state.privkey, Height, Delay),
                     %% rebroadcast the final set of signatures and stop the handler
@@ -142,9 +143,9 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                 true ->
                                     case State#state.done_called of
                                         false ->
-                                            %% this needs to be a call so we know the callback succeeded so we
-                                            %% can terminate
                                             lager:debug("good len ~p sigs ~p", [length(Signatures), Signatures]),
+                                            %% This now an async cast but we don't consider the handoff complete until
+                                            %% we have gotten a `mark_done' message from the consensus manager
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
                                                                  Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
@@ -163,9 +164,9 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                 true ->
                                     case State#state.done_called of
                                         false ->
-                                            %% this needs to be a call so we know the callback succeeded so we
-                                            %% can terminate
                                             lager:debug("good len ~p sigs ~p", [length(Signatures), Signatures]),
+                                            %% This now an async cast but we don't consider the handoff complete until
+                                            %% we have gotten a `mark_done' message from the consensus manager
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
                                                                  Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
@@ -259,6 +260,7 @@ serialize(State) ->
            donemod = DoneMod,
            donefun = DoneFun,
            done_called = DoneCalled,
+           done_acked = DoneAcked,
            sent_conf = SentConf,
            height = Height,
            delay = Delay} = State,
@@ -289,6 +291,7 @@ serialize(State) ->
            donemod => DoneMod,
            donefun => DoneFun,
            done_called => DoneCalled,
+           done_acked => DoneAcked,
            sent_conf => SentConf,
            height => Height,
            delay => Delay},
@@ -357,6 +360,7 @@ deserialize(MapState0) when is_map(MapState0) ->
            donemod = DoneMod,
            donefun = DoneFun,
            done_called = DoneCalled,
+           done_acked = maps:get(done_acked, MapState, false),
            sent_conf = SentConf,
            height = Height,
            delay = Delay}.

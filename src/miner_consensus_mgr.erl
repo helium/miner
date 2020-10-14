@@ -34,7 +34,7 @@
 
 -record(state,
         {
-         current_dkgs = #{} :: #{{pos_integer(),non_neg_integer()} => pid()},
+         current_dkgs = #{} :: #{{Height :: pos_integer(), Delay :: non_neg_integer()} => pid()},
          dkg_await :: undefined | {reference(), term()},
          initial_height = 1 :: non_neg_integer(),
          delay = 0 :: integer(),
@@ -102,8 +102,8 @@ genesis_block_done(GenesisBlock, Signatures, Members, PrivKey, Height, Delay) ->
                     [libp2p_crypto:address()], tpke_privkey:privkey(),
                     pos_integer(), non_neg_integer()) -> ok.
 election_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
-    gen_server:call(?MODULE, {election_done, Artifact, Signatures,
-                              Members, PrivKey, Height, Delay}, infinity).
+    gen_server:cast(?MODULE, {election_done, Artifact, Signatures,
+                              Members, PrivKey, Height, Delay}).
 
 rescue_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
     gen_server:call(?MODULE, {rescue_done, Artifact, Signatures,
@@ -219,66 +219,7 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
                             current_dkgs = #{},
                             cancel_dkgs = #{3 => DKGGroup},
                             chain = Chain}};
-handle_call({election_done, _Artifact, Signatures, Members, PrivKey, Height, Delay}, _From,
-            State = #state{chain = Chain,
-                           started_groups = Groups}) ->
-    lager:info("election done at ~p delay ~p", [Height, Delay]),
-    {ok, N} = blockchain:config(?num_consensus_members, blockchain:ledger(Chain)),
-    F = ((N - 1) div 3),
 
-    Proof = term_to_binary(Signatures, [compressed]),
-
-    %% first we need to add ourselves to the chain for the existing
-    %% group to validate
-    %% TODO we should also add this to the buffer of the local chain
-    {ok, ElectionHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
-    case ElectionHeight < Height of
-        true ->
-            ok = blockchain_worker:submit_txn(
-                   blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
-                   fun(Res) ->
-                           case Res of
-                               ok ->
-                                   lager:info("Election successful, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p!",
-                                              [Height, Members, Proof, Delay]);
-                               {error, invalid} ->
-                                   %% we don't need to print anything for these nonce-style failures.
-                                   ok;
-                               {error, Reason} ->
-                                   lager:error("Election failed, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p, Reason: ~p",
-                                               [Height, Members, Proof, Delay, Reason])
-                           end
-                   end
-                  );
-        %% for a restore, don't bother.
-        false -> ok
-    end,
-    {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(Chain)),
-    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
-
-    GroupArg = [miner_hbbft_handler, [Members,
-                                      Pos,
-                                      N,
-                                      F,
-                                      BatchSize,
-                                      PrivKey,
-                                      Chain,
-                                      1, % gets set later
-                                      []], % gets filled later
-                [{create, true}]],
-    %% while this won't reflect the actual height, it has to be deterministic
-    Name = consensus_group_name(max(0, Height), Delay, Members),
-    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
-                                         Name,
-                                         libp2p_group_relcast, GroupArg),
-
-    %% not sure what the correct error behavior here is?
-    started = wait_for_group(Group),
-    lager:info("checking that the hbbft group has successfully started"),
-    true = libp2p_group_relcast:handle_command(Group, have_key),
-
-    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
-    {reply, ok, State#state{started_groups = Groups#{{Height, Delay} => Group}}};
 handle_call(txn_buf, _From, State) ->
     {reply, {ok, get_buf(State#state.active_group)}, State};
 handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _Delay}, _From,
@@ -379,6 +320,68 @@ handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
+handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Delay},
+            State = #state{chain = Chain,
+                           current_dkgs = DKGs,
+                           started_groups = Groups}) ->
+    lager:info("election done at ~p delay ~p", [Height, Delay]),
+    {ok, N} = blockchain:config(?num_consensus_members, blockchain:ledger(Chain)),
+    F = ((N - 1) div 3),
+
+    Proof = term_to_binary(Signatures, [compressed]),
+
+    %% first we need to add ourselves to the chain for the existing
+    %% group to validate
+    %% TODO we should also add this to the buffer of the local chain
+    {ok, ElectionHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
+    case ElectionHeight < Height of
+        true ->
+            ok = blockchain_worker:submit_txn(
+                   blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+                   fun(Res) ->
+                           case Res of
+                               ok ->
+                                   lager:info("Election successful, Height: ~p, Delay: ~p, Members: ~p, Proof: ~p",
+                                              [Height, Delay, Members, Proof]);
+                               {error, invalid} ->
+                                   %% we don't need to print anything for these nonce-style failures.
+                                   ok;
+                               {error, Reason} ->
+                                   lager:error("Election failed, Height: ~p, Members: ~p, Proof: ~p, Delay: ~p, Reason: ~p",
+                                               [Height, Members, Proof, Delay, Reason])
+                           end
+                   end
+                  );
+        %% for a restore, don't bother.
+        false -> ok
+    end,
+    {ok, BatchSize} = blockchain:config(?batch_size, blockchain:ledger(Chain)),
+    Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
+
+    GroupArg = [miner_hbbft_handler, [Members,
+                                      Pos,
+                                      N,
+                                      F,
+                                      BatchSize,
+                                      PrivKey,
+                                      Chain,
+                                      1, % gets set later
+                                      []], % gets filled later
+                [{create, true}]],
+    %% while this won't reflect the actual height, it has to be deterministic
+    Name = consensus_group_name(max(0, Height), Delay, Members),
+    {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
+                                         Name,
+                                         libp2p_group_relcast, GroupArg),
+
+    %% not sure what the correct error behavior here is?
+    started = wait_for_group(Group),
+    lager:info("checking that the hbbft group has successfully started"),
+    true = libp2p_group_relcast:handle_command(Group, have_key),
+
+    lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
+    ok = libp2p_group_relcast:handle_command(maps:get({Height, Delay}, DKGs), mark_done),
+    {noreply, State#state{started_groups = Groups#{{Height, Delay} => Group}}};
 handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
@@ -404,7 +407,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                      State;
                                  {ok, Group} ->
                                      lager:info("canceling DKG ~p at height ~p", [Group, BlockHeight]),
-                                     catch libp2p_group_relcast:handle_command(Group, {stop, 120000}),
+                                     stop_group(Group),
                                      State#state{cancel_dkgs = maps:remove(BlockHeight, CancelDKGs)}
                              end,
                     {_, EpochStart} = blockchain_block_v1:election_info(Block),
@@ -880,8 +883,8 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
                                                     libp2p_group_relcast,
                                                     GroupArg),
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
-            lager:info("height ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
-                       [Height, MyAddress, Pos, DKGGroupName]),
+            lager:info("height ~p delay ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
+                       [Height, Delay, MyAddress, Pos, DKGGroupName]),
             {true, State#state{current_dkgs = DKGs#{{Height, Delay} => DKGGroup}}};
         false ->
             lager:info("not in DKG this round at height ~p ~p", [Height, Delay]),
@@ -996,6 +999,9 @@ stop_group(undefined) ->
     ok;
 stop_group(Pid) ->
     spawn(fun() ->
+                  %% tell the group it's allowed to stop
+                  catch libp2p_group_relcast:handle_command(Pid, mark_done),
+                  %% actually tell the group to stop
                   catch libp2p_group_relcast:handle_command(Pid, {stop, 0})
           end),
     ok.
