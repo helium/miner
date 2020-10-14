@@ -369,13 +369,8 @@ election_multi_test(Config) ->
     BinPub4 = libp2p_crypto:pubkey_to_bin(Pub4),
     BinPub5 = libp2p_crypto:pubkey_to_bin(Pub5),
 
-    Txn6 = vars(#{?use_multi_keys => true}, 2, Priv),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn6]) || M <- Miners],
-
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?use_multi_keys, true),
-
     Txn7_0 = blockchain_txn_vars_v1:new(
-               #{}, 3,
+               #{?use_multi_keys => true}, 2,
                #{multi_keys => [BinPub1, BinPub2, BinPub3, BinPub4, BinPub5]}),
     Proofs7 = [blockchain_txn_vars_v1:create_proof(P, Txn7_0)
                || P <- [Priv1, Priv2, Priv3, Priv4, Priv5]],
@@ -384,12 +379,8 @@ election_multi_test(Config) ->
     Txn7 = blockchain_txn_vars_v1:proof(Txn7_1, Proof7),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn7]) || M <- Miners],
 
+    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?use_multi_keys, true),
     ct:pal("transitioned to multikey"),
-    HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
-    {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
-
-    %% let the height go up some more to make sure that the keys are live
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 4),
 
     %% stop the first 4 miners
     TargetMiners = lists:sublist(Miners, 1, 4),
