@@ -66,8 +66,21 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
+    %% create a ed25519 based key
+    %% this will be used as part of libp2p streams negotiation process
+    %% this is a temporary measure until libp2p streams is fully fledged out
+    %% this key will be in addition to the existing ECC key for the time being
+    Ed25519KeyPair =
+        case application:get_env(blockchain, ed25519_keypair) of
+            undefined ->
+                libp2p_keypair:new(ed25519);
+            {ok, KeyPair} ->
+                KeyPair
+        end,
+
     BlockchainOpts = [
         {key, {PublicKey, SigFun, ECDHFun}},
+        {ed25519_keypair, Ed25519KeyPair},
         {seed_nodes, SeedNodes ++ SeedAddresses},
         {max_inbound_connections, MaxInboundConnections},
         {port, Port},
