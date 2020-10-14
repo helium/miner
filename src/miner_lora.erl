@@ -530,7 +530,7 @@ maybe_send_udp_ack(Socket, IP, Port, Packet, _RegDomainConfirmed)->
 sort_packets(Packets) ->
     lists:sort(
         fun(A, B) ->
-            maps:get(<<"lsnr">>, A) >= maps:get(<<"lsnr">>, B)
+            packet_snr(A) >= packet_snr(B)
         end,
         Packets
     ).
@@ -550,8 +550,8 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
             %% onion server
             miner_onion_server:decrypt_radio(
                 Payload,
-                erlang:trunc(maps:get(<<"rssi">>, Packet)),
-                maps:get(<<"lsnr">>, Packet),
+                erlang:trunc(packet_rssi(Packet)),
+                packet_snr(Packet),
                 %% TODO we might want to send GPS time here, if available
                 maps:get(<<"tmst">>, Packet),
                 Freq,
@@ -614,8 +614,8 @@ maybe_mirror({Sock, Destination}, Packet) ->
 -spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
 send_to_router(Type, RoutingInfo, Packet, Region) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    RSSI = maps:get(<<"rssi">>, Packet),
-    SNR = maps:get(<<"lsnr">>, Packet),
+    RSSI = packet_rssi(Packet),
+    SNR = packet_snr(Packet),
     %% TODO we might want to send GPS time here, if available
     Time = maps:get(<<"tmst">>, Packet),
     Freq = maps:get(<<"freq">>, Packet),
@@ -722,3 +722,45 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
     %% roll over of the clock has occurred, and that `Tmst_us` might
     %% represent a time in the future.
     Tmst_us + ?MAX_TMST_VAL - PrevTmst_us + PrevMonoTime_us.
+
+%% Extracts a packet's RSSI, abstracting away the differences between
+%% GWMP JSON V1/V2.
+-spec packet_rssi(map()) -> number().
+packet_rssi(Packet) ->
+    case maps:get(<<"rssi">>, Packet, undefined) of
+        %% GWMP V2
+        undefined ->
+            %% `rsig` is a list. It can contain more than one signal
+            %% quality object if the packet was received on multiple
+            %% antennas/receivers. So let's pick the one with the
+            %% highest RSSI[Channel]
+            [H|T] = maps:get(<<"rsig">>, Packet),
+            Selector = fun(Obj, Best) ->
+                               erlang:max(Best, maps:get(<<"rssic">>, Obj))
+                       end,
+            lists:foldl(Selector, maps:get(<<"rssic">>, H), T);
+        %% GWMP V1
+        RSSI ->
+            RSSI
+    end.
+
+%% Extracts a packet's SNR, abstracting away the differences between
+%% GWMP JSON V1/V2.
+-spec packet_snr(map()) -> number().
+packet_snr(Packet) ->
+    case maps:get(<<"lsnr">>, Packet, undefined) of
+        %% GWMP V2
+        undefined ->
+            %% `rsig` is a list. It can contain more than one signal
+            %% quality object if the packet was received on multiple
+            %% antennas/receivers. So let's pick the one with the
+            %% highest SNR
+            [H|T] = maps:get(<<"rsig">>, Packet),
+            Selector = fun(Obj, Best) ->
+                               erlang:max(Best, maps:get(<<"lsnr">>, Obj))
+                       end,
+            lists:foldl(Selector, maps:get(<<"lsnr">>, H), T);
+        %% GWMP V1
+        LSNR ->
+            LSNR
+    end.

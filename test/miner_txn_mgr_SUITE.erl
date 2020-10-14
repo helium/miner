@@ -70,7 +70,7 @@ init_per_testcase(_TestCase, Config0) ->
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     %% confirm we have a height of 1
-    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}

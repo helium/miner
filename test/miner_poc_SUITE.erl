@@ -453,7 +453,7 @@ restart_test(Config) ->
     meck:new(blockchain_txn_poc_receipts_v1, [passthrough]),
     meck:expect(blockchain_txn_poc_receipts_v1, is_valid, fun(_, _) -> ok end),
 
-    ?assertEqual(30, erlang:element(14, erlang:element(2, sys:get_state(Statem0)))),
+    ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem0)))),
 
     % Add some block to start process
     ok = add_block(Chain, ConsensusMembers, []),
@@ -696,7 +696,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
-                             40, 5000),
+                             120, 1000),
                     FinalScores = gateway_scores(Config),
                     ct:pal("FinalScores: ~p", [FinalScores]),
                     FinalRewards = get_rewards(Config),

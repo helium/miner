@@ -92,7 +92,7 @@ init_per_testcase(_TestCase, Config0) ->
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     %% confirm height has grown to 1
-    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 1),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
     miner_fake_radio_backplane ! go,
 
@@ -153,6 +153,11 @@ basic(Config) ->
     OwnerSwarm = ct_rpc:call(Owner, blockchain_swarm, swarm, []),
     {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
 
+    [begin
+         MinerSwarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+         {ok, _} = ct_rpc:call(Miner, libp2p_swarm, connect, [MinerSwarm, RouterAddress])
+     end || Miner <- Miners],
+
     DevEUI=rand:uniform(trunc(math:pow(2, 64))),
     AppEUI=rand:uniform(trunc(math:pow(2, 64))),
 
@@ -205,7 +210,7 @@ basic(Config) ->
             ct:pal("wrong data ~p", [_Other]),
             ct:fail(wrong_data)
     after 2000 ->
-        ct:fail(timeout)
+        ct:fail(send_timeout)
     end,
 
     receive
@@ -213,7 +218,7 @@ basic(Config) ->
             ct:pal("got downlink response packet ~p", [RespPacket]),
             ?assertEqual(ReplyPayload, base64:decode(maps:get(<<"data">>, RespPacket)))
     after 2000 ->
-        ct:fail(timeout2)
+        ct:fail(backplane_timeout)
     end,
 
     miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
@@ -277,7 +282,7 @@ default_routers(Config) ->
             ct:pal("wrong data ~p", [_Other]),
             ct:fail(wrong_data)
     after 2000 ->
-        ct:fail(timeout)
+        ct:fail(send_timeout)
     end,
 
     receive
@@ -285,7 +290,7 @@ default_routers(Config) ->
             ct:pal("got downlink response packet ~p", [RespPacket]),
             ?assertEqual(ReplyPayload, base64:decode(maps:get(<<"data">>, RespPacket)))
     after 2000 ->
-        ct:fail(timeout2)
+        ct:fail(backplane_timeout)
     end,
     miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
     ok.

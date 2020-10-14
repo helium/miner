@@ -27,7 +27,9 @@ all() -> [
           master_key_test,
           version_change_test,
           election_v3_test,
-          snapshot_test,
+          %% this is an OK smoke test but doesn't hit every time, the
+          %% high test is more reliable
+          %% snapshot_test,
           high_snapshot_test
          ].
 
@@ -93,7 +95,7 @@ init_per_testcase(TestCase, Config0) ->
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     Locations = lists:foldl(
         fun(I, Acc) ->
-            [h3:from_geo({37.780586, -122.469470 + I/100}, 13)|Acc]
+            [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
         end,
         [],
         lists:seq(1, length(Addresses))
@@ -108,7 +110,7 @@ init_per_testcase(TestCase, Config0) ->
     true = miner_ct_utils:wait_until(
              fun() ->
                      {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-                     length(NCMiners) == 1 orelse length(NCMiners) == 0
+                     length(NCMiners) == (length(Miners) - NumConsensusMembers)
              end, 25, 200),
 
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
@@ -211,9 +213,8 @@ election_test(Config) ->
     Me = self(),
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
-    %% TODO - review this as it seems a lil flaky, sporadically hitting the timeouts during multiple test runs
     fun Loop(0) ->
-            error(timeout);
+            error(seen_timeout);
         Loop(N) ->
             receive
                 seen_all ->
@@ -233,9 +234,9 @@ election_test(Config) ->
                     timer:sleep(500),
                     Loop(N - 1)
             after timer:seconds(30) ->
-                    error(timeout)
+                    error(message_timeout)
             end
-    end(300),
+    end(60),
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
@@ -246,11 +247,15 @@ election_test(Config) ->
     TargetMiners = lists:sublist(Miners, 1, 4),
     Stop = miner_ct_utils:stop_miners(TargetMiners),
 
+    ct:pal("stopped, waiting"),
+
     %% confirm miner is stopped
     ok = miner_ct_utils:wait_for_app_stop(TargetMiners, miner),
 
     %% delete the groups
     ok = miner_ct_utils:delete_dirs(BaseDir ++ "_{1,2,3,4}*", "/blockchain_swarm/groups/*"),
+
+    ct:pal("stopped and deleted"),
 
     %% start the stopped miners back up again
     miner_ct_utils:start_miners(Stop),
@@ -260,7 +265,7 @@ election_test(Config) ->
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
     %% height might go up by one, but it should not go up by 5
-    {_, false} = miner_ct_utils:wait_for_gte(height, Miners, Height + 5),
+    {_, false} = miner_ct_utils:wait_for_gte(height, Miners, Height + 5, any, 10),
 
     %% third: mint and submit the rescue txn, shrinking the group at
     %% the same time.
@@ -326,12 +331,12 @@ election_test(Config) ->
     %% stop some nodes and restart them to check group restore works
     StopList = lists:sublist(NewConsensusMiners, 2) ++ lists:sublist(NewNonConsensusMiners, 2),
     ct:pal("stop list ~p", [StopList]),
-    Stop = miner_ct_utils:stop_miners(StopList),
+    Stop2 = miner_ct_utils:stop_miners(StopList),
 
     %% sleep a lil then start the nodes back up again
     timer:sleep(2000),
 
-    miner_ct_utils:start_miners(Stop),
+    miner_ct_utils:start_miners(Stop2),
 
     %% fourth: confirm that blocks and elections are proceeding
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1),
@@ -841,7 +846,6 @@ high_snapshot_test(Config) ->
     %% TODO: probably at this step we should delete all the blocks
     %% that the downed node has
 
-
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
     NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
                         {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
@@ -854,7 +858,7 @@ high_snapshot_test(Config) ->
     timer:sleep(5000),
     ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 20),
+    ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 30),
     ok.
 
 

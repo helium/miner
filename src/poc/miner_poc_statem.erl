@@ -293,7 +293,8 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                     {keep_state, Data};
                 _ ->
                     Witnesses = maps:get(PacketHash, Responses0, []),
-                    case erlang:length(Witnesses) >= 5 of
+                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
+                    case erlang:length(Witnesses) >= PerHopMaxWitnesses of
                         true ->
                             {keep_state, Data};
                         false ->

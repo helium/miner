@@ -23,6 +23,8 @@
          get_config/2,
          get_balance/2,
          get_nonce/2,
+         get_dc_balance/2,
+         get_dc_nonce/2,
          get_block/2,
          make_vars/1, make_vars/2, make_vars/3,
          tmp_dir/0, tmp_dir/1, nonl/1,
@@ -61,7 +63,7 @@
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
          format_txn_mgr_list/1,
          get_txn_block_details/2, get_txn_block_details/3,
-         get_txn/2,
+         get_txn/2, get_txns/2,
          get_genesis_block/2,
          load_genesis_block/3
         ]).
@@ -165,10 +167,16 @@ election_check([], _Miners, _AddrList, Owner) ->
     Owner ! seen_all;
 election_check(NotSeen0, Miners, AddrList, Owner) ->
     timer:sleep(500),
-    Members = miner_ct_utils:consensus_members(Miners),
-    MinerNames = lists:map(fun(Member)-> miner_ct_utils:addr2node(Member, AddrList) end, Members),
-    NotSeen = NotSeen0 -- MinerNames,
-    Owner ! {not_seen, NotSeen},
+    NotSeen =
+        try
+            Members = miner_ct_utils:consensus_members(Miners),
+            MinerNames = lists:map(fun(Member)-> miner_ct_utils:addr2node(Member, AddrList) end, Members),
+            NotSeen1 = NotSeen0 -- MinerNames,
+            Owner ! {not_seen, NotSeen1},
+            NotSeen1
+        catch _:_ ->
+                NotSeen0
+        end,
     election_check(NotSeen, Miners, AddrList, Owner).
 
 integrate_genesis_block(ConsensusMiner, NonConsensusMiners)->
@@ -290,7 +298,7 @@ wait_for_app_stop(Miners, App, Retries) ->
                          fun(Miner) ->
                              case ct_rpc:call(Miner, application, which_applications, []) of
                                  {badrpc, _} ->
-                                     false;
+                                     true;
                                  Apps ->
                                      not lists:keymember(App, 1, Apps)
                              end
@@ -673,23 +681,29 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
 
     %% make sure each node is gossiping with a majority of its peers
-    true = miner_ct_utils:wait_until(fun() ->
-                                      lists:all(fun(Miner) ->
-                                                        GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 2000),
-                                                        case length(GossipPeers) >= (length(Miners) / 2) + 1 of
-                                                            true -> true;
-                                                            false ->
-                                                                ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
-                                                                Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
-                                                                lists:foreach(
-                                                                  fun(A) ->
-                                                                          CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000),
-                                                                          ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
-                                                                  end, Addrs),
-                                                                false
-                                                        end
-                                                end, Miners)
-                              end),
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     lists:all(
+                       fun(Miner) ->
+                               try
+                                   GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 500),
+                                   case length(GossipPeers) >= (length(Miners) / 2) + 1 of
+                                       true -> true;
+                                       false ->
+                                           ct:pal("~p is not connected to enough peers ~p", [Miner, GossipPeers]),
+                                           Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 500),
+                                           lists:foreach(
+                                             fun(A) ->
+                                                     CRes = ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 500),
+                                                     ct:pal("Connecting ~p to ~p: ~p", [Miner, A, CRes])
+                                             end, Addrs),
+                                           false
+                                   end
+                               catch _C:_E ->
+                                       false
+                               end
+                       end, Miners)
+             end, 200, 150),
 
     %% accumulate the address of each miner
     MinerTaggedAddresses = lists:foldl(
@@ -796,6 +810,43 @@ get_nonce(Miner, Addr) ->
                     end
             end
     end.
+
+get_dc_balance(Miner, Addr) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_dc_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_data_credits_entry_v1, balance, [Entry])
+                    end
+            end
+    end.
+
+get_dc_nonce(Miner, Addr) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_dc_entry, [Addr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, Entry} ->
+                            ct_rpc:call(Miner, blockchain_ledger_data_credits_entry_v1, nonce, [Entry])
+                    end
+            end
+    end.
+
 
 
 get_block(Block, Miner) ->
@@ -974,15 +1025,17 @@ wait_for_txn(Miners, PredFun, Timeout) ->
     wait_for_txn(Miners, PredFun, Timeout, true).
 
 wait_for_txn(Miners, PredFun, Timeout, ExpectedResult)->
+    %% timeout is in ms, we want to retry every 200
+    Count = Timeout div 200,
     ?assertAsync(begin
                      Result = lists:all(
                                 fun(Miner) ->
-                                        Res = get_txn_block_details(Miner, PredFun, Timeout),
+                                        Res = get_txn_block_details(Miner, PredFun, 500),
                                         Res /= []
 
                                 end, miner_ct_utils:shuffle(Miners))
                  end,
-                 Result == ExpectedResult, 40, timer:seconds(1)),
+                 Result == ExpectedResult, Count, 200),
     ok.
 
 format_txn_mgr_list(TxnList) ->
@@ -1034,6 +1087,13 @@ get_txn([{_, B}], PredFun) ->
                             PredFun(T)
                     end,
                     blockchain_block:transactions(B))).
+
+get_txns(Blocks, PredFun) when is_map(Blocks) ->
+    lists:foldl(fun({_, B}, Acc) ->
+                        Acc ++ lists:filter(fun(T) -> PredFun(T) end,
+                                            blockchain_block:transactions(B))
+                end, [], maps:to_list(Blocks)).
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
