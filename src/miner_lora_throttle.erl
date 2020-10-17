@@ -27,30 +27,32 @@
     frequency :: number()
 }).
 
--type region() :: 'AS923' | 'AU915' | 'CN470' | 'CN779' | 'EU433' | 'EU868' | 'IN865' | 'KR920' | 'US915'.
+-type region() ::
+    'AS923' | 'AU915' | 'CN470' | 'CN779' | 'EU433' | 'EU868' | 'IN865' | 'KR920' | 'US915'.
 
 -type regulatory_model() :: {dwell | duty, Limit :: number(), Period :: number()}.
 
--opaque handle() :: {regulatory_model(), list(#sent_packet{})}.
+-opaque handle() :: unsupported | {regulatory_model(), list(#sent_packet{})}.
 
 %% Maximum time allowable time on air.
 -define(MAX_TIME_ON_AIR_MS, 400).
 
--spec model(region()) -> regulatory_model().
+-spec model(region()) -> unsupported | regulatory_model().
 model(Region) ->
     case Region of
-        %%                   Limit  Period
-        %%                     (%)
-        'AS923' -> {'duty',   0.01, 3600000};
-        'AU915' -> {'duty',   0.01, 3600000};
-        'CN470' -> {'duty',   0.01, 3600000};
-        'CN779' -> {'duty',   0.01, 3600000};
-        'EU433' -> {'duty',   0.01, 3600000};
-        'EU868' -> {'duty',   0.01, 3600000};
-        'IN865' -> {'duty',   0.01, 3600000};
-        'KR920' -> {'duty',   0.01, 3600000};
-        %%                      ms  Period
-        'US915' -> {'dwell',   400,   20000}
+        %%                 Limit  Period
+        %%                   (%)
+        'AS923' -> {'duty', 0.01, 3600000};
+        'AU915' -> {'duty', 0.01, 3600000};
+        'CN470' -> {'duty', 0.01, 3600000};
+        'CN779' -> {'duty', 0.01, 3600000};
+        'EU433' -> {'duty', 0.01, 3600000};
+        'EU868' -> {'duty', 0.01, 3600000};
+        'IN865' -> {'duty', 0.01, 3600000};
+        'KR920' -> {'duty', 0.01, 3600000};
+        %%                    ms  Period
+        'US915' -> {'dwell', 400, 20000};
+        _ -> unsupported
     end.
 
 %% Updates Handle with time-on-air information.
@@ -66,8 +68,19 @@ model(Region) ->
     PreambleSymbols :: integer(),
     ExplicitHeader :: boolean(),
     PayloadLen :: integer()
+) -> handle().
+track_sent(
+    unsupported,
+    _SentAt,
+    _Frequency,
+    _Bandwidth,
+    _SpreadingFactor,
+    _CodeRate,
+    _PreambleSymbols,
+    _ExplicitHeader,
+    _PayloadLen
 ) ->
-    handle().
+    unsupported;
 track_sent(
     Handle,
     SentAt,
@@ -90,6 +103,8 @@ track_sent(
     track_sent(Handle, SentAt, Frequency, TimeOnAir).
 
 -spec track_sent(handle(), number(), number(), number()) -> handle().
+track_sent(unsupported, _SentAt, _Frequency, _TimeOnAir) ->
+    unsupported;
 track_sent({Region, SentPackets}, SentAt, Frequency, TimeOnAir) ->
     NewSent = #sent_packet{
         frequency = Frequency,
@@ -99,12 +114,13 @@ track_sent({Region, SentPackets}, SentAt, Frequency, TimeOnAir) ->
     {Region, trim_sent(Region, [NewSent | SentPackets])}.
 
 -spec trim_sent(regulatory_model(), list(#sent_packet{})) -> list(#sent_packet{}).
-trim_sent(Model, SentPackets = [NewSent, LastSent | _])
-        when NewSent#sent_packet.sent_at < LastSent#sent_packet.sent_at ->
-    trim_sent(Model, lists:sort(fun (A, B) -> A > B end, SentPackets));
+trim_sent(Model, SentPackets = [NewSent, LastSent | _]) when
+    NewSent#sent_packet.sent_at < LastSent#sent_packet.sent_at
+->
+    trim_sent(Model, lists:sort(fun(A, B) -> A > B end, SentPackets));
 trim_sent({_, _, Period}, SentPackets = [H | _]) ->
     CutoffTime = H#sent_packet.sent_at - Period,
-    Pred = fun (Sent) -> Sent#sent_packet.sent_at > CutoffTime end,
+    Pred = fun(Sent) -> Sent#sent_packet.sent_at > CutoffTime end,
     lists:takewhile(Pred, SentPackets).
 
 %% @doc Based on previously sent packets, returns a boolean value if
@@ -116,8 +132,9 @@ trim_sent({_, _, Period}, SentPackets = [H | _]) ->
     AtTime :: number(),
     Frequency :: integer(),
     TimeOnAir :: number()
-) ->
-    boolean().
+) -> boolean().
+can_send(unsupported, _AtTime, _Frequency, TimeOnAir) ->
+    false;
 can_send(_Handle, _AtTime, _Frequency, TimeOnAir) when TimeOnAir > ?MAX_TIME_ON_AIR_MS ->
     %% TODO: check that all regions have do in fact have the same
     %% maximum time on air.
@@ -139,11 +156,14 @@ dwell_time(SentPackets, CutoffTime, Frequency) ->
 
 -spec dwell_time(list(#sent_packet{}), integer(), number() | 'all', number()) -> number().
 %% Scenario 1: entire packet sent before CutoffTime
-dwell_time([P | T], CutoffTime, Frequency, Acc)
-        when P#sent_packet.sent_at + P#sent_packet.time_on_air < CutoffTime ->
+dwell_time([P | T], CutoffTime, Frequency, Acc) when
+    P#sent_packet.sent_at + P#sent_packet.time_on_air < CutoffTime
+->
     dwell_time(T, CutoffTime, Frequency, Acc);
 %% Scenario 2: packet sent on non-relevant frequency.
-dwell_time([P | T], CutoffTime, Frequency, Acc) when is_number(Frequency), P#sent_packet.frequency /= Frequency ->
+dwell_time([P | T], CutoffTime, Frequency, Acc) when
+    is_number(Frequency), P#sent_packet.frequency /= Frequency
+->
     dwell_time(T, CutoffTime, Frequency, Acc);
 %% Scenario 3: Packet started before CutoffTime but finished after CutoffTime.
 dwell_time([P | T], CutoffTime, Frequency, Acc) when P#sent_packet.sent_at =< CutoffTime ->
@@ -167,8 +187,7 @@ dwell_time([], _CutoffTime, _Frequency, Acc) ->
     PreambleSymbols :: integer(),
     ExplicitHeader :: boolean(),
     PayloadLen :: integer()
-) ->
-    Milliseconds :: float().
+) -> Milliseconds :: float().
 time_on_air(
     Bandwidth,
     SpreadingFactor,
@@ -215,7 +234,13 @@ symbol_duration(Bandwidth, SpreadingFactor) ->
 %% @doc Returns a new handle for the given region.
 -spec new(region()) -> handle().
 new(Region) ->
-    {model(Region), []}.
+    case model(Region) of
+        unsupported ->
+            lager:warning('\'~p\' is not a supported regulatory region', [Region]),
+            unsupported;
+        Model ->
+            {Model, []}
+    end.
 
 -spec b2n(boolean()) -> integer().
 b2n(false) ->
