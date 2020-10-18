@@ -31,12 +31,12 @@
 
 -type regulatory_model() :: {dwell | duty, Limit :: number(), Period :: number()}.
 
--opaque handle() :: {regulatory_model(), list(#sent_packet{})}.
+-opaque handle() :: unsupported | {regulatory_model(), list(#sent_packet{})}.
 
 %% Maximum time allowable time on air.
 -define(MAX_TIME_ON_AIR_MS, 400).
 
--spec model(region()) -> regulatory_model().
+-spec model(region()) -> unsupported | regulatory_model().
 model(Region) ->
     case Region of
         %%                   Limit  Period
@@ -50,7 +50,9 @@ model(Region) ->
         'IN865' -> {'duty',   0.01, 3600000};
         'KR920' -> {'duty',   0.01, 3600000};
         %%                      ms  Period
-        'US915' -> {'dwell',   400,   20000}
+        'US915' -> {'dwell',   400,   20000};
+        %% We can't support regions we are not aware of.
+        _ -> unsupported
     end.
 
 %% Updates Handle with time-on-air information.
@@ -66,8 +68,19 @@ model(Region) ->
     PreambleSymbols :: integer(),
     ExplicitHeader :: boolean(),
     PayloadLen :: integer()
+) -> handle().
+track_sent(
+    unsupported,
+    _SentAt,
+    _Frequency,
+    _Bandwidth,
+    _SpreadingFactor,
+    _CodeRate,
+    _PreambleSymbols,
+    _ExplicitHeader,
+    _PayloadLen
 ) ->
-    handle().
+    unsupported;
 track_sent(
     Handle,
     SentAt,
@@ -90,6 +103,8 @@ track_sent(
     track_sent(Handle, SentAt, Frequency, TimeOnAir).
 
 -spec track_sent(handle(), number(), number(), number()) -> handle().
+track_sent(unsupported, _SentAt, _Frequency, _TimeOnAir) ->
+    unsupported;
 track_sent({Region, SentPackets}, SentAt, Frequency, TimeOnAir) ->
     NewSent = #sent_packet{
         frequency = Frequency,
@@ -116,8 +131,9 @@ trim_sent({_, _, Period}, SentPackets = [H | _]) ->
     AtTime :: number(),
     Frequency :: integer(),
     TimeOnAir :: number()
-) ->
-    boolean().
+) -> boolean().
+can_send(unsupported, _AtTime, _Frequency, TimeOnAir) ->
+    false;
 can_send(_Handle, _AtTime, _Frequency, TimeOnAir) when TimeOnAir > ?MAX_TIME_ON_AIR_MS ->
     %% TODO: check that all regions have do in fact have the same
     %% maximum time on air.
@@ -215,7 +231,13 @@ symbol_duration(Bandwidth, SpreadingFactor) ->
 %% @doc Returns a new handle for the given region.
 -spec new(region()) -> handle().
 new(Region) ->
-    {model(Region), []}.
+    case model(Region) of
+        unsupported ->
+            lager:warning('\'~p\' is not a supported regulatory region', [Region]),
+            unsupported;
+        Model ->
+            {Model, []}
+    end.
 
 -spec b2n(boolean()) -> integer().
 b2n(false) ->
