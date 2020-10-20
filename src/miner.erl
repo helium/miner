@@ -429,7 +429,11 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                         NewTime ->
                             NewTime
                     end,
-                {ValidTransactions, InvalidTransactions} = blockchain_txn:validate(SortedTransactions, Chain),
+                {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
+                %% InvalidTransactions0  is a list of tuples in the format {Txn, InvalidReason}
+                %% we dont need the invalid reason here so need to remove the tuple format and have a regular list of txn items
+                %% in prep for returning to hbbft
+                InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
 
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
                     case blockchain_election:has_new_group(ValidTransactions) of
