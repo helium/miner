@@ -916,7 +916,8 @@ make_vars(Keys, Map, Mode) ->
               ?poc_challenge_interval => 10,
               ?poc_version => 3,
               ?poc_path_limit => 7,
-              ?poc_typo_fixes => true
+              ?poc_typo_fixes => true,
+              ?sc_grace_blocks => 4
              },
 
     #{secret := Priv, public := Pub} = Keys,
