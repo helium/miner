@@ -943,7 +943,7 @@ server_overspend_slash_test(Config) ->
     [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, fun check_type_sc_open/1),
 
     NewSummary = blockchain_state_channel_summary_v1:new(ClientPubkeyBin, Amount * 2, Amount * 2),
-    OverSpentSC = blockchain_state_channel_v1:update_summary_for(ClientPubkeyBin, NewSummary, InitialSC),
+    {OverSpentSC, true} = blockchain_state_channel_v1:update_summary_for(ClientPubkeyBin, NewSummary, InitialSC, true),
     SignedOverSpentSC = blockchain_state_channel_v1:sign(OverSpentSC, RouterSigFun),
     ok = blockchain_state_channel_v1:validate(SignedOverSpentSC),
 
