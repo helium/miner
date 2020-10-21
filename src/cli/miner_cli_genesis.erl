@@ -387,5 +387,6 @@ make_vars() ->
       ?h3_max_grid_distance => 120,
       ?h3_exclusion_ring_dist => 6,
       ?snapshot_version => 1,
+      ?sc_grace_blocks => 20,
       ?snapshot_interval => 5
      }.
