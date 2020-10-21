@@ -132,7 +132,7 @@ trim_sent({_, _, Period}, SentPackets = [H | _]) ->
     Frequency :: integer(),
     TimeOnAir :: number()
 ) -> boolean().
-can_send(unsupported, _AtTime, _Frequency, TimeOnAir) ->
+can_send(unsupported, _AtTime, _Frequency, _TimeOnAir) ->
     false;
 can_send(_Handle, _AtTime, _Frequency, TimeOnAir) when TimeOnAir > ?MAX_TIME_ON_AIR_MS ->
     %% TODO: check that all regions have do in fact have the same
