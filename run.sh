@@ -4,7 +4,8 @@
 
 ./all-cmd.sh stop
 
-make clean && make
+find _build/default/lib/blockchain/ -name \*beam -exec rm {} +
+make clean && ./rebar3 as test compile
 
 if [ -z "$1" ]
 then
