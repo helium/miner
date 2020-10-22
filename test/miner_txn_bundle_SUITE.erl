@@ -25,6 +25,7 @@
          full_circle_test/1,
          add_assert_test/1,
          invalid_add_assert_test/1,
+         transfer_hotspot_test/1,
          single_txn_bundle_test/1,
          bundleception_test/1
         ]).
@@ -42,6 +43,7 @@ all() -> [
           full_circle_test,
           add_assert_test,
           invalid_add_assert_test,
+          transfer_hotspot_test,
           single_txn_bundle_test,
           bundleception_test
          ].
@@ -537,6 +539,73 @@ invalid_add_assert_test(Config) ->
     %% Check that the gateway did not get added
     8 = maps:size(ActiveGateways),
 
+    ok.
+
+transfer_hotspot_test(Config) ->
+    %% A -> [add_gateway, assert_location]
+    %% A -> [transfer_hotspot] to B
+    Miners = ?config(miners, Config),
+    [MinerA, MinerB | _Tail] = Miners,
+    MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
+    MinerBPubkeyBin = ct_rpc:call(MinerB, blockchain_swarm, pubkey_bin, []),
+
+    {ok, _OwnerAPubkey, OwnerASigFun, _OwnerAECDHFun} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
+    {ok, _OwnerBPubkey, OwnerBSigFun, _OwnerBECDHFun} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
+
+    %% Create add_gateway txn
+    [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(1),
+    AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin),
+    SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerASigFun),
+    SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
+    ct:pal("SignedAddGatewayTxn: ~p", [SignedAddGatewayTxn]),
+
+    %% Create assert loc txn
+    Index = 631210968910285823,
+    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1),
+    PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
+    SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerASigFun),
+    ct:pal("SignedAssertLocationTxn: ~p", [SignedAssertLocationTxn]),
+
+    %% Create bundle with txns
+    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [[SignedAddGatewayTxn, SignedAssertLocationTxn]]),
+    ct:pal("BundleTxn: ~p", [BundleTxn]),
+
+    %% Submit the bundle txn
+    miner_ct_utils:submit_txn(BundleTxn, Miners),
+
+    %% wait till height 10 for txn to clear
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 10),
+
+    %% Get active gateways
+    Chain = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(MinerA, blockchain, ledger, [Chain]),
+    ActiveGateways = ct_rpc:call(MinerA, blockchain_ledger_v1, active_gateways, [Ledger]),
+
+    %% Check that the gateway got added
+    9 = maps:size(ActiveGateways),
+
+    %% validate initial balances
+    5000 = miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin),
+    5000 = miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin),
+
+    %% create transfer hotspot txn
+    TransferTxn = blockchain_txn_transfer_hotspot_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, MinerBPubkeyBin, 1000),
+    SellerXferSigned = blockchain_txn_transfer_hotspot_v1:sign_seller(TransferTxn, OwnerASigFun),
+    BuyerXferSigned = blockchain_txn_transfer_hotspot_v1:sign_buyer(SellerXferSigned, OwnerBSigFun),
+    ct:pal("BuyerXferSigned: ~p", [BuyerXferSigned]),
+
+    miner_ct_utils:submit_txn(BuyerXferSigned, Miners),
+
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 20),
+
+    Chain0 = ct_rpc:call(MinerA, blockchain_worker, blockchain, []),
+    Ledger0 = ct_rpc:call(MinerA, blockchain, ledger, [Chain0]),
+    ActiveGateways0 = ct_rpc:call(MinerA, blockchain_ledger_v1, active_gateways, [Ledger0]),
+
+    XferGw = maps:get(GatewayPubkeyBin, ActiveGateways0),
+    ?assertEqual(MinerBPubkeyBin, blockchain_ledger_gateway_v2:owner_address(XferGw)),
+    ?assertEqual(6000, miner_ct_utils:get_balance(MinerA, MinerAPubkeyBin)),
+    ?assertEqual(4000, miner_ct_utils:get_balance(MinerB, MinerBPubkeyBin)),
     ok.
 
 single_txn_bundle_test(Config) ->
