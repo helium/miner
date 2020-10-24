@@ -228,7 +228,7 @@ TV,-7.109535,177.64933,Tuvalu,,zone3
 UM,,,U.S. Minor Outlying Islands,US915,zone2
 VI,18.335765,-64.896335,U.S. Virgin Islands,US915,zone2
 UG,1.373333,32.290275,Uganda,,zone1
-UA,48.379433,31.16558,Ukraine,,zone1
+UA,48.379433,31.16558,Ukraine,EU868,zone1
 AE,23.424076,53.847818,United Arab Emirates,EU868,zone1
 GB,55.378051,-3.435973,United Kingdom,EU868,zone1
 US,37.09024,-95.712891,United States,US915,zone2
