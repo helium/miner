@@ -231,7 +231,10 @@ handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPo
     lager:debug("ignoring send request as regulatory domain not yet confirmed", []),
     {reply, {error, reg_domain_unconfirmed}, State};
 handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket}, From, State) ->
-    send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State);
+    case send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State) of
+        {error, _}=Error -> {reply, Error, State};
+        {ok, State1} -> {noreply, State1}
+    end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
 handle_call(position, _From, #state{latlong = undefined} = State) ->
@@ -412,7 +415,8 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
                     lager:info("packet sent ok"),
-                    {ok, miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir)};
+                    Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
+                    {ok, State1#state{reg_throttle=Throttle1}};
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
                     lager:info("collision"),
@@ -420,13 +424,15 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                 <<"TOO_LATE">> ->
                     lager:info("too late"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
-                        undefined -> {error, too_late};
+                        undefined -> lager:warning("No RX2 available"),
+                                     {error, too_late};
                         _ -> retry_with_rx2(From, HlmPacket, State1)
                     end;
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
-                        undefined -> {error, too_early};
+                        undefined -> lager:warning("No RX2 available"),
+                                     {error, too_early};
                         _ -> retry_with_rx2(From, HlmPacket, State1)
                     end;
                 <<"TX_FREQ">> ->
@@ -444,14 +450,12 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     {error, {unknown, Error}}
             end,
             case Reply of
-                {ok, Throttle1} ->
+                {ok, State2} ->
                     gen_server:reply(From, ok),
-                    State1#state{reg_throttle=Throttle1};
+                    State2;
                 {error, _} ->
                     gen_server:reply(From, Reply),
-                    State1;
-                State2 ->
-                    State2
+                    State1
             end;
         error ->
             State0
@@ -728,6 +732,17 @@ packet_snr(Packet) ->
             LSNR
     end.
 
+-spec send_packet(
+    Payload :: binary(),
+    When :: integer(),
+    ChannelSelectorFun :: fun(),
+    DataRate :: string(),
+    Power :: float(),
+    IPol :: boolean(),
+    HlmPacket :: helium_packet(),
+    From :: {pid(), reference()},
+    State :: state()
+) -> {error, any()} | {ok, state()}.
 send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
             #state{socket=Socket,
                    gateways=Gateways,
@@ -738,7 +753,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
                    last_mono_us=PrevMono_us}=State) ->
     case select_gateway(Gateways) of
         {error, _}=Error ->
-            {reply, Error, State};
+            Error;
         {ok, #gateway{ip=IP, port=Port}} ->
             lager:info("PULL_RESP to ~p:~p", [IP, Port]),
             %% the fun is set by the sender and is used to deterministically route data via channels
@@ -761,9 +776,18 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
             ok = gen_udp:send(Socket, IP, Port, Packet),
             %% TODO a better timeout would be good here
             Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-            {noreply, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers)}}
+            {ok, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers)}}
     end.
 
+-spec create_packet(
+    Payload :: binary(),
+    When :: integer(),
+    LocalFreq :: integer(),
+    DataRate :: string(),
+    Power :: float(),
+    IPol :: boolean(),
+    Token :: binary()
+) -> binary().
 create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
     DecodedJSX = #{<<"txpk">> => #{
                         <<"ipol">> => IPol, %% IPol for downlink to devices only, not poc packets
@@ -784,10 +808,16 @@ create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
     lager:debug("sending packet via channel: ~p",[LocalFreq]),
     <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>.
 
+-spec retry_with_rx2(
+    HlmPacket0 :: helium_packet(),
+    From :: {pid(), reference()},
+    State :: state()
+) -> {error, any()} | {ok, state()}.
 retry_with_rx2(HlmPacket0, From, State) ->
     #window_pb{timestamp=TS,
                frequency=Freq,
                datarate=DataRate} = blockchain_helium_packet_v1:rx2_window(HlmPacket0),
+    lager:info("Retrying with RX2 window ~p", [TS]),
     Power = blockchain_helium_packet_v1:signal_strength(HlmPacket0),
     Payload = blockchain_helium_packet_v1:payload(HlmPacket0),
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
