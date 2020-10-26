@@ -426,14 +426,14 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
                                      {error, too_late};
-                        _ -> retry_with_rx2(From, HlmPacket, State1)
+                        _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
                                      {error, too_early};
-                        _ -> retry_with_rx2(From, HlmPacket, State1)
+                        _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TX_FREQ">> ->
                     lager:info("tx frequency not supported"),
