@@ -27,7 +27,7 @@
          conflict_test/1,
          reject_test/1,
          server_doesnt_close_test/1,
-         client_reports_overspend_test/1,
+         server_doesnt_prevent_overspend_test/1,
          server_overspend_slash_test/1,
          ensure_dc_reward_during_grace_blocks/1
         ]).
@@ -61,7 +61,7 @@ scv2_only_tests() ->
      conflict_test,
      reject_test,
      server_doesnt_close_test,
-     client_reports_overspend_test,
+     server_doesnt_prevent_overspend_test,
      server_overspend_slash_test,
      server_doesnt_close_test,
      ensure_dc_reward_during_grace_blocks
@@ -872,11 +872,14 @@ server_doesnt_close_test(Config) ->
                    blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn))),
     ok.
 
-client_reports_overspend_test(Config) ->
+server_doesnt_prevent_overspend_test(Config) ->
     Miners = ?config(miners, Config),
 
-    {_RouterNode, RouterPubkeyBin, _} = ?config(router_node, Config),
+    {RouterNode, RouterPubkeyBin, _} = ?config(router_node, Config),
     [ClientNode | _] = tl(Miners),
+
+    %% Explicitly tell router to not prevent any overspending
+    ok = ct_rpc:call(RouterNode, application, set_env, [blockchain, prevent_sc_overspend, false]),
 
     ExpireWithin = 6,
     Amount = 2,
@@ -887,14 +890,20 @@ client_reports_overspend_test(Config) ->
     Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
     Payload2 = crypto:strong_rand_bytes(24+rand:uniform(23)),
     Payload3 = crypto:strong_rand_bytes(24+rand:uniform(23)),
-    Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1), %% pretend this is a join
-    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2), %% pretend this is a packet after join
-    Packet3 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload3), %% pretend this is a packet after join
+
+    %% pretend this is a join
+    Packet1 = blockchain_helium_packet_v1:new({eui, 16#deadbeef, 16#deadc0de}, Payload1),
+    %% pretend this is a packet after join
+    Packet2 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload2),
+    %% pretend this is a packet after join
+    Packet3 = blockchain_helium_packet_v1:new({devaddr, 1207959553}, Payload3),
+
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(500),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
     timer:sleep(500),
-    %% client will probably not even send this
+    %% client will probably not even send this, but if it does, that implies that the router didn't prevent
+    %% any overspending, hence an eventual dispute on the ledger
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet3, [], 'US915']),
 
     _SCCloseTxn =
