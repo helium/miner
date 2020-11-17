@@ -21,6 +21,7 @@
          count/2,
          randname/1,
          get_config/2,
+         get_gw_owner/2,
          get_balance/2,
          get_nonce/2,
          get_dc_balance/2,
@@ -783,6 +784,27 @@ cleanup_per_testcase(_TestCase, Config) ->
                           ct:pal("rm -rf ~p -> ~p", [DataDir, Res2]),
                           ok
                   end, Miners).
+
+get_gw_owner(Miner, GwAddr) ->
+    case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
+        {badrpc, Error} ->
+            Error;
+        Chain ->
+            case ct_rpc:call(Miner, blockchain, ledger, [Chain]) of
+                {badrpc, Error} ->
+                    Error;
+                Ledger ->
+                    case ct_rpc:call(Miner, blockchain_ledger_v1, find_gateway_info,
+                                     [GwAddr, Ledger]) of
+                        {badrpc, Error} ->
+                            Error;
+                        {ok, GwInfo} ->
+                            ct_rpc:call(Miner, blockchain_ledger_gateway_v2, owner_address,
+                                        [GwInfo])
+                    end
+            end
+    end.
+
 
 get_balance(Miner, Addr) ->
     case ct_rpc:call(Miner, blockchain_worker, blockchain, []) of
