@@ -329,7 +329,7 @@ make_vars() ->
       ?block_time => BlockTime,
       ?election_interval => Interval,
       ?election_restart_interval => 5,
-      ?election_version => 3,
+      ?election_version => 4,
       ?election_bba_penalty => 0.01,
       ?election_seen_penalty => 0.25,
       ?election_selection_pct => 75,

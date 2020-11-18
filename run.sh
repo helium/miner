@@ -100,7 +100,7 @@ echo "Node not in consensus: $non_consensus_node"
 exported_genesis_file="/tmp/genesis_$(date +%Y%m%d%H%M%S)"
 # get the genesis block from one of the consensus nodes
 LOOP=5
-while [ $LOOP -ne 0 ]; do
+while [ $LOOP -gt 0 ]; do
     for node in ${nodes[@]}; do
         if [[ $(./_build/testdev\+miner$node/rel/miner$node/bin/miner$node info in_consensus) = *true* ]]; then
             ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node genesis export $exported_genesis_file

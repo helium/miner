@@ -72,6 +72,10 @@ init_per_testcase(TestCase, Config0) ->
                   ?election_bba_penalty => 0.01,
                   ?election_seen_penalty => 0.05,
                   ?election_version => 3};
+            election_v3_test ->
+                #{
+                  ?election_version => 2
+                 };
             _ ->
                 #{}
         end,
