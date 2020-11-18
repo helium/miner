@@ -63,7 +63,6 @@ scv2_only_tests() ->
      server_doesnt_close_test,
      client_reports_overspend_test,
      server_overspend_slash_test,
-     server_doesnt_close_test,
      ensure_dc_reward_during_grace_blocks
     ].
 
@@ -76,7 +75,7 @@ init_per_group(sc_v2, Config) ->
     SCV2Vars = maps:merge(SCVars,
                           #{?sc_version => 2,
                             ?sc_overcommit => 2,
-                            ?election_interval => 8,
+                            ?election_interval => 15,
                             ?txn_fee_multiplier => 1,
                             ?dc_percent => 1.0,
                             ?consensus_percent => 0.0,
@@ -102,7 +101,7 @@ init_per_suite(Config) ->
                ?max_subnet_num => 20,                %% Max subnet num
                ?dc_payload_size => 24,               %% DC payload size for calculating DCs
                ?sc_gc_interval => 12,
-               ?sc_grace_blocks => 6},               %% Grace period (in num of blocks) for state channels to get GCd
+               ?sc_grace_blocks => 12},               %% Grace period (in num of blocks) for state channels to get GCd
     [{sc_vars, SCVars} | Config].
 
 end_per_suite(_Config) ->
@@ -127,6 +126,8 @@ init_per_testcase(TestCase, Config0) ->
                      ensure_dc_reward_during_grace_blocks ->
                          maps:merge(#{ ?reward_version => 5, ?sc_grace_blocks => 10, ?election_interval => 30 , ?sc_gc_interval => 10},
                                     reward_vars()) ;
+                     server_overspend_slash_test ->
+                         reward_vars();
                      _ ->
                          %% rule out rewards
                          #{ ?election_interval => infinity }
@@ -759,14 +760,14 @@ conflict_test(Config) ->
 
 reject_test(Config) ->
     Miners = ?config(miners, Config),
-    {RouterNode, RouterPubkeyBin, _} = ?config(router_node, Config),
+    {RouterNode, _RouterPubkeyBin, _} = ?config(router_node, Config),
 
     [ClientNode | _] = tl(Miners),
 
     %% open a state channel
     ExpireWithin = 11,
     Amount = 10,
-    ID = open_state_channel(Config, ExpireWithin, Amount),
+    _ID = open_state_channel(Config, ExpireWithin, Amount),
 
     %% Use client node to send some packets
     Payload1 = crypto:strong_rand_bytes(rand:uniform(23)),
@@ -798,7 +799,7 @@ reject_test(Config) ->
                 unreachable
     end,
 
-    ok = wait_for_gc(RouterNode, ID, RouterPubkeyBin, Config),
+    %% ok = wait_for_gc(RouterNode, ID, RouterPubkeyBin, Config),
 
     %% Check whether the balances are updated in the eventual sc close txn
     ct:pal("SCCloseTxn: ~p", [SCCloseTxn]),
@@ -811,8 +812,9 @@ reject_test(Config) ->
     %% construct what the skewed merkle tree should look like
     ExpectedTree = skewed:add(Payload3, skewed:add(Payload1, skewed:new(OpenHash))),
     %% assert the root hashes should match
-    ?assertEqual(blockchain_state_channel_v1:root_hash(blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn)), skewed:root_hash(ExpectedTree)),
-
+    ?assertEqual(skewed:root_hash(ExpectedTree),
+                 blockchain_state_channel_v1:root_hash(
+                   blockchain_txn_state_channel_close_v1:state_channel(SCCloseTxn))),
     ok.
 
 server_doesnt_close_test(Config) ->
@@ -833,7 +835,7 @@ server_doesnt_close_test(Config) ->
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet1, [], 'US915']),
     timer:sleep(500),
     ok = ct_rpc:call(ClientNode, blockchain_state_channels_client, packet, [Packet2, [], 'US915']),
-    timer:sleep(1000),
+    timer:sleep(4000),
 
     %% stop the miner so it cannot send the close
     miner_ct_utils:stop_miners([RouterNode]),  % can we wait here?
@@ -954,6 +956,7 @@ server_overspend_slash_test(Config) ->
     SCCloseTxn =
         receive
             {blockchain_txn_state_channel_close_v1, CHT, CloseTxn} ->
+                ok = block_listener:register_txns([blockchain_txn_rewards_v1]),
                 ct:pal("close height ~p", [CHT]),
                 CloseTxn;
             Other2 ->
@@ -963,6 +966,7 @@ server_overspend_slash_test(Config) ->
                 error(sc_close_timeout),
                 unreachable
     end,
+
 
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -983,33 +987,32 @@ server_overspend_slash_test(Config) ->
     ClientNodePubkeyBin = ct_rpc:call(ClientNode, blockchain_swarm, pubkey_bin, []),
     true = check_sc_num_packets(blockchain_ledger_state_channel_v2:state_channel(LSC), ClientNodePubkeyBin, Amount * 2),
 
-
-    ok = block_listener:register_txns([blockchain_txn_rewards_v1]),
-
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2),
-
-    RwdTxn1 =
-        receive
-            {blockchain_txn_rewards_v1, CHT2, RwdTxn} ->
-                ct:pal("reward height ~p", [CHT2]),
-                RwdTxn;
-            Other3 ->
-                error({bad_txn, Other3}),
-                unreachable
-        after timer:seconds(30) ->
-                error(sc_close_timeout),
-                unreachable
-    end,
-
-    ?assertNotEqual(undefined, RwdTxn1),
-
-    ct:pal("Rwd: ~p", [RwdTxn1]),
-
-    [DCReward] = lists:filter(fun(R) ->
-                                      blockchain_txn_reward_v1:type(R) == data_credits andalso blockchain_txn_reward_v1:gateway(R) == ClientPubkeyBin
-                              end, blockchain_txn_rewards_v1:rewards(RwdTxn1)),
-
-    ct:pal("DC reward: ~p", [DCReward]),
+    DCReward =
+        fun Loop(0) ->
+                error(bad_reward);
+            Loop(Retries) ->
+                receive
+                    {blockchain_txn_rewards_v1, CHT2, RwdTxn} ->
+                        ct:pal("reward height ~p ~p", [CHT2, RwdTxn]),
+                        case lists:filter(
+                               fun(R) ->
+                                       blockchain_txn_reward_v1:type(R) == data_credits andalso
+                                           blockchain_txn_reward_v1:gateway(R) == ClientPubkeyBin
+                               end, blockchain_txn_rewards_v1:rewards(RwdTxn)) of
+                            [Rwd] ->
+                                ct:pal("DC reward: ~p", [Rwd]),
+                                Rwd;
+                            [] ->
+                                Loop(Retries - 1)
+                        end;
+                    Other3 ->
+                        error({bad_txn, Other3}),
+                        unreachable
+                after timer:seconds(30) ->
+                        error(sc_close_timeout),
+                        unreachable
+                end
+        end(3),
 
     %% check how much HNT the gateway earned
     RewardInHNT = blockchain_txn_reward_v1:amount(DCReward),
@@ -1040,7 +1043,8 @@ server_overspend_slash_test(Config) ->
 open_state_channel(Config, ExpireWithin, Amount) ->
     open_state_channel(Config, ExpireWithin, Amount, 1).
 
-open_state_channel(Config, ExpireWithin, Amount, OUI) ->
+open_state_channel(Config, _ExpireWithin, Amount, OUI) ->
+    ExpireWithin = 15,
     ID = crypto:strong_rand_bytes(32),
     {RouterNode, RouterPubkeyBin, RouterSigFun} =
         case OUI of
