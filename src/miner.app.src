@@ -28,7 +28,7 @@
     kvc,
     longfi
    ]},
-  {included_applications, [blockchain]},
+  {included_applications, [blockchain, sibyl]},
   {env,[]},
   {modules, []},
 
