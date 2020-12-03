@@ -29,6 +29,9 @@ Build a miner-test image locally:
 docker build -t helium:miner-test -f .buildkite/scripts/Dockerfile-xxxNN .
 ```
 
+Note that Miner for AMD64 requires AVX support on the processor due to the erasure library.
+
+
 miner step-by-step
 =====
 
@@ -76,3 +79,5 @@ Now it's time to build the miner. This will take a while:
 $ cd miner
 $ make release
 ```
+
+Note that Miner for AMD64 requires AVX support on the processor due to the erasure library.
