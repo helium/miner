@@ -213,7 +213,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
             case SelfPubKeyBin =:= Challenger of
                 true ->
                     lager:info("challenger is ourself so sending directly to poc statem"),
-                    miner_poc_statem:witness(Witness1);
+                    miner_poc_statem:witness(SelfPubKeyBin, Witness1);
                 false ->
                     EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
                     P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
