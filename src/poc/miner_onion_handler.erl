@@ -54,9 +54,9 @@ handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
     try blockchain_poc_response_v1:decode(Data) of
         {witness, Witness} ->
-            ok = miner_poc_statem:witness(Witness);
+            ok = miner_poc_statem:witness(make_ref(), Witness);
         {receipt, Receipt} ->
-            ok = miner_poc_statem:receipt(Receipt)
+            ok = miner_poc_statem:receipt(make_ref(), Receipt)
     catch _:_ ->
         lager:error("got unknown data ~p", [Data])
     end,
