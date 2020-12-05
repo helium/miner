@@ -12,8 +12,8 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    receipt/1,
-    witness/1
+    receipt/2,
+    witness/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -88,11 +88,11 @@
 start_link(Args) ->
     gen_statem:start_link({local, ?SERVER}, ?SERVER, Args, [{hibernate_after, 5000}]).
 
-receipt(Data) ->
-    gen_statem:cast(?SERVER, {receipt, Data}).
+receipt(Address, Data) ->
+    gen_statem:cast(?SERVER, {receipt, Address, Data}).
 
-witness(Data) ->
-    gen_statem:cast(?SERVER, {witness, Data}).
+witness(Address, Data) ->
+    gen_statem:cast(?SERVER, {witness, Address, Data}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -266,7 +266,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, save_data(Data#data{receiving_timeout=T-1})};
-receiving(cast, {witness, Witness}, #data{responses=Responses0,
+receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                                           packet_hashes=PacketHashes,
                                           blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
@@ -299,11 +299,11 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                             {keep_state, Data};
                         false ->
                             %% Don't allow putting duplicate response in the witness list resp
-                            Predicate = fun(W) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                            Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
                             Responses1 =
                                 case lists:any(Predicate, Witnesses) of
                                     false ->
-                                        maps:put(PacketHash, [Witness|Witnesses], Responses0);
+                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
                                     true ->
                                         Responses0
                                 end,
@@ -311,7 +311,7 @@ receiving(cast, {witness, Witness}, #data{responses=Responses0,
                     end
             end
     end;
-receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
+receiving(cast, {receipt, Address, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
@@ -329,7 +329,7 @@ receiving(cast, {receipt, Receipt}, #data{responses=Responses0, challengees=Chal
                 {Gateway, LayerData} ->
                     case maps:get(Gateway, Responses0, undefined) of
                         undefined ->
-                            Responses1 = maps:put(Gateway, Receipt, Responses0),
+                            Responses1 = maps:put(Gateway, {Address, Receipt}, Responses0),
                             {keep_state, save_data(Data#data{responses=Responses1})};
                         _ ->
                             lager:warning("Already got this receipt ~p for ~p ignoring", [Receipt, Gateway]),
@@ -728,8 +728,9 @@ submit_receipts(#data{address=Challenger,
     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
     Path1 = lists:foldl(
         fun({Challengee, LayerHash}, Acc) ->
-            Receipt = maps:get(Challengee, Responses0, undefined),
-            Witnesses = maps:get(LayerHash, Responses0, []),
+            {Address, Receipt} = maps:get(Challengee, Responses0, undefined),
+            %% get any witnesses not from the same IP address
+            Witnesses = [W || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address],
             E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
             [E|Acc]
         end,
