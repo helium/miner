@@ -80,8 +80,8 @@ handle_info(_Type, _Msg, State) ->
 unique_peer(Addr) ->
     %% if we have an ipv4 peer, use that public IP
     case multiaddr:protocols(Addr) of
-        [{"ip4",Addr},{_,_}] ->
-            Addr;
+        [{"ip4",IP},{_,_}] ->
+            IP;
         _ ->
             %% make something unique
             make_ref()
