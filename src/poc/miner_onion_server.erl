@@ -415,7 +415,7 @@ spreading(_, _) ->
 -ifdef(TEST).
 
 spreading_test() ->
-    ?assertEqual("SF10BW125", spreading('EU868', 10)),
+    ?assertEqual("SF12BW125", spreading('EU868', 10)),
     ?assertEqual("SF12BW125", spreading('EU868', 14)),
     ?assertEqual("SF12BW125", spreading('EU868', 54)),
     ?assertEqual("SF9BW125", spreading('EU868', 117)),
