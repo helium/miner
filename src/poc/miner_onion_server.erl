@@ -396,14 +396,15 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
 
 -spec spreading(Region :: atom(),
                 Len :: pos_integer()) -> string().
-spreading(_, L) when L < 25 ->
-    "SF10BW125";
+
 spreading('EU868', L) when L < 65 ->
     "SF12BW125";
 spreading('EU868', L) when L < 129 ->
     "SF9BW125";
 spreading('EU868', L) when L < 238 ->
     "SF8BW125";
+spreading(_, L) when L < 25 ->
+    "SF10BW125";
 spreading(_, L) when L < 67 ->
     "SF9BW125";
 spreading(_, L) when L < 139 ->
