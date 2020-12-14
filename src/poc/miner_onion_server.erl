@@ -396,17 +396,17 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
 
 -spec spreading(Region :: atom(),
                 Len :: pos_integer()) -> string().
-spreading(_, L) when L < 12 ->
+spreading(_, L) when L < 25 ->
     "SF10BW125";
-spreading('EU868', L) when L < 52 ->
+spreading('EU868', L) when L < 65 ->
     "SF12BW125";
-spreading('EU868', L) when L < 116 ->
+spreading('EU868', L) when L < 129 ->
     "SF9BW125";
-spreading('EU868', L) when L < 223 ->
+spreading('EU868', L) when L < 238 ->
     "SF8BW125";
-spreading(_, L) when L < 54 ->
+spreading(_, L) when L < 67 ->
     "SF9BW125";
-spreading(_, L) when L < 126 ->
+spreading(_, L) when L < 139 ->
     "SF8BW125";
 spreading(_, _) ->
     "SF7BW125".
@@ -416,15 +416,15 @@ spreading(_, _) ->
 spreading_test() ->
     ?assertEqual("SF10BW125", spreading('EU868', 10)),
     ?assertEqual("SF12BW125", spreading('EU868', 14)),
-    ?assertEqual("SF9BW125", spreading('EU868', 54)),
-    ?assertEqual("SF8BW125", spreading('EU868', 117)),
+    ?assertEqual("SF12BW125", spreading('EU868', 54)),
+    ?assertEqual("SF9BW125", spreading('EU868', 117)),
     ?assertEqual("SF8BW125", spreading('EU868', 200)),
     ?assertEqual("SF7BW125", spreading('EU868', 252)),
     ?assertEqual("SF10BW125", spreading('US915', 10)),
     ?assertEqual("SF9BW125", spreading('US915', 50)),
-    ?assertEqual("SF8BW125", spreading('US915', 55)),
+    ?assertEqual("SF9BW125", spreading('US915', 55)),
     ?assertEqual("SF8BW125", spreading('US915', 120)),
-    ?assertEqual("SF7BW125", spreading('US915', 127)),
+    ?assertEqual("SF8BW125", spreading('US915', 127)),
     ?assertEqual("SF7BW125", spreading('US915', 200)),
     ?assertEqual("SF7BW125", spreading('US915', 242)),
     ?assertEqual("SF7BW125", spreading('US915', 255)),
