@@ -668,7 +668,7 @@ process_bbas(N, BBAs) ->
 catchup_time(N) when N < 0.0001 ->
     0;
 %% when it's still relatively small, apply gentle adjustments
-catchup_time(N) when N < 0.04 ->
+catchup_time(N) when N < 0.01 ->
     1;
 %% if it's large, jam on the gas
 catchup_time(_) ->
