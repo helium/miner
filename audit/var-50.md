@@ -87,4 +87,4 @@ None
 
 ## Acceptance block time
 
-Thu Jan  8 08:25:09 AM UTC 1970
+Wed Dec 16 06:07:49 PM UTC 2020
