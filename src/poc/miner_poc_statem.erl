@@ -650,10 +650,10 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                     case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
                         undefined ->
                             lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                    true;
+                            true;
                         LastChallenge ->
                             case (Height - LastChallenge) > POCInterval of
-                                true -> 1 == rand:uniform(trunc(POCInterval / 4));
+                                true -> 1 == rand:uniform(max(10, POCInterval div 10));
                                 false -> false
                             end
                     end,
