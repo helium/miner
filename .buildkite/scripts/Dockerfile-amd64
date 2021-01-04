@@ -14,7 +14,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 # Add our code
 ADD . /usr/src/miner/
 
-RUN rebar3 as prod tar
+RUN rebar3 as docker tar
 RUN mkdir -p /opt/rel
 RUN tar -zxvf _build/prod/rel/*/*.tar.gz -C /opt/rel
 RUN mkdir -p /opt/rel/update
