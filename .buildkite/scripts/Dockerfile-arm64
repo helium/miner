@@ -15,11 +15,11 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 ADD . /usr/src/miner/
 
 RUN rebar3 as docker tar
-RUN mkdir -p /opt/rel
-RUN tar -zxvf _build/prod/rel/*/*.tar.gz -C /opt/rel
-RUN mkdir -p /opt/rel/update
+RUN mkdir -p /opt/docker
+RUN tar -zxvf _build/prod/docker/*/*.tar.gz -C /opt/docker
+RUN mkdir -p /opt/docker/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
-RUN cp genesis /opt/rel/update/genesis
+RUN cp genesis /opt/docker/update/genesis
 
 FROM arm64v8/erlang:22.3.2-alpine as runner
 
@@ -34,7 +34,7 @@ ENV COOKIE=miner \
     # add miner to path, for easy interactions
     PATH=$PATH:/opt/miner/bin
 
-COPY --from=builder /opt/rel /opt/miner
+COPY --from=builder /opt/docker /opt/miner
 
 ENTRYPOINT ["/opt/miner/bin/miner"]
 CMD ["foreground"]
