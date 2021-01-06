@@ -11,7 +11,7 @@
     create_decoder/4,
     create_droplet/2,
     create_encoder/6,
-    catch_droplet/3,
+    catch_droplet/4,
     port/0,
     position/0,
     location_ok/0,
@@ -252,14 +252,22 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, Hlm
         {ok, State1} -> {noreply, State1}
     end;
 handle_call({fountain, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket}, From, State) ->
-    case create_encoder(State, term_to_binary(self), Payload, 32, systematic, tc128) of
+    MaxDropCount = case length(Payload) rem 16 of
+                       0 ->
+                           (length(Payload)/16)*2;
+                       _ ->
+                           round(length(Payload)/16)*2
+                   end,
+    case create_encoder(State, term_to_binary(self), Payload, 16, systematic, tc256) of
         {ok, NewState} ->
-            case send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, NewState) of
+            case send_droplet(MaxDropCount, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, NewState) of
                 {error, _}=Error -> {reply, Error, NewState};
                 {ok, State1} -> {noreply, State1}
             end;
         {exists, _} ->
-            case send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State) of
+            %% What do we do if it already exists and you want to send it again? Should this happen?
+            %% It is a plausable state so idk
+            case send_droplet(MaxDropCount, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State) of
                 {error, _}=Error -> {reply, Error, State};
                 {ok, State1} -> {noreply, State1}
             end
@@ -536,7 +544,7 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, decoders = DecoderMap} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -554,11 +562,38 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
+        {droplet, Id, Length, Payload} ->
+            case collect_droplets(State, Id, Length, Payload) of
+                {ok, #state{decoders=DecoderMap}} ->
+                    lager:info("State OK, collecting..."),
+                    State#state{decoders=DecoderMap};
+                {finished, Message, #state{decoders=DecoderMap}} ->
+                    lager:info("Completed message: ~p", [Message]),
+                    State#state{decoders=DecoderMap};
+                {error, _S} ->
+                    lager:info("Collecting ERROR")
+            end;
         {Type, RoutingInfo} ->
             lager:notice("Routing ~p", [RoutingInfo]),
             erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
+
+-spec collect_droplets(State :: state(),
+                       DropId :: binary(),
+                       Length :: non_neg_integer(),
+                       Payload :: binary()) -> {ok, state()} | {finished, term(), state()} | {error, state()}.
+collect_droplets(State, DropId, Length, Payload) ->
+    case catch_droplet(State, DropId, Payload, tc256) of
+        {ok, S1} ->
+            {ok, S1};
+        {finished, Message, S1} ->
+            lager:info("Complete message received!"),
+            {finished, Message, S1};
+        {nodecoder, S1} ->
+            {ok, S2} = create_decoder(S1, DropId, Length, 16),
+            catch_droplet(S2, DropId, Payload, tc256)
+    end.
 
 -spec route(binary()) -> any().
  route(Pkt) ->
@@ -597,6 +632,9 @@ route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _AD
         _ ->
             {lorawan, {devaddr, DevAddr}}
     end;
+route_non_longfi(<<ID:32/integer-unsigned-little, Length:32/integer-unsigned-little, Payload/binary>>) ->
+    lager:info("Routing droplet..."),
+    {droplet, ID, Length, Payload};
 route_non_longfi(_) ->
     error.
 
@@ -809,6 +847,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
     end.
 
 -spec send_droplet(
+    NumDroplets :: non_neg_integer(),
     When :: integer(),
     ChannelSelectorFun :: fun(),
     DataRate :: string(),
@@ -818,7 +857,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
     From :: {pid(), reference()},
     State :: state()
 ) -> {error, any()} | {ok, state()} | {busy, state()}.
-send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
+send_droplet(NumDroplets, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
             #state{socket=Socket,
                    gateways=Gateways,
                    packet_timers=Timers,
@@ -847,7 +886,8 @@ send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
                     %% TODO a better timeout would be good here
                     Token = mk_token(Timers),
                     Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-                    send_droplet(When,
+                    send_droplet(NumDroplets,
+                                 When,
                                  ChannelSelectorFun,
                                  DataRate,
                                  Power,
@@ -863,11 +903,22 @@ send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
                     ok = gen_udp:send(Socket, IP, Port, Packet),
                     %% TODO a better timeout would be good here
                     Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
-                    {ok, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers), encoders=EncoderMap}}
+                    case NumDroplets > 0 of
+                        true ->
+                            send_droplet(NumDroplets - 1,
+                                 When,
+                                 ChannelSelectorFun,
+                                 DataRate,
+                                 Power,
+                                 IPol,
+                                 HlmPacket,
+                                 From,
+                                 State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers), encoders=EncoderMap});
+                        false ->
+                            {ok, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers), encoders=EncoderMap}}
+                    end
             end
     end.
-
-
 
 -spec create_encoder(State :: state(),
                      Identifier :: binary(),
@@ -917,19 +968,20 @@ create_decoder(#state{decoders=DecoderMap}=State, Identifier, Length, BlockSize)
 
 -spec catch_droplet(State :: state(),
                     Identifier :: binary(),
-                    Droplet :: erlang_fountain:droplet()) -> {ok, state()} | {ok, binary(), state()} | {nodecoder, state()}.
-catch_droplet(#state{decoders=DecoderMap}=State, Identifier, Droplet) ->
+                    Droplet :: erlang_fountain:droplet(),
+                    EncoderType :: tc128 | tc256 | tc512) -> {ok, state()} | {finished, binary(), state()} | {nodecoder, state()}.
+catch_droplet(#state{decoders=DecoderMap}=State, Identifier, Droplet, EncoderType) ->
     case maps:is_key(Identifier, DecoderMap) of
         true ->
             Decoder = maps:get(Identifier, DecoderMap),
-            case fountain_decoder:catch_drop(Decoder, Droplet, tc128) of
+            case fountain_decoder:catch_drop(Decoder, Droplet, EncoderType) of
                 {missing, Stats} ->
                     lager:info("Collecting for ~p | STATS: ~p", [Identifier, Stats]),
                     {ok, State#state{decoders=maps:put(Identifier, Decoder, DecoderMap)}};
                 {finished, Message, Stats} ->
                     lager:info("Message decoded for ~p | STATS: ~p \r\n MESSAGE: ~p", [Identifier, Stats, Message]),
                     NewDecMap = maps:remove(Identifier, DecoderMap),
-                    {ok, Message, State#state{decoders=NewDecMap}}
+                    {finished, Message, State#state{decoders=NewDecMap}}
             end;
         false ->
             lager:info("No decoder found for identifier ~p when attempting to catch droplets"),
