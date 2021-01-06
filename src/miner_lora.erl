@@ -7,6 +7,11 @@
     handle_response/1,
     send/1,
     send_poc/5,
+    send_poc_fountain/5,
+    create_decoder/4,
+    create_droplet/2,
+    create_encoder/6,
+    catch_droplet/3,
     port/0,
     position/0,
     location_ok/0,
@@ -52,7 +57,9 @@
     reg_freq_list :: [float()],
     reg_throttle :: miner_lora_throttle:handle(),
     last_tmst_us = undefined :: undefined | integer(), % last concentrator tmst reported by the packet forwarder
-    last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    last_mono_us = undefined :: undefined | integer(),  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    encoders :: encoder_map(),
+    decoders :: decoder_map()
 }).
 
 -record(country, {
@@ -68,6 +75,8 @@
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
 -type freq_data() :: {Region::atom(), Freqs::[float]}.
+-type encoder_map() :: #{}.
+-type decoder_map() :: #{}.
 
 -define(COUNTRY_FREQ_DATA, country_freq_data).
 
@@ -117,6 +126,11 @@ send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength
 -spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
 send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
+
+-spec send_poc_fountain(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
+send_poc_fountain(Payload, When, ChannelSelectorFun, DataRate, Power) ->
+    gen_server:call(?MODULE, {fountain, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
+
 
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
@@ -224,7 +238,9 @@ init(Args) ->
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
                 reg_freq_list = DefaultRegFreqList,
-                reg_throttle = miner_lora_throttle:new(DefaultRegRegion)}}.
+                reg_throttle = miner_lora_throttle:new(DefaultRegRegion),
+                encoders = #{},
+                decoders = #{}}}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -234,6 +250,19 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, Hlm
     case send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State) of
         {error, _}=Error -> {reply, Error, State};
         {ok, State1} -> {noreply, State1}
+    end;
+handle_call({fountain, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket}, From, State) ->
+    case create_encoder(State, term_to_binary(self), Payload, 32, systematic, tc128) of
+        {ok, NewState} ->
+            case send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, NewState) of
+                {error, _}=Error -> {reply, Error, NewState};
+                {ok, State1} -> {noreply, State1}
+            end;
+        {exists, _} ->
+            case send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From, State) of
+                {error, _}=Error -> {reply, Error, State};
+                {ok, State1} -> {noreply, State1}
+            end
     end;
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
@@ -777,6 +806,134 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
             %% TODO a better timeout would be good here
             Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
             {ok, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers)}}
+    end.
+
+-spec send_droplet(
+    When :: integer(),
+    ChannelSelectorFun :: fun(),
+    DataRate :: string(),
+    Power :: float(),
+    IPol :: boolean(),
+    HlmPacket :: helium_packet(),
+    From :: {pid(), reference()},
+    State :: state()
+) -> {error, any()} | {ok, state()} | {busy, state()}.
+send_droplet(When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket, From,
+            #state{socket=Socket,
+                   gateways=Gateways,
+                   packet_timers=Timers,
+                   reg_freq_list=Freqs,
+                   reg_throttle=Throttle,
+                   last_tmst_us=PrevTmst_us,
+                   last_mono_us=PrevMono_us,
+                   encoders=EncoderMap}=State) ->
+    case select_gateway(Gateways) of
+        {error, _}=Error ->
+            Error;
+        {ok, #gateway{ip=IP, port=Port}} ->
+            lager:info("PULL_RESP to ~p:~p", [IP, Port]),
+            %% the fun is set by the sender and is used to deterministically route data via channels
+            LocalFreq = ChannelSelectorFun(Freqs),
+            %% Check this transmission for regulatory compliance.
+            {SpreadingFactor, Bandwidth} = parse_datarate(DataRate),
+            Droplet = create_droplet(EncoderMap, term_to_binary(self)),
+            Payload = term_to_binary(Droplet),
+            TimeOnAir = miner_lora_throttle:time_on_air(Bandwidth, SpreadingFactor, 5, 8, true, byte_size(Payload)),
+            AdjustedTmst_us = tmst_to_local_monotonic_time(When, PrevTmst_us, PrevMono_us),
+            SentAt = AdjustedTmst_us / 1000,
+            case miner_lora_throttle:can_send(Throttle, SentAt, LocalFreq, TimeOnAir) of
+                false ->
+                    lager:warning("Waiting for next droplet transmission..."),
+                    %% TODO a better timeout would be good here
+                    Token = mk_token(Timers),
+                    Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+                    send_droplet(When,
+                                 ChannelSelectorFun,
+                                 DataRate,
+                                 Power,
+                                 IPol,
+                                 HlmPacket,
+                                 From,
+                                 State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers), encoders=EncoderMap});
+                true ->
+                    Token = mk_token(Timers),
+                    Packet = create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token),
+                    maybe_mirror(State#state.mirror_socket, Packet),
+                    lager:debug("sending packet via channel: ~p",[LocalFreq]),
+                    ok = gen_udp:send(Socket, IP, Port, Packet),
+                    %% TODO a better timeout would be good here
+                    Ref = erlang:send_after(10000, self(), {tx_timeout, Token}),
+                    {ok, State#state{packet_timers=maps:put(Token, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, HlmPacket}, Timers), encoders=EncoderMap}}
+            end
+    end.
+
+
+
+-spec create_encoder(State :: state(),
+                     Identifier :: binary(),
+                     Data :: binary(),
+                     ChunkSize :: non_neg_integer(),
+                     EncType :: systematic | random,
+                     LdpcEncType :: tc128 | tc256 | tc512) -> {ok, state()} | {exists, state()}.
+create_encoder(#state{encoders=EncoderMap}=State, Identifier, Data, ChunkSize, EncType, LdpcEncType) ->
+    case maps:is_key(Identifier, EncoderMap) of
+        true ->
+            lager:info("Encoder exists and is active with identifier: ~p", [Identifier]),
+            {exists, State#state{encoders=EncoderMap}};
+        false ->
+            lager:info("Creating new encoder for identifier: ~p", [Identifier]),
+            NewEncoder = fountain_encoder:new(Data, ChunkSize, EncType, LdpcEncType),
+            {ok, State#state{encoders=maps:put(Identifier, NewEncoder, EncoderMap)}}
+    end.
+
+
+-spec create_droplet(State :: state(), Identifier :: binary()) -> {ok, erlang_fountain:droplet()} | error.
+create_droplet(#state{encoders=EncoderMap}, Identifier) ->
+    case maps:is_key(Identifier, EncoderMap) of
+        true ->
+            lager:info("Encoder found. Creating droplet for ~p", [Identifier]),
+            Encoder = maps:get(Identifier, EncoderMap),
+            Droplet = fountain_encoder:next(Encoder),
+            {ok, Droplet};
+        false ->
+            lager:info("No encoder found for ~p when creating droplet", [Identifier]),
+            error
+    end.
+
+-spec create_decoder(State :: state(),
+                     Identifier :: binary(),
+                     Length :: non_neg_integer(),
+                     BlockSize :: non_neg_integer()) -> {ok, state()}.
+create_decoder(#state{decoders=DecoderMap}=State, Identifier, Length, BlockSize) ->
+    case maps:is_key(Identifier, DecoderMap) of
+        true ->
+            lager:info("Decoder already exists for identifier ~p", [Identifier]),
+            {ok, State#state{decoders=DecoderMap}};
+        false ->
+            lager:info("Creating new decoder for identifier ~p", [Identifier]),
+            {ok, Decoder} = fountain_decoder:new(Length, BlockSize),
+            {ok, State#state{decoders=maps:put(Identifier, Decoder, DecoderMap)}}
+    end.
+
+-spec catch_droplet(State :: state(),
+                    Identifier :: binary(),
+                    Droplet :: erlang_fountain:droplet()) -> {ok, state()} | {ok, binary(), state()} | {nodecoder, state()}.
+catch_droplet(#state{decoders=DecoderMap}=State, Identifier, Droplet) ->
+    case maps:is_key(Identifier, DecoderMap) of
+        true ->
+            Decoder = maps:get(Identifier, DecoderMap),
+            case fountain_decoder:catch_drop(Decoder, Droplet, tc128) of
+                {missing, Stats} ->
+                    lager:info("Collecting for ~p | STATS: ~p", [Identifier, Stats]),
+                    {ok, State#state{decoders=maps:put(Identifier, Decoder, DecoderMap)}};
+                {finished, Message, Stats} ->
+                    lager:info("Message decoded for ~p | STATS: ~p \r\n MESSAGE: ~p", [Identifier, Stats, Message]),
+                    NewDecMap = maps:remove(Identifier, DecoderMap),
+                    {ok, Message, State#state{decoders=NewDecMap}}
+            end;
+        false ->
+            lager:info("No decoder found for identifier ~p when attempting to catch droplets"),
+            {nodecoder, State}
     end.
 
 -spec create_packet(
