@@ -267,8 +267,8 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, save_data(Data#data{receiving_timeout=T-1})};
 receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
-                                          packet_hashes=PacketHashes,
-                                          blockchain=Chain}=Data) ->
+                                                   packet_hashes=PacketHashes,
+                                                   blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
@@ -729,8 +729,8 @@ submit_receipts(#data{address=Challenger,
     Path1 = lists:foldl(
         fun({Challengee, LayerHash}, Acc) ->
             {Address, Receipt} = maps:get(Challengee, Responses0, {make_ref(), undefined}),
-            %% get any witnesses not from the same p2p address
-            Witnesses = [W || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address],
+            %% get any witnesses not from the same p2p address and also ignore challengee as a witness (self-witness)
+            Witnesses = [W || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee],
             E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
             [E|Acc]
         end,
