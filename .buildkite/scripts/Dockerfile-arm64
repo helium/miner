@@ -16,7 +16,7 @@ ADD . /usr/src/miner/
 
 RUN rebar3 as docker tar
 RUN mkdir -p /opt/docker
-RUN tar -zxvf _build/prod/docker/*/*.tar.gz -C /opt/docker
+RUN tar -zxvf _build/docker/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/docker/update/genesis
