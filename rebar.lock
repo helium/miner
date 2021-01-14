@@ -167,7 +167,7 @@
  {<<"shards">>,{pkg,<<"shards">>,<<"0.6.0">>},2},
  {<<"sibyl">>,
   {git,"git@github.com:helium/sibyl.git",
-       {ref,"dd259503c6a0c122fd48fa6cf0edbecd7ea5a9b1"}},
+       {ref,"c940901263f649efdb67cbc53b71ba0683bd03bb"}},
   0},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},3},
  {<<"splicer">>,
