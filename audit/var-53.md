@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction updates Helium staking keys and allows Calchip to onboard new Hotspots.
+This transaction updates Helium staking keys and allows Calchip to onboard new Hotspots. More details available [here](https://blog.helium.com/onboarding-for-third-party-hotspots-f8b99df35be).
 
 ## Version threshold
 
