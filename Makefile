@@ -30,16 +30,16 @@ typecheck:
 ci: compile
 	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
-release:
+release: | $(grpc_services_directory)
 	$(REBAR) as prod release -n miner
 
 cover:
 	$(REBAR) cover
 
-aws:
+aws: | $(grpc_services_directory)
 	$(REBAR) as aws release
 
-seed:
+seed: | $(grpc_services_directory)
 	$(REBAR) as seed release
 
 devrel:
