@@ -17,12 +17,13 @@ get_onboarding_filename() ->
             filename:join([OnboardingDir, "onboarding_key"])
     end.
 
-get_onboarding_key() ->
+get_onboarding_key(Default) ->
     case get_onboarding_filename() of
-        undefined -> undefined;
+        undefined -> Default;
         OnboardingKey ->
             case file:read_file(OnboardingKey) of
                 {ok, Bin} -> Bin;
+                {error, enoent} -> Default;
                 {error, _Reason} -> undefined
             end
     end.
@@ -45,7 +46,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key()
+               onboarding_key => get_onboarding_key(PubKey)
              };
         {error, enoent} ->
             KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -54,7 +55,7 @@ keys({file, BaseDir}) ->
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key()
+               onboarding_key => get_onboarding_key(PubKey)
              }
     end;
 keys({ecc, Props}) when is_list(Props) ->
@@ -70,7 +71,15 @@ keys({ecc, Props}) when is_list(Props) ->
                            miner_ecc_worker:get_pid()
                    end,
     {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
-    {ok, OnboardingKey} = ecc508:genkey(ECCPid, public, OnboardingKeySlot),
+    OnboardingKey = 
+        case ecc508:genkey(ECCPid, public, OnboardingKeySlot) of
+            {ok, Key} -> 
+                {ecc_compact, Key};
+            {error, ecc_response_exec_error} -> 
+                %% Key not present, this slot is (assumed to be) empty so use the public key 
+                %% as the onboarding key
+                PubKey
+        end,
     case whereis(miner_ecc_worker) of
         undefined ->
             %% Stop ephemeral ecc pid
@@ -91,7 +100,7 @@ keys({ecc, Props}) when is_list(Props) ->
                           {ok, Sig} = miner_ecc_worker:sign(Bin),
                           Sig
                   end,
-       onboarding_key => {ecc_compact, OnboardingKey}
+       onboarding_key => OnboardingKey
      }.
 
 
@@ -113,7 +122,8 @@ print_keys(_) ->
                end,
     MaybeUUIDv4 = fun(undefined) -> undefined;
                   (Key) ->
-                      %% only production blackspots read onboarding_key from a file
+                      %% only production blackspots read onboarding_key from a file 
+                      %% and they're (unfortunately) considered to be uuids
                       OnboardingFilename = get_onboarding_filename(),
                       case filelib:is_file(OnboardingFilename) of
                           true ->
