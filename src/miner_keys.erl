@@ -74,7 +74,7 @@ keys({ecc, Props}) when is_list(Props) ->
     OnboardingKey = 
         case ecc508:genkey(ECCPid, public, OnboardingKeySlot) of
             {ok, Key} -> 
-                {ecc_copmact, Key};
+                {ecc_compact, Key};
             {error, ecc_response_exec_error} -> 
                 %% Key not present, this slot is (assumed to be) empty so use the public key 
                 %% as the onboarding key
