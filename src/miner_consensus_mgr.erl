@@ -689,7 +689,7 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
         {error, Reason} ->
             %% die on failure
             lager:info("didn't restore consensus group: ~p", [Reason]),
-            {stop, State}
+            {stop, Reason, State}
     end;
 handle_info(_Info, State) ->
     lager:warning("unexpected message ~p", [_Info]),
