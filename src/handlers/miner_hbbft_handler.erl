@@ -203,7 +203,7 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
     end;
 %% these are coming back from the sidecar, they don't need to be
 %% validated further.
-handle_command(Txn, State=#state{hbbft=HBBFT}) ->
+handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
     Buf = hbbft:buf(HBBFT),
     case lists:member(blockchain_txn:serialize(Txn), Buf) of
         true ->
@@ -217,7 +217,9 @@ handle_command(Txn, State=#state{hbbft=HBBFT}) ->
                 {NewHBBFT, {send, Msgs}} ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
-    end.
+    end;
+handle_command(_, _State) ->
+    {reply, ignored, ignore}.
 
 handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
     Msg = binary_to_term(BinMsg),
