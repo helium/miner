@@ -42,10 +42,14 @@ groups() ->
      {sc_v2,
       [],
       test_cases() ++ scv2_only_tests()
-     }].
+     },
+     {sc_grpc,
+      [],
+      test_cases() ++ scv2_only_tests()
+     }   ].
 
 all() ->
-    [{group, sc_v1}, {group, sc_v2}].
+    [{group, sc_v1}, {group, sc_v2}, {group, sc_grpc}].
 
 test_cases() ->
     [no_packets_expiry_test,
@@ -69,7 +73,8 @@ scv2_only_tests() ->
 
 init_per_group(sc_v1, Config) ->
     %% This is only for configuration and checking purposes
-    [{sc_version, 1} | Config];
+    [{sc_version, 1},
+     {sc_client_transport_handler, blockchain_state_channel_handler} | Config];
 init_per_group(sc_v2, Config) ->
     SCVars = ?config(sc_vars, Config),
     %% NOTE: SC V2 also needs to have an election for reward payout
@@ -85,7 +90,10 @@ init_per_group(sc_v2, Config) ->
                             ?sc_causality_fix => 1,
                             ?reward_version => 4
                            }),
-    [{sc_vars, SCV2Vars}, {sc_version, 2} | Config].
+    [{sc_vars, SCV2Vars}, {sc_version, 2},
+     {sc_client_transport_handler, blockchain_state_channel_handler} | Config];
+init_per_group(sc_grpc, Config) ->
+    [{sc_client_transport_handler, blockchain_grpc_sc_client_test_handler} | Config].
 
 end_per_group(_, _Config) ->
     ok.
