@@ -1,6 +1,8 @@
 -module(miner_keys).
 
--export([keys/1, print_keys/1]).
+-export([key_config/0, keys/1, print_keys/1]).
+
+-type key_configuration() :: {ecc, proplists:proplist()} | {file, BaseDir::string()}.
 
 -type key_info() :: #{ pubkey => libp2p_crypto:pubkey(),
                        key_slot => non_neg_integer() | undefined,
@@ -8,7 +10,8 @@
                        sig_fun => libp2p_crypto:sig_fun(),
                        onboarding_key => libp2p_crypto:pubkey() | undefined
                      }.
--export_type([key_info/0]).
+
+-export_type([key_info/0, key_configuration/0]).
 
 get_onboarding_filename() ->
     case application:get_env(blockchain, onboarding_dir) of
@@ -34,8 +37,7 @@ get_onboarding_key() ->
 %% NOTE: Do NOT call this after miner has started since this function
 %% will attempt to communicate directly with the ECC. Use only as part
 %% of startup or other miner-free scripts.
--spec keys({file, BaseDir::string()} |
-           {ecc, proplists:proplist()}) -> key_info().
+-spec keys(key_configuration()) -> key_info().
 keys({file, BaseDir}) ->
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
@@ -94,16 +96,19 @@ keys({ecc, Props}) when is_list(Props) ->
        onboarding_key => {ecc_compact, OnboardingKey}
      }.
 
+-spec key_config() -> key_configuration().
+key_config() ->
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
+    case application:get_env(blockchain, key, undefined) of
+        undefined -> {file, BaseDir};
+        KC -> KC
+    end.
 
 %% @doc prints the public hotspot and onboadring key in a file:consult
 %% friendly way to stdout. This is used by other services (like
 %% gateway_config) to get read access to the public keys
 print_keys(_) ->
-    BaseDir = application:get_env(blockchain, base_dir, "data"),
-    KeyConfig = case application:get_env(blockchain, key, undefined) of
-                    undefined -> {file, BaseDir};
-                    KC -> KC
-                end,
+    KeyConfig = key_config(),
     #{
        pubkey := PubKey,
        onboarding_key := OnboardingKey

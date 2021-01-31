@@ -14,6 +14,7 @@
 
 -define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
 -define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
+-define(ONBOARDING_API_URL_BASE, "https://onboarding.dewi.org/api/v2").
 
 register_cli() ->
     register_all_usage(),
@@ -30,6 +31,7 @@ register_all_usage() ->
                    info_name_usage(),
                    info_block_age_usage(),
                    info_p2p_status_usage(),
+                   info_onboarding_usage(),
                    info_summary_usage(),
                    info_region_usage()
                   ]).
@@ -45,6 +47,7 @@ register_all_cmds() ->
                    info_name_cmd(),
                    info_block_age_cmd(),
                    info_p2p_status_cmd(),
+                   info_onboarding_cmd(),
                    info_summary_cmd(),
                    info_region_cmd()
                   ]).
@@ -57,10 +60,11 @@ info_usage() ->
      ["miner info commands\n\n",
       "  info height - Get height of the blockchain for this miner.\n",
       "  info in_consensus - Show if this miner is in the consensus_group.\n"
-      "  name - Shows the name of this miner.\n"
-      "  block_age - Get age of the latest block in the chain, in seconds.\n"
-      "  p2p_status - Shows key peer connectivity status of this miner.\n"
-      "  summary - Get a collection of key data points for this miner.\n"
+      "  info name - Shows the name of this miner.\n"
+      "  info block_age - Get age of the latest block in the chain, in seconds.\n"
+      "  info p2p_status - Shows key peer connectivity status of this miner.\n"
+      "  info onboarding - Get manufacturing and staking details for this miner.\n"
+      "  info summary - Get a collection of key data points for this miner.\n"
      ]
     ].
 
@@ -194,10 +198,8 @@ info_p2p_status_usage() ->
 
 info_p2p_status(["info", "p2p_status"], [], []) ->
     StatusResults = miner:p2p_status(),
-    FormatResult = fun({Name, Result}) ->
-                           [{name, Name}, {result, Result}]
-                   end,
-    [clique_status:table(lists:map(FormatResult, StatusResults))];
+    [clique_status:table(lists:map(fun tuple_to_table_row/1, StatusResults))];
+
 info_p2p_status([_, _, _], [], []) ->
     usage.
 
@@ -230,12 +232,102 @@ info_region([_, _, _], [], []) ->
     usage.
 
 %%
+%% info onboarding
+%%
+
+info_onboarding_usage() ->
+    [["info", "onboarding"],
+     ["info onboarding \n\n",
+      "  Get the manufacturing information for this miner\n\n"
+      "  Options\n\n"
+      "    -p, --payer "
+      "        Just print the payer key that should be used when requesting signatures for transactions that require manufacturer staking.\n"
+     ]
+    ].
+
+info_onboarding_cmd() ->
+    [
+     [["info", "onboarding"], [],
+        [{just_payer, [  {shortname, "p"},
+                         {longname, "payer"}]}
+        ], fun info_onboarding/3]
+    ].
+
+info_onboarding(["info", "onboarding"], _Keys, Flags) ->
+    PayerOutputOnly = case proplists:get_value(just_payer, Flags, false) of
+        false -> false;
+        _ -> true
+    end,
+    #{
+       onboarding_key := OnboardingKey
+    } = miner_keys:keys(miner_keys:key_config()),
+    case OnboardingKey of
+        undefined ->
+            clique_status_for_no_onboarding_key(PayerOutputOnly);
+        OK ->
+            case onboarding_info_for_key(OK) of
+                {ok, OnboardingInfo} ->
+                    clique_status_for_onboarding_info(OnboardingInfo, PayerOutputOnly);
+                {notfound, _} ->
+                    clique_status_for_onboarding_info_not_found(PayerOutputOnly)
+            end
+    end.
+
+-spec onboarding_info_for_key(libp2p_crypto:pubkey()) -> {ok, {map(), map()}} | {notfound, term()}.
+onboarding_info_for_key(OnboardingKey) ->
+    PubKey58 = libp2p_crypto:pubkey_to_b58(OnboardingKey),
+    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ PubKey58, 
+    case get_api_json_as_map(Url) of
+        {ok, OnboardingResult} ->
+            OnboardingDataMap = maps:get(<<"data">>, OnboardingResult),
+            MakerMap = maps:get(<<"maker">>, OnboardingDataMap),
+            OtherDataMap = maps:filter(fun onboarding_item_is_miscellaneous/2, OnboardingDataMap),
+            {ok, {OtherDataMap, MakerMap}};
+        {notfound, Other} -> {notfound, Other}
+    end.
+
+-spec onboarding_item_is_miscellaneous(binary(), binary()) -> boolean().
+onboarding_item_is_miscellaneous(Key, _Value) ->
+    Key =/= <<"maker">>.
+
+-spec clique_status_for_onboarding_info({map(), map()}, boolean()) -> list().
+clique_status_for_onboarding_info({OtherDataMap, MakerMap}, PayerOutputOnly) ->
+    case PayerOutputOnly of
+        true -> [ clique_status:text(maps:get(<<"address">>, MakerMap)) ];
+        false -> full_status_for_onboarding_info(OtherDataMap, MakerMap)
+    end.
+
+-spec clique_status_for_no_onboarding_key(boolean()) -> list().
+clique_status_for_no_onboarding_key(PayerOutputOnly) ->
+    case PayerOutputOnly of
+        true -> [];
+        false -> [ clique_status:text("This miner has no onboarding key, no onboarding info available.") ]
+    end.
+
+-spec clique_status_for_onboarding_info_not_found(boolean()) -> list().
+clique_status_for_onboarding_info_not_found(PayerOutputOnly) ->
+    case PayerOutputOnly of
+        true -> [];
+        false -> [ clique_status:text("No onboarding info found for this miner's onboarding key.") ]
+    end.
+
+-spec full_status_for_onboarding_info(map(), map()) -> list().
+full_status_for_onboarding_info(OtherDataMap, MakerMap) ->
+    OtherData = maps:to_list(OtherDataMap),
+    MakerData = maps:to_list(MakerMap),
+    [
+        clique_status:text("\n********************\nGeneral Manufacturing Info\n********************\n"),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, OtherData)),
+        clique_status:text("\n********************\nManufacturer Info\n********************\n"),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, MakerData))
+    ].
+
+%%
 %% info summary
 %%
 
 info_summary_cmd() ->
     [
-     [["info", "summary"], [], [], fun info_summary/3],
      [["info", "summary"], [],
       [{error_count, [  {shortname, "e"},
                         {longname, "error_count"}]},
@@ -311,11 +403,8 @@ do_info_summary(ErrorCount, ScanRange) ->
     {GeneralInfo, POCErrorInfo,
         TxnErrorInfo, GenErrorInfo} = get_summary_info(ErrorCount, ScanRange),
 
-    GeneralFormat =   fun({Name, Result}) ->
-                            [{name, Name}, {result, Result}]
-                      end,
     [   clique_status:text("\n********************\nMiner General Info\n********************\n"),
-        clique_status:table(lists:map(GeneralFormat, GeneralInfo)),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, GeneralInfo)),
         clique_status:text("\n********************\nMiner P2P Info\n********************\n"),
         hd(info_p2p_status(["info", "p2p_status"], [], [])),
         clique_status:text("\n********************\nMiner log errors\n********************\n"),
@@ -370,6 +459,16 @@ get_gateway_info(Chain, PubKey)->
             "gateway not found in ledger"
     end.
 
+-spec get_api_json_as_map(string()) -> map().
+get_api_json_as_map(Url) ->
+    {ok, Result} = httpc:request(get, {Url,[{"connection", "close"}]}, [], [{body_format, binary}]),
+    {HTTPMessage, _Headers, Data} = Result,
+    {_HTTPVersion, ReturnCode, _ResponseMessage} = HTTPMessage,
+    case ReturnCode of
+        200 -> {ok, jsx:decode(Data, [return_maps])};
+        404 -> {notfound, undefined}
+    end.
+
 format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
     integer_to_list(SyncHeight);
 format_sync_height(SyncHeight, _Height) ->
@@ -392,3 +491,6 @@ format_macs_from_interfaces(IFs)->
 
 format_hwaddr(HWAddr)->
    string:to_upper(blockchain_utils:bin_to_hex(list_to_binary(HWAddr))).
+
+tuple_to_table_row({Name, Result}) ->
+    [{name, Name}, {result, Result}].
