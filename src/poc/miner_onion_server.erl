@@ -386,8 +386,7 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
                     {error, fail_decrypt};
                 {Payload, NextLayer} ->
                     {ok, Payload, NextLayer}
-            catch _A:_B:_C ->
-                    lager:error("Error decrypting: ~p", [{_A, _B, _C}]),
+            catch _A:_B ->
                     {error, {_A, _B}}
             end;
         {ok, _} ->
