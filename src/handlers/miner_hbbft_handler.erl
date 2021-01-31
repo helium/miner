@@ -152,6 +152,8 @@ handle_command({skip, Ref, Worker}, State) ->
              State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
                          bba = <<>>, seen = #{}}}
     end;
+handle_command(mark_done, _State) ->
+    {reply, ok, ignore};
 %% XXX this is a hack because we don't yet have a way to message this process other ways
 handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
     PrevRound = hbbft:round(HBBFT),

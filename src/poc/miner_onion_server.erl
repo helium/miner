@@ -57,7 +57,6 @@
 
 -define(BLOCK_RETRY_COUNT, 10).
 -define(CHANNELS, [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3]).
--define(TX_POWER, 27). %% 27 db
 
 -type state() :: #state{}.
 
@@ -348,7 +347,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
                     Spreading = spreading(Region, erlang:byte_size(Packet)),
-                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, ?TX_POWER) end),
+                    TxPower = tx_power(Region),
+                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
                 false ->
@@ -397,6 +397,13 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
 
 -spec spreading(Region :: atom(),
                 Len :: pos_integer()) -> string().
+
+tx_power('EU868') ->
+    14;
+tx_power('US915') ->
+    27;
+tx_power(_) ->
+    27.
 
 spreading('EU868', L) when L < 65 ->
     "SF12BW125";
