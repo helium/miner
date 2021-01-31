@@ -237,89 +237,92 @@ info_region([_, _, _], [], []) ->
 
 info_onboarding_usage() ->
     [["info", "onboarding"],
-     ["info onboarding \n\n",
-      "  Get the manufacturing information for this miner\n\n"
-      "  Options\n\n"
-      "    -p, --payer "
-      "        Just print the payer key that should be used when requesting signatures for transactions that require manufacturer staking.\n"
+     ["info onboarding [-k <key>] [-p]\n\n",
+      "  Get the manufacturing information for this miner, querying the\n"
+      "  Decentralized Wireless Alliance server.\n"
+      "\n"
+      "  Options\n"
+      "\n"
+      "    -k, --key <onboarding-key>\n"
+      "        Use the specified onboarding key rather than the key for this miner.\n"
+      "    -p, --payer\n"
+      "        After obtaining the information, just print the manufacturer's payer key\n"
+      "        This is the key that should be named when requesting signatures for\n"
+      "        transactions that require manufacturer staking.\n"
      ]
     ].
 
 info_onboarding_cmd() ->
     [
      [["info", "onboarding"], [],
-        [{just_payer, [  {shortname, "p"},
-                         {longname, "payer"}]}
+        [
+            {just_payer, [ {shortname, "p"}, {longname, "payer"}]},
+            {key, [ {shortname, "k"}, {longname, "key"}, {datatype, string}]}
         ], fun info_onboarding/3]
     ].
 
-info_onboarding(["info", "onboarding"], _Keys, Flags) ->
-    PayerOutputOnly = case proplists:get_value(just_payer, Flags, false) of
-        false -> false;
-        _ -> true
+info_onboarding(["info", "onboarding"], [], Flags) ->
+    OnboardingKey = case proplists:get_value(key, Flags, undefined) of
+        undefined ->
+            #{ onboarding_key := MinerOnboardingKey } = miner_keys:keys(),
+            MinerOnboardingKey;
+        ProvidedKey ->
+            ProvidedKey
     end,
-    #{
-       onboarding_key := OnboardingKey
-    } = miner_keys:keys(miner_keys:key_config()),
+    PayerOutputOnly = proplists:is_defined(just_payer, Flags),
+    
     case OnboardingKey of
         undefined ->
-            clique_status_for_no_onboarding_key(PayerOutputOnly);
+            error_message("This miner has no onboarding key, no onboarding info available.");
         OK ->
             case onboarding_info_for_key(OK) of
                 {ok, OnboardingInfo} ->
                     clique_status_for_onboarding_info(OnboardingInfo, PayerOutputOnly);
-                {notfound, _} ->
-                    clique_status_for_onboarding_info_not_found(PayerOutputOnly)
+                notfound ->
+                    error_message("No onboarding info found for this miner's onboarding key.");
+                {error, Code} ->
+                    error_message(io_lib:format("Onboarding server unexcpetedly returned code ~p.", [ Code ]))
             end
     end.
 
--spec onboarding_info_for_key(libp2p_crypto:pubkey()) -> {ok, {map(), map()}} | {notfound, term()}.
+%%
+%% Onboarding information is generally divided into two parts: information
+%% specific to this miner ("MinerData") and information about its manufacturer
+%% ("MakerData").
+%%
+-spec onboarding_info_for_key(string()) -> {ok, {map(), map()}} | notfound.
 onboarding_info_for_key(OnboardingKey) ->
-    PubKey58 = libp2p_crypto:pubkey_to_b58(OnboardingKey),
-    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ PubKey58, 
+    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ OnboardingKey, 
     case get_api_json_as_map(Url) of
         {ok, OnboardingResult} ->
-            OnboardingDataMap = maps:get(<<"data">>, OnboardingResult),
-            MakerMap = maps:get(<<"maker">>, OnboardingDataMap),
-            OtherDataMap = maps:filter(fun onboarding_item_is_miscellaneous/2, OnboardingDataMap),
-            {ok, {OtherDataMap, MakerMap}};
-        {notfound, Other} -> {notfound, Other}
+            OnboardingData = maps:get(<<"data">>, OnboardingResult),
+            MakerData      = maps:get(<<"maker">>, OnboardingData),
+            IsMinerData = fun (Key, _Value) -> Key =/= <<"maker">> end,
+            MinerData = maps:filter(IsMinerData, OnboardingData),
+            {ok, {MinerData, MakerData}};
+        notfound -> notfound;
+        {error, Code} -> {error, Code}
     end.
-
--spec onboarding_item_is_miscellaneous(binary(), binary()) -> boolean().
-onboarding_item_is_miscellaneous(Key, _Value) ->
-    Key =/= <<"maker">>.
 
 -spec clique_status_for_onboarding_info({map(), map()}, boolean()) -> list().
-clique_status_for_onboarding_info({OtherDataMap, MakerMap}, PayerOutputOnly) ->
+clique_status_for_onboarding_info({MinerData, MakerData}, PayerOutputOnly) ->
     case PayerOutputOnly of
-        true -> [ clique_status:text(maps:get(<<"address">>, MakerMap)) ];
-        false -> full_status_for_onboarding_info(OtherDataMap, MakerMap)
-    end.
-
--spec clique_status_for_no_onboarding_key(boolean()) -> list().
-clique_status_for_no_onboarding_key(PayerOutputOnly) ->
-    case PayerOutputOnly of
-        true -> [];
-        false -> [ clique_status:text("This miner has no onboarding key, no onboarding info available.") ]
-    end.
-
--spec clique_status_for_onboarding_info_not_found(boolean()) -> list().
-clique_status_for_onboarding_info_not_found(PayerOutputOnly) ->
-    case PayerOutputOnly of
-        true -> [];
-        false -> [ clique_status:text("No onboarding info found for this miner's onboarding key.") ]
+        true -> 
+            PayerAddress = maps:get(<<"address">>, MakerData),
+            PayerAddressString = binary_to_list(PayerAddress),
+            [ clique_status:text(PayerAddressString) ];
+        false -> full_status_for_onboarding_info(MinerData, MakerData)
     end.
 
 -spec full_status_for_onboarding_info(map(), map()) -> list().
-full_status_for_onboarding_info(OtherDataMap, MakerMap) ->
-    OtherData = maps:to_list(OtherDataMap),
-    MakerData = maps:to_list(MakerMap),
+full_status_for_onboarding_info(MinerData, MakerData) ->
+    MinerDisplay = maps:to_list(MinerData),
+    MakerDisplay = maps:to_list(MakerData),
     [
         clique_status:text("\n********************\nGeneral Manufacturing Info\n********************\n"),
-        clique_status:table(lists:map(fun tuple_to_table_row/1, OtherData)),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, MinerDisplay)),
         clique_status:text("\n********************\nManufacturer Info\n********************\n"),
-        clique_status:table(lists:map(fun tuple_to_table_row/1, MakerData))
+        clique_status:table(lists:map(fun tuple_to_table_row/1, MakerDisplay))
     ].
 
 %%
@@ -414,7 +417,9 @@ do_info_summary(ErrorCount, ScanRange) ->
 
     ].
 
-
+%%
+%% Utility functions.
+%%
 get_mac_addrs()->
     {ok, IFs} = inet:getifaddrs(),
     Macs = format_macs_from_interfaces(IFs),
@@ -459,14 +464,19 @@ get_gateway_info(Chain, PubKey)->
             "gateway not found in ledger"
     end.
 
--spec get_api_json_as_map(string()) -> map().
+%%
+%% Query an HTTP/HTTPS endpoint, interpreting the body as JSON, and thence,
+%% returning it as a map.
+%%
+-spec get_api_json_as_map(string()) -> {ok, map()} | notfound | {error, non_neg_integer()}.
 get_api_json_as_map(Url) ->
     {ok, Result} = httpc:request(get, {Url,[{"connection", "close"}]}, [], [{body_format, binary}]),
     {HTTPMessage, _Headers, Data} = Result,
     {_HTTPVersion, ReturnCode, _ResponseMessage} = HTTPMessage,
-    case ReturnCode of
-        200 -> {ok, jsx:decode(Data, [return_maps])};
-        404 -> {notfound, undefined}
+    if
+        ReturnCode >= 200 andalso ReturnCode =< 299 -> {ok, jsx:decode(Data, [return_maps])};
+        ReturnCode == 404 -> notfound;
+        true -> {error, ReturnCode}
     end.
 
 format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
@@ -494,3 +504,7 @@ format_hwaddr(HWAddr)->
 
 tuple_to_table_row({Name, Result}) ->
     [{name, Name}, {result, Result}].
+
+-spec error_message(string()) -> list().
+error_message(Text) ->
+    [ clique_status:alert([clique_status:text("Error: " ++ Text)]) ].
