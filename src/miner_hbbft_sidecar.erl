@@ -127,7 +127,7 @@ handle_call({submit, Txn}, From,
                     case blockchain_txn:absorb(Txn, Chain) of
                         ok ->
                             spawn(fun() ->
-                                          catch libp2p_group_relcast:handle_command(Group, Txn)
+                                          catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                   end),
                             {reply, ok, State};
                         Error ->
@@ -189,7 +189,7 @@ handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group =
                             ok ->
                                 %% avoid deadlock by not waiting for this.
                                 spawn(fun() ->
-                                              catch libp2p_group_relcast:handle_command(Group, Txn)
+                                              catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                       end),
                                 ok;
                             Error ->
