@@ -290,7 +290,7 @@ info_onboarding(["info", "onboarding"], [], Flags) ->
 %% specific to this miner ("MinerData") and information about its manufacturer
 %% ("MakerData").
 %%
--spec onboarding_info_for_key(string()) -> {ok, {map(), map()}} | notfound.
+-spec onboarding_info_for_key(string()) -> {ok, {map(), map()}} | notfound | {error, non_neg_integer()}.
 onboarding_info_for_key(OnboardingKey) ->
     Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ OnboardingKey, 
     case get_api_json_as_map(Url) of
