@@ -144,6 +144,11 @@ print_keys(_) ->
 %% Helper funtion to retry automatic keyslot key generation and
 %% locking the first time we encounter an empty keyslot.
 get_public_key(ECCPid, Slot) ->
+    get_public_key(ECCPid, Slot, 20).
+
+get_public_key(_ECCPid, _Slot, 0) ->
+    {error, too_many_retries};
+get_public_key(ECCPid, Slot, Retries) ->
     ecc508:wake(ECCPid),
     case ecc508:genkey(ECCPid, public, Slot) of
         {ok, PubKey} ->
@@ -163,7 +168,12 @@ get_public_key(ECCPid, Slot) ->
             %% XXX this is really not the best thing to do here
             %% but deadlines rule everything around us
             ok = gen_compact_key(ECCPid, Slot, 100),
-            get_public_key(ECCPid, Slot)
+            get_public_key(ECCPid, Slot, Retries);
+        %% sometimes we get a different error here, so wait a bit
+        %% and try again, failing after 2 seconds
+        {error, _} ->
+            timer:sleep(150),
+            get_public_key(ECCPid, Slot, Retries - 1)
     end.
 
 gen_compact_key(_Pid, _Slot, 0) ->
