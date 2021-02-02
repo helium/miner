@@ -50,20 +50,22 @@ keys({file, BaseDir}) ->
     ok = filelib:ensure_dir(SwarmKey),
     case libp2p_crypto:load_keys(SwarmKey) of
         {ok, #{secret := PrivKey0, public := PubKey}} ->
+            FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(libp2p_crypto:pubkey_to_b58(PubKey))
+               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              };
         {error, enoent} ->
             KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
             ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
+            FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(libp2p_crypto:pubkey_to_b58(PubKey))
+               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              }
     end;
 keys({ecc, Props}) when is_list(Props) ->
