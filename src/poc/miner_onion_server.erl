@@ -344,8 +344,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             case miner_lora:location_ok() of
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
-                    ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
+                    ChannelSelectorFun = poc_channel(Region),
                     Spreading = spreading(Region, erlang:byte_size(Packet)),
                     TxPower = tx_power(Region),
                     erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
@@ -397,8 +397,14 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
 -spec spreading(Region :: atom(),
                 Len :: pos_integer()) -> string().
 
+%% EU should always use 869.4 for 500mW/27dBm
+poc_channel('EU868') ->
+    fun([H|_]) -> 869.4 end;
+poc_channel(_) ->
+    fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end.
+
 tx_power('EU868') ->
-    14;
+    27;
 tx_power('US915') ->
     27;
 tx_power(_) ->
