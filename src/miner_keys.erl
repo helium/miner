@@ -13,6 +13,7 @@
 
 -export_type([key_info/0, key_configuration/0]).
 
+-spec get_onboarding_filename() -> string() | undefined.
 get_onboarding_filename() ->
     case application:get_env(blockchain, onboarding_dir) of
         undefined -> undefined;
@@ -20,6 +21,7 @@ get_onboarding_filename() ->
             filename:join([OnboardingDir, "onboarding_key"])
     end.
 
+-spec get_onboarding_key(string()) -> string() | undefined.
 get_onboarding_key(Default) ->
     case get_onboarding_filename() of
         undefined -> Default;
