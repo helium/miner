@@ -49,7 +49,7 @@
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
-    swarm_tid :: ets:tid(),
+    swarm_tid :: ets:tid() | atom(),
     swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
 }).
 
@@ -580,9 +580,11 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     {noreply, State#state{blockchain = Chain}};
-handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref}) ->
+handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref, swarm_keys=SK, swarm_tid=STid}) ->
     State1 = #state{blockchain = NC,
-                    blockchain_ref = Ref},
+                    blockchain_ref = Ref,
+                    swarm_keys=SK,
+                    swarm_tid=STid},
     {noreply, State1};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),
