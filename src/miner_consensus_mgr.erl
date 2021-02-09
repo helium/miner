@@ -42,7 +42,8 @@
          cancel_dkgs = #{} :: #{pos_integer() => pid()},
          started_groups = #{} :: #{{pos_integer(),non_neg_integer()} => pid()},
          active_group :: undefined | pid(),
-         ag_monitor = make_ref() :: reference()
+         ag_monitor = make_ref() :: reference(),
+         miner_monitor = make_ref() :: reference()
         }).
 
 %%%===================================================================
@@ -166,6 +167,7 @@ einfo() ->
 
 init(_Args) ->
     ok = blockchain_event:add_handler(self()),
+    erlang:send_after(timer:seconds(1), self(), monitor_miner),
     case  blockchain_worker:blockchain() of
         undefined ->
             {ok, #state{}};
@@ -650,6 +652,31 @@ handle_info(timeout, State) ->
             lager:warning("crash during restore process, going to idle state"),
             {noreply, State}
 
+    end;
+handle_info({'DOWN', MinerRef, process, _MinerPid, _Reason},
+            #state{miner_monitor = MinerRef} = State) ->
+    self() ! monitor_miner,
+    {noreply, State};
+handle_info(monitor_miner, #state{active_group = Group} = State) ->
+    %% we've seen cases where the miner will think that it's out of consensus because
+    %% miner process has crashed, but the group is still running, just not participating
+    %% correctly.  this makes sure that the miner gets the group reinstalled on restart
+    MinerPid = whereis(miner),
+    case is_process_alive(MinerPid) of
+        true ->
+            %% re-establish the reference, waiting for a little while if needed
+            NewRef = erlang:monitor(process, MinerPid),
+            %% reinstall the group so that we participate, if there's a group
+            case Group of
+                undefined ->
+                    ok;
+                _ ->
+                    ok = miner:install_consensus(Group)
+            end,
+            {noreply, State#state{miner_monitor = NewRef}};
+        false ->
+            erlang:send_after(timer:seconds(1), self(), monitor_miner),
+            {noreply, State}
     end;
 handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
             #state{ag_monitor = OldRef, active_group = OldGroup,
