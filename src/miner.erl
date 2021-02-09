@@ -48,7 +48,9 @@
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
-    blockchain_ref = make_ref() :: reference()
+    blockchain_ref = make_ref() :: reference(),
+    swarm_tid :: ets:tid() | atom(),
+    swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
 }).
 
 -define(H3_MINIMUM_RESOLUTION, 9).
@@ -324,11 +326,17 @@ init(_Args) ->
     lager:info("STARTING UP MINER"),
     ok = blockchain_event:add_handler(self()),
     BlockchainRef = erlang:monitor(process, blockchain_worker),
+    {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
+    SwarmTID = blockchain_swarm:tid(), % we don't actually use this for anything at this
+                                       % time, but we should use this if we need it.
     case blockchain_worker:blockchain() of
         undefined ->
-            {ok, #state{}};
+            {ok, #state{swarm_keys = {MyPubKey, SignFun},
+                        swarm_tid = SwarmTID}};
         Chain ->
-            {ok, #state{blockchain = Chain,
+            {ok, #state{swarm_keys = {MyPubKey, SignFun},
+                        swarm_tid = SwarmTID,
+                        blockchain = Chain,
                         blockchain_ref = BlockchainRef}}
     end.
 
@@ -465,7 +473,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                bba_completion => BBA,
                                snapshot_hash => SnapshotHash
                               }),
-                {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
+                {MyPubKey, SignFun} = State#state.swarm_keys,
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
                 %% XXX: can we lose state here if we crash and recover later?
@@ -572,9 +580,11 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
     {noreply, State#state{blockchain = Chain}};
-handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref}) ->
+handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref, swarm_keys=SK, swarm_tid=STid}) ->
     State1 = #state{blockchain = NC,
-                    blockchain_ref = Ref},
+                    blockchain_ref = Ref,
+                    swarm_keys=SK,
+                    swarm_tid=STid},
     {noreply, State1};
 handle_info(_Msg, State) ->
     lager:warning("unhandled info message ~p", [_Msg]),

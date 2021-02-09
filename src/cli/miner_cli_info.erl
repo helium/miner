@@ -58,13 +58,14 @@ register_all_cmds() ->
 info_usage() ->
     [["info"],
      ["miner info commands\n\n",
-      "  info height - Get height of the blockchain for this miner.\n",
-      "  info in_consensus - Show if this miner is in the consensus_group.\n"
-      "  info name - Shows the name of this miner.\n"
-      "  info block_age - Get age of the latest block in the chain, in seconds.\n"
-      "  info p2p_status - Shows key peer connectivity status of this miner.\n"
-      "  info onboarding - Get manufacturing and staking details for this miner.\n"
-      "  info summary - Get a collection of key data points for this miner.\n"
+      "  info height            - Get height of the blockchain for this miner.\n",
+      "  info in_consensus      - Show if this miner is in the consensus_group.\n"
+      "  info name              - Shows the name of this miner.\n"
+      "  info block_age         - Get age of the latest block in the chain, in seconds.\n"
+      "  info p2p_status        - Shows key peer connectivity status of this miner.\n"
+      "  info onboarding        - Get manufacturing and staking details for this miner.\n"
+      "  info summary           - Get a collection of key data points for this miner.\n"
+      "  info region            - Get the operatating region for this miner.\n"
      ]
     ].
 
@@ -127,7 +128,7 @@ info_in_consensus_cmd() ->
 info_in_consensus_usage() ->
     [["info", "in_consensus"],
      ["info in_consensus \n\n",
-      "  Get whether this miner is in the consensus group.\n\n"
+      "  Get whether this miner is currently in the consensus group.\n\n"
      ]
     ].
 
@@ -148,7 +149,7 @@ info_name_cmd() ->
 info_name_usage() ->
     [["info", "name"],
      ["info name \n\n",
-      "  Get name for this miner.\n\n"
+      "  Get animal name for this miner.\n\n"
      ]
     ].
 
