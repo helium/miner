@@ -704,9 +704,9 @@ packet_rssi(Packet) ->
             %% highest RSSI[Channel]
             [H|T] = maps:get(<<"rsig">>, Packet),
             Selector = fun(Obj, Best) ->
-                               erlang:max(Best, maps:get(<<"rssic">>, Obj))
+                               erlang:max(Best, maps:get(<<"rssis">>, Obj))
                        end,
-            lists:foldl(Selector, maps:get(<<"rssic">>, H), T);
+            lists:foldl(Selector, maps:get(<<"rssis">>, H), T);
         %% GWMP V1
         RSSI ->
             RSSI
