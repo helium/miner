@@ -694,7 +694,8 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
 %% GWMP JSON V1/V2.
 -spec packet_rssi(map()) -> number().
 packet_rssi(Packet) ->
-    case maps:get(<<"rssi">>, Packet, undefined) of
+    %% SX1302 uses RSSIS and SX1301 uses RSSI
+    case maps:get(<<"rssis">>, Packet, maps:get(<<"rssi">>, Packet, undefined)) of
         %% GWMP V2
         undefined ->
             %% `rsig` is a list. It can contain more than one signal
