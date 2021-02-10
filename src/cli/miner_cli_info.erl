@@ -14,6 +14,7 @@
 
 -define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
 -define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
+-define(ONBOARDING_API_URL_BASE, "https://onboarding.dewi.org/api/v2").
 
 register_cli() ->
     register_all_usage(),
@@ -30,6 +31,7 @@ register_all_usage() ->
                    info_name_usage(),
                    info_block_age_usage(),
                    info_p2p_status_usage(),
+                   info_onboarding_usage(),
                    info_summary_usage(),
                    info_region_usage()
                   ]).
@@ -45,6 +47,7 @@ register_all_cmds() ->
                    info_name_cmd(),
                    info_block_age_cmd(),
                    info_p2p_status_cmd(),
+                   info_onboarding_cmd(),
                    info_summary_cmd(),
                    info_region_cmd()
                   ]).
@@ -60,6 +63,7 @@ info_usage() ->
       "  info name              - Shows the name of this miner.\n"
       "  info block_age         - Get age of the latest block in the chain, in seconds.\n"
       "  info p2p_status        - Shows key peer connectivity status of this miner.\n"
+      "  info onboarding        - Get manufacturing and staking details for this miner.\n"
       "  info summary           - Get a collection of key data points for this miner.\n"
       "  info region            - Get the operatating region for this miner.\n"
      ]
@@ -195,10 +199,8 @@ info_p2p_status_usage() ->
 
 info_p2p_status(["info", "p2p_status"], [], []) ->
     StatusResults = miner:p2p_status(),
-    FormatResult = fun({Name, Result}) ->
-                           [{name, Name}, {result, Result}]
-                   end,
-    [clique_status:table(lists:map(FormatResult, StatusResults))];
+    [clique_status:table(lists:map(fun tuple_to_table_row/1, StatusResults))];
+
 info_p2p_status([_, _, _], [], []) ->
     usage.
 
@@ -231,12 +233,105 @@ info_region([_, _, _], [], []) ->
     usage.
 
 %%
+%% info onboarding
+%%
+
+info_onboarding_usage() ->
+    [["info", "onboarding"],
+     ["info onboarding [-k <key>] [-p]\n\n",
+      "  Get the manufacturing information for this miner, querying the\n"
+      "  Decentralized Wireless Alliance server.\n"
+      "\n"
+      "  Options\n"
+      "\n"
+      "    -k, --key <onboarding-key>\n"
+      "        Use the specified onboarding key rather than the key for this miner.\n"
+      "    -p, --payer\n"
+      "        After obtaining the information, just print the manufacturer's payer key\n"
+      "        This is the key that should be named when requesting signatures for\n"
+      "        transactions that require manufacturer staking.\n"
+     ]
+    ].
+
+info_onboarding_cmd() ->
+    [
+     [["info", "onboarding"], [],
+        [
+            {just_payer, [ {shortname, "p"}, {longname, "payer"}]},
+            {key, [ {shortname, "k"}, {longname, "key"}, {datatype, string}]}
+        ], fun info_onboarding/3]
+    ].
+
+info_onboarding(["info", "onboarding"], [], Flags) ->
+    OnboardingKey = case proplists:get_value(key, Flags, undefined) of
+        undefined ->
+            #{ onboarding_key := MinerOnboardingKey } = miner_keys:keys(),
+            MinerOnboardingKey;
+        ProvidedKey ->
+            ProvidedKey
+    end,
+    PayerOutputOnly = proplists:is_defined(just_payer, Flags),
+    
+    case OnboardingKey of
+        undefined ->
+            error_message("This miner has no onboarding key, no onboarding info available.");
+        OK ->
+            case onboarding_info_for_key(OK) of
+                {ok, OnboardingInfo} ->
+                    clique_status_for_onboarding_info(OnboardingInfo, PayerOutputOnly);
+                notfound ->
+                    error_message("No onboarding info found for this miner's onboarding key.");
+                {error, Code} ->
+                    error_message(io_lib:format("Onboarding server unexcpetedly returned code ~p.", [ Code ]))
+            end
+    end.
+
+%%
+%% Onboarding information is generally divided into two parts: information
+%% specific to this miner ("MinerData") and information about its manufacturer
+%% ("MakerData").
+%%
+-spec onboarding_info_for_key(string()) -> {ok, {map(), map()}} | notfound | {error, non_neg_integer()}.
+onboarding_info_for_key(OnboardingKey) ->
+    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ OnboardingKey, 
+    case get_api_json_as_map(Url) of
+        {ok, OnboardingResult} ->
+            OnboardingData = maps:get(<<"data">>, OnboardingResult),
+            MakerData      = maps:get(<<"maker">>, OnboardingData),
+            IsMinerData = fun (Key, _Value) -> Key =/= <<"maker">> end,
+            MinerData = maps:filter(IsMinerData, OnboardingData),
+            {ok, {MinerData, MakerData}};
+        notfound -> notfound;
+        {error, Code} -> {error, Code}
+    end.
+
+-spec clique_status_for_onboarding_info({map(), map()}, boolean()) -> list().
+clique_status_for_onboarding_info({MinerData, MakerData}, PayerOutputOnly) ->
+    case PayerOutputOnly of
+        true -> 
+            PayerAddress = maps:get(<<"address">>, MakerData),
+            PayerAddressString = binary_to_list(PayerAddress),
+            [ clique_status:text(PayerAddressString) ];
+        false -> full_status_for_onboarding_info(MinerData, MakerData)
+    end.
+
+-spec full_status_for_onboarding_info(map(), map()) -> list().
+full_status_for_onboarding_info(MinerData, MakerData) ->
+    MinerDisplay = maps:to_list(MinerData),
+    MakerDisplay = maps:to_list(MakerData),
+    [
+        clique_status:text("\n********************\nGeneral Manufacturing Info\n********************\n"),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, MinerDisplay)),
+        clique_status:text("\n********************\nManufacturer Info\n********************\n"),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, MakerDisplay))
+    ].
+
+%%
 %% info summary
 %%
 
 info_summary_cmd() ->
     [
-     [["info", "summary"], [], [], fun info_summary/3],
      [["info", "summary"], [],
       [{error_count, [  {shortname, "e"},
                         {longname, "error_count"}]},
@@ -312,11 +407,8 @@ do_info_summary(ErrorCount, ScanRange) ->
     {GeneralInfo, POCErrorInfo,
         TxnErrorInfo, GenErrorInfo} = get_summary_info(ErrorCount, ScanRange),
 
-    GeneralFormat =   fun({Name, Result}) ->
-                            [{name, Name}, {result, Result}]
-                      end,
     [   clique_status:text("\n********************\nMiner General Info\n********************\n"),
-        clique_status:table(lists:map(GeneralFormat, GeneralInfo)),
+        clique_status:table(lists:map(fun tuple_to_table_row/1, GeneralInfo)),
         clique_status:text("\n********************\nMiner P2P Info\n********************\n"),
         hd(info_p2p_status(["info", "p2p_status"], [], [])),
         clique_status:text("\n********************\nMiner log errors\n********************\n"),
@@ -326,7 +418,9 @@ do_info_summary(ErrorCount, ScanRange) ->
 
     ].
 
-
+%%
+%% Utility functions.
+%%
 get_mac_addrs()->
     {ok, IFs} = inet:getifaddrs(),
     Macs = format_macs_from_interfaces(IFs),
@@ -371,6 +465,21 @@ get_gateway_info(Chain, PubKey)->
             "gateway not found in ledger"
     end.
 
+%%
+%% Query an HTTP/HTTPS endpoint, interpreting the body as JSON, and thence,
+%% returning it as a map.
+%%
+-spec get_api_json_as_map(string()) -> {ok, map()} | notfound | {error, non_neg_integer()}.
+get_api_json_as_map(Url) ->
+    {ok, Result} = httpc:request(get, {Url,[{"connection", "close"}]}, [], [{body_format, binary}]),
+    {HTTPMessage, _Headers, Data} = Result,
+    {_HTTPVersion, ReturnCode, _ResponseMessage} = HTTPMessage,
+    if
+        ReturnCode >= 200 andalso ReturnCode =< 299 -> {ok, jsx:decode(Data, [return_maps])};
+        ReturnCode == 404 -> notfound;
+        true -> {error, ReturnCode}
+    end.
+
 format_sync_height(SyncHeight, Height) when SyncHeight == Height ->
     integer_to_list(SyncHeight);
 format_sync_height(SyncHeight, _Height) ->
@@ -393,3 +502,10 @@ format_macs_from_interfaces(IFs)->
 
 format_hwaddr(HWAddr)->
    string:to_upper(blockchain_utils:bin_to_hex(list_to_binary(HWAddr))).
+
+tuple_to_table_row({Name, Result}) ->
+    [{name, Name}, {result, Result}].
+
+-spec error_message(string()) -> list().
+error_message(Text) ->
+    [ clique_status:alert([clique_status:text("Error: " ++ Text)]) ].

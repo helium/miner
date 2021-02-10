@@ -1,15 +1,19 @@
 -module(miner_keys).
 
--export([keys/1, print_keys/1]).
+-export([key_config/0, keys/0, keys/1, print_keys/1]).
+
+-type key_configuration() :: {ecc, proplists:proplist()} | {file, BaseDir::string()}.
 
 -type key_info() :: #{ pubkey => libp2p_crypto:pubkey(),
                        key_slot => non_neg_integer() | undefined,
                        ecdh_fun => libp2p_crypto:ecdh_fun(),
                        sig_fun => libp2p_crypto:sig_fun(),
-                       onboarding_key => libp2p_crypto:pubkey() | undefined
+                       onboarding_key => string() | undefined
                      }.
--export_type([key_info/0]).
 
+-export_type([key_info/0, key_configuration/0]).
+
+-spec get_onboarding_filename() -> string() | undefined.
 get_onboarding_filename() ->
     case application:get_env(blockchain, onboarding_dir) of
         undefined -> undefined;
@@ -17,12 +21,13 @@ get_onboarding_filename() ->
             filename:join([OnboardingDir, "onboarding_key"])
     end.
 
+-spec get_onboarding_key(string()) -> string() | undefined.
 get_onboarding_key(Default) ->
     case get_onboarding_filename() of
         undefined -> Default;
         OnboardingKey ->
             case file:read_file(OnboardingKey) of
-                {ok, Bin} -> Bin;
+                {ok, Bin} -> string:trim(binary_to_list(Bin));
                 {error, enoent} -> Default;
                 {error, _Reason} -> undefined
             end
@@ -35,27 +40,32 @@ get_onboarding_key(Default) ->
 %% NOTE: Do NOT call this after miner has started since this function
 %% will attempt to communicate directly with the ECC. Use only as part
 %% of startup or other miner-free scripts.
--spec keys({file, BaseDir::string()} |
-           {ecc, proplists:proplist()}) -> key_info().
+-spec keys() -> key_info().
+keys() ->
+    keys(key_config()).
+
+-spec keys(key_configuration()) -> key_info().
 keys({file, BaseDir}) ->
     SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
     ok = filelib:ensure_dir(SwarmKey),
     case libp2p_crypto:load_keys(SwarmKey) of
         {ok, #{secret := PrivKey0, public := PubKey}} ->
+            FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(PubKey)
+               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              };
         {error, enoent} ->
             KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
             ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
+            FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(PubKey)
+               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              }
     end;
 keys({ecc, Props}) when is_list(Props) ->
@@ -100,40 +110,30 @@ keys({ecc, Props}) when is_list(Props) ->
                           {ok, Sig} = miner_ecc_worker:sign(Bin),
                           Sig
                   end,
-       onboarding_key => OnboardingKey
+       onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
      }.
 
+-spec key_config() -> key_configuration().
+key_config() ->
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
+    case application:get_env(blockchain, key, undefined) of
+        undefined -> {file, BaseDir};
+        KC -> KC
+    end.
 
 %% @doc prints the public hotspot and onboadring key in a file:consult
 %% friendly way to stdout. This is used by other services (like
 %% gateway_config) to get read access to the public keys
 print_keys(_) ->
-    BaseDir = application:get_env(blockchain, base_dir, "data"),
-    KeyConfig = case application:get_env(blockchain, key, undefined) of
-                    undefined -> {file, BaseDir};
-                    KC -> KC
-                end,
     #{
        pubkey := PubKey,
        onboarding_key := OnboardingKey
-     } = keys(KeyConfig),
+     } = keys(),
     MaybeB58 = fun(undefined) -> undefined;
                   (Key) -> libp2p_crypto:pubkey_to_b58(Key)
                end,
-    MaybeUUIDv4 = fun(undefined) -> undefined;
-                  (Key) ->
-                      %% only production blackspots read onboarding_key from a file 
-                      %% and they're (unfortunately) considered to be uuids
-                      OnboardingFilename = get_onboarding_filename(),
-                      case filelib:is_file(OnboardingFilename) of
-                          true ->
-                              string:trim(binary_to_list(Key));
-                          false ->
-                              libp2p_crypto:pubkey_to_b58(Key)
-                      end
-               end,
     Props = [{pubkey, MaybeB58(PubKey)},
-             {onboarding_key, MaybeUUIDv4(OnboardingKey)}
+             {onboarding_key, OnboardingKey}
             ] ++ [ {animal_name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:pubkey_to_b58(PubKey)))} || PubKey /= undefined ],
     lists:foreach(fun(Term) -> io:format("~tp.~n", [Term]) end, Props).
 
