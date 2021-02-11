@@ -415,4 +415,3 @@ commitment_cache_fun() ->
                     Res
             end
     end.
-

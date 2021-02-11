@@ -4,6 +4,7 @@ set timefmt "%s"
 if (!exists("interval")) interval=12
 if (!exists("y2height")) y2height=100
 if (!exists("yheight")) yheight=200
+if (!exists("file")) file="/tmp/miner-chain-stats"
 
 set xrange [time(0) - interval*60*60:time(0)]
 set yrange [0:yheight]
@@ -13,17 +14,17 @@ set y2tics
 #set term x11 1 noraise
 set term qt noraise
 
-plot "/tmp/miner-chain-stats" using 1:2 with lines title "interval", \
-     "/tmp/miner-chain-stats" using 1:3 with lines title "txns", \
-     "/tmp/miner-chain-stats" using 1:4 with lines title "block size in kb", \
-     "/tmp/miner-chain-stats" using 1:5 with lines title "avg interval", \
-     "/tmp/miner-chain-stats" using 1:6 with lines title "median interval", \
-     "/tmp/miner-chain-stats" using 1:7 with lines title "avg txns", \
-     "/tmp/miner-chain-stats" using 1:9 with lines lw 2 lt rgb "blue" axes x1y2 title "avg election interval", \
-     "/tmp/miner-chain-stats" using 1:10 with lines lw 2 lt rgb "red" axes x1y2 title "election delay", \
-     "/tmp/miner-chain-stats" using 1:11 with lines title "100k avg", \
-     "/tmp/miner-chain-stats" using 1:12 with points pt 7 lt rgb "red" ps 2 axes x1y2 title "delay at election", \
-     "/tmp/miner-chain-stats" using 1:13 with lines lw 2 lt rgb "orange" axes x1y2  title "HNT production ratio"
+plot file using 1:2 with lines title "interval", \
+     file using 1:3 with lines title "txns", \
+     file using 1:4 with lines title "block size in kb", \
+     file using 1:5 with lines title "avg interval", \
+     file using 1:6 with lines title "median interval", \
+     file using 1:7 with lines title "avg txns", \
+     file using 1:9 with lines lw 2 lt rgb "blue" axes x1y2 title "avg election interval", \
+     file using 1:10 with lines lw 2 lt rgb "red" axes x1y2 title "election delay", \
+     file using 1:11 with lines title "100k avg", \
+     file using 1:12 with points pt 7 lt rgb "red" ps 2 axes x1y2 title "delay at election", \
+     file using 1:13 with lines lw 2 lt rgb "orange" axes x1y2  title "HNT production ratio"
 
 pause 15
 reread
