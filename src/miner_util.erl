@@ -16,6 +16,10 @@
          has_valid_local_capability/2
         ]).
 
+%% get the firmware release data from a hotspot
+-define(LSB_FILE, "/etc/lsb_release").
+-define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
+
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
 %% @end
@@ -67,19 +71,22 @@ median(List) ->
             (lists:nth(Length div 2, Sorted) + lists:nth((Length div 2) + 1, Sorted)) div 2
     end.
 
-mark(Module, Mark) ->
+-spec mark(atom(), atom()) -> ok.
+mark(Module, MarkCurr) ->
     ActiveModules = application:get_env(miner, mark_mods, []),
     case lists:member(Module, ActiveModules) of
         true ->
             case get({Module, mark}) of
                 undefined ->
-                    lager:info("starting ~p mark at ~p", [Module, Mark]),
-                    put({Module, mark}, {Mark, erlang:monotonic_time(millisecond)});
-                {Prev, Start} ->
+                    lager:info("starting ~p mark at ~p", [Module, MarkCurr]),
+                    put({Module, mark}, {MarkCurr, erlang:monotonic_time(millisecond)});
+                {MarkCurr, _} -> % Ignore duplicate calls
+                    ok;
+                {MarkPrev, Start} ->
                     End = erlang:monotonic_time(millisecond),
-                    put({Module, mark}, {Mark, End}),
+                    put({Module, mark}, {MarkCurr, End}),
                     lager:info("~p interval ~p to ~p was ~pms",
-                               [Module, Prev, Mark, End - Start])
+                               [Module, MarkPrev, MarkCurr, End - Start])
             end;
         _ -> ok
     end.
@@ -87,26 +94,23 @@ mark(Module, Mark) ->
 metadata_fun() ->
     try
         Map = blockchain_worker:signed_metadata_fun(),
-        case miner_lora:position() of
-            %% GPS location that's adequately close to the asserted
-            %% location
-            {ok, _} ->
-                Map#{<<"gps_fix_quality">> => <<"good_fix">>};
-            %% the assert location is too far from the fix
-            {ok, bad_assert, _} ->
-                Map#{<<"gps_fix_quality">> => <<"bad_assert">>};
-            %% no gps fix
-            {error, no_fix} ->
-                Map#{<<"gps_fix_quality">> => <<"no_fix">>};
-            %% no location asserted somehow
-            {error, not_asserted} ->
-                Map#{<<"gps_fix_quality">> => <<"not_asserted">>};
-            %% got nonsense or a hopefully transient error, return nothing
+        case application:get_env(miner, mode, gateway) of
+            validator ->
+                Vsn = element(2, hd(release_handler:which_releases(permanent))),
+                Map#{<<"release_version">> => list_to_binary(Vsn)};
+            gateway ->
+                FWRelease = case filelib:is_regular(?LSB_FILE) of
+                                true ->
+                                    iolist_to_binary(string:trim(os:cmd(?RELEASE_CMD)));
+                                false ->
+                                    <<"unknown">>
+                            end,
+                Map#{<<"release_info">> => FWRelease};
             _ ->
-                Map#{<<"gps_fix_quality">> => <<"no_fix">>}
+                Map
         end
     catch _:_ ->
-            #{}
+              #{}
     end.
 
 -spec has_valid_local_capability(Capability :: non_neg_integer(),
