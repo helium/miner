@@ -37,7 +37,7 @@ miner step-by-step
 
 This is a maybe up-to-date step by step on how to build Miner if you've never done it before. Results may vary depending on your host system.
 
-This is for development purposes only and if you are interested in running a miner, please follow our guide [here](https://developer.helium.com/blockchain/run-your-own-miner).
+This is for development purposes only and if you are interested in running a miner, please follow our guide [here](https://docs.helium.com/mine-hnt/build-a-packet-forwarder#run-the-miner).
 
 ## Installing Miner from Source
 
