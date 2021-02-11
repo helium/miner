@@ -641,7 +641,36 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
                 %ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
-                %% set miner configuration
+
+                %% set grpcbox configuration
+                ct_rpc:call(Miner, application, set_env, [grpcbox, servers,
+                            [
+                                #{
+                                    grpc_opts => #{
+                                        service_protos => [validator_pb, validator_state_channels_pb],
+                                        services => #{
+                                           'helium.validator' => helium_validator,
+                                           'helium.validator_state_channels' => helium_validator_state_channels_service
+                                        }
+                                    },
+                                    transport_opts => #{ssl => false},
+                                    listen_opts => #{
+                                        port => 8080,
+                                        ip => {0, 0, 0, 0}
+                                    },
+                                    pool_opts => #{size => 2},
+                                    server_opts => #{
+                                        header_table_size => 4096,
+                                        enable_push => 1,
+                                        max_concurrent_streams => unlimited,
+                                        initial_window_size => 65535,
+                                        max_frame_size => 16384,
+                                        max_header_list_size => unlimited
+                                    }
+                                }
+                            ]
+                    ]),
+            %% set miner configuration
                 ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
                 ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
                 ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
@@ -764,7 +793,8 @@ end_per_testcase(TestCase, Config) ->
     case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            cleanup_per_testcase(TestCase, Config);
+%%            cleanup_per_testcase(TestCase, Config);
+            ok;
         _ ->
             %% leave results alone for analysis
             ok

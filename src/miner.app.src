@@ -27,6 +27,7 @@
     jsx,
     kvc,
     longfi,
+    erlbus,
     grpcbox,
     grpc_lib
    ]},

@@ -534,6 +534,7 @@ multi_oui_test(Config) ->
                                 sign,
                                 [OUITxn2, RouterSigFun2]),
     ct:pal("SignedOUITxn2: ~p", [SignedOUITxn2]),
+
     ok = ct_rpc:call(RouterNode1, blockchain_worker, submit_txn, [SignedOUITxn1]),
     receive
         {blockchain_txn_oui_v1, _, _} ->
