@@ -1,0 +1,9 @@
+version: '3'
+services:
+  validator:
+    image: validator:latest
+    volumes:
+      - ../validator/data:/var/data:delegated
+      - ../validator/log:/var/log:delegated
+    stdin_open: true
+    tty: true

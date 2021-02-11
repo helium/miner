@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -22,6 +23,7 @@
 all() -> [
           restart_test,
           dkg_restart_test,
+          validator_transition_test,
           election_test,
           election_multi_test,
           group_change_test,
@@ -61,10 +63,24 @@ init_per_testcase(TestCase, Config0) ->
         libp2p_crypto:generate_keys(ecc_compact),
 
     Extras =
+        %% TODO Parametarize init_per_testcase instead leaking per-case internals.
         case TestCase of
             dkg_restart_test ->
                 #{?election_interval => 10,
                   ?election_restart_interval => 99};
+            validator_test ->
+                #{?election_interval => 5,
+                  ?monthly_reward => ?bones(1000),
+                  ?election_restart_interval => 5};
+            validator_unstake_test ->
+                #{?election_interval => 5,
+                  ?election_restart_interval => 5};
+            validator_transition_test ->
+                #{?election_version => 4,
+                  ?election_interval => 5,
+                  ?election_restart_interval => 5};
+            autoskip_chain_vars_test ->
+                #{?election_interval => 100};
             T when T == snapshot_test;
                    T == high_snapshot_test;
                    T == group_change_test ->
@@ -72,7 +88,7 @@ init_per_testcase(TestCase, Config0) ->
                   ?snapshot_interval => 5,
                   ?election_bba_penalty => 0.01,
                   ?election_seen_penalty => 0.05,
-                  ?election_version => 3};
+                  ?election_version => 5};
             election_v3_test ->
                 #{
                   ?election_version => 2
@@ -82,7 +98,7 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     Vars = #{garbage_value => totes_garb,
-             ?block_time => max(1500, BlockTime),
+             ?block_time => max(3000, BlockTime),
              ?election_interval => Interval,
              ?num_consensus_members => NumConsensusMembers,
              ?batch_size => BatchSize,
@@ -99,14 +115,27 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    Locations = lists:foldl(
+    %% create a new account to own validators for staking
+    #{public := AuxPub} = AuxKeys = libp2p_crypto:generate_keys(ecc_compact),
+    AuxAddr = libp2p_crypto:pubkey_to_bin(AuxPub),
+     Locations = lists:foldl(
         fun(I, Acc) ->
             [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
         end,
         [],
         lists:seq(1, length(Addresses))
     ),
-    InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
+    InitGen =
+        case blockchain_txn_vars_v1:decoded_vars(hd(InitialVars)) of
+            #{?election_version := V} when V >= 5 ->
+                [blockchain_txn_gen_validator_v1:new(Addr, Addr, ?bones(10000))
+                 || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))];
+            _ ->
+                [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+                 || {Addr, Loc} <- lists:zip(Addresses, Locations)] ++
+                    %% bigger stake for transfer test
+                    [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(150000))]
+        end,
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
     {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
@@ -121,7 +150,8 @@ init_per_testcase(TestCase, Config0) ->
 
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
+        {non_consensus_miners, NonConsensusMiners},
+        {aux_acct, {AuxAddr, AuxKeys}}
         | Config]
     catch
         What:Why:Stack ->
@@ -133,7 +163,144 @@ init_per_testcase(TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
+autoskip_chain_vars_test(Config) ->
+    %% The idea here is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members recognize a new chain var;
+    %% 2. 1/2 of consensus members do not;
+    %% 3.
+    %%      If autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so autoskip must've worked
 
+    MinersAll = ?config(miners, Config),
+    MinersInConsensus = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersInConsensus),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersWithBogusVar = lists:sublist(MinersInConsensus, M),
+
+    BogusKey = bogus_key,
+    BogusVal = bogus_val,
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("M: ~p", [M]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersInConsensus: ~p", [MinersInConsensus]),
+    ct:pal("MinersWithBogusVar: ~p", [MinersWithBogusVar]),
+
+    %% The mocked 1/2 of consensus group will allow bogus vars:
+    [
+        ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_vars_v1, is_valid, fun(_, _) -> ok end],
+                300
+            )
+    ||
+        Node <- MinersWithBogusVar
+    ],
+
+    %% Submit bogus var transaction:
+    (fun() ->
+        {SecretKey, _} = ?config(master_key, Config),
+        Txn0 = blockchain_txn_vars_v1:new(#{BogusKey => BogusVal}, 2),
+        Proof = blockchain_txn_vars_v1:create_proof(SecretKey, Txn0),
+        Txn = blockchain_txn_vars_v1:proof(Txn0, Proof),
+        miner_ct_utils:submit_txn(Txn, MinersInConsensus)
+    end)(),
+
+    AllHeights =
+        fun() ->
+            lists:usort([H || {_, H} <- miner_ct_utils:heights(MinersAll)])
+        end,
+
+    ?assert(
+        miner_ct_utils:wait_until(
+            fun() ->
+                case AllHeights() of
+                    [_] -> true;
+                    [_|_] -> false
+                end
+            end,
+            50,
+            1000
+        ),
+        "Heights equalized."
+    ),
+    [Height1] = AllHeights(),
+    ?assertMatch(
+        ok,
+        miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 10),
+        "Chain has advanced, so autoskip must've worked."
+    ),
+
+    %% Extra sanity check - no one should've accepted the bogus var:
+    ?assertMatch(
+        [{error, not_found}],
+        lists:usort(miner_ct_utils:chain_var_lookup_all(BogusKey, MinersAll)),
+        "No node accepted the bogus chain var."
+    ),
+
+    {comment, miner_ct_utils:heights(MinersAll)}.
+
+autoskip_on_timeout_test(Config) ->
+    %% The idea is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members produce timed blocks;
+    %% 2. 1/2 of consensus members do not;
+    %% 3.
+    %%      If time-based autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so time-based autoskip must've worked
+
+    MinersAll = ?config(miners, Config),
+    MinersCG = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersCG),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersCGBroken = lists:sublist(MinersCG, M),
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersCG: ~p", [MinersCG]),
+    ct:pal("MinersCGBroken: ~p", [MinersCGBroken]),
+
+    %% Default is 120 sesonds, but for testing we want to trigger skip faster:
+    _ = [
+        ok = ct_rpc:call(Node, application, set_env, [miner, late_block_timeout_seconds, 10], 300)
+    ||
+        Node <- MinersAll
+    ],
+
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
+
+    %% send some more skips at broken miner 1 so we're not all on the same round
+    Node1 = hd(MinersCGBroken),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+
+    ok = miner_ct_utils:assert_chain_halted(MinersAll),
+    ok = miner_ct_utils:assert_chain_advanced(MinersAll, 2500, 5),
+
+    {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -156,9 +323,7 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
-    Heights =  miner_ct_utils:heights(Miners),
-
-    {comment, Heights}.
+    {comment, miner_ct_utils:heights(Miners)}.
 
 
 dkg_restart_test(Config) ->
@@ -207,6 +372,80 @@ dkg_restart_test(Config) ->
     %% make sure that we did the restore
     EndHeight = miner_ct_utils:height(FirstCMiner),
     ?assert(EndHeight < (Height + Interval + 99)).
+
+validator_transition_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    Context = ?config(node_context, Config),
+    {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
+    AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
+    %% setup makes sure that the cluster is running, so the first thing is to create and connect two
+    %% new nodes.
+
+    Blockchain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
+
+    ListenAddrs = miner_ct_utils:get_addrs(Miners),
+    ValidatorAddrList =
+        [begin
+             Num = integer_to_list(N),
+             {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Context),
+             {_, _, _, _Pub, Addr, _SigFun} = Keys,
+             ct_rpc:call(NewVal, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+             Swarm = ct_rpc:call(NewVal, blockchain_swarm, swarm, [], 2000),
+             lists:foreach(
+               fun(A) ->
+                       ct_rpc:call(NewVal, libp2p_swarm, connect, [Swarm, A], 2000)
+               end, ListenAddrs),
+             UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, ?bones(10000), 100000),
+             Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+
+             _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
+             {NewVal, Addr}
+         end || N <- lists:seq(9, 12)],
+
+    {Validators, _Addrs} = lists:unzip(ValidatorAddrList),
+
+    {Priv, _Pub} = ?config(master_key, Config),
+
+    Vars = #{?election_version => 5},
+
+    UEVTxn = blockchain_txn_vars_v1:new(Vars, 2),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, UEVTxn),
+    EVTxn = blockchain_txn_vars_v1:proof(UEVTxn, Proof),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [EVTxn]) || M <- Miners],
+
+    Me = self(),
+    spawn(miner_ct_utils, election_check,
+          [Validators, Validators,
+           ValidatorAddrList ++ ?config(tagged_miner_addresses, Config),
+           Me]),
+    check_loop(180, Validators).
+
+check_loop(0, _Miners) ->
+    error(seen_timeout);
+check_loop(N, Miners) ->
+    receive
+        seen_all ->
+            ok;
+        {not_seen, []} ->
+            ok;
+        {not_seen, Not} ->
+            Miner = lists:nth(rand:uniform(length(Miners)), Miners),
+            try
+                Height = miner_ct_utils:height(Miner),
+                {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
+                ct:pal("not seen: ~p height ~p epoch ~p", [Not, Height, Epoch])
+            catch _:_ ->
+                    ct:pal("not seen: ~p ", [Not]),
+                    ok
+            end,
+            timer:sleep(100),
+            check_loop(N - 1, Miners)
+    after timer:seconds(30) ->
+            error(message_timeout)
+    end.
+
 
 election_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -520,8 +759,8 @@ group_change_test(Config) ->
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
-    %% wait until height has increased by 20
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20, all, 80),
+    %% wait until height has increased by 10
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 10, all, 80),
 
     [{Target, TargetEnv}] = miner_ct_utils:stop_miners([lists:last(Miners)]),
 
@@ -566,7 +805,10 @@ group_change_test(Config) ->
                                L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
                                case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
                                    {ok, Sz} ->
-                                       ct:pal("size = ~p", [Sz]),
+                                       Versions =
+                                           ct_rpc:call(Miner, blockchain_ledger_v1, cg_versions,
+                                                       [L1], Timeout),
+                                       ct:pal("size = ~p versions = ~p", [Sz, Versions]),
                                        Sz == 7;
                                    _ ->
                                        %% badrpc
@@ -618,7 +860,7 @@ group_change_test(Config) ->
 
     ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
     %% TODO: probably need to parameterize this via the delay
-    ?assert(Height2 > Height + 20 + 10),
+    ?assert(Height2 > Height + 10 + 5),
 
     %% do some additional checks to make sure that we restored across.
 
@@ -1092,10 +1334,3 @@ high_snapshot_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-
-
-
-
-
-
