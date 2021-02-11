@@ -23,6 +23,7 @@ all() -> [
           restart_test,
           dkg_restart_test,
           validator_test,
+          validator_transition_test,
           election_test,
           election_multi_test,
           group_change_test,
@@ -68,6 +69,10 @@ init_per_testcase(TestCase, Config0) ->
             validator_test ->
                 #{?election_interval => 5,
                   ?election_restart_interval => 5};
+            validator_transition_test ->
+                #{?election_version => 4,
+                  ?election_interval => 5,
+                  ?election_restart_interval => 5};
             T when T == snapshot_test;
                    T == high_snapshot_test;
                    T == group_change_test ->
@@ -101,12 +106,11 @@ init_per_testcase(TestCase, Config0) ->
                 miner_ct_utils:make_vars(Keys, FinalVars)
         end,
 
-    InitialPayment0 = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     %% create a new account to own validators for staking
     #{public := AuxPub} = AuxKeys = libp2p_crypto:generate_keys(ecc_compact),
     AuxAddr = libp2p_crypto:pubkey_to_bin(AuxPub),
-    InitialPayment = [ blockchain_txn_coinbase_v1:new(AuxAddr, 15000) | InitialPayment0],
-    Locations = lists:foldl(
+     Locations = lists:foldl(
         fun(I, Acc) ->
             [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
         end,
@@ -117,10 +121,12 @@ init_per_testcase(TestCase, Config0) ->
         case blockchain_txn_vars_v1:decoded_vars(hd(InitialVars)) of
             #{?election_version := V} when V >= 5 ->
                 [blockchain_txn_gen_validator_v1:new(Addr, Addr, 10000, Addr)
-                 || Addr <- Addresses];
+                 || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, 15000)];
             _ ->
                 [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
-                 || {Addr, Loc} <- lists:zip(Addresses, Locations)]
+                 || {Addr, Loc} <- lists:zip(Addresses, Locations)] ++
+                    %% bigger stake for transfer test
+                    [blockchain_txn_coinbase_v1:new(AuxAddr, 150000)]
         end,
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
@@ -346,6 +352,57 @@ validator_test(Config) ->
     %% make sure that staked is down
     ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, staked_hnt, [Ledger])),
     ok.
+
+validator_transition_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    Context = ?config(node_context, Config),
+    {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
+    AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
+    %% setup makes sure that the cluster is running, so the first thing is to create and connect two
+    %% new nodes.
+
+    Blockchain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
+
+    ListenAddrs = miner_ct_utils:get_addrs(Miners),
+    ValidatorAddrList =
+        [begin
+             Num = integer_to_list(N),
+             {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Context),
+             {_, _, _, _Pub, Addr, SigFun} = Keys,
+             ct_rpc:call(NewVal, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+             Swarm = ct_rpc:call(NewVal, blockchain_swarm, swarm, [], 2000),
+             lists:foreach(
+               fun(A) ->
+                       ct_rpc:call(NewVal, libp2p_swarm, connect, [Swarm, A], 2000)
+               end, ListenAddrs),
+             UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, 10000,
+                                                           <<"new val ", (list_to_binary(Num))/binary>>, 100000),
+             UTxn1_1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+             Txn1 = blockchain_txn_stake_validator_v1:validator_sign(UTxn1_1, SigFun),
+             
+             _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
+             {NewVal, Addr}
+         end || N <- lists:seq(9, 12)],
+
+    {Validators, _Addrs} = lists:unzip(ValidatorAddrList),
+
+    {Priv, _Pub} = ?config(master_key, Config),
+
+    Vars = #{?election_version => 5},
+
+    UEVTxn = blockchain_txn_vars_v1:new(Vars, 2),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, UEVTxn),
+    EVTxn = blockchain_txn_vars_v1:proof(UEVTxn, Proof),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [EVTxn]) || M <- Miners],
+
+    Me = self(),
+    spawn(miner_ct_utils, election_check,
+          [Validators, Validators,
+           ValidatorAddrList ++ ?config(tagged_miner_addresses, Config),
+           Me]),
+    check_loop(120, Validators).
 
 check_loop(0, _Miners) ->
     error(seen_timeout);
