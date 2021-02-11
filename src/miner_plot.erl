@@ -39,8 +39,6 @@
          chain :: undefined | blockchain:blockchain(),
          stats :: undefined | #stats{},
          height = 0 :: integer(),
-         %% before we merge this, get it from the env
-         start_block = 187000,
          start_time :: undefined | pos_integer(),
          fd :: undefined | file:io_device()
         }).
@@ -78,7 +76,9 @@ handle_info(timeout, _) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
     %% rewrite this eventually
-    {ok, BAgo0} = blockchain:get_block(Height - 100000, Chain),
+    Window = application:get_env(miner, stabilization_period, 50000),
+    Ago0 = max(2, Height - Window),
+    {ok, BAgo0} = blockchain:get_block(Ago0, Chain),
     TAgo0 = blockchain_block:time(BAgo0),
 
     {ok, Interval} = blockchain:config(?election_interval, blockchain:ledger(Chain)),
@@ -94,7 +94,10 @@ handle_info(timeout, _) ->
              Txns = blockchain_block:transactions(B),
              Size = byte_size(blockchain_block:serialize(B)),
              %% rewrite this eventually
-             {ok, BAgo} = blockchain:get_block(H - 100000, Chain),
+             Window = application:get_env(miner, stabilization_period, 50000),
+             Ago = max(2, H - Window),
+             Period = max(2, H - Ago),
+             {ok, BAgo} = blockchain:get_block(Ago, Chain),
              TAgo = blockchain_block:time(BAgo),
 
              %% Txns = lists:filter(
@@ -103,7 +106,8 @@ handle_info(timeout, _) ->
              %%                      blockchain_txn_poc_request_v1
              %%          end, Txns0),
              Epoch = blockchain_block_v1:election_info(B),
-             Avg = ((Time - TAgo) / 100000),
+             lager:info("~p ~p ~p", [Time, TAgo, Period]),
+             Avg = ((Time - TAgo) / Period),
              {Time, Txns, Epoch, H, Avg, Size, Interval}
          end
          || H <- lists:seq(Start, CurrHeight)],
@@ -131,18 +135,21 @@ handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
                    fd = File,
                    stats = Stats} = State) ->
     {ok, Interval} = blockchain:config(?election_interval, Ledger),
+    Window = application:get_env(miner, stabilization_period, 50000),
 
     case blockchain:get_block(Hash, Chain) of
         {ok, Block} ->
             case blockchain_block:height(Block) of
                 Height when Height > CurrHeight ->
-                    {ok, BAgo} = blockchain:get_block(Height - 100000, Chain),
+                    Ago = max(2, Height - Window),
+                    Period = Height - Ago,
+                    {ok, BAgo} = blockchain:get_block(Ago, Chain),
                     TAgo = blockchain_block:time(BAgo),
                     Time = blockchain_block:time(Block),
                     Txns = blockchain_block:transactions(Block),
                     Size = byte_size(blockchain_block:serialize(Block)),
                     Epoch = blockchain_block_v1:election_info(Block),
-                    Avg = ((Time - TAgo) / 100000),
+                    Avg = ((Time - TAgo) / Period),
                     {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height,
                                                      Avg, Size, Interval},
                                                     Stats),
