@@ -102,7 +102,6 @@ block_age() ->
     {ok, Block} = blockchain:head_block(Chain),
     erlang:system_time(seconds) - blockchain_block:time(Block).
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
