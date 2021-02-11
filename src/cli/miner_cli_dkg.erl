@@ -119,29 +119,30 @@ dkg_queue(["dkg", "queue"], [], Flags) ->
                 undefined ->
                     Workers = maps:get(worker_info, miner:relcast_info(dkg_group), #{}),
                     %% just print a summary of the queue
-                    [clique_status:table([[{destination, "inbound"} ] ++
-                                           [{address, ""} || lists:keymember(verbose, 1, Flags)] ++
-                                           [{name, ""},
-                                           {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
-                                           {connected, "true"},
-                                           {blocked, "false"},
-                                           {in_flight, "0"},
-                                           {connections, "0"},
-                                           {last_take, "none"},
-                                           {last_ack, 0}
-                                          ]] ++
-                                         [[{destination, integer_to_list(K)}] ++
-                                           [{address, maps:get(address, maps:get(K, Workers))} || lists:keymember(verbose, 1, Flags)] ++
-                                           [{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:p2p_to_pubkey_bin(maps:get(address, maps:get(K, Workers))))))},
-                                           {count, integer_to_list(length(V))},
-                                           {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
-                                           {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
-                                           {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))},
-                                           {connects, integer_to_list(maps:get(connects, maps:get(K, Workers)))},
-                                           {last_take, atom_to_list(maps:get(last_take, maps:get(K, Workers)))},
-                                           {last_ack, integer_to_list(erlang:system_time(second) - maps:get(last_ack, maps:get(K, Workers)))}
-                                          ] ||
-                                          {K, V} <- maps:to_list(maps:get(outbound, Queue, #{}))])];
+                    [clique_status:table(
+                       [[{destination, "inbound"} ] ++
+                            [{address, ""} || lists:keymember(verbose, 1, Flags)] ++
+                            [{name, ""},
+                             {count, integer_to_list(length(maps:get(inbound, Queue, [])))},
+                             {connected, "true"},
+                             {blocked, "false"},
+                             {in_flight, "0"},
+                             {connections, "0"},
+                             {last_take, "none"},
+                             {last_ack, 0}
+                            ]] ++
+                           [[{destination, integer_to_list(K)}] ++
+                                [{address, maps:get(address, maps:get(K, Workers))} || lists:keymember(verbose, 1, Flags)] ++
+                                [{name, blockchain_utils:addr2name(libp2p_crypto:p2p_to_pubkey_bin(maps:get(address, maps:get(K, Workers))))},
+                                 {count, integer_to_list(length(V))},
+                                 {connected, atom_to_list((maps:get(connected, maps:get(K, Workers)))) },
+                                 {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
+                                 {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))},
+                                 {connects, integer_to_list(maps:get(connects, maps:get(K, Workers)))},
+                                 {last_take, atom_to_list(maps:get(last_take, maps:get(K, Workers)))},
+                                 {last_ack, integer_to_list(erlang:system_time(second) - maps:get(last_ack, maps:get(K, Workers)))}
+                                ] ||
+                               {K, V} <- maps:to_list(maps:get(outbound, Queue, #{}))])];
                 PeerID when is_integer(PeerID) ->
                             %% print the outbound messages for this peer
                             Msgs = maps:get(PeerID, maps:get(outbound, Queue, #{}), []),

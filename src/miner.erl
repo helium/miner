@@ -24,6 +24,8 @@
     create_block/3,
     signed_block/2,
 
+    keys/0,
+
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
@@ -102,7 +104,6 @@ block_age() ->
     {ok, Block} = blockchain:head_block(Chain),
     erlang:system_time(seconds) - blockchain_block:time(Block).
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
@@ -162,8 +163,7 @@ relcast_info(Group) ->
           end,
     case gen_server:call(Mod, Group, 60000) of
         undefined -> #{};
-        Pid ->
-            libp2p_group_relcast:info(Pid)
+        Pid -> libp2p_group_relcast:info(Pid)
     end.
 
 %%--------------------------------------------------------------------
@@ -298,6 +298,9 @@ signed_block(Signatures, BinBlock) ->
     ok.
 
 
+-spec keys() -> {ok, {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}}.
+keys() ->
+    gen_server:call(?MODULE, keys).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -315,7 +318,9 @@ remove_consensus() ->
 
 -spec version() -> integer().
 version() ->
-    2.
+    %% format:
+    %% MMMmmmPPPP
+       0000010029.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -495,6 +500,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                 {error, multiple_hashes}
         end,
     {reply, Reply, State};
+handle_call(keys, _From, State) ->
+    {reply, {ok, State#state.swarm_keys}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -681,7 +688,7 @@ process_bbas(N, BBAs) ->
 %% final 0.04 (twice as much leverage, but 20% of the rate).
 
 %% when drift is small or 0, let it accumulate for a bit
-catchup_time(N) when N < 0.0001 ->
+catchup_time(N) when N < 0.001 ->
     0;
 %% when it's still relatively small, apply gentle adjustments
 catchup_time(N) when N < 0.01 ->
