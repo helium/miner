@@ -50,7 +50,7 @@ grep avx /proc/cpuinfo
 Next, install [git](https://git-scm.com/) and build dependencies.
 
 ```bash
-apt install -y git erlang libdbus-1-dev autoconf automake libtool flex libgmp-dev cmake libsodium-dev libssl-dev bison libsnappy-dev libclang-dev doxygen vim build-essential cargo
+apt install -y git erlang libdbus-1-dev autoconf automake libtool flex libgmp-dev cmake libsodium-dev libssl-dev bison libsnappy-dev libclang-dev doxygen vim build-essential cargo parallel
 ```
 
 Clone the git repository:
