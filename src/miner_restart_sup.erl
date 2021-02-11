@@ -71,7 +71,8 @@ init([SigFun, ECDHFun]) ->
                     region_override => RegionOverRide
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts])];
+                 ?WORKER(miner_lora, [OnionOpts]),
+                 ?WORKER(miner_poc_statem, [POCOpts])];
             _ ->
                 []
         end,
@@ -82,14 +83,20 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
+    ValServer =
+        case application:get_env(miner, mode, gateway) of
+            validator -> [?WORKER(miner_val_heartbeat, [])];
+            _ -> []
+        end,
+
     ChildSpecs =
         [
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, [])
          ] ++
+        ValServer ++
         EbusServer ++
-        OnionServer ++
-        [?WORKER(miner_poc_statem, [POCOpts])],
+        OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
 
 
