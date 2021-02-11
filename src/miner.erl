@@ -17,6 +17,8 @@
     create_block/3,
     signed_block/2,
 
+    keys/0,
+
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
@@ -182,8 +184,7 @@ relcast_info(Group) ->
           end,
     case gen_server:call(Mod, Group, 60000) of
         undefined -> #{};
-        Pid ->
-            libp2p_group_relcast:info(Pid)
+        Pid -> libp2p_group_relcast:info(Pid)
     end.
 
 %% TODO: spec
@@ -290,6 +291,10 @@ signed_block(Signatures, BinBlock) ->
     end,
     ok.
 
+-spec keys() -> {ok, {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}}.
+keys() ->
+    gen_server:call(?MODULE, keys).
+
 start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
 
@@ -301,7 +306,9 @@ remove_consensus() ->
 
 -spec version() -> integer().
 version() ->
-    2.
+    %% format:
+    %% MMMmmmPPPP
+       0000010041.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -332,13 +339,12 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
                                                  blockchain = Chain})};
-handle_call(
-    {create_block, Metadata, Txns, HBBFTRound},
-    _From,
-    #state{blockchain=Chain, swarm_keys=SK}=State
-) ->
+handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
+            #state{blockchain = Chain, swarm_keys = SK} = State) ->
     Result = try_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
     {reply, Result, State};
+handle_call(keys, _From, State) ->
+    {reply, {ok, State#state.swarm_keys}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -725,7 +731,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
 %% final 0.04 (twice as much leverage, but 20% of the rate).
 
 %% when drift is small or 0, let it accumulate for a bit
-catchup_time(N) when N < 0.0001 ->
+catchup_time(N) when N < 0.001 ->
     0;
 %% when it's still relatively small, apply gentle adjustments
 catchup_time(N) when N < 0.01 ->

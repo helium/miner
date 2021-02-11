@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -22,6 +23,9 @@
 all() -> [
           restart_test,
           dkg_restart_test,
+          validator_test,
+          validator_transition_test,
+          validator_unstake_test,
           election_test,
           election_multi_test,
           group_change_test,
@@ -65,6 +69,17 @@ init_per_testcase(TestCase, Config0) ->
             dkg_restart_test ->
                 #{?election_interval => 10,
                   ?election_restart_interval => 99};
+            validator_test ->
+                #{?election_interval => 5,
+                  ?monthly_reward => ?bones(1000),
+                  ?election_restart_interval => 5};
+            validator_unstake_test ->
+                #{?election_interval => 5,
+                  ?election_restart_interval => 5};
+            validator_transition_test ->
+                #{?election_version => 4,
+                  ?election_interval => 5,
+                  ?election_restart_interval => 5};
             T when T == snapshot_test;
                    T == high_snapshot_test;
                    T == group_change_test ->
@@ -72,7 +87,7 @@ init_per_testcase(TestCase, Config0) ->
                   ?snapshot_interval => 5,
                   ?election_bba_penalty => 0.01,
                   ?election_seen_penalty => 0.05,
-                  ?election_version => 3};
+                  ?election_version => 5};
             election_v3_test ->
                 #{
                   ?election_version => 2
@@ -99,14 +114,27 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    Locations = lists:foldl(
+    %% create a new account to own validators for staking
+    #{public := AuxPub} = AuxKeys = libp2p_crypto:generate_keys(ecc_compact),
+    AuxAddr = libp2p_crypto:pubkey_to_bin(AuxPub),
+     Locations = lists:foldl(
         fun(I, Acc) ->
             [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
         end,
         [],
         lists:seq(1, length(Addresses))
     ),
-    InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
+    InitGen =
+        case blockchain_txn_vars_v1:decoded_vars(hd(InitialVars)) of
+            #{?election_version := V} when V >= 5 ->
+                [blockchain_txn_gen_validator_v1:new(Addr, Addr, ?bones(10000))
+                 || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))];
+            _ ->
+                [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+                 || {Addr, Loc} <- lists:zip(Addresses, Locations)] ++
+                    %% bigger stake for transfer test
+                    [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(150000))]
+        end,
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
     DKGResults = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
@@ -130,7 +158,8 @@ init_per_testcase(TestCase, Config0) ->
 
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
+        {non_consensus_miners, NonConsensusMiners},
+        {aux_acct, {AuxAddr, AuxKeys}}
         | Config]
     catch
         What:Why ->
@@ -140,7 +169,6 @@ init_per_testcase(TestCase, Config0) ->
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
-
 
 
 restart_test(Config) ->
@@ -215,6 +243,310 @@ dkg_restart_test(Config) ->
     %% make sure that we did the restore
     EndHeight = miner_ct_utils:height(FirstCMiner),
     ?assert(EndHeight < (Height + Interval + 99)).
+
+
+validator_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    Context = ?config(node_context, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+    {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
+    AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
+    %% setup makes sure that the cluster is running, so the first thing is to create and connect two
+    %% new nodes.
+
+    Blockchain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain]),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
+
+    {NewVal1, Keys1} = miner_ct_utils:start_miner(list_to_atom("9" ++ miner_ct_utils:randname(5)), Context),
+    {_, _, _, _Pub1, Addr1, _SigFun1} = Keys1,
+    ct_rpc:call(NewVal1, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+
+    {NewVal2, Keys2} = miner_ct_utils:start_miner(list_to_atom("10" ++ miner_ct_utils:randname(5)), Context),
+    {_, _, _, _Pub2, Addr2, _SigFun2} = Keys2,
+    ct_rpc:call(NewVal2, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+
+    ListenAddrs = miner_ct_utils:get_addrs(Miners),
+    Swarm1 = ct_rpc:call(NewVal1, blockchain_swarm, swarm, [], 2000),
+    Swarm2 = ct_rpc:call(NewVal2, blockchain_swarm, swarm, [], 2000),
+    lists:foreach(
+      fun(A) ->
+              ct_rpc:call(NewVal1, libp2p_swarm, connect, [Swarm1, A], 2000),
+              ct_rpc:call(NewVal2, libp2p_swarm, connect, [Swarm2, A], 2000)
+      end, ListenAddrs),
+
+    %% once they're talking to the group, we stake the first of them, and confirm that it makes it
+    %% into the group.
+
+    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, ?bones(10000), 100000),
+    Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+    timer:sleep(1000),
+
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ct:pal("submitting txn ~p", [Txn1]),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
+
+    %% wait here until the owner account is debited
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     {ok, Entry} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
+                     Balance = blockchain_ledger_entry_v1:balance(Entry),
+                     ct:pal("balance ~p ~p", [Owner, Balance]),
+                     Balance =< ?bones(5000)
+             end, 50, 200),
+    %% check that staked hnt has increased
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    Miners1 = [NewVal1 | Miners],
+    AddrList1 = [{NewVal1, Addr1} | AddrList],
+    Me = self(),
+    spawn(miner_ct_utils, election_check, [[NewVal1], Miners1, AddrList1, Me]),
+    check_loop(90, Miners),
+
+    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, ?bones(100000)),
+    Txn2 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
+    ct:pal("submitting ~p", [Txn2]),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn2]) || M <- Miners1],
+
+    %% transfer the stake from new node 1 to new node 2 and confirm that 1 leaves and 2 joins
+    Miners2 = [NewVal2 | Miners],
+    AddrList2 = [{NewVal2, Addr2} | AddrList1],
+    receive _ -> receive _ -> ok after 0 -> ok end after 0 -> ok end,
+    spawn(miner_ct_utils, election_check, [[NewVal2], Miners2, AddrList2, Me]),
+    check_loop(120, Miners2),
+
+    %% check that the balance is similar
+    {ok, Entry2} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
+    Balance2 = blockchain_ledger_entry_v1:balance(Entry2),
+    ct:pal("balance2 ~p ~p", [Owner, Balance2]),
+    ?assert(Balance2 =< ?bones(10000)),
+
+    %% check that the staked amount hasn't changed
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    ?assertEqual(0, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger])),
+    %% submit unstake txn
+    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner),
+    Txn4 = blockchain_txn_unstake_validator_v1:sign(UTxn4, AuxSigFun),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn4]) || M <- Miners1],
+
+    %% wait till cooldown shows something
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     ct:pal("cooldown not zero? ~p", [Cooldown]),
+                     Cooldown /= 0
+             end, 100, 200),
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    %% wait till balance has been returned
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     ct:pal("cooldown zero? ~p", [Cooldown]),
+                     Cooldown == 0
+             end, 100, 200),
+
+    %% make sure that staked is down
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    %% check that HNT has been returned
+    {ok, Entry3} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
+    Balance3 = blockchain_ledger_entry_v1:balance(Entry3),
+    ct:pal("balance3 ~p ~p", [Owner, Balance3]),
+    ?assert(Balance3 >= ?bones(15000)),
+    ok.
+
+validator_unstake_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    Context = ?config(node_context, Config),
+
+    {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
+    AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
+    %% setup makes sure that the cluster is running, so the first thing is to create and connect two
+    %% new nodes.
+
+    Blockchain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain]),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
+
+    {NewVal1, Keys1} = miner_ct_utils:start_miner(list_to_atom("9" ++ miner_ct_utils:randname(5)), Context),
+    {_, _, _, _Pub1, Addr1, _SigFun1} = Keys1,
+    ct_rpc:call(NewVal1, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+
+    {NewVal2, Keys2} = miner_ct_utils:start_miner(list_to_atom("10" ++ miner_ct_utils:randname(5)), Context),
+    {_, _, _, _Pub2, Addr2, _SigFun2} = Keys2,
+    ct_rpc:call(NewVal2, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+
+    ListenAddrs = miner_ct_utils:get_addrs(Miners),
+    Swarm1 = ct_rpc:call(NewVal1, blockchain_swarm, swarm, [], 2000),
+    Swarm2 = ct_rpc:call(NewVal2, blockchain_swarm, swarm, [], 2000),
+    lists:foreach(
+      fun(A) ->
+              ct_rpc:call(NewVal1, libp2p_swarm, connect, [Swarm1, A], 2000),
+              ct_rpc:call(NewVal2, libp2p_swarm, connect, [Swarm2, A], 2000)
+      end, ListenAddrs),
+
+    %% once they're talking to the group, we stake the first of them.
+
+    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, ?bones(10000), 100000),
+    Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+    timer:sleep(1000),
+
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ct:pal("submitting txn ~p", [Txn1]),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
+
+    %% wait here until the owner account is debited
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     {ok, Entry} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
+                     Balance = blockchain_ledger_entry_v1:balance(Entry),
+                     ct:pal("balance ~p ~p", [Owner, Balance]),
+                     Balance =< ?bones(5000)
+             end, 50, 200),
+    %% check that staked hnt has increased
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    #{secret := Priv2, public := Owner2Pub} =
+        libp2p_crypto:generate_keys(ecc_compact),
+    Owner2SigFun = libp2p_crypto:mk_sig_fun(Priv2),
+    Owner2 = libp2p_crypto:pubkey_to_bin(Owner2Pub),
+
+    %% do like the other validator test but change the owner account too
+    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, Owner2, 0, 100000),
+    UTxn2_1 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
+    Txn2 = blockchain_txn_transfer_validator_stake_v1:new_owner_sign(UTxn2_1, Owner2SigFun),
+    ct:pal("submitting ~p", [Txn2]),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn2]) || M <- Miners],
+
+    %% check that the balance is similar
+    {ok, Entry2} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
+    Balance2 = blockchain_ledger_entry_v1:balance(Entry2),
+    ct:pal("balance2 ~p ~p", [Owner, Balance2]),
+    ?assert(Balance2 =< ?bones(6000)),
+
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     try
+                         {ok, EntryW} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner2, Ledger]),
+                         BalanceW = blockchain_ledger_entry_v1:balance(EntryW),
+                         ct:pal("balance new ~p ~p", [Owner2, BalanceW]),
+                         BalanceW /= -0
+                     catch _:_ ->
+                             ct:pal("circ ~p",
+                                    [ct_rpc:call(hd(Miners), blockchain_ledger_v1,
+                                                 query_circulating_hnt, [Ledger])]),
+                             false
+                     end
+             end, 100, 600),
+
+    %% check that the staked amount hasn't changed
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    ?assertEqual(0, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger])),
+    %% submit unstake txn
+    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner),
+    Txn4 = blockchain_txn_unstake_validator_v1:sign(UTxn4, AuxSigFun),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn4]) || M <- Miners],
+
+    %% wait till cooldown shows something
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                     Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     Cooldown /= 0
+             end, 50, 400),
+     true = miner_ct_utils:wait_until(
+             fun() ->
+                     Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     Cooldown == 0
+             end, 50, 200),
+
+    %% check the staked is down
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
+    %% make sure that the balance has gone up!
+    {ok, Entry3} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner2, Ledger]),
+    Balance3 = blockchain_ledger_entry_v1:balance(Entry3),
+    ct:pal("balance3 ~p ~p", [Owner, Balance3]),
+    ?assert(Balance3 >= ?bones(10000)),
+
+    ok.
+
+validator_transition_test(Config) ->
+    %% get all the miners
+    Miners = ?config(miners, Config),
+    Context = ?config(node_context, Config),
+    {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
+    AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
+    %% setup makes sure that the cluster is running, so the first thing is to create and connect two
+    %% new nodes.
+
+    Blockchain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
+    {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
+
+    ListenAddrs = miner_ct_utils:get_addrs(Miners),
+    ValidatorAddrList =
+        [begin
+             Num = integer_to_list(N),
+             {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Context),
+             {_, _, _, _Pub, Addr, _SigFun} = Keys,
+             ct_rpc:call(NewVal, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
+             Swarm = ct_rpc:call(NewVal, blockchain_swarm, swarm, [], 2000),
+             lists:foreach(
+               fun(A) ->
+                       ct_rpc:call(NewVal, libp2p_swarm, connect, [Swarm, A], 2000)
+               end, ListenAddrs),
+             UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, ?bones(10000), 100000),
+             Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+
+             _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
+             {NewVal, Addr}
+         end || N <- lists:seq(9, 12)],
+
+    {Validators, _Addrs} = lists:unzip(ValidatorAddrList),
+
+    {Priv, _Pub} = ?config(master_key, Config),
+
+    Vars = #{?election_version => 5},
+
+    UEVTxn = blockchain_txn_vars_v1:new(Vars, 2),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, UEVTxn),
+    EVTxn = blockchain_txn_vars_v1:proof(UEVTxn, Proof),
+    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [EVTxn]) || M <- Miners],
+
+    Me = self(),
+    spawn(miner_ct_utils, election_check,
+          [Validators, Validators,
+           ValidatorAddrList ++ ?config(tagged_miner_addresses, Config),
+           Me]),
+    check_loop(180, Validators).
+
+check_loop(0, _Miners) ->
+    error(seen_timeout);
+check_loop(N, Miners) ->
+    receive
+        seen_all ->
+            ok;
+        {not_seen, []} ->
+            ok;
+        {not_seen, Not} ->
+            Miner = lists:nth(rand:uniform(length(Miners)), Miners),
+            try
+                Height = miner_ct_utils:height(Miner),
+                {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
+                ct:pal("not seen: ~p height ~p epoch ~p", [Not, Height, Epoch])
+            catch _:_ ->
+                    ct:pal("not seen: ~p ", [Not]),
+                    ok
+            end,
+            timer:sleep(100),
+            check_loop(N - 1, Miners)
+    after timer:seconds(30) ->
+            error(message_timeout)
+    end.
+
 
 election_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -528,8 +860,8 @@ group_change_test(Config) ->
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
 
-    %% wait until height has increased by 20
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 20, all, 80),
+    %% wait until height has increased by 10
+    ok = miner_ct_utils:wait_for_gte(height, Miners, Height + 10, all, 80),
 
     [{Target, TargetEnv}] = miner_ct_utils:stop_miners([lists:last(Miners)]),
 
@@ -574,7 +906,10 @@ group_change_test(Config) ->
                                L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
                                case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
                                    {ok, Sz} ->
-                                       ct:pal("size = ~p", [Sz]),
+                                       Versions =
+                                           ct_rpc:call(Miner, blockchain_ledger_v1, cg_versions,
+                                                       [L1], Timeout),
+                                       ct:pal("size = ~p versions = ~p", [Sz, Versions]),
                                        Sz == 7;
                                    _ ->
                                        %% badrpc
@@ -626,7 +961,7 @@ group_change_test(Config) ->
 
     ct:pal("post change miner ~p height ~p", [hd(Miners), Height2]),
     %% TODO: probably need to parameterize this via the delay
-    ?assert(Height2 > Height + 20 + 10),
+    ?assert(Height2 > Height + 10 + 5),
 
     %% do some additional checks to make sure that we restored across.
 
@@ -1100,10 +1435,3 @@ high_snapshot_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-
-
-
-
-
-
