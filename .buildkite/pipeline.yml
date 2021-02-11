@@ -36,6 +36,19 @@ steps:
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
+      
+  - if: build.tag =~ /^val/
+    name: "validator ARM64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "arm64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_val_image.sh"
 
 # There is some kind of compiler bug in 32 bit ARM
 # and rocksdb, so comment out for now. Can revisit
