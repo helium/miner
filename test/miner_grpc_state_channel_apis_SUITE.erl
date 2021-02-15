@@ -212,56 +212,7 @@ end_per_testcase(TestCase, Config) ->
 
 
 is_valid_sc_test(Config) ->
-    Miners = ?config(miners, Config),
-    [RouterNode1 | _] = Miners,
-
-    %% setup
-    %% oui txn
-    {ok, RouterPubkey1, RouterSigFun1, _ECDHFun1} = ct_rpc:call(RouterNode1, blockchain_swarm, keys, []),
-    RouterPubkeyBin1 = libp2p_crypto:pubkey_to_bin(RouterPubkey1),
-    RouterSwarm1 = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
-    ct:pal("RouterSwarm1: ~p", [RouterSwarm1]),
-    RouterP2PAddress1 = ct_rpc:call(RouterNode1, libp2p_swarm, p2p_address, [RouterSwarm1]),
-    ct:pal("RouterP2PAddress1: ~p", [RouterP2PAddress1]),
-
-    %% appears in both filters
-    DevEUI1=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI1=rand:uniform(trunc(math:pow(2, 64))),
-    %% appears in only one filter
-    DevEUI2=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI2=rand:uniform(trunc(math:pow(2, 64))),
-    %% appears in no filters
-    DevEUI3=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI3=rand:uniform(trunc(math:pow(2, 64))),
-
-    {Filter1, _} = xor16:to_bin(xor16:new([<<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
-    %% sanity check we don't have a false positive
-    ?assert(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>)),
-    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
-    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
-
-    OUI1 = 1,
-    OUITxn1 = ct_rpc:call(RouterNode1,
-                          blockchain_txn_oui_v1,
-                          new,
-                          [OUI1, RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8]),
-    ct:pal("OUITxn1: ~p", [OUITxn1]),
-    SignedOUITxn1 = ct_rpc:call(RouterNode1,
-                                blockchain_txn_oui_v1,
-                                sign,
-                                [OUITxn1, RouterSigFun1]),
-    ct:pal("SignedOUITxn1: ~p", [SignedOUITxn1]),
-
-    ct:pal("RouterNode: ~p", [RouterNode1]),
-    ok = ct_rpc:call(RouterNode1, blockchain_worker, submit_txn, [SignedOUITxn1]),
-    receive
-        {blockchain_txn_oui_v1, _, _} ->
-            ok;
-        Other ->
-            error({bad_txn, Other})
-    after timer:seconds(55) ->
-            error(oui_timeout)
-    end,
+    {RouterNode, RouterPubkeyBin, _RouterSigFun} = ?config(router_node, Config),
 
     %% open state channel 1
     ExpireWithin = 8,
@@ -269,29 +220,29 @@ is_valid_sc_test(Config) ->
     ID1 = open_state_channel(Config, ExpireWithin, Amount),
 
     %% check state_channels from both nodes appears on the ledger
-    {ok, SC1} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
-    true = check_ledger_state_channel(SC1, RouterPubkeyBin1, ID1, Config),
+    {ok, SC1} = get_ledger_state_channel(RouterNode, ID1, RouterPubkeyBin),
+    true = check_ledger_state_channel(SC1, RouterPubkeyBin, ID1, Config),
     true = miner_ct_utils:wait_until(
              fun() ->
-                     undefined /= ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, [])
+                     undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
              end),
     ct:pal("SC1: ~p", [SC1]),
 
     %% Wait till client has an active sc
     true = miner_ct_utils:wait_until(
              fun() ->
-                     TempID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+                     TempID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
                      ct:pal("TempID: ~p", [TempID]),
                      TempID /= undefined
              end,
              60, 500),
 
-    ActiveSCID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+    ActiveSCID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
     ct:pal("ActiveSCID: ~p", [ActiveSCID]),
 
     %% pull the active SC from the router node, confirm it has same ID as one from ledger
     %% and then use it to test the is_valid GRPC api
-    ActiveSCPB = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc, []),
+    ActiveSCPB = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
 
     %% convert state channel record to map, grpc client only uses maps
@@ -301,7 +252,7 @@ is_valid_sc_test(Config) ->
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 8080),
 
     %% use the grpc APIs to confirm the state channel is valid/sane
-    {ok, #{headers := Headers, result := #{msg := {is_valid_resp, ResponseMsg}, height := ResponseHeight, signature := ResponseSig} = Result}} = grpc_client:unary(
+    {ok, #{headers := Headers, result := #{msg := {is_valid_resp, ResponseMsg}, height := _ResponseHeight, signature := _ResponseSig} = Result}} = grpc_client:unary(
         Connection,
         #{sc => ActiveSCMap},
         'helium.gateway_state_channels',
@@ -320,56 +271,7 @@ is_valid_sc_test(Config) ->
 
 close_sc_test(Config) ->
     %% open a SC and then submit a close
-    Miners = ?config(miners, Config),
-    [RouterNode1, ClientNode | _] = Miners,
-
-    %% setup
-    %% oui txn
-    {ok, RouterPubkey1, RouterSigFun1, _ECDHFun1} = ct_rpc:call(RouterNode1, blockchain_swarm, keys, []),
-    RouterPubkeyBin1 = libp2p_crypto:pubkey_to_bin(RouterPubkey1),
-    RouterSwarm1 = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
-    ct:pal("RouterSwarm1: ~p", [RouterSwarm1]),
-    RouterP2PAddress1 = ct_rpc:call(RouterNode1, libp2p_swarm, p2p_address, [RouterSwarm1]),
-    ct:pal("RouterP2PAddress1: ~p", [RouterP2PAddress1]),
-
-    %% appears in both filters
-    DevEUI1=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI1=rand:uniform(trunc(math:pow(2, 64))),
-    %% appears in only one filter
-    DevEUI2=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI2=rand:uniform(trunc(math:pow(2, 64))),
-    %% appears in no filters
-    DevEUI3=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI3=rand:uniform(trunc(math:pow(2, 64))),
-
-    {Filter1, _} = xor16:to_bin(xor16:new([<<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
-    %% sanity check we don't have a false positive
-    ?assert(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI1:64/integer-unsigned-little, AppEUI1:64/integer-unsigned-little>>)),
-    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI2:64/integer-unsigned-little, AppEUI2:64/integer-unsigned-little>>)),
-    ?assertNot(xor16:contain({Filter1, fun xxhash:hash64/1}, <<DevEUI3:64/integer-unsigned-little, AppEUI3:64/integer-unsigned-little>>)),
-
-    OUI1 = 1,
-    OUITxn1 = ct_rpc:call(RouterNode1,
-                          blockchain_txn_oui_v1,
-                          new,
-                          [OUI1, RouterPubkeyBin1, [RouterPubkeyBin1], Filter1, 8]),
-    ct:pal("OUITxn1: ~p", [OUITxn1]),
-    SignedOUITxn1 = ct_rpc:call(RouterNode1,
-                                blockchain_txn_oui_v1,
-                                sign,
-                                [OUITxn1, RouterSigFun1]),
-    ct:pal("SignedOUITxn1: ~p", [SignedOUITxn1]),
-
-    ct:pal("RouterNode: ~p", [RouterNode1]),
-    ok = ct_rpc:call(RouterNode1, blockchain_worker, submit_txn, [SignedOUITxn1]),
-    receive
-        {blockchain_txn_oui_v1, _, _} ->
-            ok;
-        Other ->
-            error({bad_txn, Other})
-    after timer:seconds(55) ->
-            error(oui_timeout)
-    end,
+    {RouterNode, RouterPubkeyBin, _RouterSigFun} = ?config(router_node, Config),
 
     %% open state channel 1
     ExpireWithin = 8,
@@ -377,28 +279,28 @@ close_sc_test(Config) ->
     ID1 = open_state_channel(Config, ExpireWithin, Amount),
 
     %% check state_channels from both nodes appears on the ledger
-    {ok, SC1} = get_ledger_state_channel(RouterNode1, ID1, RouterPubkeyBin1),
-    true = check_ledger_state_channel(SC1, RouterPubkeyBin1, ID1, Config),
+    {ok, SC1} = get_ledger_state_channel(RouterNode, ID1, RouterPubkeyBin),
+    true = check_ledger_state_channel(SC1, RouterPubkeyBin, ID1, Config),
     true = miner_ct_utils:wait_until(
              fun() ->
-                     undefined /= ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, [])
+                     undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
              end),
     ct:pal("SC1: ~p", [SC1]),
 
     %% Wait till client has an active sc
     true = miner_ct_utils:wait_until(
              fun() ->
-                     TempID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+                     TempID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
                      ct:pal("TempID: ~p", [TempID]),
                      TempID /= undefined
              end,
              60, 500),
 
-    ActiveSCID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+    ActiveSCID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
     ct:pal("ActiveSCID: ~p", [ActiveSCID]),
 
     %% pull the active SC from the router node, we will need it in for our close txn
-    ActiveSCPB = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc, []),
+    ActiveSCPB = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
 
 
@@ -421,7 +323,7 @@ close_sc_test(Config) ->
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 8080),
 
     %% use the grpc APIs to confirm the state channel is valid/sane
-    {ok, #{headers := Headers, result := #{msg := {close_resp, ResponseMsg}, height := ResponseHeight, signature := ResponseSig} = Result}} = grpc_client:unary(
+    {ok, #{headers := Headers, result := #{msg := {close_resp, ResponseMsg}, height := _ResponseHeight, signature := _ResponseSig} = Result}} = grpc_client:unary(
         Connection,
         #{close_txn => SignedTxnMap2},
         'helium.gateway_state_channels',
@@ -615,19 +517,19 @@ follow_multi_scs_test(Config) ->
     ?assertEqual(Headers0HttpStatus, <<"200">>),
 
     %% we should receive 3 stream msgs for SC1, closable, closing and closed
-    {data, #{height := Data0Height, msg := {follow_streamed_msg, Data0FollowMsg}}} = Data0 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data0Height, msg := {follow_streamed_msg, Data0FollowMsg}}} = Data0 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data0: ~p", [Data0]),
     #{sc_id := Data0SCID1, close_state := Data0CloseState} = Data0FollowMsg,
     ?assertEqual(ActiveSCID, Data0SCID1),
     ?assertEqual(closable, Data0CloseState),
 
-    {data, #{height := Data1Height, msg := {follow_streamed_msg, Data1FollowMsg}}} = Data1 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data1Height, msg := {follow_streamed_msg, Data1FollowMsg}}} = Data1 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
     ?assertEqual(ActiveSCID, Data1SCID1),
     ?assertEqual(closing, Data1CloseState),
 
-    {data, #{height := Data2Height, msg := {follow_streamed_msg, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data2Height, msg := {follow_streamed_msg, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
     ?assertEqual(ActiveSCID, Data2SCID1),
@@ -662,19 +564,19 @@ follow_multi_scs_test(Config) ->
     end,
 
     %% assert the streamed msgs for SC2
-    {data, #{height := Data3Height, msg := {follow_streamed_msg, Data3FollowMsg}}} = Data3 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data3Height, msg := {follow_streamed_msg, Data3FollowMsg}}} = Data3 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data3: ~p", [Data3]),
     #{sc_id := Data3SCID2, close_state := Data3CloseState} = Data3FollowMsg,
     ?assertEqual(ActiveSCID2, Data3SCID2),
     ?assertEqual(Data3CloseState, closable),
 
-    {data, #{height := Data4Height, msg := {follow_streamed_msg, Data4FollowMsg}}} = Data4 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data4Height, msg := {follow_streamed_msg, Data4FollowMsg}}} = Data4 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data4: ~p", [Data4]),
     #{sc_id := Data4SCID2, close_state := Data4CloseState} = Data4FollowMsg,
     ?assertEqual(ActiveSCID2, Data4SCID2),
     ?assertEqual(Data4CloseState, closing),
 
-    {data, #{height := Data5Height, msg := {follow_streamed_msg, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := _Data5Height, msg := {follow_streamed_msg, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),
