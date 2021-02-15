@@ -647,10 +647,10 @@ init_per_testcase(Mod, TestCase, Config0) ->
                             [
                                 #{
                                     grpc_opts => #{
-                                        service_protos => [validator_pb, validator_state_channels_pb],
+                                        service_protos => [gateway_pb],
                                         services => #{
-                                           'helium.validator' => helium_validator,
-                                           'helium.validator_state_channels' => helium_validator_state_channels_service
+                                            'helium.gateway_routing' => helium_routing_service,
+                                            'helium.gateway_state_channels' => helium_state_channels_service
                                         }
                                     },
                                     transport_opts => #{ssl => false},

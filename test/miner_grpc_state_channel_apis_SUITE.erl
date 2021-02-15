@@ -304,9 +304,9 @@ is_valid_sc_test(Config) ->
     {ok, #{headers := Headers, result := #{msg := {is_valid_resp, ResponseMsg}, height := ResponseHeight, signature := ResponseSig} = Result}} = grpc_client:unary(
         Connection,
         #{sc => ActiveSCMap},
-        'helium.validator_state_channels',
+        'helium.gateway_state_channels',
         'is_valid',
-        validator_state_channels_client_pb,
+        gateway_client_pb,
         []
     ),
     ct:pal("Response Headers: ~p", [Headers]),
@@ -424,9 +424,9 @@ close_sc_test(Config) ->
     {ok, #{headers := Headers, result := #{msg := {close_resp, ResponseMsg}, height := ResponseHeight, signature := ResponseSig} = Result}} = grpc_client:unary(
         Connection,
         #{close_txn => SignedTxnMap2},
-        'helium.validator_state_channels',
+        'helium.gateway_state_channels',
         'close',
-        validator_state_channels_client_pb,
+        gateway_client_pb,
         []
     ),
     ct:pal("Response Headers: ~p", [Headers]),
@@ -580,9 +580,9 @@ follow_multi_scs_test(Config) ->
     %% setup a 'follow' streamed connection to server
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        'helium.validator_state_channels',
+        'helium.gateway_state_channels',
         follow,
-        validator_state_channels_client_pb
+        gateway_client_pb
     ),
     ct:pal("follow stream ~p:", [Stream]),
 
@@ -608,7 +608,7 @@ follow_multi_scs_test(Config) ->
     end,
     ct:pal("SCCloseTxn1: ~p", [_SCCloseTxn1]),
 
-    %% headers are always send with the first data msg
+    %% headers are always sent with the first data msg
     {headers, Headers0} = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Headers0: ~p", [Headers0]),
     #{<<":status">> := Headers0HttpStatus} = Headers0,
