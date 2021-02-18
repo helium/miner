@@ -14,9 +14,9 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 # Add our code
 ADD . /usr/src/miner/
 
-RUN rebar3 as validator tar
+RUN rebar3 as docker_val tar
 RUN mkdir -p /opt/docker
-RUN tar -zxvf _build/docker/rel/*/*.tar.gz -C /opt/docker
+RUN tar -zxvf _build/docker_val/rel/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
 RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 RUN cp genesis /opt/docker/update/genesis
