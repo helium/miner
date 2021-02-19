@@ -19,6 +19,7 @@ compile: | $(grpc_services_directory)
 	$(REBAR) compile
 
 clean:
+	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 test: compile
