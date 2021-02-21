@@ -912,10 +912,28 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
             ok = libp2p_group_relcast:handle_input(DKGGroup, start),
             lager:info("height ~p delay ~p Address: ~p, ConsensusWorker pos: ~p, Group name ~p",
                        [Height, Delay, MyAddress, Pos, DKGGroupName]),
-            {true, State#state{current_dkgs = DKGs#{{Height, Delay} => DKGGroup}}};
+            {true, State#state{current_dkgs = clean_dkgs(DKGs#{{Height, Delay} => DKGGroup})}};
         false ->
             lager:info("not in DKG this round at height ~p ~p", [Height, Delay]),
-            {false, State#state{current_dkgs = DKGs#{{Height, Delay} => out}}}
+            {false, State#state{current_dkgs = clean_dkgs(DKGs#{{Height, Delay} => out})}}
+    end.
+
+clean_dkgs(DKGs) ->
+    Max = application:get_env(miner, allowed_dkgs, 2),
+    case maps:size(DKGs) of
+        N when N > Max ->
+            L0 = maps:to_list(DKGs),
+            L = lists:reverse(lists:sort(L0)),
+            {Keep, Stop} = lists:split(Max, L),
+            lists:foreach(
+              fun(out) ->
+                      ok;
+                 (G) ->
+                      catch libp2p_group_relcast:handle_command(G, {stop, 0})
+              end, Stop),
+            maps:from_list(Keep);
+        _ ->
+            DKGs
     end.
 
 start_hbbft(DKG, Height, Delay, Chain) ->
