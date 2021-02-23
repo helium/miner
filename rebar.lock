@@ -51,7 +51,7 @@
   1},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
-       {ref,"855fbf83b31e8b8ab4f64e293b29831708217753"}},
+       {ref,"120fceedd4a918aec02422c864f1aefd1de1459c"}},
   1},
  {<<"erlang_stats">>,
   {git,"https://github.com/helium/erlang-stats.git",
