@@ -24,7 +24,7 @@
   1},
  {<<"ebus">>,
   {git,"https://github.com/helium/ebus.git",
-       {ref,"17024c0ff8e2f9c803a9ffedb6a1dac33c8b75b9"}},
+       {ref,"e49d7845c8c1e19961e529fc8a7fb61eec9973c6"}},
   0},
  {<<"ecc508">>,
   {git,"https://github.com/helium/ecc508.git",
