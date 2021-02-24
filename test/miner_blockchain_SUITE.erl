@@ -253,11 +253,11 @@ validator_test(Config) ->
     {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
 
     {NewVal1, Keys1} = miner_ct_utils:start_miner(list_to_atom("9" ++ miner_ct_utils:randname(5)), Context),
-    {_, _, _, _Pub1, Addr1, SigFun1} = Keys1,
+    {_, _, _, _Pub1, Addr1, _SigFun1} = Keys1,
     ct_rpc:call(NewVal1, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
 
     {NewVal2, Keys2} = miner_ct_utils:start_miner(list_to_atom("10" ++ miner_ct_utils:randname(5)), Context),
-    {_, _, _, _Pub2, Addr2, SigFun2} = Keys2,
+    {_, _, _, _Pub2, Addr2, _SigFun2} = Keys2,
     ct_rpc:call(NewVal2, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
 
     ListenAddrs = miner_ct_utils:get_addrs(Miners),
@@ -268,13 +268,12 @@ validator_test(Config) ->
               ct_rpc:call(NewVal1, libp2p_swarm, connect, [Swarm1, A], 2000),
               ct_rpc:call(NewVal2, libp2p_swarm, connect, [Swarm2, A], 2000)
       end, ListenAddrs),
-  
+
     %% once they're talking to the group, we stake the first of them, and confirm that it makes it
     %% into the group.
 
     UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, 10000, 100000),
-    UTxn1_1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
-    Txn1 = blockchain_txn_stake_validator_v1:validator_sign(UTxn1_1, SigFun1),
+    Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
     timer:sleep(1000),
 
     ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
@@ -297,10 +296,9 @@ validator_test(Config) ->
     Me = self(),
     spawn(miner_ct_utils, election_check, [[NewVal1], Miners1, AddrList1, Me]),
     check_loop(90, Miners),
-    
+
     UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, 2, 100000),
-    UTxn2_1 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
-    Txn2 = blockchain_txn_transfer_validator_stake_v1:new_validator_sign(UTxn2_1, SigFun2),
+    Txn2 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
     ct:pal("submitting ~p", [Txn2]),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn2]) || M <- Miners1],
 
@@ -330,15 +328,18 @@ validator_test(Config) ->
     true = miner_ct_utils:wait_until(
              fun() ->
                      Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     ct:pal("cooldown not zero? ~p", [Cooldown]),
                      Cooldown /= 0
-             end, 50, 200),
+             end, 100, 200),
+    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     %% wait till balance has been returned
     true = miner_ct_utils:wait_until(
              fun() ->
                      Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
+                     ct:pal("cooldown zero? ~p", [Cooldown]),
                      Cooldown == 0
-             end, 50, 200),
+             end, 100, 200),
 
     %% make sure that staked is down
     ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
@@ -364,11 +365,11 @@ validator_unstake_test(Config) ->
     {ok, GenesisBlock} = ct_rpc:call(hd(Miners), blockchain, genesis_block, [Blockchain]),
 
     {NewVal1, Keys1} = miner_ct_utils:start_miner(list_to_atom("9" ++ miner_ct_utils:randname(5)), Context),
-    {_, _, _, _Pub1, Addr1, SigFun1} = Keys1,
+    {_, _, _, _Pub1, Addr1, _SigFun1} = Keys1,
     ct_rpc:call(NewVal1, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
 
     {NewVal2, Keys2} = miner_ct_utils:start_miner(list_to_atom("10" ++ miner_ct_utils:randname(5)), Context),
-    {_, _, _, _Pub2, Addr2, SigFun2} = Keys2,
+    {_, _, _, _Pub2, Addr2, _SigFun2} = Keys2,
     ct_rpc:call(NewVal2, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
 
     ListenAddrs = miner_ct_utils:get_addrs(Miners),
@@ -379,12 +380,11 @@ validator_unstake_test(Config) ->
               ct_rpc:call(NewVal1, libp2p_swarm, connect, [Swarm1, A], 2000),
               ct_rpc:call(NewVal2, libp2p_swarm, connect, [Swarm2, A], 2000)
       end, ListenAddrs),
-  
+
     %% once they're talking to the group, we stake the first of them.
 
     UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, 10000, 100000),
-    UTxn1_1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
-    Txn1 = blockchain_txn_stake_validator_v1:validator_sign(UTxn1_1, SigFun1),
+    Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
     timer:sleep(1000),
 
     ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
@@ -408,10 +408,9 @@ validator_unstake_test(Config) ->
     Owner2 = libp2p_crypto:pubkey_to_bin(Owner2Pub),
 
     %% do like the other validator test but change the owner account too
-    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, Owner2, 2, 100000),
+    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, Owner2, 0, 2, 100000),
     UTxn2_1 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
-    UTxn2_2 = blockchain_txn_transfer_validator_stake_v1:new_owner_sign(UTxn2_1, Owner2SigFun),
-    Txn2 = blockchain_txn_transfer_validator_stake_v1:new_validator_sign(UTxn2_2, SigFun2),
+    Txn2 = blockchain_txn_transfer_validator_stake_v1:new_owner_sign(UTxn2_1, Owner2SigFun),
     ct:pal("submitting ~p", [Txn2]),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn2]) || M <- Miners],
 
@@ -419,7 +418,7 @@ validator_unstake_test(Config) ->
     {ok, Entry2} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
     Balance2 = blockchain_ledger_entry_v1:balance(Entry2),
     ct:pal("balance2 ~p ~p", [Owner, Balance2]),
-    ?assert(Balance2 =< 5000),
+    ?assert(Balance2 =< 6000),
 
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -457,8 +456,7 @@ validator_unstake_test(Config) ->
 
     %% submit unstake txn
     UTxn5 = blockchain_txn_stake_validator_v1:new(Addr2, Owner2, 0, 4, 100000),
-    UTxn5_1 = blockchain_txn_stake_validator_v1:sign(UTxn5, Owner2SigFun),
-    Txn5 = blockchain_txn_stake_validator_v1:validator_sign(UTxn5_1, SigFun2),
+    Txn5 = blockchain_txn_stake_validator_v1:sign(UTxn5, Owner2SigFun),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn5]) || M <- Miners],
 
     %% check that cooldown is back to 0, staked is back up, and that the validator is back to staked
@@ -512,7 +510,7 @@ validator_transition_test(Config) ->
         [begin
              Num = integer_to_list(N),
              {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Context),
-             {_, _, _, _Pub, Addr, SigFun} = Keys,
+             {_, _, _, _Pub, Addr, _SigFun} = Keys,
              ct_rpc:call(NewVal, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
              Swarm = ct_rpc:call(NewVal, blockchain_swarm, swarm, [], 2000),
              lists:foreach(
@@ -520,9 +518,8 @@ validator_transition_test(Config) ->
                        ct_rpc:call(NewVal, libp2p_swarm, connect, [Swarm, A], 2000)
                end, ListenAddrs),
              UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, 10000, 100000),
-             UTxn1_1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
-             Txn1 = blockchain_txn_stake_validator_v1:validator_sign(UTxn1_1, SigFun),
-             
+             Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
+
              _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
              {NewVal, Addr}
          end || N <- lists:seq(9, 12)],
@@ -928,7 +925,7 @@ group_change_test(Config) ->
                                L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
                                case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
                                    {ok, Sz} ->
-                                       Versions = 
+                                       Versions =
                                            ct_rpc:call(Miner, blockchain_ledger_v1, cg_versions,
                                                        [L1], Timeout),
                                        ct:pal("size = ~p versions = ~p", [Sz, Versions]),
@@ -1457,10 +1454,3 @@ high_snapshot_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-
-
-
-
-
-

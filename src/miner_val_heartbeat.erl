@@ -18,6 +18,8 @@
         {
          address :: libp2p_crypto:address(),
          sigfun :: libp2p_crypto:sig_fun(),
+         txn_status = ready :: ready | waiting,
+         txn_wait = 10 :: non_neg_integer(),
          chain :: undefined | blockchain:blockchain()
         }).
 
@@ -40,7 +42,7 @@ init([]) ->
             erlang:send_after(500, self(), chain_check),
             {ok, #state{address = Address,
                         sigfun = SigFun}};
-        Chain -> 
+        Chain ->
             ok = blockchain_event:add_handler(self()),
             {ok, #state{address = Address,
                         sigfun = SigFun,
@@ -56,42 +58,51 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
+handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
+            #state{txn_status = waiting, txn_wait = Wait} = State) ->
+    case Wait of
+        1 ->
+            {noreply, State#state{txn_status = ready, txn_wait = 10}};
+        N ->
+            {noreply, State#state{txn_wait = N - 1}}
+    end;
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{address = Address, sigfun = SigFun} = State) ->
     Ledger = blockchain:ledger(State#state.chain),
     case blockchain:config(?election_version, Ledger) of
         {ok, V} when V >= 5 ->
             {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
-            case blockchain:get_block(Hash, State#state.chain) of
-                {ok, Block} ->
-                    Height = blockchain_block:height(Block),
-                    %% heartbeat server needs to be able to run on an unstaked validator
-                    case blockchain_ledger_v1:get_validator(Address, Ledger) of
-                        {ok, Val} ->
-                            lager:debug("getting validator for address ~p got ~p", [Address, Val]),
-                            case blockchain_ledger_validator_v1:last_heartbeat(Val) of
-                                N when (N + HBInterval) =< Height andalso (not Sync) -> 
-                                    %% we need to construct and submit a heartbeat txn
-                                    {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
-                                    {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
-                                    UnsignedTxn =
-                                        blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback()),
-                                    Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
-                                    lager:debug("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
-                                    blockchain_worker:submit_txn(Txn),
-                                    ok;
-                                _ -> ok
-                            end;
-                        {error, not_found} ->
-                            lager:debug("getting validator for address ~p not found", [Address]),
-                            ok
+            {ok, Block} = blockchain:get_block(Hash, State#state.chain),
+            Height = blockchain_block:height(Block),
+            %% heartbeat server needs to be able to run on an unstaked validator
+            case blockchain_ledger_v1:get_validator(Address, Ledger) of
+                {ok, Val} ->
+                    lager:debug("getting validator for address ~p got ~p", [Address, Val]),
+                    case blockchain_ledger_validator_v1:last_heartbeat(Val) of
+                        N when (N + HBInterval) =< Height andalso (not Sync) ->
+                            %% we need to construct and submit a heartbeat txn
+                            {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
+                            {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
+                            UnsignedTxn =
+                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback()),
+                            Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
+                            lager:debug("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
+                            Self = self(),
+                            blockchain_worker:submit_txn(Txn, fun(Res) -> Self ! {sub, Res} end),
+                            {noreply, State#state{txn_status = waiting}};
+                        _ -> {noreply, State}
                     end;
-                _ -> ok             
+                {error, not_found} ->
+                    lager:debug("getting validator for address ~p not found", [Address]),
+                    {noreply, State}
             end;
         _ ->
-            ok
-    end,
-    {noreply, State};
+            {noreply, State}
+    end;
+%% logically it doesn't matter what the result is, we either need to start actively waiting or
+%% trying again
+handle_info({sub, _Res}, State) ->
+    {noreply, State#state{txn_status = ready, txn_wait = 10}};
 handle_info({blockchain_event, _}, State) ->
     {noreply, State};
 handle_info(chain_check, State) ->
@@ -99,7 +110,7 @@ handle_info(chain_check, State) ->
         undefined ->
             erlang:send_after(500, self(), chain_check),
             {noreply, State};
-        Chain -> 
+        Chain ->
             ok = blockchain_event:add_handler(self()),
             {noreply, State#state{chain = Chain}}
     end;
