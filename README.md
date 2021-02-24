@@ -31,7 +31,7 @@ docker build -t helium:miner-test -f .buildkite/scripts/Dockerfile-xxxNN .
 
 Note that Miner for AMD64 requires AVX support on the processor due to the erasure library.
 
-It is possible to build ARM64 images from and AMD64 machine. Install the following:
+It is possible to build ARM64 images from an AMD64 machine. Install the following:
 
 ```
 sudo apt-get install qemu binfmt-support qemu-user-static # Install the qemu packages
