@@ -661,22 +661,27 @@ handle_info(monitor_miner, #state{active_group = Group} = State) ->
     %% we've seen cases where the miner will think that it's out of consensus because
     %% miner process has crashed, but the group is still running, just not participating
     %% correctly.  this makes sure that the miner gets the group reinstalled on restart
-    MinerPid = whereis(miner),
-    case is_process_alive(MinerPid) of
-        true ->
-            %% re-establish the reference, waiting for a little while if needed
-            NewRef = erlang:monitor(process, MinerPid),
-            %% reinstall the group so that we participate, if there's a group
-            case Group of
-                undefined ->
-                    ok;
-                _ ->
-                    ok = miner:install_consensus(Group)
-            end,
-            {noreply, State#state{miner_monitor = NewRef}};
-        false ->
+    case whereis(miner) of
+        undefined ->
             erlang:send_after(timer:seconds(1), self(), monitor_miner),
-            {noreply, State}
+            {noreply, State};
+        MinerPid when is_pid(MinerPid) ->
+            case is_process_alive(MinerPid) of
+                true ->
+                    %% re-establish the reference, waiting for a little while if needed
+                    NewRef = erlang:monitor(process, MinerPid),
+                    %% reinstall the group so that we participate, if there's a group
+                    case Group of
+                        undefined ->
+                            ok;
+                        _ ->
+                            ok = miner:install_consensus(Group)
+                    end,
+                    {noreply, State#state{miner_monitor = NewRef}};
+                false ->
+                    erlang:send_after(timer:seconds(1), self(), monitor_miner),
+                    {noreply, State}
+            end
     end;
 handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
             #state{ag_monitor = OldRef, active_group = OldGroup,
