@@ -548,7 +548,7 @@ send_receipts(LatLongs, Challengees) ->
                 {Address, LayerData} ->
                     Receipt = blockchain_poc_receipt_v1:new(Address, Timestamp, 0, LayerData, radio),
                     SignedReceipt = blockchain_poc_receipt_v1:sign(Receipt, SigFun),
-                    miner_poc_statem:receipt(make_ref(), SignedReceipt);
+                    miner_poc_statem:receipt(make_ref(), SignedReceipt, "/ip4/127.0.0.1/tcp/1234");
                 _ ->
                     ok
             end
