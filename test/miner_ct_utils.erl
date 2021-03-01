@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -define(BASE_TMP_DIR, "./_build/test/tmp").
@@ -933,7 +934,7 @@ make_vars(Keys, Map, Mode) ->
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.60,
-              ?monthly_reward => 50000 * 1000000,
+              ?monthly_reward => 50000 * 10000000,
               ?securities_percent => 0.35,
               ?dc_percent => 0.0,
               ?poc_challengees_percent => 0.19 + 0.16,
@@ -961,7 +962,7 @@ make_vars(Keys, Map, Mode) ->
               ?poc_path_limit => 7,
               ?poc_typo_fixes => true,
               ?sc_grace_blocks => 4,
-              ?validator_minimum_stake => 10000,
+              ?validator_minimum_stake => ?bones(10000),
               ?validator_liveness_grace_period => 10,
               ?validator_liveness_interval => 5,
               ?stake_withdrawl_cooldown => 5

@@ -674,7 +674,7 @@ process_bbas(N, BBAs) ->
 %% final 0.04 (twice as much leverage, but 20% of the rate).
 
 %% when drift is small or 0, let it accumulate for a bit
-catchup_time(N) when N < 0.0001 ->
+catchup_time(N) when N < 0.001 ->
     0;
 %% when it's still relatively small, apply gentle adjustments
 catchup_time(N) when N < 0.01 ->

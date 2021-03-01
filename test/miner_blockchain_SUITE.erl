@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -69,7 +70,7 @@ init_per_testcase(TestCase, Config0) ->
                   ?election_restart_interval => 99};
             validator_test ->
                 #{?election_interval => 5,
-                  ?monthly_reward => 1000 * 1000000,
+                  ?monthly_reward => ?bones(1000),
                   ?election_restart_interval => 5};
             validator_unstake_test ->
                 #{?election_interval => 5,
@@ -125,13 +126,13 @@ init_per_testcase(TestCase, Config0) ->
     InitGen =
         case blockchain_txn_vars_v1:decoded_vars(hd(InitialVars)) of
             #{?election_version := V} when V >= 5 ->
-                [blockchain_txn_gen_validator_v1:new(Addr, Addr, 10000)
-                 || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, 15000)];
+                [blockchain_txn_gen_validator_v1:new(Addr, Addr, ?bones(10000))
+                 || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))];
             _ ->
                 [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
                  || {Addr, Loc} <- lists:zip(Addresses, Locations)] ++
                     %% bigger stake for transfer test
-                    [blockchain_txn_coinbase_v1:new(AuxAddr, 150000)]
+                    [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(150000))]
         end,
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
@@ -272,11 +273,11 @@ validator_test(Config) ->
     %% once they're talking to the group, we stake the first of them, and confirm that it makes it
     %% into the group.
 
-    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, 10000, 100000),
+    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, ?bones(10000), 100000),
     Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
     timer:sleep(1000),
 
-    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
     ct:pal("submitting txn ~p", [Txn1]),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
 
@@ -286,10 +287,10 @@ validator_test(Config) ->
                      {ok, Entry} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
                      Balance = blockchain_ledger_entry_v1:balance(Entry),
                      ct:pal("balance ~p ~p", [Owner, Balance]),
-                     Balance =< 5000
+                     Balance =< ?bones(5000)
              end, 50, 200),
     %% check that staked hnt has increased
-    ?assertEqual(90000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     Miners1 = [NewVal1 | Miners],
     AddrList1 = [{NewVal1, Addr1} | AddrList],
@@ -297,7 +298,7 @@ validator_test(Config) ->
     spawn(miner_ct_utils, election_check, [[NewVal1], Miners1, AddrList1, Me]),
     check_loop(90, Miners),
 
-    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, 2, 100000),
+    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, ?bones(100000)),
     Txn2 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
     ct:pal("submitting ~p", [Txn2]),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn2]) || M <- Miners1],
@@ -313,14 +314,14 @@ validator_test(Config) ->
     {ok, Entry2} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
     Balance2 = blockchain_ledger_entry_v1:balance(Entry2),
     ct:pal("balance2 ~p ~p", [Owner, Balance2]),
-    ?assert(Balance2 =< 10000),
+    ?assert(Balance2 =< ?bones(10000)),
 
     %% check that the staked amount hasn't changed
-    ?assertEqual(90000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     ?assertEqual(0, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger])),
     %% submit unstake txn
-    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner, 3),
+    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner),
     Txn4 = blockchain_txn_unstake_validator_v1:sign(UTxn4, AuxSigFun),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn4]) || M <- Miners1],
 
@@ -331,7 +332,7 @@ validator_test(Config) ->
                      ct:pal("cooldown not zero? ~p", [Cooldown]),
                      Cooldown /= 0
              end, 100, 200),
-    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     %% wait till balance has been returned
     true = miner_ct_utils:wait_until(
@@ -342,12 +343,12 @@ validator_test(Config) ->
              end, 100, 200),
 
     %% make sure that staked is down
-    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
     %% check that HNT has been returned
     {ok, Entry3} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
     Balance3 = blockchain_ledger_entry_v1:balance(Entry3),
     ct:pal("balance3 ~p ~p", [Owner, Balance3]),
-    ?assert(Balance3 >= 15000),
+    ?assert(Balance3 >= ?bones(15000)),
     ok.
 
 validator_unstake_test(Config) ->
@@ -383,11 +384,11 @@ validator_unstake_test(Config) ->
 
     %% once they're talking to the group, we stake the first of them.
 
-    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, 10000, 100000),
+    UTxn1 = blockchain_txn_stake_validator_v1:new(Addr1, Owner, ?bones(10000), 100000),
     Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
     timer:sleep(1000),
 
-    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
     ct:pal("submitting txn ~p", [Txn1]),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
 
@@ -397,10 +398,10 @@ validator_unstake_test(Config) ->
                      {ok, Entry} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
                      Balance = blockchain_ledger_entry_v1:balance(Entry),
                      ct:pal("balance ~p ~p", [Owner, Balance]),
-                     Balance =< 5000
+                     Balance =< ?bones(5000)
              end, 50, 200),
     %% check that staked hnt has increased
-    ?assertEqual(90000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     #{secret := Priv2, public := Owner2Pub} =
         libp2p_crypto:generate_keys(ecc_compact),
@@ -408,7 +409,7 @@ validator_unstake_test(Config) ->
     Owner2 = libp2p_crypto:pubkey_to_bin(Owner2Pub),
 
     %% do like the other validator test but change the owner account too
-    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, Owner2, 0, 2, 100000),
+    UTxn2 = blockchain_txn_transfer_validator_stake_v1:new(Addr1, Addr2, Owner, Owner2, 0, 100000),
     UTxn2_1 = blockchain_txn_transfer_validator_stake_v1:sign(UTxn2, AuxSigFun),
     Txn2 = blockchain_txn_transfer_validator_stake_v1:new_owner_sign(UTxn2_1, Owner2SigFun),
     ct:pal("submitting ~p", [Txn2]),
@@ -418,7 +419,7 @@ validator_unstake_test(Config) ->
     {ok, Entry2} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner, Ledger]),
     Balance2 = blockchain_ledger_entry_v1:balance(Entry2),
     ct:pal("balance2 ~p ~p", [Owner, Balance2]),
-    ?assert(Balance2 =< 6000),
+    ?assert(Balance2 =< ?bones(6000)),
 
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -436,11 +437,11 @@ validator_unstake_test(Config) ->
              end, 100, 600),
 
     %% check that the staked amount hasn't changed
-    ?assertEqual(90000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+    ?assertEqual(?bones(90000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
 
     ?assertEqual(0, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger])),
     %% submit unstake txn
-    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner, 3),
+    UTxn4 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner),
     Txn4 = blockchain_txn_unstake_validator_v1:sign(UTxn4, AuxSigFun),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn4]) || M <- Miners],
 
@@ -450,46 +451,20 @@ validator_unstake_test(Config) ->
                      Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
                      Cooldown /= 0
              end, 50, 400),
-
-    %% check the staked is down
-    ?assertEqual(80000, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
-
-    %% submit unstake txn
-    UTxn5 = blockchain_txn_stake_validator_v1:new(Addr2, Owner2, 0, 4, 100000),
-    Txn5 = blockchain_txn_stake_validator_v1:sign(UTxn5, Owner2SigFun),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn5]) || M <- Miners],
-
-    %% check that cooldown is back to 0, staked is back up, and that the validator is back to staked
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     90000 == ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])
-             end, 50, 400),
-
-    ?assertEqual(0, ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger])),
-
-    %% reunstake
-    UTxn6 = blockchain_txn_unstake_validator_v1:new(Addr2, Owner2, 5),
-    Txn6 = blockchain_txn_unstake_validator_v1:sign(UTxn6, Owner2SigFun),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn6]) || M <- Miners],
-
-    %% wait till the stake enters cooldown
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
-                     Cooldown /= 0
-             end, 50, 200),
-    %% wait until it is returned
-    true = miner_ct_utils:wait_until(
+     true = miner_ct_utils:wait_until(
              fun() ->
                      Cooldown = ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_cooldown_hnt, [Ledger]),
                      Cooldown == 0
              end, 50, 200),
 
+    %% check the staked is down
+    ?assertEqual(?bones(80000), ct_rpc:call(hd(Miners), blockchain_ledger_v1, query_staked_hnt, [Ledger])),
+
     %% make sure that the balance has gone up!
     {ok, Entry3} = ct_rpc:call(hd(Miners), blockchain_ledger_v1, find_entry, [Owner2, Ledger]),
     Balance3 = blockchain_ledger_entry_v1:balance(Entry3),
     ct:pal("balance3 ~p ~p", [Owner, Balance3]),
-    ?assert(Balance3 >= 10000),
+    ?assert(Balance3 >= ?bones(10000)),
 
     ok.
 
@@ -517,7 +492,7 @@ validator_transition_test(Config) ->
                fun(A) ->
                        ct_rpc:call(NewVal, libp2p_swarm, connect, [Swarm, A], 2000)
                end, ListenAddrs),
-             UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, 10000, 100000),
+             UTxn1 = blockchain_txn_stake_validator_v1:new(Addr, Owner, ?bones(10000), 100000),
              Txn1 = blockchain_txn_stake_validator_v1:sign(UTxn1, AuxSigFun),
 
              _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn1]) || M <- Miners],
