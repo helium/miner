@@ -18,8 +18,9 @@ RUN rebar3 as docker_val tar
 RUN mkdir -p /opt/docker
 RUN tar -zxvf _build/docker_val/rel/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
-RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
-RUN cp genesis /opt/docker/update/genesis
+# replace with testnet genesis
+#RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
+#RUN cp genesis /opt/docker/update/genesis
 
 FROM erlang:22.3.2-alpine as runner
 
