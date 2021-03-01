@@ -662,7 +662,7 @@ handle_info(monitor_miner, #state{active_group = Group} = State) ->
     %% miner process has crashed, but the group is still running, just not participating
     %% correctly.  this makes sure that the miner gets the group reinstalled on restart
     MinerPid = whereis(miner),
-    case is_process_alive(MinerPid) of
+    case is_pid(MinerPid) andalso is_process_alive(MinerPid) of
         true ->
             %% re-establish the reference, waiting for a little while if needed
             NewRef = erlang:monitor(process, MinerPid),
