@@ -313,15 +313,19 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
         poc_not_found ->
             Ledger = blockchain:ledger(Chain),
             _ = erlang:spawn(fun() ->
-                ok = wait_for_block(fun() ->
+                case wait_for_block(fun() ->
                     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
                         {ok, _} ->
                             true;
                         _ ->
                             false
                     end
-                end, 10),
-                ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream)
+                end, 10) of
+                    ok ->
+                        ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream);
+                    {error, _} ->
+                        ok
+                end
             end),
             State;
         {error, fail_decrypt} ->
