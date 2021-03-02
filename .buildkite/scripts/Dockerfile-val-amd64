@@ -18,7 +18,10 @@ RUN rebar3 as docker_val tar
 RUN mkdir -p /opt/docker
 RUN tar -zxvf _build/docker_val/rel/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
-# replace with testnet genesis
+
+RUN wget https://snapshots.helium.wtf/genesis.testnet
+RUN cp genesis.testnet /opt/docker/update/genesis
+
 #RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
 #RUN cp genesis /opt/docker/update/genesis
 
