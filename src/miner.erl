@@ -314,7 +314,7 @@ remove_consensus() ->
 
 -spec version() -> integer().
 version() ->
-    2.
+    3.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
