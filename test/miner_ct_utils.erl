@@ -456,7 +456,9 @@ start_node(Name) ->
             connect(Node),
             ct_slave:stop(Name),
             wait_until_offline(Node),
-            start_node(Name)
+            start_node(Name);
+        Other ->
+            Other
     end.
 
 partition_cluster(ANodes, BNodes) ->
@@ -594,9 +596,17 @@ init_per_testcase(Mod, TestCase, Config0) ->
         lists:seq(1, TotalMiners)
     ),
 
+    case lists:any(fun({{error, _}, _}) -> true; (_) -> false end, MinersAndPorts) of
+        true ->
+            %% kill any nodes we started and throw error
+            miner_ct_utils:pmap(fun({error, _}) -> ok; (Miner) -> ct_slave:stop(Miner) end, element(1, lists:unzip(MinersAndPorts))),
+            throw(hd([ E || {{error, E}, _} <- MinersAndPorts ]));
+        false ->
+            ok
+    end,
+
     Keys = miner_ct_utils:pmap(
              fun({Miner, Ports}) ->
-                     miner_ct_utils:start_node(Miner),
                      #{secret := GPriv, public := GPub} =
                      libp2p_crypto:generate_keys(ecc_compact),
                      GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),

@@ -45,6 +45,7 @@ all() -> [basic, default_routers].
 
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    try
     Miners = ?config(miners, Config),
     MinersAndPorts = ?config(ports, Config),
     Addresses = ?config(addresses, Config),
@@ -114,14 +115,24 @@ init_per_testcase(_TestCase, Config0) ->
     SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
     {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
 
-    [{swarm, RouterSwarm}|Config].
+    [{swarm, RouterSwarm}|Config]
+    catch
+        What:Why ->
+            end_per_testcase(_TestCase, Config),
+            erlang:What(Why)
+    end.
 
 end_per_testcase(_TestCase, Config) ->
-    RouterSwarm = ?config(swarm, Config),
-    libp2p_swarm:stop(RouterSwarm),
+    miner_ct_utils:end_per_testcase(_TestCase, Config),
+    case proplists:get_value(swarm, Config) of
+        undefined ->
+            ok;
+        RouterSwarm ->
+            libp2p_swarm:stop(RouterSwarm)
+    end,
     gen_server:stop(miner_fake_radio_backplane),
     meck:unload(blockchain_state_channels_server),
-    miner_ct_utils:end_per_testcase(_TestCase, Config).
+    ok.
 
 %%--------------------------------------------------------------------
 %% TEST CASES
