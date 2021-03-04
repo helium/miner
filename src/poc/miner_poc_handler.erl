@@ -28,7 +28,10 @@
 
 -include("miner_util.hrl").
 
--record(state, {peer :: undefined | libp2p_crypto:pubkey_bin()}).
+-record(state,
+    { peer :: undefined | libp2p_crypto:pubkey_bin(),
+      peer_addr :: undefined | string()
+     }).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -48,7 +51,8 @@ send(Pid, Data) ->
 init(client, _Conn, _Args) ->
     {ok, #state{}};
 init(server, Conn, _Args) ->
-    {ok, #state{peer=?IDENTIFY(Conn)}}.
+    {_, PeerAddr} = libp2p_connection:addr_info(Conn),
+    {ok, #state{peer=?IDENTIFY(Conn), peer_addr=PeerAddr}}.
 
 handle_data(client, Data, State) ->
     lager:info("client got data: ~p", [Data]),
@@ -59,7 +63,7 @@ handle_data(server, Data, State) ->
         {witness, Witness} ->
             ok = miner_poc_statem:witness(State#state.peer, Witness);
         {receipt, Receipt} ->
-            ok = miner_poc_statem:receipt(State#state.peer, Receipt)
+            ok = miner_poc_statem:receipt(State#state.peer, Receipt, State#state.peer_addr)
     catch _:_ ->
         lager:error("got unknown data ~p", [Data])
     end,

@@ -12,7 +12,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    receipt/2,
+    receipt/3,
     witness/2
 ]).
 
@@ -49,12 +49,21 @@
 -define(RECEIPTS_TIMEOUT, 10).
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
+-define(ADDR_HASH_FP_RATE, 1.0e-6).
 
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
 -else.
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(120)).
 -endif.
+
+-record(addr_hash_filter, {
+          start :: pos_integer(),
+          height :: pos_integer(),
+          byte_size :: pos_integer(),
+          salt :: binary(),
+          bloom :: bloom_nif:bloom()
+         }).
 
 -record(data, {
     base_dir :: file:filename_all() | undefined,
@@ -75,7 +84,8 @@
     retry = ?CHALLENGE_RETRY :: non_neg_integer(),
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
     poc_restarts = ?POC_RESTARTS :: non_neg_integer(),
-    txn_ref = make_ref() :: reference()
+    txn_ref = make_ref() :: reference(),
+    addr_hash_filter :: undefined | #addr_hash_filter{}
 }).
 
 -type state() :: requesting | mining | receiving | waiting.
@@ -88,8 +98,8 @@
 start_link(Args) ->
     gen_statem:start_link({local, ?SERVER}, ?SERVER, Args, [{hibernate_after, 5000}]).
 
-receipt(Address, Data) ->
-    gen_statem:cast(?SERVER, {receipt, Address, Data}).
+receipt(Address, Data, PeerAddr) ->
+    gen_statem:cast(?SERVER, {receipt, Address, Data, PeerAddr}).
 
 witness(Address, Data) ->
     gen_statem:cast(?SERVER, {witness, Address, Data}).
@@ -109,23 +119,23 @@ init(Args) ->
     lager:info("init with ~p", [Args]),
     case load_data(BaseDir) of
         {error, _} ->
-            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting}};
+            {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting})};
         %% we have attempted to unsuccessfully restart this POC too many times, give up and revert to default state
         {ok, _State, #data{poc_restarts=POCRestarts}} when POCRestarts == 0 ->
-            {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                   address=Address, poc_interval=Delay, state=requesting}};
+            {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                   address=Address, poc_interval=Delay, state=requesting})};
         %% we loaded a state from the saved statem file, initialise with this if its an exported/supported state
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
                 true ->
-                    {ok, State, Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                    {ok, State, maybe_init_addr_hash(Data#data{base_dir=BaseDir, blockchain=Blockchain,
                                           address=Address, poc_interval=Delay, state=State,
-                                          poc_restarts = POCRestarts - 1}};
+                                          poc_restarts = POCRestarts - 1})};
                 false ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
-                    {ok, requesting, #data{base_dir=BaseDir, blockchain=Blockchain,
-                                           address=Address, poc_interval=Delay, state=requesting}}
+                    {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                           address=Address, poc_interval=Delay, state=requesting})}
             end
     end.
 
@@ -170,7 +180,7 @@ requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
                     case allow_request(BlockHash, Data) of
                         false ->
                             lager:debug("request not allowed @ ~p", [BlockHash]),
-                            {keep_state, Data};
+                            {keep_state, save_data(maybe_init_addr_hash(Data))};
                         true ->
                             {Txn, Keys, Secret} = create_request(Address, BlockHash, Ledger),
                             #{public := PubKey} = Keys,
@@ -180,12 +190,12 @@ requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
                             TxnRef = make_ref(),
                             ok = blockchain_worker:submit_txn(Txn, fun(Result) -> Self ! {TxnRef, Result} end),
                             lager:info("submitted poc request ~p", [Txn]),
-                            {next_state, mining, save_data(Data#data{state=mining, secret=Secret,
+                            {next_state, mining, save_data(maybe_init_addr_hash(Data#data{state=mining, secret=Secret,
                                                                      onion_keys=Keys, responses=#{},
-                                                                     poc_hash=BlockHash, txn_ref=TxnRef})}
+                                                                     poc_hash=BlockHash, txn_ref=TxnRef}))}
                     end;
                 true ->
-                    handle_event(info, Msg, Data)
+                    handle_event(info, Msg, save_data(maybe_init_addr_hash(Data)))
             end;
         {error, _Reason} ->
             {keep_state, Data}
@@ -225,14 +235,14 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
-                                Data#data{mining_timeout = Data#data.poc_interval, request_block_hash=BlockHash});
+                                maybe_init_addr_hash(Data#data{mining_timeout = Data#data.poc_interval, request_block_hash=BlockHash}));
         {error, _Reason} ->
              case MiningTimeout > 0 of
                 true ->
-                    {keep_state, Data#data{mining_timeout=MiningTimeout-1}};
+                    {keep_state, maybe_init_addr_hash(Data#data{mining_timeout=MiningTimeout-1})};
                 false ->
                     lager:error("did not see PoC request in last ~p block, giving up on this POC", [Data#data.poc_interval]),
-                    {next_state, requesting, save_data(Data#data{state=requesting})}
+                    {next_state, requesting, save_data(maybe_init_addr_hash(Data#data{state=requesting}))}
             end
     end;
 mining(EventType, EventContent, Data) ->
@@ -252,20 +262,20 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
         0 ->
             lager:warning("timing out, no receipts @ ~p", [_Hash]),
             %% we got nothing, no reason to submit
-            {next_state, requesting, save_data(Data#data{state=requesting})};
+            {next_state, requesting, save_data(maybe_init_addr_hash(Data#data{state=requesting}))};
         _ ->
             lager:warning("timing out, submitting receipts @ ~p", [_Hash]),
             try
                 Ref = submit_receipts(Data),
-                {next_state, waiting, save_data(Data#data{state=waiting, txn_ref=Ref})}
+                {next_state, waiting, save_data(maybe_init_addr_hash(Data#data{state=waiting, txn_ref=Ref}))}
             catch C:E:S ->
                     lager:warning("error ~p:~p submitting requests: ~p", [C, E, S]),
-                    {next_state, requesting, save_data(Data#data{state=requesting})}
+                    {next_state, requesting, save_data(maybe_init_addr_hash(Data#data{state=requesting}))}
             end
     end;
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
-    {keep_state, save_data(Data#data{receiving_timeout=T-1})};
+    {keep_state, save_data(maybe_init_addr_hash(Data#data{receiving_timeout=T-1}))};
 receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                                                    packet_hashes=PacketHashes,
                                                    blockchain=Chain}=Data) ->
@@ -311,12 +321,13 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                     end
             end
     end;
-receiving(cast, {receipt, Address, Receipt}, #data{responses=Responses0, challengees=Challengees}=Data) ->
+receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     LocationOK = miner_lora:location_ok(),
-    case {LocationOK, blockchain_poc_receipt_v1:is_valid(Receipt)} of
+    Ledger = blockchain:ledger(Chain),
+    case {LocationOK, blockchain_poc_receipt_v1:is_valid(Receipt, Ledger)} of
         {false, Valid} ->
             lager:warning("location is bad, validity: ~p", [Valid]),
             {keep_state, Data};
@@ -329,8 +340,26 @@ receiving(cast, {receipt, Address, Receipt}, #data{responses=Responses0, challen
                 {Gateway, LayerData} ->
                     case maps:get(Gateway, Responses0, undefined) of
                         undefined ->
-                            Responses1 = maps:put(Gateway, {Address, Receipt}, Responses0),
-                            {keep_state, save_data(Data#data{responses=Responses1})};
+                            IsFirstChallengee = case hd(Challengees) of
+                                                    {Gateway, _} ->
+                                                        true;
+                                                    _ ->
+                                                        false
+                                                end,
+                            %% compute address hash and compare to known ones
+                            case check_addr_hash(PeerAddr, Data) of
+                                true when IsFirstChallengee ->
+                                    %% drop whole challenge because we should always be able to get the first hop's receipt
+                                    {next_state, requesting, save_data(Data#data{state=requesting})};
+                                true ->
+                                    {keep_state, Data};
+                                undefined ->
+                                    Responses1 = maps:put(Gateway, {Address, Receipt}, Responses0),
+                                    {keep_state, save_data(Data#data{responses=Responses1})};
+                                PeerHash ->
+                                    Responses1 = maps:put(Gateway, {Address, blockchain_poc_receipt_v1:addr_hash(Receipt, PeerHash)}, Responses0),
+                                    {keep_state, save_data(Data#data{responses=Responses1})}
+                            end;
                         _ ->
                             lager:warning("Already got this receipt ~p for ~p ignoring", [Receipt, Gateway]),
                             {keep_state, Data}
@@ -359,17 +388,17 @@ waiting(enter, _State, Data)->
     {keep_state, Data#data{receipts_timeout=?RECEIPTS_TIMEOUT}};
 waiting(info, {blockchain_event, {add_block, _BlockHash, _, _}}, #data{receipts_timeout=0}=Data) ->
     lager:warning("I have been waiting for ~p blocks abandoning last request", [?RECEIPTS_TIMEOUT]),
-    {next_state, requesting,  save_data(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT})};
+    {next_state, requesting,  save_data(maybe_init_addr_hash(Data#data{state=requesting, receipts_timeout=?RECEIPTS_TIMEOUT}))};
 waiting(info, {TxnRef, Result}, #data{txn_ref=TxnRef}=Data) ->
     lager:info("PoC receipt submission result ~p", [Result]),
     {keep_state, Data};
 waiting(info, {blockchain_event, {add_block, BlockHash, _, _}}, #data{receipts_timeout=Timeout}=Data) ->
     case find_receipts(BlockHash, Data) of
         ok ->
-            {next_state, requesting, save_data(Data#data{state=requesting})};
+            {next_state, requesting, save_data(maybe_init_addr_hash(Data#data{state=requesting}))};
         {error, _Reason} ->
              lager:info("receipts not found in block ~p : ~p", [BlockHash, _Reason]),
-            {keep_state, save_data(Data#data{receipts_timeout=Timeout-1})}
+            {keep_state, save_data(maybe_init_addr_hash(Data#data{receipts_timeout=Timeout-1}))}
     end;
 waiting(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
@@ -389,7 +418,7 @@ handle_event(info, {blockchain_event, {new_chain, NC}},
                                               address=Address, poc_interval=Delay})};
 handle_event(info, {blockchain_event, {add_block, _, _, _}}, Data) ->
     %% suppress the warning here
-    {keep_state, Data};
+    {keep_state, maybe_init_addr_hash(Data)};
 handle_event(_EventType, _EventContent, Data) ->
     lager:warning("ignoring event [~p] ~p", [_EventType, _EventContent]),
     {keep_state, Data}.
@@ -541,6 +570,7 @@ save_data(#data{base_dir = BaseDir,
                 request_block_hash = BlockHash,
                 mining_timeout = MiningTimeout,
                 retry = Retry,
+                addr_hash_filter = Filter,
                 receipts_timeout = ReceiptTimeout} = State) ->
     StateMap = #{
                  state => CurrState,
@@ -554,7 +584,8 @@ save_data(#data{base_dir = BaseDir,
                  request_block_hash => BlockHash,
                  mining_timeout => MiningTimeout,
                  retry => Retry,
-                 receipts_timeout => ReceiptTimeout
+                 receipts_timeout => ReceiptTimeout,
+                 addr_hash_filter => serialize_addr_hash_filter(Filter)
                 },
     BinState = erlang:term_to_binary(StateMap),
     File = filename:join([BaseDir, ?STATE_FILE]),
@@ -573,7 +604,7 @@ load_data(BaseDir) ->
             {error, empty_file};
         {ok, Binary} ->
             try erlang:binary_to_term(Binary) of
-                    #{state := State,
+                    Map = #{state := State,
                       secret := Secret,
                       onion_keys := Keys,
                       challengees := Challengees,
@@ -598,6 +629,7 @@ load_data(BaseDir) ->
                                request_block_hash = BlockHash,
                                mining_timeout = MiningTimeout,
                                retry = Retry,
+                               addr_hash_filter = deserialize_addr_hash_filter(maps:get(addr_hash_filter, Map, undefined)),
                                receipts_timeout = ReceiptTimeout}};
                     _ ->
                         {error, wrong_data}
@@ -608,6 +640,132 @@ load_data(BaseDir) ->
 
     catch _:_ ->
             {error, read_error}
+    end.
+
+-spec maybe_init_addr_hash(#data{}) -> #data{}.
+maybe_init_addr_hash(#data{blockchain=undefined}=Data) ->
+    %% no chain
+    Data;
+maybe_init_addr_hash(#data{blockchain=Blockchain, addr_hash_filter=undefined}=Data) ->
+    %% check if we have the block we need
+    Ledger = blockchain:ledger(Blockchain),
+    case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
+        {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
+            case blockchain:config(?poc_challenge_interval, Ledger) of
+                {ok, Interval} ->
+                    {ok, Height} = blockchain:height(Blockchain),
+                    StartHeight = max(Height - (Height rem Interval), 1),
+                    %% check if we have this block
+                    case blockchain:get_block(StartHeight, Blockchain) of
+                        {ok, Block} ->
+                            Hash = blockchain_block:hash_block(Block),
+                            %% ok, now we can build the filter
+                            Gateways = blockchain_ledger_v1:gateway_count(Ledger),
+                            {ok, Bloom} = bloom:new_optimal(Gateways, ?ADDR_HASH_FP_RATE),
+                            sync_filter(Block, Bloom, Blockchain),
+                            Data#data{addr_hash_filter=#addr_hash_filter{start=StartHeight, height=Height, byte_size=Bytes, salt=Hash, bloom=Bloom}};
+                        _ ->
+                            Data
+                    end;
+                _ ->
+                    Data
+            end;
+        _ ->
+            Data
+    end;
+maybe_init_addr_hash(#data{blockchain=Blockchain, addr_hash_filter=#addr_hash_filter{start=StartHeight, height=Height, byte_size=Bytes, salt=Hash, bloom=Bloom}}=Data) ->
+    Ledger = blockchain:ledger(Blockchain),
+    case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
+        {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
+            case blockchain:config(?poc_challenge_interval, Ledger) of
+                {ok, Interval} ->
+                    {ok, CurHeight} = blockchain:height(Blockchain),
+                    case max(Height - (Height rem Interval), 1) of
+                        StartHeight ->
+                            case CurHeight of
+                                Height ->
+                                    %% ok, everything lines up
+                                    Data;
+                                _ ->
+                                    case blockchain:get_block(Height, Blockchain) of
+                                        {ok, Block} ->
+                                            sync_filter(Block, Bloom, Blockchain),
+                                            Data#data{addr_hash_filter=#addr_hash_filter{start=StartHeight, height=CurHeight, byte_size=Bytes, salt=Hash, bloom=Bloom}};
+                                        _ ->
+                                            Data
+                                    end
+                            end;
+                        _NewStart ->
+                            %% filter is stale
+                            maybe_init_addr_hash(Data#data{addr_hash_filter=undefined})
+                    end;
+                _ ->
+                    Data
+            end;
+        _ ->
+            Data#data{addr_hash_filter=undefined}
+    end.
+
+sync_filter(StopBlock, Bloom, Blockchain) ->
+    blockchain:fold_chain(fun(Blk, _) ->
+                                  blockchain_utils:find_txn(Blk, fun(T) ->
+                                                                         case blockchain_txn:type(T) == blockchain_txn_poc_receipts_v1 of
+                                                                             true ->
+                                                                                 %% abuse side effects here for PERFORMANCE
+                                                                                 [ update_addr_hash(Bloom, E) ||  E <- blockchain_txn_poc_receipts_v1:path(T) ];
+                                                                             false ->
+                                                                                 ok
+                                                                         end,
+                                                                         false
+                                                                 end),
+                                  case Blk == StopBlock of
+                                      true ->
+                                          return;
+                                      false ->
+                                          continue
+                                  end
+                          end, any, element(2, blockchain:head_block(Blockchain)), Blockchain).
+
+
+-spec update_addr_hash(Bloom :: bloom_nif:bloom(), Element :: blockchain_poc_path_element_v1:poc_element()) -> ok.
+update_addr_hash(Bloom, Element) ->
+    case blockchain_poc_path_element_v1:receipt(Element) of
+        undefined ->
+            ok;
+        Receipt ->
+            case blockchain_poc_receipt_v1:addr_hash(Receipt) of
+                undefined ->
+                    ok;
+                Hash ->
+                    bloom:set(Bloom, Hash)
+            end
+    end.
+
+serialize_addr_hash_filter(undefined) ->
+    undefined;
+serialize_addr_hash_filter(Filter=#addr_hash_filter{bloom=Bloom}) ->
+    Filter#addr_hash_filter{bloom=bloom:serialize(Bloom)}.
+
+deserialize_addr_hash_filter(undefined) ->
+    undefined;
+deserialize_addr_hash_filter(Filter=#addr_hash_filter{bloom=Bloom}) ->
+    Filter#addr_hash_filter{bloom=bloom:deserialize(Bloom)}.
+
+check_addr_hash(_PeerAddr, #data{addr_hash_filter=undefined}) ->
+    undefined;
+check_addr_hash(PeerAddr, #data{addr_hash_filter=#addr_hash_filter{byte_size=Size, salt=Hash, bloom=Bloom}}) ->
+    case multiaddr:protocols(PeerAddr) of
+        [{"ip4",Address},{_,_}] ->
+            {ok, Addr} = inet:parse_ipv4_address(Address),
+            Val = binary:part(enacl:pwhash(list_to_binary(tuple_to_list(Addr)), binary:part(Hash, {0, enacl:pwhash_SALTBYTES()})), {0, Size}),
+            case bloom:check_and_set(Bloom, Val) of
+                true ->
+                    true;
+                false ->
+                    Val
+            end;
+        _ ->
+            undefined
     end.
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) -> boolean().
