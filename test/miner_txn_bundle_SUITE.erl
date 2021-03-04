@@ -54,6 +54,7 @@ end_per_suite(Config) ->
 
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    try
     Miners = ?config(miners, Config),
     Addresses = ?config(addresses, Config),
     Balance = 5000,
@@ -90,7 +91,12 @@ init_per_testcase(_TestCase, Config0) ->
     [
         {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
-        | NewConfig].
+        | NewConfig]
+    catch
+        What:Why ->
+            end_per_testcase(_TestCase, Config),
+            erlang:What(Why)
+    end.
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).

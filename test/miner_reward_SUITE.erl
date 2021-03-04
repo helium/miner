@@ -32,6 +32,7 @@ end_per_suite(Config) ->
 
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    try
     Miners = ?config(miners, Config),
     Addresses = ?config(addresses, Config),
     InitialCoinbaseTxns = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
@@ -74,7 +75,13 @@ init_per_testcase(_TestCase, Config0) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
     [   {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners} | Config].
+        {non_consensus_miners, NonConsensusMiners} | Config]
+    catch
+        What:Why ->
+            end_per_testcase(_TestCase, Config),
+            erlang:What(Why)
+    end.
+
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
