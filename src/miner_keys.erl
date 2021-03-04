@@ -82,10 +82,10 @@ keys({ecc, Props}) when is_list(Props) ->
                    end,
     {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
     OnboardingKey = 
-        case ecc508:genkey(ECCPid, public, OnboardingKeySlot) of
-            {ok, Key} -> 
+        case get_public_key(ECCPid, OnboardingKeySlot) of
+            {ok, Key, OnboardingKeySlot} ->
                 {ecc_compact, Key};
-            {error, ecc_response_exec_error} -> 
+            _ ->
                 %% Key not present, this slot is (assumed to be) empty so use the public key 
                 %% as the onboarding key
                 PubKey
