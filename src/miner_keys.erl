@@ -84,7 +84,7 @@ keys({ecc, Props}) when is_list(Props) ->
     OnboardingKey = 
         case get_public_key(ECCPid, OnboardingKeySlot) of
             {ok, Key, OnboardingKeySlot} ->
-                {ecc_compact, Key};
+                Key;
             _ ->
                 %% Key not present, this slot is (assumed to be) empty so use the public key 
                 %% as the onboarding key
