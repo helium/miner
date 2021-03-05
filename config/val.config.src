@@ -10,6 +10,11 @@
      {lager_file_backend, [{file, "error.log"}, {size, 52428800}, {level, error}]}
     ]}
   ]},
+ {libp2p,
+  [
+   {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}}
+    ]
+ },
  {blockchain,
   [
    {seed_nodes, "/ip4/3.12.155.25/tcp/2154"},

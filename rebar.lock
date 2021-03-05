@@ -100,7 +100,7 @@
   1},
  {<<"libp2p">>,
   {git,"https://github.com/helium/erlang-libp2p.git",
-       {ref,"725f257b028ff6f4c0493c6f2b40561f440416c6"}},
+       {ref,"2c93909cca75e27b130ee7264db51a36ed73f390"}},
   1},
  {<<"libp2p_crypto">>,{pkg,<<"libp2p_crypto">>,<<"1.3.2">>},2},
  {<<"longfi">>,
