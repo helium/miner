@@ -409,7 +409,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                      State;
                                  {ok, Group} ->
                                      lager:info("canceling DKG ~p at height ~p", [Group, BlockHeight]),
-                                     stop_group(Group),
+                                     %% soft stop here, in case we're not done
+                                     catch libp2p_group_relcast:handle_command(Group, {stop, 0}),
                                      State#state{cancel_dkgs = maps:remove(BlockHeight, CancelDKGs)}
                              end,
                     {_, EpochStart} = blockchain_block_v1:election_info(Block),
