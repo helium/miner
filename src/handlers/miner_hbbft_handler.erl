@@ -116,7 +116,7 @@ handle_command({set_buf, Buf}, State) ->
 handle_command(stop, State) ->
     %% TODO add ignore support for this four tuple to use ignore
     lager:info("stop called without timeout"),
-    {reply, ok, [{stop, timer:minutes(1)}], State};
+    {reply, ok, [{stop, 0}], State};
 handle_command({stop, Timeout}, State) ->
     %% TODO add ignore support for this four tuple to use ignore
     lager:info("stop called with timeout: ~p", [Timeout]),

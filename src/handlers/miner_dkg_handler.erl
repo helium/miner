@@ -69,6 +69,8 @@ handle_command(get_info, #state{privkey = undefined} = State) ->
     {reply, {error, not_done}, [], State};
 handle_command(get_info, #state{privkey = PKey, members = Members} = State) ->
     {reply, {ok, PKey, Members}, [], State};
+handle_command(stop, State) ->
+    {reply, ok, [{stop, 0}], State};
 handle_command({stop, _Timeout}, #state{privkey = PKey, done_acked = false} = State)
   when PKey /= undefined ->
     {reply, {error, not_done}, [], State};
