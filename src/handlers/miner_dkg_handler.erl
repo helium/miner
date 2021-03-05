@@ -121,7 +121,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     %% rebroadcast the final set of signatures and stop the handler
                     {State#state{done_called = true, sent_conf = true,
                                  signatures = GoodSignatures},
-                     [{multicast, term_to_binary({conf, GoodSignatures})}]};
+                     [{multicast, t2b({conf, GoodSignatures})}]};
                 {ok, _GoodSignatures} ->
                     lager:debug("already done"),
                     {State, []};
@@ -149,14 +149,14 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
                                                                  Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
-                                             [{multicast, term_to_binary({conf, Signatures})}]};
+                                             [{multicast, t2b({conf, Signatures})}]};
                                         _ ->
                                             %% not enough total signatures, or we've already completed
                                             {NewState, []}
                                     end;
                                 false ->
                                     {NewState#state{sent_conf=true, signatures = Signatures},
-                                     [{multicast, term_to_binary({conf, NewState#state.signatures})}]}
+                                     [{multicast, t2b({conf, NewState#state.signatures})}]}
                             end;
                         {ok, Signatures} ->
                             lager:debug("enough 2 ~p", [length(Signatures)]),
@@ -170,7 +170,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                             ok = DoneMod:DoneFun(State#state.artifact, Signatures,
                                                                  Members, State#state.privkey, Height, Delay),
                                             {NewState#state{done_called = true, signatures = Signatures},
-                                             [{multicast, term_to_binary({conf, Signatures})}]};
+                                             [{multicast, t2b({conf, Signatures})}]};
                                         _ ->
                                             %% not enough total signatures, or we've already completed
                                             {NewState, []}
@@ -225,7 +225,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State#state{dkg=NewDKG, privkey=PrivateKey,
                                  signatures_required=Threshold,
                                  signatures=[{Address, Signature}|State#state.signatures]},
-                     [{multicast, term_to_binary({signature, Address, Signature})}]};
+                     [{multicast, t2b({signature, Address, Signature})}]};
                 {_NewDKG, {result, {_Shard, _VK, _VKs}}} ->
                     ignore
             end
@@ -234,11 +234,11 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
 callback_message(Actor, Message, _State) ->
     case binary_to_term(Message) of
         {Id, {send, {Session, SerializedCommitment, Shares}}} ->
-            term_to_binary({Id, {send, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
+            t2b({Id, {send, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
         {Id, {echo, {Session, SerializedCommitment, Shares}}} ->
-            term_to_binary({Id, {echo, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
+            t2b({Id, {echo, {Session, SerializedCommitment, lists:nth(Actor, Shares)}}});
         {Id, {ready, {Session, SerializedCommitment, Shares, Proof}}} ->
-            term_to_binary({Id, {ready, {Session, SerializedCommitment, lists:nth(Actor, Shares), Proof}}})
+            t2b({Id, {ready, {Session, SerializedCommitment, lists:nth(Actor, Shares), Proof}}})
     end.
 
 %% helper functions
@@ -295,7 +295,7 @@ serialize(State) ->
            sent_conf => SentConf,
            height => Height,
            delay => Delay},
-    M = maps:map(fun(_K, Term) -> term_to_binary(Term) end, M0),
+    M = maps:map(fun(_K, Term) -> t2b(Term) end, M0),
     maps:merge(PreSer, M).
 
 %% to make dialyzer happy till I fix the relcast typing
@@ -372,11 +372,11 @@ restore(OldState, _NewState) ->
 
 fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
-                      {unicast, J, term_to_binary(NextMsg)};
+                      {unicast, J, t2b(NextMsg)};
                  ({multicast, NextMsg}) ->
-                      {multicast, term_to_binary(NextMsg)};
+                      {multicast, t2b(NextMsg)};
                  ({callback, NextMsg}) ->
-                      {callback, term_to_binary(NextMsg)}
+                      {callback, t2b(NextMsg)}
               end, Msgs).
 
 enough_signatures(sig, #state{signatures=Sigs, n = N, t = T}) when length(Sigs) < (N - T) ->
@@ -417,3 +417,5 @@ mk_verification_fun(Members) ->
             libp2p_crypto:verify(Msg, Signature, PeerKey)
     end.
 
+t2b(Term) ->
+    term_to_binary(Term, [{compressed, 1}]).
