@@ -71,7 +71,7 @@ metadata(Version, Meta, Chain) ->
                                 lager:info("no snapshot interval configured"),
                                 ChainMeta0
                         end,
-            term_to_binary(maps:merge(Meta, ChainMeta))
+            t2b(maps:merge(Meta, ChainMeta))
     end.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
@@ -239,10 +239,10 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     %% no point in doing this more than once
                     ok = miner:signed_block(MySignatures, State#state.artifact),
                     {NewState#state{signed = Round, sig_phase = done},
-                     [{multicast, term_to_binary({signatures, Round, MySignatures})}]};
+                     [{multicast, t2b({signatures, Round, MySignatures})}]};
                 {ok, gossip, MySignatures} ->
                     {NewState#state{sig_phase = gossip},
-                     [{multicast, term_to_binary({signatures, Round, MySignatures})}]};
+                     [{multicast, t2b({signatures, Round, MySignatures})}]};
                 _ ->
                     {NewState, []}
             end;
@@ -258,11 +258,11 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                             %% no point in doing this more than once
                             ok = miner:signed_block(Signatures, State#state.artifact),
                             {NewState#state{signed = Round, sig_phase = done},
-                             [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                             [{multicast, t2b({signatures, Round, Signatures})}]};
                         {ok, gossip, Signatures} ->
                             ?mark(gossip_sigs),
                             {NewState#state{sig_phase = gossip},
-                             [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                             [{multicast, t2b({signatures, Round, Signatures})}]};
                         _ ->
                             {NewState, []}
                     end;
@@ -323,10 +323,10 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                                     %% no point in doing this more than once
                                     ok = miner:signed_block(Signatures, State#state.artifact),
                                     {NewState#state{signed = Round, sig_phase = done, seen = Seen},
-                                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                                     [{multicast, t2b({signatures, Round, Signatures})}]};
                                 {ok, gossip, Signatures} ->
                                     {NewState#state{sig_phase = gossip, seen = Seen},
-                                     [{multicast, term_to_binary({signatures, Round, Signatures})}]};
+                                     [{multicast, t2b({signatures, Round, Signatures})}]};
                                 _ ->
                                     {NewState#state{seen = Seen}, fixup_msgs(Msgs)}
                             end;
@@ -422,9 +422,9 @@ restore(OldState, NewState) ->
 %% helper functions
 fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
-                      {unicast, J+1, term_to_binary(NextMsg)};
+                      {unicast, J+1, t2b(NextMsg)};
                  ({multicast, NextMsg}) ->
-                      {multicast, term_to_binary(NextMsg)}
+                      {multicast, t2b(NextMsg)}
               end, Msgs).
 
 dedup_signatures(InSigs, #state{signatures = Sigs}) ->
@@ -493,3 +493,6 @@ md_version(Ledger) ->
         _ ->
             tuple
     end.
+
+t2b(Term) ->
+    term_to_binary(Term, [{compressed, 1}]).
