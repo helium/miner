@@ -486,7 +486,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
-                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
+                                        State2#state{current_dkgs =
+                                                         maps:remove(EID, cleanup_groups(EID,
+                                                                                         State2#state.current_dkgs)),
+                                                     started_groups = cleanup_groups(EID, State#state.started_groups),
                                                      active_group = undefined};
                                     {ok, ElectionGroup} ->
                                         HBBFTGroup =
@@ -1028,6 +1031,8 @@ set_buf(ConsensusGroup, Buf) ->
     end.
 
 stop_group(undefined) ->
+    ok;
+stop_group(out) ->
     ok;
 stop_group(Pid) ->
     spawn(fun() ->
