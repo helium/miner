@@ -23,7 +23,8 @@ register_all_usage() ->
                   hbbft_status_usage(),
                   hbbft_skip_usage(),
                   hbbft_queue_usage(),
-                  hbbft_group_usage()
+                  hbbft_group_usage(),
+                  hbbft_perf_usage()
                  ]).
 
 register_all_cmds() ->
@@ -35,7 +36,8 @@ register_all_cmds() ->
                   hbbft_status_cmd(),
                   hbbft_skip_cmd(),
                   hbbft_queue_cmd(),
-                  hbbft_group_cmd()
+                  hbbft_group_cmd(),
+                  hbbft_perf_cmd()
                  ]).
 %%
 %% hbbft
@@ -47,6 +49,8 @@ hbbft_usage() ->
       "  hbbft status           - Display hbbft status.\n"
       "  hbbft queue            - Display hbbft message queue.\n"
       "  hbbft skip             - Skip current hbbft round.\n"
+      "  hbbft group            - Display current hbbfr group.\n"
+      "  hbbft perf             - Show performance of current group members.\n"
      ]
     ].
 
@@ -211,3 +215,54 @@ hbbft_group(["hbbft", "group"], [], Flags) ->
     end;
 hbbft_group([], [], []) ->
     usage.
+
+hbbft_perf_cmd() ->
+    [
+     [["hbbft", "perf"], [],
+      [], fun hbbft_perf/3]
+    ].
+
+hbbft_perf_usage() ->
+    [["hbbft", "perf"],
+     ["hbbft queue \n\n",
+      "  Display the performance of the current hbbft group\n"
+     ]
+    ].
+
+hbbft_perf(["hbbft", "perf"], [], _Flags) ->
+    %% calculate the current election start height
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    InitMap = maps:from_list([ {Addr, 0} || Addr <- ConsensusAddrs]),
+    {ok, Head} = blockchain:head_block(Chain),
+    EI = blockchain_block_v1:election_info(Head),
+    {BBATotals, SeenTotals, TotalCount} = blockchain:fold_chain(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
+                                  case blockchain_block_v1:election_info(Blk) == EI of
+                                      true ->
+                                          BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
+                                          Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
+                                                                     Votes = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), Votes0),
+                                                                     merge_map(ConsensusAddrs, Votes, Acc)
+                                                             end,SeenAcc, blockchain_block_v1:seen_votes(Blk)),
+                                          {merge_map(ConsensusAddrs, BBAs, BBAAcc), Seen, Count + 1};
+                                      false ->
+                                          return
+                                  end
+                          end, {InitMap, InitMap, 0}, Head, Chain),
+
+    [clique_status:table(
+       [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))},
+         {address, libp2p_crypto:pubkey_bin_to_p2p(A)},
+         {bba_completions, io_lib:format("~b/~b", [maps:get(A, BBATotals), TotalCount-1])},
+         {seen_votes, io_lib:format("~b/~b", [maps:get(A, SeenTotals), length(ConsensusAddrs)*TotalCount-1])}
+        ] || A <- ConsensusAddrs])];
+hbbft_perf([], [], []) ->
+    usage.
+
+merge_map(Addrs, Votes, Acc) ->
+    maps:fold(fun(K, true, A) ->
+                       maps:update_with(lists:nth(K, Addrs), fun(V) -> V+1 end, 1, A);
+                 (_, false, A) ->
+                      A
+              end, Acc, Votes).
