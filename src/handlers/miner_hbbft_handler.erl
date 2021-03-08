@@ -116,7 +116,7 @@ handle_command({set_buf, Buf}, State) ->
 handle_command(stop, State) ->
     %% TODO add ignore support for this four tuple to use ignore
     lager:info("stop called without timeout"),
-    {reply, ok, [{stop, timer:minutes(1)}], State};
+    {reply, ok, [{stop, 0}], State};
 handle_command({stop, Timeout}, State) ->
     %% TODO add ignore support for this four tuple to use ignore
     lager:info("stop called with timeout: ~p", [Timeout]),
@@ -343,7 +343,9 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
 callback_message(_, _, _) -> none.
 
 make_bba(Sz, Metadata) ->
-    M = maps:from_list([{Id, true} || {Id, _} <- Metadata]),
+    %% note that BBA indices are 0 indexed, but bitvectors are 1 indexed
+    %% so we correct that here
+    M = maps:from_list([{Id + 1, true} || {Id, _} <- Metadata]),
     M1 = lists:foldl(fun(Id, Acc) ->
                              case Acc of
                                  #{Id := _} ->

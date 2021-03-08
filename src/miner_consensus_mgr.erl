@@ -485,7 +485,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         stop_group(State2#state.active_group),
                                         miner:remove_consensus(),
                                         miner_hbbft_sidecar:set_group(undefined),
-                                        State2#state{current_dkgs = maps:remove(EID, State2#state.current_dkgs),
+                                        State2#state{current_dkgs =
+                                                         maps:remove(EID, cleanup_groups(EID,
+                                                                                         State2#state.current_dkgs)),
+                                                     started_groups = cleanup_groups(EID, State#state.started_groups),
                                                      active_group = undefined};
                                     {ok, ElectionGroup} ->
                                         HBBFTGroup =
@@ -510,7 +513,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                               spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, State#state.chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
                                           end, NewConsensusAddrs -- OldConsensusAddrs),
                                         Round = blockchain_block:hbbft_round(Block),
-                                        activate_hbbft(HBBFTGroup, State#state.active_group, Round),
+                                        activate_hbbft(HBBFTGroup, State#state.active_group, State#state.ag_monitor, Round),
                                         Ref = erlang:monitor(process, HBBFTGroup),
                                         State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs)),
                                                      cancel_dkgs = CancelDKGs#{BlockHeight+2 => ElectionGroup},
@@ -607,7 +610,8 @@ handle_info(timeout, State) ->
                             Round = blockchain_block:hbbft_round(HeadBlock),
                             case wait_for_group(Group) of
                                 started ->
-                                    activate_hbbft(Group, undefined, Round),
+                                    %% no need for active group to stop
+                                    activate_hbbft(Group, undefined, make_ref(), Round),
                                     Ref = erlang:monitor(process, Group),
                                     State#state{active_group = Group, ag_monitor = Ref};
                                 {error, cannot_start} ->
@@ -711,7 +715,8 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
     case wait_for_group(Group) of
         started ->
             Ref = erlang:monitor(process, Group),
-            activate_hbbft(Group, undefined, Round),
+            %% no need for old group, this is a response to one dying
+            activate_hbbft(Group, undefined, make_ref(), Round),
             {noreply, State#state{active_group = Group, ag_monitor = Ref}};
         {error, Reason} ->
             %% die on failure
@@ -829,7 +834,7 @@ restore_dkg(Height, Delay, CurrHeight, Round, State) ->
                     started = wait_for_group(Group),
                     true = libp2p_group_relcast:handle_command(Group, have_key),
                     lager:info("restore start group ~p ~p in pos ~p", [Name, Group, Pos]),
-                    activate_hbbft(Group, undefined, Round),
+                    activate_hbbft(Group, undefined, make_ref(), Round),
                     #state{cancel_dkgs = CancelDKGs,
                            current_dkgs = DKGs} = State1,
                     {DKGGroup, DKGs1} = maps:take({Height, Delay}, DKGs),
@@ -965,9 +970,11 @@ start_hbbft(DKG, Height, Delay, Chain, Retries) ->
             end
     end.
 
-activate_hbbft(Group, PrevGroup, Round) ->
+activate_hbbft(Group, PrevGroup, PrevRef, Round) ->
     Buf = get_buf(PrevGroup),
     set_buf(Group, Buf),
+    erlang:demonitor(PrevRef, [flush]),
+    stop_group(PrevGroup),
     miner_hbbft_sidecar:set_group(Group),
     libp2p_group_relcast:handle_input(Group, {next_round, Round + 1, [], false}),
     miner:install_consensus(Group).
@@ -1024,12 +1031,14 @@ set_buf(ConsensusGroup, Buf) ->
 
 stop_group(undefined) ->
     ok;
+stop_group(out) ->
+    ok;
 stop_group(Pid) ->
     spawn(fun() ->
                   %% tell the group it's allowed to stop
                   catch libp2p_group_relcast:handle_command(Pid, mark_done),
                   %% actually tell the group to stop
-                  catch libp2p_group_relcast:handle_command(Pid, {stop, 0})
+                  catch libp2p_group_relcast:handle_command(Pid, stop)
           end),
     ok.
 
