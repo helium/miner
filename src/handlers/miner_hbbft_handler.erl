@@ -343,7 +343,9 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
 callback_message(_, _, _) -> none.
 
 make_bba(Sz, Metadata) ->
-    M = maps:from_list([{Id, true} || {Id, _} <- Metadata]),
+    %% note that BBA indices are 0 indexed, but bitvectors are 1 indexed
+    %% so we correct that here
+    M = maps:from_list([{Id + 1, true} || {Id, _} <- Metadata]),
     M1 = lists:foldl(fun(Id, Acc) ->
                              case Acc of
                                  #{Id := _} ->
