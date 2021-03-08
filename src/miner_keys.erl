@@ -81,14 +81,15 @@ keys({ecc, Props}) when is_list(Props) ->
                            miner_ecc_worker:get_pid()
                    end,
     {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
-    OnboardingKey = 
+    {ok, OnboardingKey} =
         case get_public_key(ECCPid, OnboardingKeySlot) of
             {ok, Key, OnboardingKeySlot} ->
-                Key;
-            _ ->
-                %% Key not present, this slot is (assumed to be) empty so use the public key 
+                {ok, Key};
+            {error, empty_slot} ->
+                %% Key not present, this slot is (assumed to be) empty so use the public key
                 %% as the onboarding key
-                PubKey
+                {ok, PubKey};
+            Other -> Other
         end,
     case whereis(miner_ecc_worker) of
         undefined ->
@@ -163,28 +164,11 @@ get_public_key(ECCPid, Slot, Retries) ->
                     get_public_key(ECCPid, Slot + 1)
             end;
         {error, ecc_response_exec_error} ->
-            %% key is not present, generate one
-            %%
-            %% XXX this is really not the best thing to do here
-            %% but deadlines rule everything around us
-            ok = gen_compact_key(ECCPid, Slot, 100),
-            get_public_key(ECCPid, Slot, Retries);
-        %% sometimes we get a different error here, so wait a bit
-        %% and try again, failing after 2 seconds
+            %% key is not present
+            {error, empty_slot};
         {error, _} ->
+            %% sometimes we get a different error here, so wait a bit
+            %% and try again, failing after 2 seconds
             timer:sleep(150),
             get_public_key(ECCPid, Slot, Retries - 1)
-    end.
-
-gen_compact_key(_Pid, _Slot, 0) ->
-    {error, compact_key_create_failed};
-gen_compact_key(Pid, Slot, N) when N > 0 ->
-    case  ecc508:genkey(Pid, private, Slot) of
-        {ok, PubKey} ->
-            case ecc_compact:is_compact(PubKey) of
-                {true, _} -> ok;
-                false -> gen_compact_key(Pid, Slot, N - 1)
-            end;
-        {error, Error} ->
-            {error, Error}
     end.
