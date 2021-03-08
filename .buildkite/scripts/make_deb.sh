@@ -10,4 +10,4 @@ fpm -n validator \
     --depends libsodium23 \
     --deb-systemd deb/miner.service \
     --deb-no-default-config-files \
-    _build/prod/rel/=/var/helium
+    _build/validator/rel/=/var/helium
