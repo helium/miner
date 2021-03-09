@@ -11,6 +11,27 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
+  - if: build.tag =~ /^val/
+    name: ":debian: build validator deb"
+    commands:
+      - "git fetch -t"
+      - "./rebar3 as validator release"
+      - ".buildkite/scripts/make_deb.sh"
+    key: "deb"
+    artifact_paths: "*.deb"
+    depends_on: "tests"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^val/
+    name: ":cloud: upload validator deb to packagecloud"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/packagecloud_upload.sh"
+    depends_on: "deb"
+    agents:
+      queue: "erlang"
+
   - if: build.tag =~ /\_GA$$/
     name: ":whale: AMD64 docker"
     env:
@@ -36,7 +57,7 @@ steps:
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
-      
+
   - if: build.tag =~ /^val/
     name: "validator ARM64 docker"
     env:
@@ -50,21 +71,6 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
 
-# There is some kind of compiler bug in 32 bit ARM
-# and rocksdb, so comment out for now. Can revisit
-# later if need be.
-#
-#  - if: build.tag != null
-#    name: ":whale: ARM32 docker"
-#   agents:
-#     queue: "erlang"
-#    env:
-#      - MINER_REGISTRY_NAME: "quay.io/team-helium/miner"
-#      - IMAGE_FORMAT: "docker"
-#      - IMAGE_ARCH: "arm32"
-#   commands:
-#     - "git fetch -t"
-#     - ".buildkite/scripts/make_image.sh"
   - if: build.tag =~ /\_GA$$/
     name: ":whale: ARM64 docker"
     agents:
