@@ -346,7 +346,7 @@ make_vars() ->
       ?predicate_callback_mod => miner,
       ?predicate_callback_fun => version,
       ?predicate_threshold => 0.95,
-      ?monthly_reward => 50000 * 1000000,
+      ?monthly_reward => 5000000 * 10000000,
       ?securities_percent => 0.35,
       ?dc_percent => 0.0,
       ?poc_centrality_wt => 0.5,
