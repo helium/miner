@@ -23,6 +23,7 @@ all() ->
 
 init_per_testcase(TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
+    try
     Addresses = ?config(addresses, Config),
     N = ?config(num_consensus_members, Config),
     Curve = ?config(dkg_curve, Config),
@@ -50,7 +51,12 @@ init_per_testcase(TestCase, Config0) ->
     timer:sleep(5000),
     ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
-    Config.
+    Config
+    catch
+        What:Why ->
+            end_per_testcase(TestCase, Config),
+            erlang:What(Why)
+    end.
 
 end_per_testcase(TestCase, Config) ->
     gen_server:stop(miner_fake_radio_backplane),

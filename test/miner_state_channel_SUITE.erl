@@ -110,6 +110,7 @@ end_per_suite(_Config) ->
 
 init_per_testcase(TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
+    try
     Miners = ?config(miners, Config),
     Addresses = ?config(addresses, Config),
     NumConsensusMembers = ?config(num_consensus_members, Config),
@@ -215,7 +216,13 @@ init_per_testcase(TestCase, Config0) ->
      {router_node, {RouterNode, RouterPubkeyBin, RouterSigFun}},
      {non_consensus_miners, NonConsensusMiners},
      {default_routers, application:get_env(miner, default_routers, [])}
-     | Config].
+     | Config]
+    catch
+        What:Why ->
+            end_per_testcase(TestCase, Config),
+            erlang:What(Why)
+    end.
+
 
 end_per_testcase(TestCase, Config) ->
     ok = block_listener:stop(),

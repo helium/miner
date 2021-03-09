@@ -38,6 +38,7 @@ end_per_suite(Config) ->
 
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+    try
     [Seller | _ ] = Miners = ?config(miners, Config),
     SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
     Addresses = ?config(addresses, Config),
@@ -77,7 +78,12 @@ init_per_testcase(_TestCase, Config0) ->
 
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
-        | Config].
+        | Config]
+    catch
+        What:Why ->
+            end_per_testcase(_TestCase, Config),
+            erlang:What(Why)
+    end.
 
 
 end_per_testcase(_TestCase, Config) ->
