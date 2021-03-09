@@ -219,43 +219,46 @@ hbbft_group([], [], []) ->
 hbbft_perf_cmd() ->
     [
      [["hbbft", "perf"], [],
-      [], fun hbbft_perf/3]
+      [
+       {verbose, [{shortname, "v"}, {longname, "verbose"}]}
+      ], fun hbbft_perf/3]
     ].
 
 hbbft_perf_usage() ->
     [["hbbft", "perf"],
      ["hbbft queue \n\n",
       "  Display the performance of the current hbbft group\n"
+      " -v --verbose\n"
+      "  Show extra information\n"
      ]
     ].
 
-hbbft_perf(["hbbft", "perf"], [], _Flags) ->
+hbbft_perf(["hbbft", "perf"], [], Flags) ->
     %% calculate the current election start height
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, 0} || Addr <- ConsensusAddrs]),
-    {ok, Head} = blockchain:head_block(Chain),
-    EI = blockchain_block_v1:election_info(Head),
-    {BBATotals, SeenTotals, TotalCount} = blockchain:fold_chain(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
-                                  case blockchain_block_v1:election_info(Blk) == EI of
-                                      true ->
-                                          BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
-                                          Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
-                                                                     Votes = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), Votes0),
-                                                                     merge_map(ConsensusAddrs, Votes, Acc)
-                                                             end,SeenAcc, blockchain_block_v1:seen_votes(Blk)),
-                                          {merge_map(ConsensusAddrs, BBAs, BBAAcc), Seen, Count + 1};
-                                      false ->
-                                          return
-                                  end
-                          end, {InitMap, InitMap, 0}, Head, Chain),
+    #{start_height := Start, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
+    GroupWithPenalties = blockchain_election:adjust_old_group([{0, 0, A} || A <- ConsensusAddrs], Ledger),
+    Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
+                    || Ht <- lists:seq(Start + 2, End)], %% TODO this should be + 2
+    {BBATotals, SeenTotals, TotalCount} = lists:foldl(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
+                                                              BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
+                                                              Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
+                                                                                         Votes = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), Votes0),
+                                                                                         merge_map(ConsensusAddrs, Votes, Acc)
+                                                                                 end,SeenAcc, blockchain_block_v1:seen_votes(Blk)),
+                                                              {merge_map(ConsensusAddrs, BBAs, BBAAcc), Seen, Count + 1}
+                                                      end, {InitMap, InitMap, 0}, Blocks),
 
     [clique_status:table(
-       [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))},
-         {address, libp2p_crypto:pubkey_bin_to_p2p(A)},
-         {bba_completions, io_lib:format("~b/~b", [maps:get(A, BBATotals), TotalCount-1])},
-         {seen_votes, io_lib:format("~b/~b", [maps:get(A, SeenTotals), length(ConsensusAddrs)*TotalCount-1])}
+       [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))} ] ++
+         [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
+         [
+          {bba_completions, io_lib:format("~b/~b", [maps:get(A, BBATotals), TotalCount])},
+         {seen_votes, io_lib:format("~b/~b", [maps:get(A, SeenTotals), length(ConsensusAddrs)*TotalCount])},
+         {penalty, io_lib:format("~.2f", [element(1, lists:keyfind(A, 3, GroupWithPenalties))])}
         ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
     usage.
