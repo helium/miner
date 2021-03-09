@@ -744,12 +744,23 @@ update_addr_hash(Bloom, Element) ->
 serialize_addr_hash_filter(undefined) ->
     undefined;
 serialize_addr_hash_filter(Filter=#addr_hash_filter{bloom=Bloom}) ->
-    Filter#addr_hash_filter{bloom=bloom:serialize(Bloom)}.
+    case bloom:serialize(Bloom) of
+        {ok, SerBloom} ->
+            Filter#addr_hash_filter{bloom=SerBloom};
+        _ ->
+            undefined
+    end.
 
 deserialize_addr_hash_filter(undefined) ->
     undefined;
-deserialize_addr_hash_filter(Filter=#addr_hash_filter{bloom=Bloom}) ->
-    Filter#addr_hash_filter{bloom=bloom:deserialize(Bloom)}.
+deserialize_addr_hash_filter(Filter=#addr_hash_filter{bloom=SerBloom}) ->
+    case bloom:deserialize(SerBloom) of
+        {ok, Bloom} ->
+            Filter#addr_hash_filter{bloom=Bloom};
+        _ ->
+            undefined
+    end.
+
 
 check_addr_hash(_PeerAddr, #data{addr_hash_filter=undefined}) ->
     undefined;
