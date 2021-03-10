@@ -801,10 +801,11 @@ rescue_dkg(Members, Artifact, State) ->
                                      delay = 0}),
     State1.
 
-%%% restart dgk is called when we haven't heard of an election, meaning that a) we might have
+%%% restart dkg is called when we haven't heard of an election, meaning that a) we might have
 %%% restarted since the election started, or b) we might have shut the dkg for it down in a race
 %%% with the transaction.  in either case, we may need to restart the dkg, start the hbbft group
--spec restart_dkg(Height :: non_neg_integer(), Delay :: non_neg_integer(), State :: state()) ->  no_dkg | {ok, state()}.
+-spec restart_dkg(Height :: non_neg_integer(), Delay :: non_neg_integer(), State :: #state{}) ->
+          no_dkg | {ok, #state{}}.
 restart_dkg(Height, Delay, State) ->
     EID = {Height, Delay},
     Chain = State#state.chain,
@@ -846,7 +847,7 @@ restart_dkg(Height, Delay, State) ->
 %%% potentially with consensus group
 restore_dkg(Height, Delay, Round, State) ->
     Ledger = blockchain:ledger(State#state.chain),
-    {ok,  ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
