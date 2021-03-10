@@ -804,6 +804,7 @@ rescue_dkg(Members, Artifact, State) ->
 %%% restart dgk is called when we haven't heard of an election, meaning that a) we might have
 %%% restarted since the election started, or b) we might have shut the dkg for it down in a race
 %%% with the transaction.  in either case, we may need to restart the dkg, start the hbbft group
+-spec restart_dkg(Height :: non_neg_integer(), Delay :: non_neg_integer(), State :: state()) ->  no_dkg | {ok, state()}.
 restart_dkg(Height, Delay, State) ->
     EID = {Height, Delay},
     Chain = State#state.chain,
