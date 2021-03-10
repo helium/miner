@@ -239,10 +239,20 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     Ledger = blockchain:ledger(Chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, 0} || Addr <- ConsensusAddrs]),
-    #{start_height := Start, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
-    GroupWithPenalties = blockchain_election:adjust_old_group([{0, 0, A} || A <- ConsensusAddrs], Ledger),
+    #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
+    {Start, GroupWithPenalties} = case blockchain:config(?election_version, Ledger) of
+                             {ok, N} when N >= 5 ->
+                                 Input = lists:map(fun(A) ->
+                                                           {ok, V} = blockchain_ledger_v1:get_validator(A, Ledger),
+                                                           HB = blockchain_ledger_validator_v1:last_heartbeat(V),
+                                                           {val_v1, 1.0, HB, A}
+                                                   end, ConsensusAddrs),
+                                 {Start0 + 2, blockchain_election:adjust_old_group_v2(Input, Ledger)};
+                             _ ->
+                                          {Start0 + 1, [{A, S} || {S, _L, A} <- blockchain_election:adjust_old_group([{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
+                         end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
-                    || Ht <- lists:seq(Start + 2, End)], %% TODO this should be + 2
+                    || Ht <- lists:seq(Start, End)],
     {BBATotals, SeenTotals, TotalCount} = lists:foldl(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
                                                               BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
                                                               Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
@@ -258,7 +268,7 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
          [
           {bba_completions, io_lib:format("~b/~b", [maps:get(A, BBATotals), TotalCount])},
          {seen_votes, io_lib:format("~b/~b", [maps:get(A, SeenTotals), length(ConsensusAddrs)*TotalCount])},
-         {penalty, io_lib:format("~.2f", [element(1, lists:keyfind(A, 3, GroupWithPenalties))])}
+         {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
         ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
     usage.
