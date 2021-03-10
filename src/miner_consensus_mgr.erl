@@ -773,6 +773,7 @@ restart_election(#state{delay = Delay,
             State
     end.
 
+-spec limit_dkgs(State :: state()) -> state().
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
     Limit = application:get_env(miner, dkg_limit, 2),
     Sz = maps:size(CurrentDKGs),
