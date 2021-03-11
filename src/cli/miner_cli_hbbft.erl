@@ -238,7 +238,7 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
-    InitMap = maps:from_list([ {Addr, 0} || Addr <- ConsensusAddrs]),
+    InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
     #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
     {Start, GroupWithPenalties} = case blockchain:config(?election_version, Ledger) of
                              {ok, N} when N >= 5 ->
@@ -254,29 +254,32 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
                     || Ht <- lists:seq(Start, End)],
     {BBATotals, SeenTotals, TotalCount} = lists:foldl(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
+                                                              H = blockchain_block:height(Blk),
                                                               BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
                                                               SeenVotes = blockchain_block_v1:seen_votes(Blk),
                                                               Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
                                                                                          Votes = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), Votes0),
-                                                                                         merge_map(ConsensusAddrs, Votes, Acc)
+                                                                                         merge_map(ConsensusAddrs, Votes, H, Acc)
                                                                                  end,SeenAcc, SeenVotes),
-                                                              {merge_map(ConsensusAddrs, BBAs, BBAAcc), Seen, Count + length(SeenVotes)}
+                                                              {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
                                                       end, {InitMap, InitMap, 0}, Blocks),
 
     [clique_status:table(
        [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))} ] ++
          [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
          [
-          {bba_completions, io_lib:format("~b/~b", [maps:get(A, BBATotals), End+1 - Start])},
-         {seen_votes, io_lib:format("~b/~b", [maps:get(A, SeenTotals), TotalCount])},
+          {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), End+1 - Start])},
+         {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
+         {last_bba, element(1, maps:get(A, BBATotals))},
+         {last_seen, element(1, maps:get(A, SeenTotals))},
          {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
         ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
     usage.
 
-merge_map(Addrs, Votes, Acc) ->
+merge_map(Addrs, Votes, Height, Acc) ->
     maps:fold(fun(K, true, A) ->
-                       maps:update_with(lists:nth(K, Addrs), fun(V) -> V+1 end, 1, A);
+                       maps:update_with(lists:nth(K, Addrs), fun({_, V}) -> {Height, V+1} end, {Height, 1}, A);
                  (_, false, A) ->
                       A
               end, Acc, Votes).
