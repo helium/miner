@@ -112,21 +112,25 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
     Msg = binary_to_term(BinMsg),
     %lager:info("DKG input ~s from ~p", [fakecast:print_message(Msg), Index]),
     case Msg of
-        {conf, InSigs} ->
-            lager:debug("got conf from ~p with ~p", [length(InSigs), Index]),
-            Sigs1 = lists:foldl(fun({Address, Signature}, Acc) ->
-                                        case lists:keymember(Address, 1, Acc) == false andalso
-                                            libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)) of
-                                            true ->
+        {conf, InSigs} when State#state.done_called == false ->
+            lager:debug("got conf from ~p with ~p", [Index, length(InSigs)]),
+            GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
+                                        %% only check signatures from members we have not already verified and have not already appeared in this list
+                                        case {lists:keymember(Address, 1, Acc) == false andalso
+                                             lists:member(Address, Members),
+                                            libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                            {true, true} ->
                                                 lager:debug("adding sig from conf"),
                                                 [{Address, Signature}|Acc];
-                                            false ->
+                                            {true, false} ->
+                                                lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                                                Acc;
+                                            {false, _} ->
                                                 Acc
                                         end
                                 end, Sigs, InSigs),
-            NewState = State#state{signatures = Sigs1},
-            case enough_signatures(conf, NewState) of
-                {ok, GoodSignatures} when State#state.done_called == false ->
+            case length(GoodSignatures) == State#state.signatures_required of
+                true when State#state.done_called == false ->
                     lager:debug("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
                     %% This now an async cast but we don't consider the handoff complete until
                     %% we have gotten a `mark_done' message from the consensus manager
@@ -136,80 +140,54 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State#state{done_called = true, sent_conf = true,
                                  signatures = GoodSignatures},
                      [{multicast, t2b({conf, GoodSignatures})}]};
-                {ok, _GoodSignatures} ->
+                true ->
                     lager:debug("already done"),
                     {State, []};
                 _ ->
-                    lager:debug("not done, conf have ~p", [length(Sigs1)]),
-                    {State, []}
+                    lager:debug("not done, conf have ~p", [length(GoodSignatures)]),
+                    {State#state{signatures=GoodSignatures}, []}
             end;
-        {signature, Address, Signature} ->
-            case {libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address)),
-                  not lists:keymember(Address, 1, Sigs)} of
+        {conf, _} ->
+            %% don't bother, we've already completed and sent a conf message
+            ignore;
+        {signature, Address, Signature} when State#state.done_called == false ->
+            case {lists:member(Address, Members) andalso %% valid signatory
+                 not lists:keymember(Address, 1, Sigs), %% not a duplicate
+                 libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} %% valid signature
+            of
                 {true, true} ->
                     lager:debug("got good sig ~p from ~p, have ~p", [Signature, Index,
                                                                     length(State#state.signatures) + 1]),
                     NewState = State#state{signatures=[{Address, Signature}|State#state.signatures]},
-                    case enough_signatures(sig, NewState) of
-                        {ok, Signatures} when State#state.sent_conf == false ->
-                            lager:debug("enough 1 ~p", [length(Signatures)]),
-                            case length(Signatures) == length(Members) of
-                                true ->
-                                    case State#state.done_called of
-                                        false ->
-                                            lager:debug("good len ~p sigs ~p", [length(Signatures), Signatures]),
-                                            %% This now an async cast but we don't consider the handoff complete until
-                                            %% we have gotten a `mark_done' message from the consensus manager
-                                            ok = DoneMod:DoneFun(State#state.artifact, Signatures,
-                                                                 Members, State#state.privkey, Height, Delay),
-                                            {NewState#state{done_called = true, signatures = Signatures},
-                                             [{multicast, t2b({conf, Signatures})}]};
-                                        _ ->
-                                            %% not enough total signatures, or we've already completed
-                                            {NewState, []}
-                                    end;
-                                false ->
-                                    {NewState#state{sent_conf=true, signatures = Signatures},
-                                     [{multicast, t2b({conf, NewState#state.signatures})}]}
-                            end;
-                        {ok, Signatures} ->
-                            lager:debug("enough 2 ~p", [length(Signatures)]),
-                            case length(Signatures) == length(Members) of
-                                true ->
-                                    case State#state.done_called of
-                                        false ->
-                                            lager:debug("good len ~p sigs ~p", [length(Signatures), Signatures]),
-                                            %% This now an async cast but we don't consider the handoff complete until
-                                            %% we have gotten a `mark_done' message from the consensus manager
-                                            ok = DoneMod:DoneFun(State#state.artifact, Signatures,
-                                                                 Members, State#state.privkey, Height, Delay),
-                                            {NewState#state{done_called = true, signatures = Signatures},
-                                             [{multicast, t2b({conf, Signatures})}]};
-                                        _ ->
-                                            %% not enough total signatures, or we've already completed
-                                            {NewState, []}
-                                    end;
-                                false ->
-                                    %% already sent a CONF, or not enough signatures
-                                    {NewState, []}
-                            end;
+                    case length(NewState#state.signatures) == State#state.signatures_required of
+                        true when State#state.sent_conf == false ->
+                            lager:debug("enough 1 ~p", [length(NewState#state.signatures)]),
+                            %% This now an async cast but we don't consider the handoff complete until
+                            %% we have gotten a `mark_done' message from the consensus manager
+                            ok = DoneMod:DoneFun(State#state.artifact, NewState#state.signatures,
+                                                 Members, State#state.privkey, Height, Delay),
+                            {NewState#state{done_called = true},
+                             [{multicast, t2b({conf, NewState#state.signatures})}]};
                         false ->
-                            lager:debug("not enough"),
-                            %% already sent a CONF, or not enough signatures
+                            lager:debug("not enough ~p/~p - ~p", [length(NewState#state.signatures), length(Members), State#state.signatures_required]),
                             {NewState, []}
                     end;
-                {true, _} ->
+                {false, _} ->
                     %% duplicate, this is ok
                     {State, []};
-                {false, _} ->
+                {true, false} ->
                     lager:warning("got invalid signature ~p from ~p", [Signature, Address]),
                     {State, []}
             end;
+        {signature, _Address, _Signature} ->
+            %% we have already completed
+            ignore;
         _ ->
             case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
                 %% NOTE: We cover all possible return values from handle_msg hence
                 %% eliminating the need for a final catch-all clause
                 {_, ignore} ->
+                    lager:info("ignoring ~p", [Msg]),
                     ignore;
                 {NewDKG, ok} ->
                     {State#state{dkg=NewDKG}, []};
@@ -242,6 +220,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                  signatures=[{Address, Signature}|State#state.signatures]},
                      [{multicast, t2b({signature, Address, Signature})}]};
                 {_NewDKG, {result, {_Shard, _VK, _VKs}}} ->
+                    lager:info("dkg completed again?"),
                     ignore
             end
     end.
@@ -393,24 +372,6 @@ fixup_msgs(Msgs) ->
                  ({callback, NextMsg}) ->
                       {callback, t2b(NextMsg)}
               end, Msgs).
-
-enough_signatures(sig, #state{signatures=Sigs, n = N, t = T}) when length(Sigs) < (N - T) ->
-    lager:debug("failsig n ~p t ~p sigs ~p", [N, T, length(Sigs)]),
-    false;
-enough_signatures(conf, #state{signatures=Sigs, signatures_required=Count}) when length(Sigs) < Count ->
-    lager:debug("failconf count ~p sigs ~p", [Count, length(Sigs)]),
-    false;
-enough_signatures(_Phase, #state{artifact=Artifact, members=Members, signatures=Signatures,
-                                 signatures_required=Threshold}) ->
-    lager:debug("checking using ~p", [Threshold]),
-    %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    %% in the unhappy case we have forged sigs, we can redo work here, but that should be uncommon
-    case blockchain_block_v1:verify_signatures(Artifact, Members, Signatures, Threshold) of
-        {true, ValidSignatures} ->
-            {ok, ValidSignatures};
-        false ->
-            false
-    end.
 
 %% ==================================================================
 %% Internal functions
