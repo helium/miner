@@ -31,6 +31,7 @@
          done_called = false :: boolean(),
          done_acked = false :: boolean(),
          sent_conf = false :: boolean(),
+         dkg_completed = false :: boolean(),
          height :: pos_integer(),
          delay :: non_neg_integer()
         }).
@@ -80,11 +81,22 @@ handle_command(mark_done, State) ->
     {reply, ok, [], State#state{done_called = true, done_acked = true}};
 handle_command(status, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
+    MembersWithIndex = lists:zip(lists:seq(1, length(State#state.members)), State#state.members),
+    MissingSignatures = lists:foldl(fun({Id, M}, Acc) ->
+                                            case lists:keymember(M, 1, State#state.signatures) of
+                                                true ->
+                                                    Acc;
+                                                false ->
+                                                    [Id | Acc]
+                                            end
+                                    end, [], MembersWithIndex),
     Map1 = maps:merge(#{
                         id => State#state.id,
                         members => State#state.members,
                         signatures_required => State#state.signatures_required,
                         signatures => length(State#state.signatures),
+                        missing_signatures_from => lists:reverse(MissingSignatures),
+                        dkg_completed => State#state.dkg_completed,
                         sent_conf => State#state.sent_conf
                        }, Map),
     {reply, Map1, ignore}.
@@ -226,6 +238,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                         end,
                     {State#state{dkg=NewDKG, privkey=PrivateKey,
                                  signatures_required=Threshold,
+                                 dkg_completed=true,
                                  signatures=[{Address, Signature}|State#state.signatures]},
                      [{multicast, t2b({signature, Address, Signature})}]};
                 {_NewDKG, {result, {_Shard, _VK, _VKs}}} ->
