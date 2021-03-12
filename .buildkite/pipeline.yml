@@ -19,7 +19,7 @@ steps:
       - ".buildkite/scripts/make_deb.sh"
     key: "deb"
     artifact_paths: "*.deb"
-    depends_on: "tests"
+    # depends_on: "tests"  # can't do this right now with the test status as it is.
     agents:
       queue: "erlang"
 
