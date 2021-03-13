@@ -3,7 +3,7 @@
 set -euo pipefail
 
 fpm -n validator \
-    -v $(git describe --long --always) \
+    -v $(git describe --abbrev=0 --tags | sed -e s/val//) \
     -s dir \
     -t deb \
     --depends libssl1.1 \
