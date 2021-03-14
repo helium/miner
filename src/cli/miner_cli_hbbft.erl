@@ -270,8 +270,8 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
          [
           {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), End+1 - Start])},
          {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
-         {last_bba, element(1, maps:get(A, BBATotals))},
-         {last_seen, element(1, maps:get(A, SeenTotals))},
+         {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
+         {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
          {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
         ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
