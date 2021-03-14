@@ -77,6 +77,24 @@ handle_command({stop, _Timeout}, #state{privkey = PKey, done_acked = false} = St
     {reply, {error, not_done}, [], State};
 handle_command({stop, Timeout}, State) ->
     {reply, ok, [{stop, Timeout}], State};
+handle_command(final_status, State) ->
+    case State#state.dkg_completed of
+        false ->
+            %% we didn't overcome the BFT threshold so we cannot meaningfully
+            %% report a state here
+            dkg_not_complete;
+        true ->
+            case length(State#state.signatures) == State#state.signatures_required of
+                true ->
+                    %% we did the thing
+                    complete;
+                false ->
+                    %% ok, here's where it gets interesting. We completed the DKG
+                    %% which means that at least 2f+1 nodes completed the protocol
+                    %% but we were unable to get to unanimous agreement. Return
+                    %% the final state of the protocol we saw and try to get agreement
+                    %% on who did not complete.
+
 handle_command(mark_done, State) ->
     {reply, ok, [], State#state{done_called = true, done_acked = true}};
 handle_command(status, State) ->
@@ -170,7 +188,8 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                              [{multicast, t2b({conf, NewState#state.signatures})}]};
                         false ->
                             lager:debug("not enough ~p/~p - ~p", [length(NewState#state.signatures), length(Members), State#state.signatures_required]),
-                            {NewState, []}
+                            %% this is a new, valid signature so we can pass it on just in case we have some point to point failures
+                            {NewState, [{multicast, t2b({signature, Address, Signature})}]}
                     end;
                 {false, _} ->
                     %% duplicate, this is ok
