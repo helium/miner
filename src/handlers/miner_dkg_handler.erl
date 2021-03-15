@@ -148,7 +148,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                                         end
                                 end, Sigs, InSigs),
             case length(GoodSignatures) == State#state.signatures_required of
-                true when State#state.done_called == false ->
+                true ->
                     lager:debug("good len ~p sigs ~p", [length(GoodSignatures), GoodSignatures]),
                     %% This now an async cast but we don't consider the handoff complete until
                     %% we have gotten a `mark_done' message from the consensus manager
@@ -158,9 +158,6 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     {State#state{done_called = true, sent_conf = true,
                                  signatures = GoodSignatures},
                      [{multicast, t2b({conf, GoodSignatures})}]};
-                true ->
-                    lager:debug("already done"),
-                    {State, []};
                 _ ->
                     lager:debug("not done, conf have ~p", [length(GoodSignatures)]),
                     {State#state{signatures=GoodSignatures}, []}
@@ -193,10 +190,10 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                     end;
                 {false, _} ->
                     %% duplicate, this is ok
-                    {State, []};
+                    ignore;
                 {true, false} ->
                     lager:warning("got invalid signature ~p from ~p", [Signature, Address]),
-                    {State, []}
+                    ignore
             end;
         {signature, _Address, _Signature} ->
             %% we have already completed

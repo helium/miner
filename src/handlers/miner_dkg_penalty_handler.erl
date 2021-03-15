@@ -26,8 +26,11 @@
 
 -record(state, {bbas :: #{pos_integer() => hbbft_bba:bba_data()},
                 members :: [ libp2p_crypto:pubkey_bin()],
+                f :: pos_integer(),
                 dkg_results :: bitstring(),
                 bba_results = #{} :: #{pos_integer() => 0 | 1},
+                done_called = false :: boolean(),
+                artifact,
                 signatures=[] :: [{libp2p_crypto:address(), binary()}]
                }).
 
@@ -36,6 +39,7 @@ init([Members, PrivKey, DKGResultVector]) ->
     F = floor((bit_size(DKGResultVector) - 1) / 3),
     BBAs = [ {I, hbbft_bba:init(PrivKey, N, F)} || I <- lists:seq(1, bit_size(DKGResultVector))],
     {ok, #state{bbas=maps:from_list(BBAs),
+                f=F,
                 members=Members,
                 dkg_results=DKGResultVector}}.
 
@@ -49,9 +53,59 @@ handle_command(start, State) ->
 handle_message(BinMsg, Index, State) ->
     Msg = binary_to_term(BinMsg),
     case Msg of
-        {signature, Address, Signature} ->
+        {conf, Signatures} when State#state.artifact /= undefined andalso State#state.done_called == false ->
+            GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
+                                        %% only check signatures from members we have not already verified and have not already appeared in this list
+                                        case {lists:keymember(Address, 1, Acc) == false andalso
+                                             lists:member(Address, State#state.members),
+                                            libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                            {true, true} ->
+                                                lager:debug("adding sig from conf"),
+                                                [{Address, Signature}|Acc];
+                                            {true, false} ->
+                                                lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                                                Acc;
+                                            {false, _} ->
+                                                Acc
+                                        end
+                                end, State#state.signatures, Signatures),
+            case length(GoodSignatures) >= (2*State#state.f)+1 of
+                true ->
+                    DoneMod:DoneFun(NewSignatures, State#state.artifact),
+                    {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
+                false ->
+                    {State#state{signatures=GoodSignatures}, []}
+            end;
+        {conf, Signatures} when State#state.artifact == undefined ->
+            %% don't have artifact yet so cannot verify signatures
+            {State#state{signatures=Signatures++State#state.signatures}, []};
+        {conf, _Signatures} ->
+            ignore;
+        {signature, Address, Signature} when State#state.artifact /= undefined andalso State#state.done_called == false ->
             %% got a signature from our peer, check it matches our BBA result vector
             %% it's from a member and it's not a duplicate
+            case {lists:member(Address, State#state.members) andalso not lists:keymember(Address, 1, State#state.signatures),
+                 libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                {true, true} ->
+                    NewSignatures = [{Address, Signature}|State#state.signatures],
+                    case length(NewSignatures) == (2*State#state.f)+1 of
+                        true ->
+                            DoneMod:DoneFun(NewSignatures, State#state.artifact),
+                            {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, NewSignatures})}]};
+                        false ->
+                            {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]}
+                    end;
+                {true, false} ->
+                    lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                    ignore;
+                {false, _} ->
+                    ignore
+            end;
+        {signature, Address, Signature} when State#state.artifact == undefined ->
+            %% don't have artifact yet so cannot verify signatures
+            {State#state{signatures=[{Address, Signature}|State#state.signatures]}, []};
+        {signature, _Address, _Signature} ->
+            ignore;
         {bba, I, BBAMsg} ->
             BBA = maps:get(I, State#state.bbas),
             case hbbft_bba:handle_msg(BBA, Index, BBAMsg) of
@@ -62,17 +116,53 @@ handle_message(BinMsg, Index, State) ->
                 ignore ->
                     ignore;
                 {NewBBA, {send, ToSend}} ->
-                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, fixup_bba_msgs(ToSend)};
+                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, fixup_bba_msgs(ToSend, I)};
                 {NewBBA, {result_and_send, Result, ToSend}} ->
                     BBAResults = maps:put(I, Result, State#state.bba_results),
                     case maps:size(BBAResults) == bit_size(State#state.dkg_results) of
                         true ->
                             %% construct a vector of the BBA results, sign it and send it to our peers
+                            %% TODO this should be an actual transaction
+                            Vector = << <<B:1/integer>> || {_, B} <- lists:keysort(1, maps:to_list(BBAResults)) >>,
+                            {MyAddress, MySignature} = SigFun(Vector),
+                            GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
+                                                                 %% only check signatures from members we have not already verified and have not already appeared in this list
+                                                                 case {lists:keymember(Address, 1, Acc) == false andalso
+                                                                       lists:member(Address, State#state.members),
+                                                                       libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                                                     {true, true} ->
+                                                                         lager:debug("adding sig from conf"),
+                                                                         [{Address, Signature}|Acc];
+                                                                     {true, false} ->
+                                                                         lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                                                                         Acc;
+                                                                     {false, _} ->
+                                                                         Acc
+                                                                 end
+                                                         end, [{MyAddress, MySignature}], State#state.signatures),
+                            case length(GoodSignatures) >= (2*State#state.f)+1 of
+                                true ->
+                                    DoneMod:DoneFun(NewSignatures, Vector),
+                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Vector, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
+                                false ->
+                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Vector}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
+                            end;
+                        false ->
+                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults}, fixup_bba_msgs(ToSend, I)}
+                    end
+            end
+    end.
 
-                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results= }, fixup_bba_msgs(ToSend)};
+callback_message(_, _, _) -> none.
 
+serialize(_State) ->
+    #{}.
 
+deserialize(_M) ->
+    #state{}.
 
+restore(OldState, _NewState) ->
+    OldState.
 
 fixup_bba_msgs(Msgs, I) ->
     lists:map(fun({unicast, J, NextMsg}) ->
