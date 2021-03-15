@@ -81,7 +81,7 @@ handle_command(mark_done, State) ->
     {reply, ok, [], State#state{done_called = true, done_acked = true}};
 handle_command(status, State) ->
     Map = dkg_hybriddkg:status(State#state.dkg),
-    MembersWithIndex = lists:zip(lists:seq(1, length(State#state.members)), State#state.members),
+    MembersWithIndex = lists:zip(lists:seq(1, State#state.n), State#state.members),
     MissingSignatures = lists:foldl(fun({Id, M}, Acc) ->
                                             case lists:keymember(M, 1, State#state.signatures) of
                                                 true ->
@@ -187,7 +187,7 @@ handle_message(BinMsg, Index, State=#state{n = N, t = T,
                 %% NOTE: We cover all possible return values from handle_msg hence
                 %% eliminating the need for a final catch-all clause
                 {_, ignore} ->
-                    lager:info("ignoring ~p", [Msg]),
+                    % lager:info("ignoring ~p", [Msg]),
                     ignore;
                 {NewDKG, ok} ->
                     {State#state{dkg=NewDKG}, []};

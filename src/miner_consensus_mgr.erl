@@ -796,7 +796,7 @@ rescue_dkg(Members, Artifact, State) ->
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
 
     {_, State1} = do_dkg(Members, Artifact, {?MODULE, sign_artifact},
-                         rescue_done, length(Members), Curve, true,
+                         rescue_done, length(Members), Curve, true, % I think length is OK only here
                          State#state{initial_height = Height,
                                      delay = 0}),
     State1.
@@ -823,7 +823,7 @@ restart_dkg(Height, Delay, State) ->
     Artifact = term_to_binary(ConsensusAddrs),
 
     case do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
-                election_done, length(ConsensusAddrs), Curve,
+                election_done, N, Curve,
                 false, % do not create this if it doesn't exist
                 #state{initial_height = Height,  % blank state woo
                        delay = Delay,
@@ -853,7 +853,7 @@ restore_dkg(Height, Delay, Round, State) ->
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
     Artifact = term_to_binary(ConsensusAddrs),
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
-                         election_done, length(ConsensusAddrs), Curve, false,
+                         election_done, N, Curve, false,
                          State#state{initial_height = Height,
                                      delay = Delay}),
     DKGGroup = maps:get({Height, Delay}, State1#state.current_dkgs),
@@ -924,7 +924,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
     ConsensusAddrs = lists:sublist(Addrs, 1, N),
     lager:info("ConsensusAddrs: ~p", [animalize(ConsensusAddrs)]),
     MyAddress = blockchain_swarm:pubkey_bin(),
-    lager:info("MyAddress: ~p", [MyAddress]),
+    lager:info("MyAddress: ~p", animalize([MyAddress])),
     case lists:member(MyAddress, ConsensusAddrs) of
         true ->
             lager:info("Preparing to run DKG #~p at height ~p ", [Delay, Height]),

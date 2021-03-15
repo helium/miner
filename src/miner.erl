@@ -161,8 +161,7 @@ relcast_info(Group) ->
           end,
     case gen_server:call(Mod, Group, 60000) of
         undefined -> #{};
-        Pid ->
-            libp2p_group_relcast:info(Pid)
+        Pid -> libp2p_group_relcast:info(Pid)
     end.
 
 %%--------------------------------------------------------------------

@@ -31,6 +31,7 @@
  {miner,
   [
    {mode, validator},
+   {dkg_limit, 4},
    {network, testnet},
    %% these two now disable all the poc stuff
    {use_ebus, false},
