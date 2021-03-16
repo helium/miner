@@ -25,6 +25,7 @@
 
 
 -record(state, {bbas :: #{pos_integer() => hbbft_bba:bba_data()},
+                privkey :: tpke_privkey:privkey(),
                 members :: [ libp2p_crypto:pubkey_bin()],
                 f :: pos_integer(),
                 dkg_results :: [boolean(),...],
@@ -44,6 +45,7 @@ init([PrivKey, Signatures, Members, Delay, Height]) ->
                                    lists:keymember(Member, 1, Signatures)
                            end, Members),
     {ok, #state{bbas=maps:from_list(BBAs),
+                privkey=PrivKey,
                 f=F,
                 delay=Delay,
                 height=Height,
@@ -170,11 +172,21 @@ handle_message(BinMsg, Index, State) ->
 
 callback_message(_, _, _) -> none.
 
-serialize(_State) ->
-    #{}.
+-spec serialize(#state{}) -> binary().
+serialize(State) ->
+    t2b(State#state{privkey=tpke_privkey:serialize(State#state.privkey),
+                    bbas=maps:map(fun(_, BBA) ->
+                                          hbbft_bba:serialize(BBA)
+                                  end, State#state.bbas)}).
 
-deserialize(_M) ->
-    #state{}.
+-spec deserialize(binary()) -> #state{}.
+deserialize(M) ->
+    State0 = binary_to_term(M),
+    PrivKey = tpke_privkey:deserialize(State0#state.privkey),
+    State0#state{privkey=PrivKey,
+                 bbas=maps:map(fun(_, BBA) ->
+                                       hbbft_bba:deserialize(BBA, PrivKey)
+                               end, State0#state.bbas)}.
 
 restore(OldState, _NewState) ->
     OldState.
