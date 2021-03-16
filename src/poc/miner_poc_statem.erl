@@ -49,7 +49,7 @@
 -define(RECEIPTS_TIMEOUT, 10).
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
--define(ADDR_HASH_FP_RATE, 1.0e-6).
+-define(ADDR_HASH_FP_RATE, 1.0e-9).
 
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
@@ -687,7 +687,7 @@ maybe_init_addr_hash(#data{blockchain=Blockchain, addr_hash_filter=#addr_hash_fi
                                     %% ok, everything lines up
                                     Data;
                                 _ ->
-                                    case blockchain:get_block(Height, Blockchain) of
+                                    case blockchain:get_block(Height+1, Blockchain) of
                                         {ok, Block} ->
                                             sync_filter(Block, Bloom, Blockchain),
                                             Data#data{addr_hash_filter=#addr_hash_filter{start=StartHeight, height=CurHeight, byte_size=Bytes, salt=Hash, bloom=Bloom}};
