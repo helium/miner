@@ -17,7 +17,7 @@
 %% have agreement on who to penalize.
 %% @end
 %%%-------------------------------------------------------------------
--module(miner_dkg_handler).
+-module(miner_dkg_penalty_handler).
 
 -behavior(relcast).
 
@@ -27,27 +27,38 @@
 -record(state, {bbas :: #{pos_integer() => hbbft_bba:bba_data()},
                 members :: [ libp2p_crypto:pubkey_bin()],
                 f :: pos_integer(),
-                dkg_results :: bitstring(),
+                dkg_results :: [boolean(),...],
                 bba_results = #{} :: #{pos_integer() => 0 | 1},
                 done_called = false :: boolean(),
+                delay :: non_neg_integer(),
+                height :: pos_integer(),
                 artifact,
                 signatures=[] :: [{libp2p_crypto:address(), binary()}]
                }).
 
-init([Members, PrivKey, DKGResultVector]) ->
-    N = bit_size(DKGResultVector),
-    F = floor((bit_size(DKGResultVector) - 1) / 3),
-    BBAs = [ {I, hbbft_bba:init(PrivKey, N, F)} || I <- lists:seq(1, bit_size(DKGResultVector))],
+init([PrivKey, Signatures, Members, Delay, Height]) ->
+    N = length(Members),
+    F = floor((N - 1) / 3),
+    BBAs = [ {I, hbbft_bba:init(PrivKey, N, F)} || I <- lists:seq(1, length(Members))],
+    DKGResults = lists:map(fun(Member) ->
+                                   lists:keymember(Member, 1, Signatures)
+                           end, Members),
     {ok, #state{bbas=maps:from_list(BBAs),
                 f=F,
+                delay=Delay,
+                height=Height,
                 members=Members,
-                dkg_results=DKGResultVector}}.
+                dkg_results=DKGResults}}.
 
 handle_command(start, State) ->
-    {NewBBAs, OutMsgs} = lists:foldl(fun({BBAIndex, Input}, {BBAs, Msgs}) ->
+    {NewBBAs, OutMsgs} = lists:foldl(fun({BBAIndex, SawSig}, {BBAs, Msgs}) ->
+                                             Input = case SawSig of
+                                                         true -> 1;
+                                                         false -> 0
+                                                     end,
                                              {NewBBA, BBAMsgs} = hbbft_bba:input(maps:get(BBAIndex, State#state.bbas), Input),
                                              {maps:put(BBAIndex, NewBBA, BBAs), [fixup_bba_msgs(BBAMsgs, BBAIndex)|Msgs]}
-                                     end, {State#state.bbas, []}, lists:zip(lists:seq(1, bit_size(State#state.dkg_results)), [ V || <<V:1/integer>> <= State#state.dkg_results ])),
+                                     end, {State#state.bbas, []}, lists:zip(lists:seq(1, length(State#state.members)), State#state.dkg_results)),
     {reply, ok, OutMsgs, State#state{bbas=NewBBAs}}.
 
 handle_message(BinMsg, Index, State) ->
@@ -58,7 +69,7 @@ handle_message(BinMsg, Index, State) ->
                                         %% only check signatures from members we have not already verified and have not already appeared in this list
                                         case {lists:keymember(Address, 1, Acc) == false andalso
                                              lists:member(Address, State#state.members),
-                                            libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                            blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
                                             {true, true} ->
                                                 lager:debug("adding sig from conf"),
                                                 [{Address, Signature}|Acc];
@@ -71,8 +82,8 @@ handle_message(BinMsg, Index, State) ->
                                 end, State#state.signatures, Signatures),
             case length(GoodSignatures) >= (2*State#state.f)+1 of
                 true ->
-                    DoneMod:DoneFun(NewSignatures, State#state.artifact),
-                    {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
+                    done(GoodSignatures, State#state.artifact),
+                    {State#state{signatures=GoodSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
                 false ->
                     {State#state{signatures=GoodSignatures}, []}
             end;
@@ -90,7 +101,7 @@ handle_message(BinMsg, Index, State) ->
                     NewSignatures = [{Address, Signature}|State#state.signatures],
                     case length(NewSignatures) == (2*State#state.f)+1 of
                         true ->
-                            DoneMod:DoneFun(NewSignatures, State#state.artifact),
+                            done(NewSignatures, State#state.artifact),
                             {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, NewSignatures})}]};
                         false ->
                             {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]}
@@ -115,16 +126,20 @@ handle_message(BinMsg, Index, State) ->
                     defer;
                 ignore ->
                     ignore;
-                {NewBBA, {send, ToSend}} ->
+                {NewBBA, {send, _}=ToSend} ->
                     {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, fixup_bba_msgs(ToSend, I)};
                 {NewBBA, {result_and_send, Result, ToSend}} ->
                     BBAResults = maps:put(I, Result, State#state.bba_results),
-                    case maps:size(BBAResults) == bit_size(State#state.dkg_results) of
+                    case maps:size(BBAResults) == length(State#state.members) of
                         true ->
                             %% construct a vector of the BBA results, sign it and send it to our peers
                             %% TODO this should be an actual transaction
-                            Vector = << <<B:1/integer>> || {_, B} <- lists:keysort(1, maps:to_list(BBAResults)) >>,
-                            {MyAddress, MySignature} = SigFun(Vector),
+                            Vector = [ B || {_, B} <- lists:keysort(1, maps:to_list(BBAResults)) ],
+                            FailedMembers = [ M || {M, F} <- lists:zip(State#state.members, Vector), F == 0 ],
+                            {ok, {MyKey, SigFun}} = miner:keys(),
+                            Txn = blockchain_txn_consensus_group_failure_v1:new(FailedMembers, State#state.height, State#state.delay),
+                            MyAddress = libp2p_crypto:pubkey_to_bin(MyKey),
+                            MySignature = blockchain_txn_consensus_group_failure_v1:sign(Txn, SigFun),
                             GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
                                                                  %% only check signatures from members we have not already verified and have not already appeared in this list
                                                                  case {lists:keymember(Address, 1, Acc) == false andalso
@@ -142,10 +157,10 @@ handle_message(BinMsg, Index, State) ->
                                                          end, [{MyAddress, MySignature}], State#state.signatures),
                             case length(GoodSignatures) >= (2*State#state.f)+1 of
                                 true ->
-                                    DoneMod:DoneFun(NewSignatures, Vector),
-                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Vector, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
+                                    done(GoodSignatures, Txn),
+                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
                                 false ->
-                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Vector}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
+                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
                             end;
                         false ->
                             {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults}, fixup_bba_msgs(ToSend, I)}
@@ -164,7 +179,13 @@ deserialize(_M) ->
 restore(OldState, _NewState) ->
     OldState.
 
-fixup_bba_msgs(Msgs, I) ->
+done(Signatures, Txn) ->
+    NewTxn = blockchain_txn_consensus_group_failure_v1:set_signatures(Txn, Signatures),
+    blockchain_worker:submit_txn(NewTxn).
+
+fixup_bba_msgs(ok, _) ->
+    [];
+fixup_bba_msgs({send, Msgs}, I) ->
     lists:map(fun({unicast, J, NextMsg}) ->
                       {unicast, J, t2b({bba, I, NextMsg})};
                  ({multicast, NextMsg}) ->

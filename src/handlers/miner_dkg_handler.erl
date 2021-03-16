@@ -82,19 +82,22 @@ handle_command(final_status, State) ->
         false ->
             %% we didn't overcome the BFT threshold so we cannot meaningfully
             %% report a state here
-            dkg_not_complete;
+            {reply, dkg_not_complete, [], State};
         true ->
             case length(State#state.signatures) == State#state.signatures_required of
                 true ->
                     %% we did the thing
-                    complete;
+                    {reply, complete, [], State};
                 false ->
                     %% ok, here's where it gets interesting. We completed the DKG
                     %% which means that at least 2f+1 nodes completed the protocol
                     %% but we were unable to get to unanimous agreement. Return
                     %% the final state of the protocol we saw and try to get agreement
                     %% on who did not complete.
-
+                    {reply, {ok, {State#state.privkey, State#state.signatures, State#state.members,
+                             State#state.delay, State#state.height}}, [], State}
+            end
+    end;
 handle_command(mark_done, State) ->
     {reply, ok, [], State#state{done_called = true, done_acked = true}};
 handle_command(status, State) ->
