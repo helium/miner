@@ -1034,6 +1034,9 @@ consensus_group_name(Height, fallback, Members) ->
 consensus_group_name(Height, Delay, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b_~b", [Height, Delay, erlang:phash2(Members)])).
 
+penalize_group_name(Height, Delay, Members) ->
+    lists:flatten(io_lib:format("penalize_~b_~b_~b", [Height, Delay, erlang:phash2(Members)])).
+
 animalize(L) ->
     lists:map(fun(X0) ->
                       X = libp2p_crypto:bin_to_b58(X0),
@@ -1098,7 +1101,26 @@ maybe_penalize(out) ->
     ok;
 maybe_penalize(Pid) ->
     spawn(fun() ->
-                  catch libp2p_group_relcast:handle_command(Pid, final_status)
+                  case libp2p_group_relcast:handle_command(Pid, final_status) of
+                      {ok, {PrivKey, Signatures, Members, Delay, Height}} ->
+                          Name = penalize_group_name(Height, Delay, Members),
+                          %% we intentionally don't use create here
+                          GroupArg = [miner_dkg_penalty_handler, [Members,
+                                                                  PrivKey,
+                                                                  Signatures,
+                                                                  Delay,
+                                                                  Height],
+                                      [{create, true}]],
+                          lager:info("starting penalize group ~p", [Name]),
+                          {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
+                                                               Name,
+                                                               libp2p_group_relcast, GroupArg),
+                          libp2p_group_relcast:handle_input(Group, start),
+                          %% TODO we need to tell the consensus manager about this group?
+                          Group;
+                      _ ->
+                          ok
+                  end
           end),
     ok.
 
@@ -1143,7 +1165,7 @@ cleanup_groups({Start, _Delay} = EID, Groups, Retain) ->
               lager:info("stopping group ~p ~p", [E, V]),
               %% retain = true means we're cleaning up stale DKGs, and S == Start means that they're
               %% from this election cycle (older ones will have been successful).
-              case Retain and S == Start of
+              case Retain andalso S == Start of
                   true ->
                       maybe_penalize(V);
                   _ -> ok

@@ -37,7 +37,7 @@
                 signatures=[] :: [{libp2p_crypto:address(), binary()}]
                }).
 
-init([PrivKey, Signatures, Members, Delay, Height]) ->
+init([Members, PrivKey, Signatures, Delay, Height]=Args) ->
     N = length(Members),
     F = floor((N - 1) / 3),
     BBAs = [ {I, hbbft_bba:init(PrivKey, N, F)} || I <- lists:seq(1, length(Members))],
@@ -59,7 +59,7 @@ handle_command(start, State) ->
                                                          false -> 0
                                                      end,
                                              {NewBBA, BBAMsgs} = hbbft_bba:input(maps:get(BBAIndex, State#state.bbas), Input),
-                                             {maps:put(BBAIndex, NewBBA, BBAs), [fixup_bba_msgs(BBAMsgs, BBAIndex)|Msgs]}
+                                             {maps:put(BBAIndex, NewBBA, BBAs), fixup_bba_msgs(BBAMsgs, BBAIndex)++Msgs}
                                      end, {State#state.bbas, []}, lists:zip(lists:seq(1, length(State#state.members)), State#state.dkg_results)),
     {reply, ok, OutMsgs, State#state{bbas=NewBBAs}}.
 
@@ -71,7 +71,7 @@ handle_message(BinMsg, Index, State) ->
                                         %% only check signatures from members we have not already verified and have not already appeared in this list
                                         case {lists:keymember(Address, 1, Acc) == false andalso
                                              lists:member(Address, State#state.members),
-                                            blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                             blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
                                             {true, true} ->
                                                 lager:debug("adding sig from conf"),
                                                 [{Address, Signature}|Acc];
@@ -98,7 +98,7 @@ handle_message(BinMsg, Index, State) ->
             %% got a signature from our peer, check it matches our BBA result vector
             %% it's from a member and it's not a duplicate
             case {lists:member(Address, State#state.members) andalso not lists:keymember(Address, 1, State#state.signatures),
-                 libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                  blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
                 {true, true} ->
                     NewSignatures = [{Address, Signature}|State#state.signatures],
                     case length(NewSignatures) == (2*State#state.f)+1 of
@@ -146,7 +146,7 @@ handle_message(BinMsg, Index, State) ->
                                                                  %% only check signatures from members we have not already verified and have not already appeared in this list
                                                                  case {lists:keymember(Address, 1, Acc) == false andalso
                                                                        lists:member(Address, State#state.members),
-                                                                       libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))} of
+                                                                       blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
                                                                      {true, true} ->
                                                                          lager:debug("adding sig from conf"),
                                                                          [{Address, Signature}|Acc];
