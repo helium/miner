@@ -37,7 +37,7 @@
                 signatures=[] :: [{libp2p_crypto:address(), binary()}]
                }).
 
-init([Members, PrivKey, Signatures, Delay, Height]=Args) ->
+init([Members, PrivKey, Signatures, Delay, Height]=_Args) ->
     N = length(Members),
     F = floor((N - 1) / 3),
     BBAs = [ {I, hbbft_bba:init(PrivKey, N, F)} || I <- lists:seq(1, length(Members))],
