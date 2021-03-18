@@ -965,7 +965,9 @@ make_vars(Keys, Map, Mode) ->
               ?validator_minimum_stake => ?bones(10000),
               ?validator_liveness_grace_period => 10,
               ?validator_liveness_interval => 5,
-              ?stake_withdrawl_cooldown => 5
+              ?stake_withdrawl_cooldown => 55,
+              ?dkg_penalty => 1.0,
+              ?penalty_history_limit => 100
              },
 
     #{secret := Priv, public := Pub} = Keys,

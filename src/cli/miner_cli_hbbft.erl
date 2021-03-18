@@ -240,40 +240,55 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
     #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
-    {Start, GroupWithPenalties} = case blockchain:config(?election_version, Ledger) of
-                             {ok, N} when N >= 5 ->
-                                 Input = lists:map(fun(A) ->
-                                                           {ok, V} = blockchain_ledger_v1:get_validator(A, Ledger),
-                                                           HB = blockchain_ledger_validator_v1:last_heartbeat(V),
-                                                           {val_v1, 1.0, HB, A}
-                                                   end, ConsensusAddrs),
-                                 {Start0 + 2, blockchain_election:adjust_old_group_v2(Input, Ledger)};
-                             _ ->
-                                          {Start0 + 1, [{A, S} || {S, _L, A} <- blockchain_election:adjust_old_group([{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
-                         end,
+    {Start, GroupWithPenalties, Fails} =
+        case blockchain:config(?election_version, Ledger) of
+            {ok, N} when N >= 5 ->
+                Input0 = lists:map(
+                          fun(A) ->
+                                  {ok, V} = blockchain_ledger_v1:get_validator(A, Ledger),
+                                  HB = blockchain_ledger_validator_v1:last_heartbeat(V),
+                                  Fail = blockchain_ledger_validator_v1:recent_failures(V),
+                                  {{val_v1, 1.0, HB, Fail, A}, length(Fail)}
+                          end, ConsensusAddrs),
+                {Input, Failures0} = lists:unzip(Input0),
+                Failures = lists:zip(ConsensusAddrs, Failures0),
+                Penalties = blockchain_election:adjust_old_group_v2(Input, Ledger),
+                {Start0 + 2, Penalties, Failures};
+            _ ->
+                {Start0 + 1,
+                 [{A, S} || {S, _L, A} <- blockchain_election:adjust_old_group(
+                                            [{0, 0, A} || A <- ConsensusAddrs], Ledger)], []}
+        end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
                     || Ht <- lists:seq(Start, End)],
-    {BBATotals, SeenTotals, TotalCount} = lists:foldl(fun(Blk, {BBAAcc, SeenAcc, Count}) ->
-                                                              H = blockchain_block:height(Blk),
-                                                              BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Blk)),
-                                                              SeenVotes = blockchain_block_v1:seen_votes(Blk),
-                                                              Seen = lists:foldl(fun({_Idx, Votes0}, Acc) ->
-                                                                                         Votes = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), Votes0),
-                                                                                         merge_map(ConsensusAddrs, Votes, H, Acc)
-                                                                                 end,SeenAcc, SeenVotes),
-                                                              {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
-                                                      end, {InitMap, InitMap, 0}, Blocks),
+    {BBATotals, SeenTotals, TotalCount} =
+        lists:foldl(
+          fun(Blk, {BBAAcc, SeenAcc, Count}) ->
+                  H = blockchain_block:height(Blk),
+                  BBAs = blockchain_utils:bitvector_to_map(
+                           length(ConsensusAddrs),
+                           blockchain_block_v1:bba_completion(Blk)),
+                  SeenVotes = blockchain_block_v1:seen_votes(Blk),
+                  Seen = lists:foldl(
+                           fun({_Idx, Votes0}, Acc) ->
+                                   Votes = blockchain_utils:bitvector_to_map(
+                                             length(ConsensusAddrs), Votes0),
+                                   merge_map(ConsensusAddrs, Votes, H, Acc)
+                           end,SeenAcc, SeenVotes),
+                  {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
+          end, {InitMap, InitMap, 0}, Blocks),
 
     [clique_status:table(
        [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))} ] ++
-         [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
-         [
-          {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), End+1 - Start])},
-         {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
-         {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
-         {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
-         {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
-        ] || A <- ConsensusAddrs])];
+            [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
+            [
+             {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), End+1 - Start])},
+             {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
+             {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
+             {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
+             {recent_failures, io_lib:format("~b", [element(2, lists:keyfind(A, 1, Fails))])},
+             {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
+            ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
     usage.
 

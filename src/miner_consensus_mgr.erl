@@ -777,7 +777,7 @@ restart_election(#state{delay = Delay,
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
     Limit = application:get_env(miner, dkg_limit, 2),
     Sz = maps:size(CurrentDKGs),
-    lager:info("size ~p limit ~p", [Sz, Limit]),
+    lager:debug("size ~p limit ~p", [Sz, Limit]),
     case Sz > Limit of
         false ->
             State;
@@ -786,6 +786,7 @@ limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
             DKGList = lists:sort(maps:to_list(CurrentDKGs)),
             {Stop0, Rem} = lists:split(Sz - Limit, DKGList),
             {_, Stop} = lists:unzip(Stop0),
+            lists:foreach(fun maybe_penalize/1, Stop),
             lists:foreach(fun stop_group/1, Stop),
             State#state{current_dkgs = maps:from_list(Rem)}
     end.
@@ -1033,6 +1034,9 @@ consensus_group_name(Height, fallback, Members) ->
 consensus_group_name(Height, Delay, Members) ->
     lists:flatten(io_lib:format("consensus_~b_~b_~b", [Height, Delay, erlang:phash2(Members)])).
 
+penalize_group_name(Height, Delay, Members) ->
+    lists:flatten(io_lib:format("penalize_~b_~b_~b", [Height, Delay, erlang:phash2(Members)])).
+
 animalize(L) ->
     lists:map(fun(X0) ->
                       X = libp2p_crypto:bin_to_b58(X0),
@@ -1091,6 +1095,35 @@ stop_group(Pid) ->
           end),
     ok.
 
+maybe_penalize(undefined) ->
+    ok;
+maybe_penalize(out) ->
+    ok;
+maybe_penalize(Pid) ->
+    spawn(fun() ->
+                  case libp2p_group_relcast:handle_command(Pid, final_status) of
+                      {ok, {PrivKey, Signatures, Members, Delay, Height}} ->
+                          Name = penalize_group_name(Height, Delay, Members),
+                          %% we intentionally don't use create here
+                          GroupArg = [miner_dkg_penalty_handler, [Members,
+                                                                  PrivKey,
+                                                                  Signatures,
+                                                                  Delay,
+                                                                  Height],
+                                      [{create, true}]],
+                          lager:info("starting penalize group ~p", [Name]),
+                          {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
+                                                               Name,
+                                                               libp2p_group_relcast, GroupArg),
+                          libp2p_group_relcast:handle_input(Group, start),
+                          %% TODO we need to tell the consensus manager about this group?
+                          Group;
+                      _ ->
+                          ok
+                  end
+          end),
+    ok.
+
 get_buf(ConsensusGroup) ->
     case ConsensusGroup of
         P when is_pid(P) ->
@@ -1130,6 +1163,13 @@ cleanup_groups({Start, _Delay} = EID, Groups, Retain) ->
          %% group from same or older start height, stop and remove
          ({S, _D} = E, V, G) when S =< Start ->
               lager:info("stopping group ~p ~p", [E, V]),
+              %% retain = true means we're cleaning up stale DKGs, and S == Start means that they're
+              %% from this election cycle (older ones will have been successful).
+              case Retain andalso S == Start of
+                  true ->
+                      maybe_penalize(V);
+                  _ -> ok
+              end,
               stop_group(V),
               G;
          (K, V, G) ->
