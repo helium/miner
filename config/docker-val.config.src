@@ -28,6 +28,10 @@
    [
     {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}}
  ]},
+ {relcast,
+  [
+   {pipeline_depth, 125}
+  ]},
  {miner,
   [
    {mode, validator},
