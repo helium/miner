@@ -1117,6 +1117,11 @@ maybe_penalize(Pid) ->
                                                                libp2p_group_relcast, GroupArg),
                           libp2p_group_relcast:handle_input(Group, start),
                           %% TODO we need to tell the consensus manager about this group?
+                          spawn(fun() ->
+                                        Timeout = application:get_env(miner, penalty_group_timeout, 120),
+                                        timer:sleep(timer:seconds(Timeout)),
+                                        catch libp2p_group_relcast:handle_command(Group, stop)
+                                end),
                           Group;
                       _ ->
                           ok

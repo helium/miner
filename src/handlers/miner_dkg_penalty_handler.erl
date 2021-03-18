@@ -62,7 +62,10 @@ handle_command(start, State) ->
                                              {NewBBA, BBAMsgs} = hbbft_bba:input(maps:get(BBAIndex, State#state.bbas), Input),
                                              {maps:put(BBAIndex, NewBBA, BBAs), fixup_bba_msgs(BBAMsgs, BBAIndex)++Msgs}
                                      end, {State#state.bbas, []}, lists:zip(lists:seq(1, length(State#state.members)), State#state.dkg_results)),
-    {reply, ok, OutMsgs, State#state{bbas=NewBBAs}}.
+    {reply, ok, OutMsgs, State#state{bbas=NewBBAs}};
+handle_command(stop, State) ->
+    lager:info("stop called without timeout"),
+    {reply, ok, [{stop, 0}], State}.
 
 handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
     try binary_to_term(BinMsg) of
