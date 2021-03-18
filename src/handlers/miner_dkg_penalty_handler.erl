@@ -164,7 +164,7 @@ handle_message({bba, I, BBAMsg}, Index, State) ->
                                                          %% only check signatures from members we have not already verified and have not already appeared in this list
                                                          case {lists:keymember(Address, 1, Acc) == false andalso
                                                                lists:member(Address, State#state.members),
-                                                               blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
+                                                               blockchain_txn_consensus_group_failure_v1:verify_signature(Txn, Address, Signature)} of
                                                              {true, true} ->
                                                                  lager:debug("adding sig from conf"),
                                                                  [{Address, Signature}|Acc];
