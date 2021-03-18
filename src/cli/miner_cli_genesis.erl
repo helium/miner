@@ -396,5 +396,5 @@ make_vars() ->
       ?validator_liveness_grace_period => 50,
       ?validator_liveness_interval => 200,
       ?dkg_penalty => 1.0,
-      ?dkg_penalty_history_limit => 1000
+      ?penalty_history_limit => 1000
      }.
