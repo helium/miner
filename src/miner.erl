@@ -318,7 +318,9 @@ remove_consensus() ->
 
 -spec version() -> integer().
 version() ->
-    2.
+    %% format:
+    %% MMMmmmPPPP
+       0000010024.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions

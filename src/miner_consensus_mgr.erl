@@ -775,7 +775,8 @@ restart_election(#state{delay = Delay,
 
 -spec limit_dkgs(State :: #state{}) -> #state{}.
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
-    Limit = case blockchain:config(?election_restart_interval_range, Ledger) of
+    Limit = case blockchain:config(?election_restart_interval_range,
+                                   blockchain:ledger(State#state.chain)) of
                 {ok, IR} -> IR;
                 _ -> 1
             end,
