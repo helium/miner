@@ -221,9 +221,14 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
-handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
-    Msg = binary_to_term(BinMsg),
-    %lager:info("HBBFT input ~s from ~p", [fakecast:print_message(Msg), Index]),
+handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
+    Msg = try
+              binary_to_term(BinMsg)
+          catch _:_ ->
+                  ignore
+          end,
+    handle_message(Msg, Index, State);
+handle_message(Msg, Index, State=#state{hbbft = HBBFT}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
         {signatures, R, _Signatures} when R > Round ->

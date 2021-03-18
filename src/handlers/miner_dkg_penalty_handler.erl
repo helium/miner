@@ -63,110 +63,117 @@ handle_command(start, State) ->
                                      end, {State#state.bbas, []}, lists:zip(lists:seq(1, length(State#state.members)), State#state.dkg_results)),
     {reply, ok, OutMsgs, State#state{bbas=NewBBAs}}.
 
-handle_message(BinMsg, Index, State) ->
-    Msg = binary_to_term(BinMsg),
-    case Msg of
-        {conf, Signatures} when State#state.artifact /= undefined andalso State#state.done_called == false ->
-            GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
-                                        %% only check signatures from members we have not already verified and have not already appeared in this list
-                                        case {lists:keymember(Address, 1, Acc) == false andalso
-                                             lists:member(Address, State#state.members),
-                                             blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
-                                            {true, true} ->
-                                                lager:debug("adding sig from conf"),
-                                                [{Address, Signature}|Acc];
-                                            {true, false} ->
-                                                lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
-                                                Acc;
-                                            {false, _} ->
-                                                Acc
-                                        end
-                                end, State#state.signatures, Signatures),
-            case length(GoodSignatures) >= (2*State#state.f)+1 of
+handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
+    Msg = try
+              binary_to_term(BinMsg)
+          catch _:_ ->
+                  ignore
+          end,
+    handle_message(Msg, Index, State);
+handle_message({conf, Signatures}, _Index, State)
+  when State#state.artifact /= undefined andalso State#state.done_called == false ->
+    GoodSignatures =
+        lists:foldl(
+          fun({Address, Signature}, Acc) ->
+                  %% only check signatures from members we have not already verified and have not already appeared in this list
+                  case {lists:keymember(Address, 1, Acc) == false andalso
+                        lists:member(Address, State#state.members),
+                        blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
+                      {true, true} ->
+                          lager:debug("adding sig from conf"),
+                          [{Address, Signature}|Acc];
+                      {true, false} ->
+                          lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                          Acc;
+                      {false, _} ->
+                          Acc
+                  end
+          end, State#state.signatures, Signatures),
+    case length(GoodSignatures) >= (2*State#state.f)+1 of
+        true ->
+            done(GoodSignatures, State#state.artifact),
+            {State#state{signatures=GoodSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
+        false ->
+            {State#state{signatures=GoodSignatures}, []}
+    end;
+handle_message({conf, Signatures}, _Index, State) when State#state.artifact == undefined ->
+    %% don't have artifact yet so cannot verify signatures
+    {State#state{signatures=Signatures++State#state.signatures}, []};
+handle_message({conf, _Signatures}, _Index, _State) ->
+    ignore;
+handle_message({signature, Address, Signature}, _Index, State)
+  when State#state.artifact /= undefined andalso State#state.done_called == false ->
+    %% got a signature from our peer, check it matches our BBA result vector
+    %% it's from a member and it's not a duplicate
+    case {lists:member(Address, State#state.members) andalso not lists:keymember(Address, 1, State#state.signatures),
+          blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
+        {true, true} ->
+            NewSignatures = [{Address, Signature}|State#state.signatures],
+            case length(NewSignatures) == (2*State#state.f)+1 of
                 true ->
-                    done(GoodSignatures, State#state.artifact),
-                    {State#state{signatures=GoodSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
+                    done(NewSignatures, State#state.artifact),
+                    {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, NewSignatures})}]};
                 false ->
-                    {State#state{signatures=GoodSignatures}, []}
+                    {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]}
             end;
-        {conf, Signatures} when State#state.artifact == undefined ->
-            %% don't have artifact yet so cannot verify signatures
-            {State#state{signatures=Signatures++State#state.signatures}, []};
-        {conf, _Signatures} ->
+        {true, false} ->
+            lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
             ignore;
-        {signature, Address, Signature} when State#state.artifact /= undefined andalso State#state.done_called == false ->
-            %% got a signature from our peer, check it matches our BBA result vector
-            %% it's from a member and it's not a duplicate
-            case {lists:member(Address, State#state.members) andalso not lists:keymember(Address, 1, State#state.signatures),
-                  blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
-                {true, true} ->
-                    NewSignatures = [{Address, Signature}|State#state.signatures],
-                    case length(NewSignatures) == (2*State#state.f)+1 of
+        {false, _} ->
+            ignore
+    end;
+handle_message({signature, Address, Signature}, _Index, State) when State#state.artifact == undefined ->
+    %% don't have artifact yet so cannot verify signatures
+    {State#state{signatures=[{Address, Signature}|State#state.signatures]}, []};
+handle_message({signature, _Address, _Signature}, _Index, _State) ->
+    ignore;
+handle_message({bba, I, BBAMsg}, Index, State) ->
+    BBA = maps:get(I, State#state.bbas),
+    case hbbft_bba:handle_msg(BBA, Index, BBAMsg) of
+        {NewBBA, ok} ->
+            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, []};
+        {_, defer} ->
+            defer;
+        ignore ->
+            ignore;
+        {NewBBA, {send, _}=ToSend} ->
+            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, fixup_bba_msgs(ToSend, I)};
+        {NewBBA, {result_and_send, Result, ToSend}} ->
+            BBAResults = maps:put(I, Result, State#state.bba_results),
+            case maps:size(BBAResults) == length(State#state.members) of
+                true ->
+                    %% construct a vector of the BBA results, sign it and send it to our peers
+                    %% TODO this should be an actual transaction
+                    Vector = [ B || {_, B} <- lists:keysort(1, maps:to_list(BBAResults)) ],
+                    FailedMembers = [ M || {M, F} <- lists:zip(State#state.members, Vector), F == 0 ],
+                    {ok, {MyKey, SigFun}} = miner:keys(),
+                    Txn = blockchain_txn_consensus_group_failure_v1:new(FailedMembers, State#state.height, State#state.delay),
+                    MyAddress = libp2p_crypto:pubkey_to_bin(MyKey),
+                    MySignature = blockchain_txn_consensus_group_failure_v1:sign(Txn, SigFun),
+                    GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
+                                                         %% only check signatures from members we have not already verified and have not already appeared in this list
+                                                         case {lists:keymember(Address, 1, Acc) == false andalso
+                                                               lists:member(Address, State#state.members),
+                                                               blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
+                                                             {true, true} ->
+                                                                 lager:debug("adding sig from conf"),
+                                                                 [{Address, Signature}|Acc];
+                                                             {true, false} ->
+                                                                 lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
+                                                                 Acc;
+                                                             {false, _} ->
+                                                                 Acc
+                                                         end
+                                                 end, [{MyAddress, MySignature}], State#state.signatures),
+                    case length(GoodSignatures) >= (2*State#state.f)+1 of
                         true ->
-                            done(NewSignatures, State#state.artifact),
-                            {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, NewSignatures})}]};
+                            done(GoodSignatures, Txn),
+                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
                         false ->
-                            {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]}
+                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
                     end;
-                {true, false} ->
-                    lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
-                    ignore;
-                {false, _} ->
-                    ignore
-            end;
-        {signature, Address, Signature} when State#state.artifact == undefined ->
-            %% don't have artifact yet so cannot verify signatures
-            {State#state{signatures=[{Address, Signature}|State#state.signatures]}, []};
-        {signature, _Address, _Signature} ->
-            ignore;
-        {bba, I, BBAMsg} ->
-            BBA = maps:get(I, State#state.bbas),
-            case hbbft_bba:handle_msg(BBA, Index, BBAMsg) of
-                {NewBBA, ok} ->
-                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, []};
-                {_, defer} ->
-                    defer;
-                ignore ->
-                    ignore;
-                {NewBBA, {send, _}=ToSend} ->
-                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas)}, fixup_bba_msgs(ToSend, I)};
-                {NewBBA, {result_and_send, Result, ToSend}} ->
-                    BBAResults = maps:put(I, Result, State#state.bba_results),
-                    case maps:size(BBAResults) == length(State#state.members) of
-                        true ->
-                            %% construct a vector of the BBA results, sign it and send it to our peers
-                            %% TODO this should be an actual transaction
-                            Vector = [ B || {_, B} <- lists:keysort(1, maps:to_list(BBAResults)) ],
-                            FailedMembers = [ M || {M, F} <- lists:zip(State#state.members, Vector), F == 0 ],
-                            {ok, {MyKey, SigFun}} = miner:keys(),
-                            Txn = blockchain_txn_consensus_group_failure_v1:new(FailedMembers, State#state.height, State#state.delay),
-                            MyAddress = libp2p_crypto:pubkey_to_bin(MyKey),
-                            MySignature = blockchain_txn_consensus_group_failure_v1:sign(Txn, SigFun),
-                            GoodSignatures = lists:foldl(fun({Address, Signature}, Acc) ->
-                                                                 %% only check signatures from members we have not already verified and have not already appeared in this list
-                                                                 case {lists:keymember(Address, 1, Acc) == false andalso
-                                                                       lists:member(Address, State#state.members),
-                                                                       blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
-                                                                     {true, true} ->
-                                                                         lager:debug("adding sig from conf"),
-                                                                         [{Address, Signature}|Acc];
-                                                                     {true, false} ->
-                                                                         lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
-                                                                         Acc;
-                                                                     {false, _} ->
-                                                                         Acc
-                                                                 end
-                                                         end, [{MyAddress, MySignature}], State#state.signatures),
-                            case length(GoodSignatures) >= (2*State#state.f)+1 of
-                                true ->
-                                    done(GoodSignatures, Txn),
-                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
-                                false ->
-                                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
-                            end;
-                        false ->
-                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults}, fixup_bba_msgs(ToSend, I)}
-                    end
+                false ->
+                    {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults}, fixup_bba_msgs(ToSend, I)}
             end
     end.
 
