@@ -123,12 +123,12 @@ handle_command(status, State) ->
     {reply, Map1, ignore}.
 
 handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
-    Msg = try
-              binary_to_term(BinMsg)
-          catch _:_ ->
-                  ignore
-          end,
-    handle_message(Msg, Index, State);
+    try binary_to_term(BinMsg) of
+        Msg ->
+            handle_message(Msg, Index, State)
+    catch _:_ ->
+              ignore
+    end;
 handle_message({conf, InSigs}, Index, State=#state{members = Members,
                                                    signatures = Sigs, f=F,
                                                    height = Height, delay = Delay,

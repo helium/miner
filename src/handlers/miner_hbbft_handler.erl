@@ -222,12 +222,12 @@ handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
 handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
-    Msg = try
-              binary_to_term(BinMsg)
-          catch _:_ ->
-                  ignore
-          end,
-    handle_message(Msg, Index, State);
+    try binary_to_term(BinMsg) of
+        Msg ->
+            handle_message(Msg, Index, State)
+    catch _:_ ->
+              ignore
+    end;
 handle_message(Msg, Index, State=#state{hbbft = HBBFT}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
