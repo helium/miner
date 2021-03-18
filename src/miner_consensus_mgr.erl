@@ -775,7 +775,10 @@ restart_election(#state{delay = Delay,
 
 -spec limit_dkgs(State :: #state{}) -> #state{}.
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
-    Limit = application:get_env(miner, dkg_limit, 2),
+    Limit = case blockchain:config(?election_restart_interval_range, Ledger) of
+                {ok, IR} -> IR;
+                _ -> 1
+            end,
     Sz = maps:size(CurrentDKGs),
     lager:debug("size ~p limit ~p", [Sz, Limit]),
     case Sz > Limit of
