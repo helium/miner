@@ -31,6 +31,7 @@
                 dkg_results :: [boolean(),...],
                 bba_results = #{} :: #{pos_integer() => 0 | 1},
                 done_called = false :: boolean(),
+                conf_sent = false :: boolean(),
                 delay :: non_neg_integer(),
                 height :: pos_integer(),
                 artifact,
@@ -89,11 +90,14 @@ handle_message({conf, Signatures}, _Index, State)
                           Acc
                   end
           end, State#state.signatures, Signatures),
-    case length(GoodSignatures) >= (2*State#state.f)+1 of
-        true ->
+        Majority = floor(length(State#state.members) / 2) + 1,
+    case length(GoodSignatures) of
+        SigLen when SigLen >= (State#state.f*2) + 1 ->
             done(GoodSignatures, State#state.artifact),
-            {State#state{signatures=GoodSignatures, done_called=true}, [{multicast, t2b({conf, GoodSignatures})}]};
-        false ->
+            {State#state{signatures=GoodSignatures, done_called=true}, []};
+        SigLen when SigLen >= Majority andalso State#state.conf_sent == false ->
+            {State#state{signatures=GoodSignatures, conf_sent=true}, [{multicast, t2b({conf, GoodSignatures})}]};
+        _ ->
             {State#state{signatures=GoodSignatures}, []}
     end;
 handle_message({conf, Signatures}, _Index, State) when State#state.artifact == undefined ->
@@ -109,12 +113,18 @@ handle_message({signature, Address, Signature}, _Index, State)
           blockchain_txn_consensus_group_failure_v1:verify_signature(State#state.artifact, Address, Signature)} of
         {true, true} ->
             NewSignatures = [{Address, Signature}|State#state.signatures],
-            case length(NewSignatures) == (2*State#state.f)+1 of
-                true ->
+            Majority = floor(length(State#state.members) / 2) + 1,
+            case length(NewSignatures) of
+                SigLen when SigLen == (2*State#state.f) + 1 ->
                     done(NewSignatures, State#state.artifact),
-                    {State#state{signatures=NewSignatures, done_called=true}, [{multicast, t2b({conf, NewSignatures})}]};
-                false ->
-                    {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]}
+                    {State#state{signatures=NewSignatures, done_called=true}, []};
+                SigLen when SigLen >= Majority andalso State#state.conf_sent == false ->
+                    {State#state{signatures=NewSignatures, conf_sent=true}, [{multicast, t2b({conf, NewSignatures})}]};
+                SigLen when SigLen >= Majority ->
+                    %% already sent conf, gossip signatures beyond majority
+                    {State#state{signatures=NewSignatures}, [{multicast, t2b({signature, Address, Signature})}]};
+                _ ->
+                    {State#state{signatures=NewSignatures}, []}
             end;
         {true, false} ->
             lager:debug("got invalid signature ~p from ~p", [Signature, Address]),
@@ -165,11 +175,14 @@ handle_message({bba, I, BBAMsg}, Index, State) ->
                                                                  Acc
                                                          end
                                                  end, [{MyAddress, MySignature}], State#state.signatures),
-                    case length(GoodSignatures) >= (2*State#state.f)+1 of
-                        true ->
+                    Majority = floor(length(State#state.members) / 2) + 1,
+                    case length(GoodSignatures) of
+                        SigLen when SigLen  >= (2*State#state.f)+1 ->
                             done(GoodSignatures, Txn),
-                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, done_called=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
-                        false ->
+                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, done_called=true}, fixup_bba_msgs(ToSend, I)};
+                        SigLen when SigLen >= Majority ->
+                            {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn, conf_sent=true}, [{multicast, t2b({conf, GoodSignatures})} | fixup_bba_msgs(ToSend, I)]};
+                        _ ->
                             {State#state{bbas=maps:put(I, NewBBA, State#state.bbas), bba_results=BBAResults, signatures=GoodSignatures, artifact=Txn}, [{multicast, t2b({signature, MyAddress, MySignature})} | fixup_bba_msgs(ToSend, I)]}
                     end;
                 false ->
