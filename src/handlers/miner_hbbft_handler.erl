@@ -226,7 +226,8 @@ handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
         Msg ->
             handle_message(Msg, Index, State)
     catch _:_ ->
-              ignore
+            lager:warning("got truncated message: ~p:", [BinMsg]),
+            ignore
     end;
 handle_message(Msg, Index, State=#state{hbbft = HBBFT}) ->
     Round = hbbft:round(HBBFT),

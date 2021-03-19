@@ -72,7 +72,8 @@ handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
         Msg ->
             handle_message(Msg, Index, State)
     catch _:_ ->
-              ignore
+            lager:warning("got truncated message: ~p:", [BinMsg]),
+            ignore
     end;
 handle_message({conf, Signatures}, _Index, State)
   when State#state.artifact /= undefined andalso State#state.done_called == false ->

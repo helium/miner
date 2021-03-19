@@ -32,6 +32,15 @@
   [
    {pipeline_depth, 125}
   ]},
+ {rocksdb,
+  [{global_opts,
+    [
+     {compaction_style, universal},
+     {block_based_table_options, [{cache_index_and_filter_blocks, true}]},
+     {max_write_buffer_number, 16},
+     {keep_log_file_num, 10}
+    ]}
+  ]},
  {miner,
   [
    {mode, validator},
