@@ -380,7 +380,10 @@ handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
     true = libp2p_group_relcast:handle_command(Group, have_key),
 
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
-    ok = libp2p_group_relcast:handle_command(maps:get({Height, Delay}, DKGs), mark_done),
+    case maps:find({Height, Delay}, DKGs) of
+        error -> ok;
+        {ok, Grp} -> ok = libp2p_group_relcast:handle_command(Grp, mark_done)
+    end,
     {noreply, State#state{started_groups = Groups#{{Height, Delay} => Group}}};
 handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
@@ -777,8 +780,8 @@ restart_election(#state{delay = Delay,
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
     Limit = case blockchain:config(?election_restart_interval_range,
                                    blockchain:ledger(State#state.chain)) of
-                {ok, IR} -> IR;
-                _ -> 1
+                {ok, IR} -> IR + 1;
+                _ -> 2
             end,
     Sz = maps:size(CurrentDKGs),
     lager:debug("size ~p limit ~p", [Sz, Limit]),
