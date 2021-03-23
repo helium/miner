@@ -22,6 +22,9 @@
 -define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 125,
                     blockchain_txn_consensus_group_v1 => 10000}).
 
+%% txns that do not appear naturally
+-define(InvalidTxns, [blockchain_txn_reward_v1, blockchain_txn_reward_v2]).
+
 -record(validation,
         {
          timer :: reference(),
@@ -110,34 +113,39 @@ handle_call({submit, Txn}, From,
     Type = blockchain_txn:type(Txn),
     lager:debug("got submission of txn: ~s", [blockchain_txn:print(Txn)]),
     {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
-    case maps:find(Type, ?SlowTxns) of
-        {ok, Timeout} ->
-            Limit = application:get_env(miner, sidecar_parallelism_limit, 3),
-            case maps:size(Validations) of
-                N when N >= Limit ->
-                    Queue1 = Queue ++ [{From, Txn}],
-                    {noreply, State#state{queue = Queue1}};
-                _ ->
-                    {Attempt, V} = start_validation(Txn, From, Timeout, Chain),
-                    {noreply, State#state{validations = Validations#{Attempt => V}}}
-            end;
-        error ->
-            case blockchain_txn:is_valid(Txn, Chain) of
-                ok ->
-                    case blockchain_txn:absorb(Txn, Chain) of
-                        ok ->
-                            spawn(fun() ->
-                                          catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
-                                  end),
-                            {reply, ok, State};
-                        Error ->
-                            lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                            {reply, Error, State}
+    case lists:member(Type, ?InvalidTxns) of
+        true ->
+            {reply, {error, invalid_txn}, State};
+        false ->
+            case maps:find(Type, ?SlowTxns) of
+                {ok, Timeout} ->
+                    Limit = application:get_env(miner, sidecar_parallelism_limit, 3),
+                    case maps:size(Validations) of
+                        N when N >= Limit ->
+                            Queue1 = Queue ++ [{From, Txn}],
+                            {noreply, State#state{queue = Queue1}};
+                        _ ->
+                            {Attempt, V} = start_validation(Txn, From, Timeout, Chain),
+                            {noreply, State#state{validations = Validations#{Attempt => V}}}
                     end;
-                Error ->
-                    write_txn("failed", Height, Txn),
-                    lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                    {reply, Error, State}
+                error ->
+                    case blockchain_txn:is_valid(Txn, Chain) of
+                        ok ->
+                            case blockchain_txn:absorb(Txn, Chain) of
+                                ok ->
+                                    spawn(fun() ->
+                                                catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
+                                        end),
+                                    {reply, ok, State};
+                                Error ->
+                                    lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
+                                    {reply, Error, State}
+                            end;
+                        Error ->
+                            write_txn("failed", Height, Txn),
+                            lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
+                            {reply, Error, State}
+                    end
             end
     end;
 handle_call({new_round, _Buf, _RemoveTxns}, _From, #state{chain = undefined} = State) ->

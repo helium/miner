@@ -132,7 +132,7 @@ single_payment_test(Config) ->
 
     Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
     false = Group == undefined,
-    ok = libp2p_group_relcast:handle_command(Group, SignedTxn2),
+    ok = libp2p_group_relcast:handle_command(Group, {txn, SignedTxn2}),
     ct_rpc:call(Candidate, sys, suspend, [Group]),
 
     {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain]),
