@@ -425,11 +425,15 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
     BBA = process_bbas(length(Consensus), BBAs),
     Reply =
-        case lists:usort(Hashes) of
+        case process_hashes(Hashes, F) of
             [CurrentBlockHash] ->
-                SortedTransactions = lists:filter(fun(T) ->
-                                                          not lists:member(blockchain_txn:type(T), [blockchain_txn_rewards_v1, blockchain_txn_rewards_v2]) end,
-                                                  lists:sort(fun blockchain_txn:sort/2, Txns)),
+                SortedTransactions =
+                    lists:filter(fun(T) ->
+                                         not lists:member(blockchain_txn:type(T),
+                                                          [blockchain_txn_rewards_v1,
+                                                           blockchain_txn_rewards_v2])
+                                 end,
+                                 lists:sort(fun blockchain_txn:sort/2, Txns)),
                 lager:info("metadata snapshot hash for ~p is ~p", [NewHeight, SnapshotHash]),
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
@@ -445,9 +449,9 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                             NewTime
                     end,
                 {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
-                %% InvalidTransactions0  is a list of tuples in the format {Txn, InvalidReason}
-                %% we dont need the invalid reason here so need to remove the tuple format and have a regular list of txn items
-                %% in prep for returning to hbbft
+                %% InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
+                %% dont need the invalid reason here so need to remove the tuple format and have a
+                %% regular list of txn items in prep for returning to hbbft
                 InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
 
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
@@ -658,6 +662,22 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
     State#state{block_timer=Timer}.
+
+process_hashes(Hashes, F) ->
+    Map = lists:foldl(
+            fun(Hash, M) ->
+                    maps:update_with(Hash, fun(X) -> X + 1 end, 1, M)
+            end,
+            #{},
+            Hashes),
+    Threshold = (2 * F) + 1,
+    case maps:filter(fun(_H, Ct) -> Ct >= Threshold end, Map) of
+        M when map_size(M) == 1 ->
+            [{H, _Ct}] = maps:to_list(M),
+            [H];
+        _ ->
+            maps:to_list(Map)
+    end.
 
 process_bbas(N, BBAs) ->
     %% 2f + 1 = N - ((N - 1) div 3)
