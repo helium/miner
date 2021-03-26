@@ -41,6 +41,7 @@
 -endif.
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain_caps.hrl").
 
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 30).
@@ -129,9 +130,19 @@ init(Args) ->
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
                 true ->
-                    {ok, State, maybe_init_addr_hash(Data#data{base_dir=BaseDir, blockchain=Blockchain,
-                                          address=Address, poc_interval=Delay, state=State,
-                                          poc_restarts = POCRestarts - 1})};
+                    %% to handle scenario whereby existing hotspots transition to light gateways
+                    %% check the GW mode is compatible with the loaded state, if not default to requesting
+                    Ledger = blockchain:ledger(Blockchain),
+                    case miner_util:has_valid_local_capability(?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                        X when X == ok;
+                               X == {error, gateway_not_found} ->
+                            {ok, State, maybe_init_addr_hash(Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                                                  address=Address, poc_interval=Delay, state=State,
+                                                  poc_restarts = POCRestarts - 1})};
+                        _ ->
+                            {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                 address=Address, poc_interval=Delay, state=requesting})}
+                    end;
                 false ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
                     {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
@@ -454,7 +465,7 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                     GatewayScoreMap = blockchain_utils:score_gateways(Ledger),
 
                     %% Filtered gateways
-                    GatewayScores = blockchain_poc_target_v2:filter(GatewayScoreMap, ChallengerAddr, ChallengerLoc, Height, Vars),
+                    GatewayScores = blockchain_poc_target_v2:filter(GatewayScoreMap, ChallengerAddr, ChallengerLoc, Height, Vars, Ledger),
                     case blockchain_poc_target_v2:target(Entropy, GatewayScores, Vars) of
                         {error, no_target} ->
                             lager:info("Limit: ~p~n", [maps:get(poc_path_limit, Vars)]),
@@ -501,7 +512,7 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
                               {ok, V} when V < 4 ->
                                   Self ! {Attempt, blockchain_poc_path:build(Entropy, Target, Gateways, Height, Ledger)};
                               {ok, V} when V < 7 ->
-                                  Path = blockchain_poc_path_v2:build(Target, Gateways, Time, Entropy, Vars),
+                                  Path = blockchain_poc_path_v2:build(Target, Gateways, Time, Entropy, Vars, Ledger),
                                   lager:info("poc_v4 Path: ~p~n", [Path]),
                                   Self ! {Attempt, {ok, Path}};
                               {ok, V} when V < 8 ->
@@ -793,7 +804,7 @@ validate_witness(Witness, Ledger) ->
                     lager:warning("ignoring witness ~p location undefined", [Gateway]),
                     false;
                 _ ->
-                    blockchain_poc_witness_v1:is_valid(Witness)
+                    blockchain_poc_witness_v1:is_valid(Witness, Ledger)
             end
     end.
 
@@ -809,26 +820,31 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
             _ ->
                 POCInterval0
         end,
-
     try
         case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
             {ok, GwInfo} ->
-                {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
-                Height = blockchain_block:height(Block),
-                ChallengeOK =
-                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                        undefined ->
-                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                            true;
-                        LastChallenge ->
-                            case (Height - LastChallenge) > POCInterval of
-                                true -> 1 == rand:uniform(max(10, POCInterval div 10));
-                                false -> false
-                            end
-                    end,
-                LocationOK = true,
-                LocationOK = miner_lora:location_ok(),
-                ChallengeOK andalso LocationOK;
+                case blockchain_ledger_gateway_v2:is_valid_capability(GwInfo, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                    true ->
+                        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+                        Height = blockchain_block:height(Block),
+                        ChallengeOK =
+                            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                                undefined ->
+                                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                                    true;
+                                LastChallenge ->
+                                    case (Height - LastChallenge) > POCInterval of
+                                        true -> 1 == rand:uniform(max(10, POCInterval div 10));
+                                        false -> false
+                                    end
+                            end,
+                        LocationOK = true,
+                        LocationOK = miner_lora:location_ok(),
+                        ChallengeOK andalso LocationOK;
+                    _ ->
+                        %% the GW is not allowed to send POC challenges
+                        false
+                end;
             %% mostly this is going to be unasserted full nodes
             _ ->
                 false

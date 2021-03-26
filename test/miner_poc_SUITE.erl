@@ -12,6 +12,7 @@
     init_per_testcase/2,
     end_per_testcase/2,
     basic_test/1,
+    basic_test_light_gateway/1,
     poc_dist_v1_test/1,
     poc_dist_v2_test/1,
     poc_dist_v4_test/1,
@@ -54,6 +55,7 @@
 all() ->
     [
      basic_test,
+     basic_test_light_gateway,
      %% poc_dist_v1_test,
      %% poc_dist_v2_test,
      %% poc_dist_v4_test,
@@ -79,12 +81,15 @@ all() ->
 
 init_per_testcase(basic_test = TestCase, Config) ->
     miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
+init_per_testcase(basic_test_light_gateway = TestCase, Config) ->
+    miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
 init_per_testcase(restart_test = TestCase, Config) ->
     miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
 init_per_testcase(TestCase, Config0) ->
     miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0).
 
-end_per_testcase(basic_test, Config) ->
+end_per_testcase(TestCase, Config) when TestCase == basic_test;
+                                        TestCase == basic_test_light_gateway ->
     catch gen_statem:stop(miner_poc_statem),
     case ?config(tc_status, Config) of
         ok ->
@@ -355,6 +360,141 @@ basic_test(Config) ->
     ?assert(meck:validate(blockchain_txn_poc_receipts_v1)),
     meck:unload(blockchain_txn_poc_receipts_v1),
 
+    ok = gen_statem:stop(Statem),
+    ok.
+
+basic_test_light_gateway(Config) ->
+    %% same test as above but this time we change the local gateway from full mode to light mode
+    %% this is done before we start the POC statem
+    %% when the POC statem is started it should default to requesting
+    %% and remain in requesting even after it has exceeded the poc interval
+    %% light gateways will never move out of requesting state
+    BaseDir = ?config(base_dir, Config),
+
+    {PrivKey, PubKey} = new_random_key(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    ECDHFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
+    Opts = [
+        {key, {PubKey, SigFun, ECDHFun}},
+        {seed_nodes, []},
+        {port, 0},
+        {num_consensus_members, 7},
+        {base_dir, BaseDir}
+    ],
+    {ok, _Sup} = blockchain_sup:start_link(Opts),
+    ?assert(erlang:is_pid(blockchain_swarm:swarm())),
+
+    % Now add genesis
+    % Generate fake blockchains (just the keys)
+    RandomKeys = miner_ct_utils:generate_keys(6),
+    Address = blockchain_swarm:pubkey_bin(),
+    ConsensusMembers = [
+        {Address, {PubKey, PrivKey, libp2p_crypto:mk_sig_fun(PrivKey)}}
+    ] ++ RandomKeys,
+
+    % Create genesis block
+    Balance = 5000,
+    ConbaseTxns = [blockchain_txn_coinbase_v1:new(Addr, Balance)
+                     || {Addr, _} <- ConsensusMembers],
+    ConbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance)
+                     || {Addr, _} <- ConsensusMembers],
+    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new([Addr || {Addr, _} <- ConsensusMembers], <<>>, 1, 0),
+    VarsKeys = libp2p_crypto:generate_keys(ecc_compact),
+
+    ExtraVars = #{?poc_challenge_interval => 20},
+    ct:pal("extra vars: ~p", [ExtraVars]),
+    VarsTx = miner_ct_utils:make_vars(VarsKeys, ExtraVars),
+
+    Txs = ConbaseTxns ++ ConbaseDCTxns ++ [GenConsensusGroupTx] ++ VarsTx,
+    GenesisBlock = blockchain_block_v1:new_genesis_block(Txs),
+    ok = blockchain_worker:integrate_genesis_block(GenesisBlock),
+
+    Chain = blockchain_worker:blockchain(),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+
+    ?assertEqual(blockchain_block:hash_block(GenesisBlock), blockchain_block:hash_block(HeadBlock)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:head_block(Chain)),
+    ?assertEqual({ok, blockchain_block:hash_block(GenesisBlock)}, blockchain:genesis_hash(Chain)),
+    ?assertEqual({ok, GenesisBlock}, blockchain:genesis_block(Chain)),
+    ?assertEqual({ok, 1}, blockchain:height(Chain)),
+
+    % All these point are in a line one after the other (except last)
+    LatLongs = [
+        {{37.780586, -122.469471}, {PrivKey, PubKey}},
+        {{37.780959, -122.467496}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.78101, -122.465372}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781179, -122.463226}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781281, -122.461038}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781349, -122.458892}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781468, -122.456617}, miner_ct_utils:new_random_key(ecc_compact)},
+        {{37.781637, -122.4543}, miner_ct_utils:new_random_key(ecc_compact)}
+    ],
+
+    % Add a Gateway
+    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+
+    true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
+
+    % Assert the Gateways location
+    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+
+    true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
+
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+
+    %% update the local gateway to light mode
+    %% we do this before we start the poc statem
+    %% thereafter it should never move out of requesting state
+    Ledger1 = blockchain_ledger_v1:new_context(Ledger),
+    {ok, GWInfo} = blockchain_gateway_cache:get(Address, Ledger1),
+    GWInfo2 = blockchain_ledger_gateway_v2:mode(light, GWInfo),
+    blockchain_ledger_v1:update_gateway(GWInfo2, Address, Ledger1),
+    ok = blockchain_ledger_v1:commit_context(Ledger1),
+
+    {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
+
+    %% assert default states
+    ct:pal("got state ~p", [sys:get_state(Statem)]),
+    ?assertEqual(requesting, erlang:element(1, sys:get_state(Statem))),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem)))), % State is requesting
+
+    % Mock submit_txn to  add blocks
+    meck:new(blockchain_worker, [passthrough]),
+    meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
+        add_block(Chain, ConsensusMembers, [Txn])
+    end),
+
+    % Add some block to start process
+    ok = add_block(Chain, ConsensusMembers, []),
+
+    % 3 previous blocks + 1 block to start process ( no POC req txn will have been submitted by the statem )
+    true = miner_ct_utils:wait_until(fun() -> ct:pal("height: ~p", [blockchain:height(Chain)]), {ok, 4} =:= blockchain:height(Chain) end),
+
+    % confirm we DO NOT move from receiving state
+    true = miner_ct_utils:wait_until(fun() ->
+                                             case sys:get_state(Statem) of
+                                                 {requesting, _} -> true;
+                                                 _Other -> ct:pal("got other state ~p", [_Other]), false
+                                             end
+                                     end),
+    ?assertEqual(requesting, erlang:element(6, erlang:element(2, sys:get_state(Statem)))),
+
+    % Passing poc interval
+    lists:foreach(
+        fun(_) ->
+            ok = add_block(Chain, ConsensusMembers, []),
+            timer:sleep(100)
+        end,
+        lists:seq(1, 25)
+    ),
+    % confirm we remain in requesting state
+    ?assertEqual(requesting,  erlang:element(1, sys:get_state(Statem))),
+
+    ?assert(meck:validate(blockchain_worker)),
+    meck:unload(blockchain_worker),
     ok = gen_statem:stop(Statem),
     ok.
 

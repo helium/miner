@@ -12,7 +12,8 @@
          h3_index/3,
          median/1,
          mark/2,
-         metadata_fun/0
+         metadata_fun/0,
+         has_valid_local_capability/2
         ]).
 
 %%-----------------------------------------------------------------------------
@@ -106,4 +107,23 @@ metadata_fun() ->
         end
     catch _:_ ->
             #{}
+    end.
+
+-spec has_valid_local_capability(Capability :: non_neg_integer(),
+                                 Ledger :: blockchain_ledger_v1:ledger())->
+    ok |
+    {error, gateway_not_found} |
+    {error, {invalid_capability, blockchain_ledger_gateway_v2:mode()}}.
+has_valid_local_capability(Capability, Ledger) ->
+    SelfAddr = blockchain_swarm:pubkey_bin(),
+    case blockchain_ledger_v1:find_gateway_info(SelfAddr, Ledger) of
+        {error, _Reason} ->
+            {error, gateway_not_found};
+        {ok, GWAddrInfo} ->
+            case blockchain_ledger_gateway_v2:is_valid_capability(GWAddrInfo, Capability, Ledger) of
+                false ->
+                    {error, {invalid_capability, blockchain_ledger_gateway_v2:mode(GWAddrInfo)}};
+                true ->
+                    ok
+            end
     end.
