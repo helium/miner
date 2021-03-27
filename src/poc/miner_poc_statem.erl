@@ -77,6 +77,7 @@
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
+    responses_meta = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     poc_hash  :: binary() | undefined,
     request_block_hash  :: binary() | undefined,
@@ -277,6 +278,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, save_data(maybe_init_addr_hash(Data#data{receiving_timeout=T-1}))};
 receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
+                                                   responses_meta=ResponsesMeta0,
                                                    packet_hashes=PacketHashes,
                                                    blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
@@ -302,22 +304,41 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                     lager:warning("Saw self-witness from ~p", [GatewayWitness]),
                     {keep_state, Data};
                 _ ->
-                    Witnesses = maps:get(PacketHash, Responses0, []),
+                    Witnesses0 = maps:get(PacketHash, Responses0, []),
+                    %% using length(Witnesses0) as default because responses_meta field is not persisted therefore associated meta might not be in map
+                    %% this interferes with randomness of witnesses being stored but but we have to be backwards compatible with old schema
+                    SeenWitnessesCount = maps:get(PacketHash, ResponsesMeta0, length(Witnesses0)),
                     PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                    case erlang:length(Witnesses) >= PerHopMaxWitnesses of
-                        true ->
-                            {keep_state, Data};
+                    %% Don't allow putting duplicate response in the witness list resp
+                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                    case lists:any(Predicate, Witnesses0) of
                         false ->
-                            %% Don't allow putting duplicate response in the witness list resp
-                            Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
                             Responses1 =
-                                case lists:any(Predicate, Witnesses) of
-                                    false ->
-                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
+                                % - if SeenWitnessesCount < PerHopMaxWitnesses then storing is always done
+                                % - if we reached capacity of witnesses list, probability of replacing existing witness = 1 / SeenWitnessesCount
+                                % more at https://rosettacode.org/wiki/Knuth%27s_algorithm_S
+                                case rand:uniform(SeenWitnessesCount + 1) =< PerHopMaxWitnesses of
                                     true ->
+                                        Witnesses1 =
+                                            % if we have reached capacity of witness list we need to remove random witness first
+                                            case SeenWitnessesCount >= PerHopMaxWitnesses of
+                                                true ->
+                                                    %% remove random witness to keep length under given limit
+                                                    lists:delete(lists:nth(rand:uniform(PerHopMaxWitnesses), Witnesses0), Witnesses0);
+                                                false ->
+                                                    %% there is still room for new witness
+                                                    Witnesses0
+                                            end,
+                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses1, {Address, Witness}), Responses0);
+                                    false ->
+                                        % not storing incoming witness
                                         Responses0
                                 end,
-                            {keep_state, save_data(Data#data{responses=Responses1})}
+                            ResponsesMeta1 = maps:put(PacketHash, SeenWitnessesCount, ResponsesMeta0),
+                            {keep_state, save_data(Data#data{responses=Responses1, responses_meta=ResponsesMeta1})};
+                        true ->
+                            % ignoring witness
+                            {keep_state, Data}
                     end
             end
     end;
@@ -554,7 +575,6 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
     end.
 
 
-
 -spec save_data(data()) -> data().
 save_data(#data{base_dir=undefined}=State) ->
     State;
@@ -565,6 +585,7 @@ save_data(#data{base_dir = BaseDir,
                 challengees = Challengees,
                 packet_hashes = PacketHashes,
                 responses = Responses,
+                responses_meta = ResponsesMeta,
                 receiving_timeout = RecTimeout,
                 poc_hash = PoCHash,
                 request_block_hash = BlockHash,
@@ -579,6 +600,7 @@ save_data(#data{base_dir = BaseDir,
                  challengees => Challengees,
                  packet_hashes => PacketHashes,
                  responses => Responses,
+                 responses_meta => ResponsesMeta,
                  receiving_timeout => RecTimeout,
                  poc_hash => PoCHash,
                  request_block_hash => BlockHash,
@@ -624,6 +646,7 @@ load_data(BaseDir) ->
                                challengees = Challengees,
                                packet_hashes = PacketHashes,
                                responses = Responses,
+                               responses_meta = maps:get(responses_meta, Map, #{}),
                                receiving_timeout = RecTimeout,
                                poc_hash = PoCHash,
                                request_block_hash = BlockHash,
