@@ -334,7 +334,7 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                                         % not storing incoming witness
                                         Responses0
                                 end,
-                            ResponsesMeta1 = maps:put(PacketHash, SeenWitnessesCount, ResponsesMeta0),
+                            ResponsesMeta1 = maps:put(PacketHash, SeenWitnessesCount + 1, ResponsesMeta0),
                             {keep_state, save_data(Data#data{responses=Responses1, responses_meta=ResponsesMeta1})};
                         true ->
                             % ignoring witness
