@@ -284,8 +284,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, save_data(maybe_init_addr_hash(Data#data{receiving_timeout=T-1}))};
-receiving(cast, {witness, Address, Witness}, #data{packet_hashes=PacketHashes,
-                                                   blockchain=Chain}=Data) ->
+receiving(cast, {witness, Address, Witness}, #data{blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
@@ -298,20 +297,7 @@ receiving(cast, {witness, Address, Witness}, #data{packet_hashes=PacketHashes,
             lager:warning("ignoring invalid witness ~p", [Witness]),
             {keep_state, Data};
         {_, true} ->
-            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
-            GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
-            %% check this is a known layer of the packet
-            case lists:keyfind(PacketHash, 2, PacketHashes) of
-                false ->
-                    lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
-                    {keep_state, Data};
-                {GatewayWitness, PacketHash} ->
-                    lager:warning("Saw self-witness from ~p", [GatewayWitness]),
-                    {keep_state, Data};
-                _ ->
-                    {keep_state, save_data(maybe_store_witness_response(Address, Witness, Data))}
-
-            end
+            {keep_state, save_data(maybe_store_witness_response(Address, Witness, Data))}
     end;
 receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
