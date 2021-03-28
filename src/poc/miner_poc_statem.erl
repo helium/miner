@@ -50,6 +50,8 @@
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
+-define(PREDICTED_MAX_WITNESSES, 100).
+-define(ALLOWED_FALSE_POSITIVES_RATE, 0.01).
 
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
@@ -65,6 +67,11 @@
           bloom :: bloom_nif:bloom()
          }).
 
+-record(witness_filter, {
+          seen_witnesses_count  :: integer(),
+          bloom_filter          :: term()
+         }).
+
 -record(data, {
     base_dir :: file:filename_all() | undefined,
     blockchain :: blockchain:blockchain() | undefined,
@@ -77,7 +84,7 @@
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
-    responses_meta = #{},
+    witness_filters = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     poc_hash  :: binary() | undefined,
     request_block_hash  :: binary() | undefined,
@@ -277,9 +284,7 @@ receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_ti
 receiving(info, {blockchain_event, {add_block, _Hash, _, _}}, #data{receiving_timeout=T}=Data) ->
     lager:info("got block ~p decreasing timeout", [_Hash]),
     {keep_state, save_data(maybe_init_addr_hash(Data#data{receiving_timeout=T-1}))};
-receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
-                                                   responses_meta=ResponsesMeta0,
-                                                   packet_hashes=PacketHashes,
+receiving(cast, {witness, Address, Witness}, #data{packet_hashes=PacketHashes,
                                                    blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
@@ -304,42 +309,8 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                     lager:warning("Saw self-witness from ~p", [GatewayWitness]),
                     {keep_state, Data};
                 _ ->
-                    Witnesses0 = maps:get(PacketHash, Responses0, []),
-                    %% using length(Witnesses0) as default because responses_meta field is not persisted therefore associated meta might not be in map
-                    %% this interferes with randomness of witnesses being stored but but we have to be backwards compatible with old schema
-                    SeenWitnessesCount = maps:get(PacketHash, ResponsesMeta0, length(Witnesses0)),
-                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                    %% Don't allow putting duplicate response in the witness list resp
-                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
-                    case lists:any(Predicate, Witnesses0) of
-                        false ->
-                            Responses1 =
-                                % - if SeenWitnessesCount < PerHopMaxWitnesses then storing is always done
-                                % - if we reached capacity of witnesses list, probability of replacing existing witness = 1 / SeenWitnessesCount
-                                % more at https://rosettacode.org/wiki/Knuth%27s_algorithm_S
-                                case rand:uniform(SeenWitnessesCount + 1) =< PerHopMaxWitnesses of
-                                    true ->
-                                        Witnesses1 =
-                                            % if we have reached capacity of witness list we need to remove random witness first
-                                            case SeenWitnessesCount >= PerHopMaxWitnesses of
-                                                true ->
-                                                    %% remove random witness to keep length under given limit
-                                                    lists:delete(lists:nth(rand:uniform(PerHopMaxWitnesses), Witnesses0), Witnesses0);
-                                                false ->
-                                                    %% there is still room for new witness
-                                                    Witnesses0
-                                            end,
-                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses1, {Address, Witness}), Responses0);
-                                    false ->
-                                        % not storing incoming witness
-                                        Responses0
-                                end,
-                            ResponsesMeta1 = maps:put(PacketHash, SeenWitnessesCount + 1, ResponsesMeta0),
-                            {keep_state, save_data(Data#data{responses=Responses1, responses_meta=ResponsesMeta1})};
-                        true ->
-                            % ignoring witness
-                            {keep_state, Data}
-                    end
+                    {keep_state, save_data(maybe_store_witness_response(Address, Witness, Data))}
+
             end
     end;
 receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
@@ -585,7 +556,6 @@ save_data(#data{base_dir = BaseDir,
                 challengees = Challengees,
                 packet_hashes = PacketHashes,
                 responses = Responses,
-                responses_meta = ResponsesMeta,
                 receiving_timeout = RecTimeout,
                 poc_hash = PoCHash,
                 request_block_hash = BlockHash,
@@ -600,7 +570,6 @@ save_data(#data{base_dir = BaseDir,
                  challengees => Challengees,
                  packet_hashes => PacketHashes,
                  responses => Responses,
-                 responses_meta => ResponsesMeta,
                  receiving_timeout => RecTimeout,
                  poc_hash => PoCHash,
                  request_block_hash => BlockHash,
@@ -646,7 +615,6 @@ load_data(BaseDir) ->
                                challengees = Challengees,
                                packet_hashes = PacketHashes,
                                responses = Responses,
-                               responses_meta = maps:get(responses_meta, Map, #{}),
                                receiving_timeout = RecTimeout,
                                poc_hash = PoCHash,
                                request_block_hash = BlockHash,
@@ -983,6 +951,65 @@ send_onion(P2P, Onion, Retry) ->
             lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
             timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
+    end.
+
+maybe_store_witness_response(Address, Witness,
+                             #data{responses=Responses0,
+                                   witness_filters=WitnessFilters0,
+                                   packet_hashes=PacketHashes,
+                                   blockchain=Chain}=Data) ->
+    PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+    GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
+    Ledger = blockchain:ledger(Chain),
+    %% check this is a known layer of the packet
+    case lists:keyfind(PacketHash, 2, PacketHashes) of
+        false ->
+            lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+            Data;
+        {GatewayWitness, PacketHash} ->
+            lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+            Data;
+        _ ->
+            Witnesses0 = maps:get(PacketHash, Responses0, []),
+            case lists:member({Address, Witness}, Witnesses0) of
+                false ->
+                    WitnessFilter0 = #witness_filter{seen_witnesses_count = SeenWitnessesCount, bloom_filter = BloomFilter} =
+                        case maps:get(PacketHash, WitnessFilters0, undefined) of
+                            #witness_filter{} = Val ->
+                                Val;
+                            undefined ->
+                                #witness_filter{seen_witnesses_count = 0,
+                                                bloom_filter = bloom:new_optimal(?PREDICTED_MAX_WITNESSES, ?ALLOWED_FALSE_POSITIVES_RATE)}
+                        end,
+                    %% witness is not stored but they could have replied and got replaced
+                    Responses1 =
+                        case bloom:check_and_set(BloomFilter, {Address, Witness}) of
+                            false ->
+                                %% definitely this witness has not replied before
+                                PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
+                                Witnesses1 =
+                                    case SeenWitnessesCount < PerHopMaxWitnesses of
+                                        true ->
+                                            %% there is room for another witness
+                                            Witnesses0;
+                                        false ->
+                                            %% make a room for another witness
+                                            lists:delete(lists:nth(rand:uniform(PerHopMaxWitnesses), Witnesses0), Witnesses0)
+                                    end,
+                                maps:put(PacketHash, lists:keystore(Address, 1, Witnesses1, {Address, Witness}), Responses0);
+                            true ->
+                                lager:warning("Saw probable duplicate witness from ~p", [Witness]),
+                                %% this might be a false positive, known feature of bloom filters
+                                Responses0
+                        end,
+                    %% update witness filters with incremented number of witnesses seen
+                    WitnessFilter1 = WitnessFilter0#witness_filter{seen_witnesses_count = SeenWitnessesCount + 1},
+                    WitnessFilters1 = maps:put(PacketHash, WitnessFilter1, WitnessFilters0),
+                    Data#data{responses = Responses1, witness_filters = WitnessFilters1};
+                true ->
+                    lager:warning("Saw conclusive duplicate witness from ~p", [Witness]),
+                    Data
+            end
     end.
 
 %% ------------------------------------------------------------------
