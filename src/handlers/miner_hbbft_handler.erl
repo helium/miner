@@ -37,6 +37,11 @@
          bba = <<>> :: binary()
         }).
 
+-spec metadata(V, M, C) -> binary()
+    when V :: tuple | map,
+         M :: #{} | #{seen => binary(), bba_completion => binary()},
+         C :: blockchain:blockchain().
+%% TODO No need to pass Meta when tuple. Use sum type: {map, Meta} | tuple
 metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
@@ -299,7 +304,15 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     NewRound = hbbft:round(NewHBBFT),
                     Before = erlang:monotonic_time(millisecond),
                     case miner:create_block(Metadata, Txns, NewRound) of
-                        {ok, Address, Artifact, Signature, PendingTxns, InvalidTxns} ->
+                        {ok,
+                            #{
+                                address               := Address,
+                                unsigned_binary_block := Artifact,
+                                signature             := Signature,
+                                pending_txns          := PendingTxns,
+                                invalid_txns          := InvalidTxns
+                             }
+                        } ->
                             ?mark(block_success),
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
