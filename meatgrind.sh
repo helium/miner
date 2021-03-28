@@ -13,7 +13,7 @@ while true; do
         ./cmd.sh $I stop
     else
         export I=$(( $I - $N))
-        if [ $(./cmd.sh $I ping) = "pong" ]; then
+        if [ "$(./cmd.sh $I ping)" = "pong" ]; then
             MURDERPID=$(./cmd.sh $I eval 'list_to_integer(os:getpid())')
             kill -9 $MURDERPID
         fi
