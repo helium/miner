@@ -50,8 +50,8 @@
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
--define(PREDICTED_MAX_WITNESSES, 100).
--define(WITNESS_FILTER_ALLOWED_FALSE_POSITIVES_RATE, 0.01).
+-define(WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT, 250).
+-define(WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE, 0.004).
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
 -else.
@@ -964,7 +964,8 @@ maybe_store_witness_response(Address, Witness,
                                 Val;
                             undefined ->
                                 #witness_filter{seen_witnesses_count = 0,
-                                                bloom_filter = bloom:new_optimal(?PREDICTED_MAX_WITNESSES, ?WITNESS_FILTER_ALLOWED_FALSE_POSITIVES_RATE)}
+                                                bloom_filter = bloom:new_optimal(?WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT,
+                                                                                 ?WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE)}
                         end,
                     %% witness is not stored but they could have replied and got replaced
                     Responses1 =
