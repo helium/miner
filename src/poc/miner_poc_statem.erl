@@ -963,9 +963,9 @@ maybe_store_witness_response(Address, Witness,
                             #witness_filter{} = Val ->
                                 Val;
                             undefined ->
-                                #witness_filter{seen_witnesses_count = 0,
-                                                bloom_filter = bloom:new_optimal(?WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT,
-                                                                                 ?WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE)}
+                                {ok, BloomFilter0} = bloom:new_optimal(?WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT,
+                                                                      ?WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE),
+                                #witness_filter{seen_witnesses_count = 0, bloom_filter = BloomFilter0}
                         end,
                     %% witness is not stored but they could have replied and got replaced
                     Responses1 =
@@ -1082,5 +1082,175 @@ maybe_store_witness_response(Address, Witness,
 %%     meck:unload(blockchain_worker),
 %%     meck:unload(blockchain_swarm),
 %%     meck:unload(blockchain).
+
+maybe_store_witness_response__invalid_witness_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    Address = address_1,
+    Witness = witness_1,
+    Data = #data{blockchain = Chain, packet_hashes = []},
+
+    meck:new(blockchain, []),
+    meck:new(blockchain_poc_witness_v1, []),
+    meck:new(lager, [non_strict]),
+    meck:expect(blockchain_poc_witness_v1, packet_hash, [Witness], PacketHash),
+    meck:expect(blockchain_poc_witness_v1, gateway, [Witness], GatewayWitness),
+    meck:expect(blockchain, ledger, [Chain], Ledger),
+    meck:expect(lager, warning, ["Saw invalid witness with packet hash ~p", [PacketHash]], ok),
+
+    ?assertEqual(Data, maybe_store_witness_response(Address, Witness, Data)),
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(lager)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__self_witness_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    Address = address_1,
+    Witness = GatewayWitness,
+    Data = #data{blockchain = Chain, packet_hashes = [{GatewayWitness, PacketHash}]},
+
+    meck:new(blockchain, [passthrough]),
+    meck:new(blockchain_poc_witness_v1, [passthrough]),
+    meck:new(lager, [non_strict]),
+    meck:expect(blockchain_poc_witness_v1, packet_hash, [Witness], PacketHash),
+    meck:expect(blockchain_poc_witness_v1, gateway, [Witness], GatewayWitness),
+    meck:expect(blockchain, ledger, [Chain], Ledger),
+    meck:expect(lager, warning, ["Saw self-witness from ~p", [GatewayWitness]], ok),
+
+    ?assertEqual(Data, maybe_store_witness_response(Address, Witness, Data)),
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(lager)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__conclusive_duplicate_witness_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    Address = address_1,
+    Witness = witness_1,
+    Data = #data{blockchain = Chain, responses = #{packet_hash_1 => [{foo, bar}, {Address, Witness}, {a, b}]}},
+
+    meck:new(blockchain, [passthrough]),
+    meck:new(blockchain_poc_witness_v1, [passthrough]),
+    meck:new(lager, [non_strict]),
+    meck:expect(blockchain_poc_witness_v1, packet_hash, [Witness], PacketHash),
+    meck:expect(blockchain_poc_witness_v1, gateway, [Witness], GatewayWitness),
+    meck:expect(blockchain, ledger, [Chain], Ledger),
+    meck:expect(lager, warning, ["Saw conclusive duplicate witness from ~p", [Witness]], ok),
+
+    ?assertEqual(Data, maybe_store_witness_response(Address, Witness, Data)),
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(lager)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__first_witness_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    Address = address_1,
+    Witness = witness_1,
+    Data = #data{blockchain = Chain, packet_hashes = [{Witness, PacketHash}]},
+
+    meck:new(blockchain, []),
+    meck:new(blockchain_poc_witness_v1, []),
+    meck:new(blockchain_utils, []),
+    meck:expect(blockchain_poc_witness_v1, packet_hash, [Witness], PacketHash),
+    meck:expect(blockchain_poc_witness_v1, gateway, [Witness], GatewayWitness),
+    meck:expect(blockchain, ledger, [Chain], Ledger),
+    meck:expect(blockchain_utils, poc_per_hop_max_witnesses, [Ledger], 25),
+
+    Data1 = maybe_store_witness_response(Address, Witness, Data),
+    WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
+    BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
+    ?assertEqual(1, WitnessFilter1#witness_filter.seen_witnesses_count, 1),
+    ?assert(bloom:check(BloomFilter1, {Address, Witness})),
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(blockchain_utils)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__full_capacity_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    AddressFun = fun(N) -> {address, N} end,
+    WitnessFun = fun(N) -> {witness, N} end,
+    WitnessCapacity = 25,
+    WitnessCount = WitnessCapacity,
+    Data = #data{blockchain = Chain, packet_hashes = [{WitnessFun(N), PacketHash} || N <- lists:seq(1, WitnessCount)]},
+
+    meck:new(blockchain, []),
+    meck:new(blockchain_poc_witness_v1, []),
+    meck:new(blockchain_utils, []),
+
+    Data1 = lists:foldl(fun(N, Data0) ->
+                            meck:expect(blockchain_poc_witness_v1, packet_hash, [WitnessFun(N)], PacketHash),
+                            meck:expect(blockchain_poc_witness_v1, gateway, [WitnessFun(N)], GatewayWitness),
+                            meck:expect(blockchain, ledger, [Chain], Ledger),
+                            meck:expect(blockchain_utils, poc_per_hop_max_witnesses, [Ledger], WitnessCapacity),
+                            maybe_store_witness_response(AddressFun(N), WitnessFun(N), Data0)
+                        end, Data, lists:seq(1, WitnessCount)),
+    WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
+    BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
+    ?assertEqual(WitnessCount, WitnessFilter1#witness_filter.seen_witnesses_count),
+    [ ?assert(bloom:check(BloomFilter1, {AddressFun(N), WitnessFun(N)})) || N <- lists:seq(1, WitnessCount) ],
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(blockchain_utils)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__overflow_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    AddressFun = fun(N) -> {address, N} end,
+    WitnessFun = fun(N) -> {witness, N} end,
+    WitnessCapacity = 25,
+    WitnessCount = WitnessCapacity + 1,
+    Data = #data{blockchain = Chain, packet_hashes = [{WitnessFun(N), PacketHash} || N <- lists:seq(1, WitnessCount)]},
+
+    meck:new(blockchain, []),
+    meck:new(blockchain_poc_witness_v1, []),
+    meck:new(blockchain_utils, []),
+
+    Data1 = lists:foldl(fun(N, Data0) ->
+                            meck:expect(blockchain_poc_witness_v1, packet_hash, [WitnessFun(N)], PacketHash),
+                            meck:expect(blockchain_poc_witness_v1, gateway, [WitnessFun(N)], GatewayWitness),
+                            meck:expect(blockchain, ledger, [Chain], Ledger),
+                            meck:expect(blockchain_utils, poc_per_hop_max_witnesses, [Ledger], WitnessCapacity),
+                            maybe_store_witness_response(AddressFun(N), WitnessFun(N), Data0)
+                        end, Data, lists:seq(1, WitnessCount)),
+    WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
+    BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
+    ?assertEqual(26, WitnessFilter1#witness_filter.seen_witnesses_count),
+    [ ?assert(bloom:check(BloomFilter1, {AddressFun(N), WitnessFun(N)})) || N <- lists:seq(1, WitnessCount) ],
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(blockchain_utils)),
+    meck:unload(),
+    ok.
 
 -endif.
