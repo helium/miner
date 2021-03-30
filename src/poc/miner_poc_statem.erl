@@ -956,40 +956,34 @@ maybe_store_witness_response(Address, Witness,
             Data;
         _ ->
             Witnesses0 = maps:get(PacketHash, Responses0, []),
-            case lists:member({Address, Witness}, Witnesses0) of
-                false ->
-                    %% witness is not stored but they could have replied and got replaced
-                    case maybe_store_witness_in_witness_filters(PacketHash, {Address, Witness}, WitnessFilters0) of
-                        {ok, {WitnessFilters1, SeenWitnessesCount1}} ->
-                            PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                            case SeenWitnessesCount1 =< PerHopMaxWitnesses of
+            %% witness is not stored but they could have replied and got replaced
+            case maybe_store_witness_in_witness_filters(PacketHash, {Address, Witness}, WitnessFilters0) of
+                {ok, {WitnessFilters1, SeenWitnessesCount1}} ->
+                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
+                    case SeenWitnessesCount1 =< PerHopMaxWitnesses of
+                        true ->
+                            %% there is room for another witness
+                            Witnesses1 = lists:keystore(Address, 1, Witnesses0, {Address, Witness}),
+                            Responses1 = maps:put(PacketHash, Witnesses1, Responses0),
+                            Data#data{responses = Responses1, witness_filters = WitnessFilters1};
+                        false ->
+                            WitnessToBeReplaced = rand:uniform(SeenWitnessesCount1),
+                            case WitnessToBeReplaced =< PerHopMaxWitnesses of
                                 true ->
-                                    %% there is room for another witness
-                                    Witnesses1 = lists:keystore(Address, 1, Witnesses0, {Address, Witness}),
+                                    %% making a room for another witness before storing it
+                                    Witnesses1 = lists:keystore(Address, 1,
+                                                                lists:delete(lists:nth(WitnessToBeReplaced, Witnesses0), Witnesses0),
+                                                                {Address, Witness}),
                                     Responses1 = maps:put(PacketHash, Witnesses1, Responses0),
                                     Data#data{responses = Responses1, witness_filters = WitnessFilters1};
                                 false ->
-                                    WitnessToBeReplaced = rand:uniform(SeenWitnessesCount1),
-                                    case WitnessToBeReplaced =< PerHopMaxWitnesses of
-                                        true ->
-                                            %% making a room for another witness before storing it
-                                            Witnesses1 = lists:keystore(Address, 1,
-                                                                        lists:delete(lists:nth(WitnessToBeReplaced, Witnesses0), Witnesses0),
-                                                                        {Address, Witness}),
-                                            Responses1 = maps:put(PacketHash, Witnesses1, Responses0),
-                                            Data#data{responses = Responses1, witness_filters = WitnessFilters1};
-                                        false ->
-                                            %% Only bloom filter got updated (its data is not an erlang term)
-                                            Data
-                                    end
-                            end;
-                        false ->
-                            lager:warning("Saw probable duplicate witness from ~p", [Witness]),
-                            %% this might be a false positive, known feature of bloom filters
-                            Data
+                                    %% Only bloom filter got updated (its data is not an erlang term)
+                                    Data
+                            end
                     end;
-                true ->
-                    lager:warning("Saw conclusive duplicate witness from ~p", [Witness]),
+                false ->
+                    lager:warning("Saw probable duplicate witness from ~p", [Witness]),
+                    %% this might be a false positive, known feature of bloom filters
                     Data
             end
     end.
@@ -1150,7 +1144,7 @@ maybe_store_witness_response__self_witness_test() ->
     meck:unload(),
     ok.
 
-maybe_store_witness_response__conclusive_duplicate_witness_test() ->
+maybe_store_witness_response__probable_duplicate_witness_test() ->
     Chain = chain_1,
     PacketHash = packet_hash_1,
     GatewayWitness = gateway_witness_1,
@@ -1165,7 +1159,7 @@ maybe_store_witness_response__conclusive_duplicate_witness_test() ->
     meck:expect(blockchain_poc_witness_v1, packet_hash, [Witness], PacketHash),
     meck:expect(blockchain_poc_witness_v1, gateway, [Witness], GatewayWitness),
     meck:expect(blockchain, ledger, [Chain], Ledger),
-    meck:expect(lager, warning, ["Saw conclusive duplicate witness from ~p", [Witness]], ok),
+    meck:expect(lager, warning, ["Saw probable duplicate witness from ~p", [Witness]], ok),
 
     ?assertEqual(Data, maybe_store_witness_response(Address, Witness, Data)),
 
