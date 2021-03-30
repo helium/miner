@@ -1013,7 +1013,6 @@ start_hbbft(DKG, Height, Delay, Chain, Retries) ->
             ok = libp2p_group_relcast:handle_command(DKG, mark_done),
 
             lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
-            ok = miner:install_consensus(Group),
             {ok, Group};
         {error, not_done} ->
             case Retries of
