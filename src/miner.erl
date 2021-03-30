@@ -320,7 +320,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0000010033.
+       0000010034.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
