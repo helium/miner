@@ -958,45 +958,62 @@ maybe_store_witness_response(Address, Witness,
             Witnesses0 = maps:get(PacketHash, Responses0, []),
             case lists:member({Address, Witness}, Witnesses0) of
                 false ->
-                    WitnessFilter0 = #witness_filter{seen_witnesses_count = SeenWitnessesCount, bloom_filter = BloomFilter} =
-                        case maps:get(PacketHash, WitnessFilters0, undefined) of
-                            #witness_filter{} = Val ->
-                                Val;
-                            undefined ->
-                                {ok, BloomFilter0} = bloom:new_optimal(?WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT,
-                                                                      ?WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE),
-                                #witness_filter{seen_witnesses_count = 0, bloom_filter = BloomFilter0}
-                        end,
                     %% witness is not stored but they could have replied and got replaced
-                    Responses1 =
-                        case bloom:check_and_set(BloomFilter, {Address, Witness}) of
-                            false ->
-                                %% definitely this witness has not replied before
-                                PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                                Witnesses1 =
-                                    case SeenWitnessesCount < PerHopMaxWitnesses of
+                    case maybe_store_witness_in_witness_filters(PacketHash, {Address, Witness}, WitnessFilters0) of
+                        {ok, {WitnessFilters1, SeenWitnessesCount1}} ->
+                            PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
+                            case SeenWitnessesCount1 =< PerHopMaxWitnesses of
+                                true ->
+                                    %% there is room for another witness
+                                    Witnesses1 = lists:keystore(Address, 1, Witnesses0, {Address, Witness}),
+                                    Responses1 = maps:put(PacketHash, Witnesses1, Responses0),
+                                    Data#data{responses = Responses1, witness_filters = WitnessFilters1};
+                                false ->
+                                    WitnessToBeReplaced = rand:uniform(SeenWitnessesCount1),
+                                    case WitnessToBeReplaced =< PerHopMaxWitnesses of
                                         true ->
-                                            %% there is room for another witness
-                                            Witnesses0;
+                                            %% making a room for another witness before storing it
+                                            Witnesses1 = lists:keystore(Address, 1,
+                                                                        lists:delete(lists:nth(WitnessToBeReplaced, Witnesses0), Witnesses0),
+                                                                        {Address, Witness}),
+                                            Responses1 = maps:put(PacketHash, Witnesses1, Responses0),
+                                            Data#data{responses = Responses1, witness_filters = WitnessFilters1};
                                         false ->
-                                            %% make a room for another witness
-                                            lists:delete(lists:nth(rand:uniform(PerHopMaxWitnesses), Witnesses0), Witnesses0)
-                                    end,
-                                maps:put(PacketHash, lists:keystore(Address, 1, Witnesses1, {Address, Witness}), Responses0);
-                            true ->
-                                lager:warning("Saw probable duplicate witness from ~p", [Witness]),
-                                %% this might be a false positive, known feature of bloom filters
-                                Responses0
-                        end,
-                    %% update witness filters with incremented number of witnesses seen
-                    WitnessFilter1 = WitnessFilter0#witness_filter{seen_witnesses_count = SeenWitnessesCount + 1},
-                    WitnessFilters1 = maps:put(PacketHash, WitnessFilter1, WitnessFilters0),
-                    Data#data{responses = Responses1, witness_filters = WitnessFilters1};
+                                            %% Only bloom filter got updated (its data is not an erlang term)
+                                            Data
+                                    end
+                            end;
+                        false ->
+                            lager:warning("Saw probable duplicate witness from ~p", [Witness]),
+                            %% this might be a false positive, known feature of bloom filters
+                            Data
+                    end;
                 true ->
                     lager:warning("Saw conclusive duplicate witness from ~p", [Witness]),
                     Data
             end
     end.
+
+maybe_store_witness_in_witness_filters(PacketHash, {Address, Witness}, WitnessFilters0) ->
+     WitnessFilter0 = #witness_filter{seen_witnesses_count = SeenWitnessesCount0, bloom_filter = BloomFilter} =
+        case maps:get(PacketHash, WitnessFilters0, undefined) of
+            #witness_filter{} = Val ->
+                Val;
+            undefined ->
+                {ok, BloomFilter0} = bloom:new_optimal(?WITNESS_FILTER_ESTIMATED_MAX_ITEMS_COUNT,
+                                                      ?WITNESS_FILTER_WANTED_FALSE_POSITIVES_RATE),
+                #witness_filter{seen_witnesses_count = 0, bloom_filter = BloomFilter0}
+        end,
+        case bloom:check_and_set(BloomFilter, {Address, Witness}) of
+            false ->
+                %% this witness is definitely not in filter
+                SeenWitnessesCount1 = SeenWitnessesCount0 + 1,
+                WitnessFilter1 = WitnessFilter0#witness_filter{seen_witnesses_count = SeenWitnessesCount1},
+                {ok, {maps:put(PacketHash, WitnessFilter1, WitnessFilters0), SeenWitnessesCount1}};
+            true ->
+                %% this witness is most likely a duplicate
+                false
+        end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -1179,6 +1196,7 @@ maybe_store_witness_response__first_witness_test() ->
     WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
     BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
     ?assertEqual(1, WitnessFilter1#witness_filter.seen_witnesses_count, 1),
+    ?assertEqual([{Address, Witness}], maps:get(PacketHash, Data1#data.responses)),
     ?assert(bloom:check(BloomFilter1, {Address, Witness})),
 
     ?assert(meck:validate(blockchain)),
@@ -1192,10 +1210,10 @@ maybe_store_witness_response__full_capacity_test() ->
     PacketHash = packet_hash_1,
     GatewayWitness = gateway_witness_1,
     Ledger = ledger_1,
-    AddressFun = fun(N) -> {address, N} end,
-    WitnessFun = fun(N) -> {witness, N} end,
     WitnessCapacity = 25,
     WitnessCount = WitnessCapacity,
+    AddressFun = fun(N) -> {address, N} end,
+    WitnessFun = fun(N) -> {witness, N} end,
     Data = #data{blockchain = Chain, packet_hashes = [{WitnessFun(N), PacketHash} || N <- lists:seq(1, WitnessCount)]},
 
     meck:new(blockchain, []),
@@ -1212,6 +1230,7 @@ maybe_store_witness_response__full_capacity_test() ->
     WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
     BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
     ?assertEqual(WitnessCount, WitnessFilter1#witness_filter.seen_witnesses_count),
+    ?assertEqual([{AddressFun(N), WitnessFun(N)} || N <- lists:seq(1, WitnessCapacity)], maps:get(PacketHash, Data1#data.responses)),
     [ ?assert(bloom:check(BloomFilter1, {AddressFun(N), WitnessFun(N)})) || N <- lists:seq(1, WitnessCount) ],
 
     ?assert(meck:validate(blockchain)),
@@ -1220,21 +1239,22 @@ maybe_store_witness_response__full_capacity_test() ->
     meck:unload(),
     ok.
 
-maybe_store_witness_response__overflow_test() ->
+maybe_store_witness_response__overflow_and_store_test() ->
     Chain = chain_1,
     PacketHash = packet_hash_1,
     GatewayWitness = gateway_witness_1,
     Ledger = ledger_1,
-    AddressFun = fun(N) -> {address, N} end,
-    WitnessFun = fun(N) -> {witness, N} end,
     WitnessCapacity = 25,
     WitnessCount = WitnessCapacity + 1,
+    AddressFun = fun(N) -> {address, N} end,
+    WitnessFun = fun(N) -> {witness, N} end,
     Data = #data{blockchain = Chain, packet_hashes = [{WitnessFun(N), PacketHash} || N <- lists:seq(1, WitnessCount)]},
 
     meck:new(blockchain, []),
     meck:new(blockchain_poc_witness_v1, []),
     meck:new(blockchain_utils, []),
 
+    rand:seed(exsss, {1, 1, 1}), % next rand:uniform(26) will return 4
     Data1 = lists:foldl(fun(N, Data0) ->
                             meck:expect(blockchain_poc_witness_v1, packet_hash, [WitnessFun(N)], PacketHash),
                             meck:expect(blockchain_poc_witness_v1, gateway, [WitnessFun(N)], GatewayWitness),
@@ -1244,7 +1264,46 @@ maybe_store_witness_response__overflow_test() ->
                         end, Data, lists:seq(1, WitnessCount)),
     WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
     BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
-    ?assertEqual(26, WitnessFilter1#witness_filter.seen_witnesses_count),
+    ExpectedWitnesses0 = [{AddressFun(N), WitnessFun(N)} || N <- lists:seq(1, WitnessCapacity)],
+    ExpectedWitnesses1 = lists:delete({AddressFun(4), WitnessFun(4)}, ExpectedWitnesses0) ++ [{AddressFun(WitnessCount), WitnessFun(WitnessCount)}],
+    ?assertEqual(WitnessCount, WitnessFilter1#witness_filter.seen_witnesses_count),
+    ?assertEqual(ExpectedWitnesses1, maps:get(PacketHash, Data1#data.responses)),
+    [ ?assert(bloom:check(BloomFilter1, {AddressFun(N), WitnessFun(N)})) || N <- lists:seq(1, WitnessCount) ],
+
+    ?assert(meck:validate(blockchain)),
+    ?assert(meck:validate(blockchain_poc_witness_v1)),
+    ?assert(meck:validate(blockchain_utils)),
+    meck:unload(),
+    ok.
+
+maybe_store_witness_response__overflow_and_drop_test() ->
+    Chain = chain_1,
+    PacketHash = packet_hash_1,
+    GatewayWitness = gateway_witness_1,
+    Ledger = ledger_1,
+    WitnessCapacity = 25,
+    WitnessCount = WitnessCapacity + 1,
+    AddressFun = fun(N) -> {address, N} end,
+    WitnessFun = fun(N) -> {witness, N} end,
+    Data = #data{blockchain = Chain, packet_hashes = [{WitnessFun(N), PacketHash} || N <- lists:seq(1, WitnessCount)]},
+
+    meck:new(blockchain, []),
+    meck:new(blockchain_poc_witness_v1, []),
+    meck:new(blockchain_utils, []),
+
+    rand:seed(exsss, {1, 1, 35}), % next rand:uniform(26) will return 26
+    Data1 = lists:foldl(fun(N, Data0) ->
+                            meck:expect(blockchain_poc_witness_v1, packet_hash, [WitnessFun(N)], PacketHash),
+                            meck:expect(blockchain_poc_witness_v1, gateway, [WitnessFun(N)], GatewayWitness),
+                            meck:expect(blockchain, ledger, [Chain], Ledger),
+                            meck:expect(blockchain_utils, poc_per_hop_max_witnesses, [Ledger], WitnessCapacity),
+                            maybe_store_witness_response(AddressFun(N), WitnessFun(N), Data0)
+                        end, Data, lists:seq(1, WitnessCount)),
+    WitnessFilter1 = maps:get(PacketHash, Data1#data.witness_filters),
+    BloomFilter1 = WitnessFilter1#witness_filter.bloom_filter,
+    ExpectedWitnesses0 = [{AddressFun(N), WitnessFun(N)} || N <- lists:seq(1, WitnessCapacity)],
+    ?assertEqual(WitnessCount - 1, WitnessFilter1#witness_filter.seen_witnesses_count),
+    ?assertEqual(ExpectedWitnesses0, maps:get(PacketHash, Data1#data.responses)),
     [ ?assert(bloom:check(BloomFilter1, {AddressFun(N), WitnessFun(N)})) || N <- lists:seq(1, WitnessCount) ],
 
     ?assert(meck:validate(blockchain)),
