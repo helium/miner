@@ -83,7 +83,6 @@
     challengees = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     responses = #{},
-    witness_filters = #{},
     receiving_timeout = ?RECEIVING_TIMEOUT :: non_neg_integer(),
     poc_hash  :: binary() | undefined,
     request_block_hash  :: binary() | undefined,
@@ -92,7 +91,8 @@
     receipts_timeout = ?RECEIPTS_TIMEOUT :: non_neg_integer(),
     poc_restarts = ?POC_RESTARTS :: non_neg_integer(),
     txn_ref = make_ref() :: reference(),
-    addr_hash_filter :: undefined | #addr_hash_filter{}
+    addr_hash_filter :: undefined | #addr_hash_filter{},
+    witness_filters = #{}
 }).
 
 -type state() :: requesting | mining | receiving | waiting.
