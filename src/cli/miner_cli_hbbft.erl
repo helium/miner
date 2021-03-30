@@ -150,7 +150,7 @@ hbbft_queue(["hbbft", "queue"], [], Flags) ->
                                            [{address, maps:get(address, maps:get(K, Workers))} || lists:keymember(verbose, 1, Flags)] ++
                                            [{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(libp2p_crypto:p2p_to_pubkey_bin(maps:get(address, maps:get(K, Workers))))))},
                                            {count, integer_to_list(length(V))},
-                                           {connected, atom_to_list(not (maps:get(stream_info, maps:get(info, maps:get(K, Workers))) == undefined))},
+                                           {connected, atom_to_list((maps:get(connected, maps:get(K, Workers)))) },
                                            {blocked, atom_to_list(not (maps:get(ready, maps:get(K, Workers))))},
                                            {in_flight, integer_to_list(maps:get(in_flight, maps:get(K, Workers)))},
                                            {connects, integer_to_list(maps:get(connects, maps:get(K, Workers)))},
