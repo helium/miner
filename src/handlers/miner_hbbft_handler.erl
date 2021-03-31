@@ -138,7 +138,7 @@ handle_command({status, Ref, Worker}, State) ->
                                 signatures => Sigs,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
-                                public_key_hash => blockchain_utils:bin_to_hex(crypto:hash(sha256, term_to_binary(pubkey:to_bytes(tc_key_share:public_key(State#state.sk)))))
+                                public_key_hash => blockchain_utils:bin_to_hex(crypto:hash(sha256, term_to_binary(pubkey:serialize(tc_key_share:public_key(State#state.sk)))))
                                }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->
