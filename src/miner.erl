@@ -521,7 +521,8 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
-    SeenBBAs = metadata_to_seen_bbas(Metadata),
+    SeenBBAs =
+        [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     BBA = common_enough_or_default(VotesNeeded, BBAs, <<>>),
@@ -621,11 +622,6 @@ select_transactions(Chain, Txns, BlockCurr, BlockHeightCurr, BlockHeightNext) ->
 txn_is_rewards(Txn) ->
     Rewards = [blockchain_txn_rewards_v1, blockchain_txn_rewards_v2],
     lists:member(blockchain_txn:type(Txn), Rewards).
-
--spec metadata_to_seen_bbas(metadata()) ->
-    [{{pos_integer(), binary()}, binary()}].
-metadata_to_seen_bbas(M) ->
-    [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(M)].
 
 -spec metadata_only_v2(metadata()) ->
     [{non_neg_integer(), metadata_v2()}].
