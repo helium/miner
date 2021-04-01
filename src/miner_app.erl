@@ -28,6 +28,15 @@ start(_StartType, _StartArgs) ->
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
+    Filename = filename:join([BaseDir, "follow-mode"]),
+    case file:read_file_info(Filename) of
+        {ok, _} ->
+            application:set_env(blockchain, follow_mode, true);
+        _ ->
+            ok
+    end,
+
     case miner_sup:start_link() of
         {ok, Pid} ->
             miner_cli_registry:register_cli(),
