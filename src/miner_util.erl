@@ -6,6 +6,8 @@
 -module(miner_util).
 
 -export([
+         list_count/1,
+         list_count_and_sort/1,
          index_of/2,
          h3_index/3,
          median/1,
@@ -13,10 +15,26 @@
          metadata_fun/0
         ]).
 
-%%--------------------------------------------------------------------
-%% @doc
+%%-----------------------------------------------------------------------------
+%% @doc Count the number of occurrences of each element in the list.
 %% @end
-%%--------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
+-spec list_count([A]) -> #{A => pos_integer()}.
+list_count(Xs) ->
+    lists:foldl(
+        fun(X, Counts) -> maps:update_with(X, fun(C) -> C + 1 end, 1, Counts) end,
+        #{},
+        Xs
+    ).
+
+%%-----------------------------------------------------------------------------
+%% @doc `list_count` then sort from largest-first (head) to smallest-last.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec list_count_and_sort([A]) -> [{A, pos_integer()}].
+list_count_and_sort(Xs) ->
+    lists:sort(fun({_, C1}, {_, C2}) -> C1 > C2 end, maps:to_list(list_count(Xs))).
+
 -spec index_of(any(), [any()]) -> pos_integer().
 index_of(Item, List) -> index_of(Item, List, 1).
 
@@ -34,6 +52,7 @@ h3_index(Lat, Lon, Accuracy) ->
     lager:info("Resolution ~p is best for accuracy of ~p meters", [Resolution, Accuracy/1000]),
     {h3:from_geo({Lat, Lon}, Resolution), Resolution}.
 
+-spec median([I]) -> I when I :: non_neg_integer().
 median([]) -> 0;
 median(List) ->
     Length = length(List),
