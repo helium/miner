@@ -524,7 +524,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     SeenBBAs = metadata_to_seen_bbas(Metadata),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
-    BBA = pick_consented_or_default(VotesNeeded, BBAs, <<>>),
+    BBA = common_enough_or_default(VotesNeeded, BBAs, <<>>),
     {ElectionEpoch, EpochStart, TxnsToInsert, InvalidTransactions} =
         select_transactions(Chain, Txns, CurrentBlock, HeightCurr, HeightNext),
     NewBlock =
@@ -655,18 +655,18 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
     case blockchain:config(?snapshot_interval, Ledger) of
         {ok, Interval} when (BlockHeightNext - 1) rem Interval == 0 ->
             Hashes = [H || {_, #{snapshot_hash := H}} <- metadata_only_v2(Metadata)],
-            pick_consented_or_default(VotesNeeded, Hashes, <<>>);
+            common_enough_or_default(VotesNeeded, Hashes, <<>>);
         _ ->
             <<>>
     end.
 
--spec pick_consented_or_default(non_neg_integer(), [X], X) -> X.
-pick_consented_or_default(VotesNeeded, Xs, Default) ->
+-spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
+common_enough_or_default(Threshold, Xs, Default) ->
     %% Looking for highest count AND sufficient agreement:
     case miner_util:list_count_and_sort(Xs) of
-        [{X, C}|_] when C >= VotesNeeded -> X;
-        [{_, _}|_]                       -> Default; % Insufficient agreement
-        []                               -> Default
+        [{X, C}|_] when C >= Threshold -> X;
+        [{_, _}|_]                     -> Default; % Not common-enough.
+        []                             -> Default
     end.
 
 set_next_block_timer(State=#state{blockchain=Chain}) ->
