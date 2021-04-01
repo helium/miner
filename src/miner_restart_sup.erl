@@ -82,13 +82,6 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    PoCServer =
-        case application:get_env(blockchain, follow_mode, false) of
-            false ->
-                [?WORKER(miner_poc_statem, [POCOpts])];
-            _ -> []
-        end,
-
     ChildSpecs =
         [
          ?WORKER(miner_hbbft_sidecar, []),
@@ -96,7 +89,7 @@ init([SigFun, ECDHFun]) ->
          ] ++
         EbusServer ++
         OnionServer ++
-        PoCServer,
+        [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.
 
 
