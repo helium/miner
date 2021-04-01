@@ -661,12 +661,13 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
     end.
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
+common_enough_or_default(_, [], Default) ->
+    Default;
 common_enough_or_default(Threshold, Xs, Default) ->
     %% Looking for highest count AND sufficient agreement:
     case miner_util:list_count_and_sort(Xs) of
         [{X, C}|_] when C >= Threshold -> X;
-        [{_, _}|_]                     -> Default; % Not common-enough.
-        []                             -> Default
+        [{_, _}|_]                     -> Default % Not common-enough.
     end.
 
 set_next_block_timer(State=#state{blockchain=Chain}) ->
