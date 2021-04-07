@@ -133,7 +133,19 @@ group_predicate("consensus" ++ _ = Name) ->
                     lager:debug("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
-                [_Tag, Height0, _Hash] ->
+                _ ->
+                    false
+            end;
+        _ ->
+            false
+    catch _:_ ->
+            false
+    end;
+group_predicate("penalize" ++ _ = Name) ->
+    try einfo() of
+        #{election_height := ElectionHeight} ->
+            case string:tokens(Name, "_") of
+                [_Tag, Height0, _Delay, _Hash] ->
                     lager:debug("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
