@@ -29,10 +29,11 @@ start_link() ->
     start_link(Bus, []).
 
 start_link(Bus, Args) ->
-    NameOpts = [{replace_existing, true},
-                {allow_replacement, true},
-                {do_not_queue, true}
-               ],
+    NameOpts = [
+        {replace_existing, true},
+        {allow_replacement, true},
+        {do_not_queue, true}
+    ],
     ok = ebus:request_name(Bus, ?MINER_APPLICATION_NAME, NameOpts),
     ebus_object:start_link(Bus, ?MINER_OBJECT_PATH, ?MODULE, Args, []).
 
@@ -44,8 +45,7 @@ init(_Args) ->
     erlang:register(?SERVER, self()),
     {ok, #state{}}.
 
-
-handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) ->
+handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW) = Member, Msg, State = #state{}) ->
     case ebus_message:args(Msg) of
         {ok, [OwnerB58, Fee, StakingFee, PayerB58]} ->
             case (catch blockchain:add_gateway_txn(OwnerB58, PayerB58, Fee, StakingFee)) of
@@ -62,11 +62,20 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ADD_GW)=Member, Msg, State=#state{}) 
             lager:warning("Invalid add gateway args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
-handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state{}) ->
+handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC) = Member, Msg, State = #state{}) ->
     case ebus_message:args(Msg) of
         {ok, [H3String, OwnerB58, Nonce, StakingFee, Fee, PayerB58]} ->
             lager:info("Requesting assert for ~p", [H3String]),
-            case (catch blockchain:assert_loc_txn(H3String, OwnerB58, PayerB58, Nonce, StakingFee, Fee)) of
+            case
+                (catch blockchain:assert_loc_txn(
+                    H3String,
+                    OwnerB58,
+                    PayerB58,
+                    Nonce,
+                    StakingFee,
+                    Fee
+                ))
+            of
                 {ok, TxnBin} ->
                     {reply, [{array, byte}], [TxnBin], State};
                 {'EXIT', Why} ->
@@ -80,7 +89,7 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
             lager:warning("Invalid assert_loc args: ~p", [Error]),
             {reply_error, ?MINER_ERROR_BADARGS, Member, State}
     end;
-handle_message(?MINER_OBJECT(?MINER_MEMBER_P2P_STATUS), _, State=#state{}) ->
+handle_message(?MINER_OBJECT(?MINER_MEMBER_P2P_STATUS), _, State = #state{}) ->
     Status = miner:p2p_status(),
     {reply, [{array, {struct, [string, string]}}], [Status], State};
 handle_message(Member, _Msg, State) ->

@@ -46,76 +46,98 @@ all() -> [basic, default_routers].
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     try
-    Miners = ?config(miners, Config),
-    MinersAndPorts = ?config(ports, Config),
-    Addresses = ?config(addresses, Config),
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    InitialDCTransactions = [ blockchain_txn_dc_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    %AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 %|| Addr <- Addresses],
+        Miners = ?config(miners, Config),
+        MinersAndPorts = ?config(ports, Config),
+        Addresses = ?config(addresses, Config),
+        InitialPaymentTransactions = [
+            blockchain_txn_coinbase_v1:new(Addr, 5000)
+         || Addr <- Addresses
+        ],
+        InitialDCTransactions = [
+            blockchain_txn_dc_coinbase_v1:new(Addr, 5000)
+         || Addr <- Addresses
+        ],
+        %AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
+        %|| Addr <- Addresses],
 
-    Locations = ?SFLOCS ++ ?NYLOCS,
-    AddressesWithLocations = lists:zip(Addresses, Locations),
-    InitialGenGatewayTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- AddressesWithLocations],
+        Locations = ?SFLOCS ++ ?NYLOCS,
+        AddressesWithLocations = lists:zip(Addresses, Locations),
+        InitialGenGatewayTxns = [
+            blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+         || {Addr, Loc} <- AddressesWithLocations
+        ],
 
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime = ?config(block_time, Config),
+        Interval = ?config(election_interval, Config),
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
+        %% VarCommitInterval = ?config(var_commit_interval, Config),
 
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    Interval = ?config(election_interval, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
-    %% VarCommitInterval = ?config(var_commit_interval, Config),
+        Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+        InitialVars = miner_ct_utils:make_vars(Keys, #{
+            ?block_time => BlockTime,
+            ?election_interval => Interval,
+            ?num_consensus_members => NumConsensusMembers,
+            ?batch_size => BatchSize,
+            ?dkg_curve => Curve
+        }),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   ?election_interval => Interval,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+        DKGResults = miner_ct_utils:initial_dkg(
+            Miners,
+            InitialVars ++
+                InitialPaymentTransactions ++ InitialDCTransactions ++ InitialGenGatewayTxns,
+            Addresses,
+            NumConsensusMembers,
+            Curve
+        ),
+        true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ InitialGenGatewayTxns,
-                                             Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+        RadioPorts = [P || {_Miner, {_TP, P}} <- MinersAndPorts],
+        miner_fake_radio_backplane:start_link(8, 45000, lists:zip(RadioPorts, Locations)),
 
-    RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
-    miner_fake_radio_backplane:start_link(8, 45000, lists:zip(RadioPorts, Locations)),
+        %% Get both consensus and non consensus miners
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
 
+        %% ensure that blockchain is undefined for non_consensus miners
+        false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
 
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
+            hd(ConsensusMiners),
+            NonConsensusMiners
+        ),
 
+        %% confirm height has grown to 1
+        ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
-    %% ensure that blockchain is undefined for non_consensus miners
-    false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
+        miner_fake_radio_backplane ! go,
 
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+        meck:new(blockchain_state_channels_server, [passthrough]),
+        meck:expect(blockchain_state_channels_server, packet, fun(Packet, HandlerPid) ->
+            handle_packet(Packet, HandlerPid)
+        end),
 
-    %% confirm height has grown to 1
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
+        application:ensure_all_started(throttle),
+        application:ensure_all_started(ranch),
+        application:set_env(lager, error_logger_flush_queue, false),
+        application:ensure_all_started(lager),
+        lager:set_loglevel(lager_console_backend, debug),
+        lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
+        application:set_env(blockchain, sc_packet_handler, ?MODULE),
 
-    miner_fake_radio_backplane ! go,
+        lists:foreach(
+            fun(Miner) ->
+                ct_rpc:call(Miner, application, set_env, [miner, default_routers, []])
+            end,
+            Miners
+        ),
 
-    meck:new(blockchain_state_channels_server, [passthrough]),
-    meck:expect(blockchain_state_channels_server, packet, fun(Packet, HandlerPid) -> handle_packet(Packet, HandlerPid) end),
+        SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
+        {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
 
-    application:ensure_all_started(throttle),
-    application:ensure_all_started(ranch),
-    application:set_env(lager, error_logger_flush_queue, false),
-    application:ensure_all_started(lager),
-    lager:set_loglevel(lager_console_backend, debug),
-    lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
-    application:set_env(blockchain, sc_packet_handler, ?MODULE),
-
-    lists:foreach(fun(Miner) ->
-                          ct_rpc:call(Miner, application, set_env, [miner, default_routers, []])
-                  end, Miners),
-
-    SwarmOpts = [{libp2p_nat, [{enabled, false}]}],
-    {ok, RouterSwarm} = libp2p_swarm:start(router_swarm, SwarmOpts),
-
-    [{swarm, RouterSwarm}|Config]
+        [{swarm, RouterSwarm} | Config]
     catch
         What:Why ->
             end_per_testcase(_TestCase, Config),
@@ -146,7 +168,7 @@ end_per_testcase(_TestCase, Config) ->
 basic(Config) ->
     Miners = ?config(miners, Config),
     RouterSwarm = ?config(swarm, Config),
-    [Owner| _Tail] = Miners,
+    [Owner | _Tail] = Miners,
     OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
 
     register(ct_sc_handler, self()),
@@ -160,23 +182,37 @@ basic(Config) ->
         {libp2p_framed_stream, server, [blockchain_state_channel_handler]}
     ),
 
-    [RouterAddress|_] = libp2p_swarm:listen_addrs(RouterSwarm),
+    [RouterAddress | _] = libp2p_swarm:listen_addrs(RouterSwarm),
     OwnerSwarm = ct_rpc:call(Owner, blockchain_swarm, swarm, []),
     {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
 
-    [begin
-         MinerSwarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
-         {ok, _} = ct_rpc:call(Miner, libp2p_swarm, connect, [MinerSwarm, RouterAddress])
-     end || Miner <- Miners],
+    [
+        begin
+            MinerSwarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+            {ok, _} = ct_rpc:call(Miner, libp2p_swarm, connect, [MinerSwarm, RouterAddress])
+        end
+     || Miner <- Miners
+    ],
 
-    DevEUI=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI=rand:uniform(trunc(math:pow(2, 64))),
+    DevEUI = rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI = rand:uniform(trunc(math:pow(2, 64))),
 
     ct:pal("Owner is ~p", [Owner]),
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterPubkey}]),
-    {Filter, _} = xor16:to_bin(xor16:new([<<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>], fun xxhash:hash64/1)),
+    {Filter, _} = xor16:to_bin(
+        xor16:new(
+            [<<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>],
+            fun xxhash:hash64/1
+        )
+    ),
     OUI = 1,
-    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [OUI, OwnerPubKeyBin, [RouterPubkey], Filter, 8]),
+    Txn = ct_rpc:call(Owner, blockchain_txn_oui_v1, new, [
+        OUI,
+        OwnerPubKeyBin,
+        [RouterPubkey],
+        Filter,
+        8
+    ]),
     {ok, Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
     SignedTxn = ct_rpc:call(Owner, blockchain_txn_oui_v1, sign, [Txn, SigFun]),
     ok = ct_rpc:call(Owner, blockchain_worker, submit_txn, [SignedTxn]),
@@ -184,18 +220,26 @@ basic(Config) ->
     Chain = ct_rpc:call(Owner, blockchain_worker, blockchain, []),
     Ledger = blockchain:ledger(Chain),
 
-    ?assertAsync(begin
-                        Result =
-                            case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
-                                {ok, Routing} ->
-                                    ct:pal("Routing ~p", [Routing]),
-                                    true;
-                                _ -> false
-                            end
-                 end,
-        Result == true, 60, timer:seconds(1)),
+    ?assertAsync(
+        begin
+            Result =
+                case ct_rpc:call(Owner, blockchain_ledger_v1, find_routing, [1, Ledger]) of
+                    {ok, Routing} ->
+                        ct:pal("Routing ~p", [Routing]),
+                        true;
+                    _ ->
+                        false
+                end
+        end,
+        Result == true,
+        60,
+        timer:seconds(1)
+    ),
 
-    Packet = <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>,
+    Packet =
+        <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little,
+            DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big,
+            0:32/integer-unsigned-big>>,
     miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
 
     ReplyPayload = crypto:strong_rand_bytes(12),
@@ -208,12 +252,21 @@ basic(Config) ->
             ?assert(blockchain_state_channel_packet_v1:validate(Thing)),
             ?assertEqual(PubKeyBin, blockchain_state_channel_packet_v1:hotspot(Thing)),
             HeliumPacket = blockchain_state_channel_packet_v1:packet(Thing),
-            ?assertEqual({eui, DevEUI, AppEUI}, blockchain_helium_packet_v1:routing_info(HeliumPacket)),
+            ?assertEqual(
+                {eui, DevEUI, AppEUI},
+                blockchain_helium_packet_v1:routing_info(HeliumPacket)
+            ),
             ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
-            Resp = blockchain_state_channel_response_v1:new(true,
-                                                            blockchain_helium_packet_v1:new_downlink(ReplyPayload,
-                                                                                                     erlang:system_time(millisecond) + 1000,
-                                                                                                     28, 911.6, <<"SF8BW500">>)),
+            Resp = blockchain_state_channel_response_v1:new(
+                true,
+                blockchain_helium_packet_v1:new_downlink(
+                    ReplyPayload,
+                    erlang:system_time(millisecond) + 1000,
+                    28,
+                    911.6,
+                    <<"SF8BW500">>
+                )
+            ),
             miner_fake_radio_backplane:get_next_packet(),
             blockchain_state_channel_handler:send_response(HandlerPid, Resp),
             ok;
@@ -238,7 +291,7 @@ basic(Config) ->
 default_routers(Config) ->
     Miners = ?config(miners, Config),
     RouterSwarm = ?config(swarm, Config),
-    [Owner| _Tail] = Miners,
+    [Owner | _Tail] = Miners,
     OwnerPubKeyBin = ct_rpc:call(Owner, blockchain_swarm, pubkey_bin, []),
 
     register(ct_sc_handler, self()),
@@ -252,22 +305,32 @@ default_routers(Config) ->
         {libp2p_framed_stream, server, [blockchain_state_channel_handler]}
     ),
 
-    lists:foreach(fun(Miner) ->
-                          ct_rpc:call(Miner, application, set_env, [miner, default_routers, [libp2p_crypto:pubkey_bin_to_p2p(RouterPubkey)]])
-                  end, Miners),
+    lists:foreach(
+        fun(Miner) ->
+            ct_rpc:call(Miner, application, set_env, [
+                miner,
+                default_routers,
+                [libp2p_crypto:pubkey_bin_to_p2p(RouterPubkey)]
+            ])
+        end,
+        Miners
+    ),
 
-    [RouterAddress|_] = libp2p_swarm:listen_addrs(RouterSwarm),
+    [RouterAddress | _] = libp2p_swarm:listen_addrs(RouterSwarm),
     OwnerSwarm = ct_rpc:call(Owner, blockchain_swarm, swarm, []),
     {ok, _} = ct_rpc:call(Owner, libp2p_swarm, connect, [OwnerSwarm, RouterAddress]),
 
-    DevEUI=rand:uniform(trunc(math:pow(2, 64))),
-    AppEUI=rand:uniform(trunc(math:pow(2, 64))),
+    DevEUI = rand:uniform(trunc(math:pow(2, 64))),
+    AppEUI = rand:uniform(trunc(math:pow(2, 64))),
 
     ct:pal("Owner is ~p", [Owner]),
     ct:pal("MARKER ~p", [{OwnerPubKeyBin, RouterPubkey}]),
     {ok, Pubkey, _SigFun, _ECDHFun} = ct_rpc:call(Owner, blockchain_swarm, keys, []),
 
-    Packet = <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big, 0:32/integer-unsigned-big>>,
+    Packet =
+        <<?JOIN_REQUEST:3, 0:5, AppEUI:64/integer-unsigned-little,
+            DevEUI:64/integer-unsigned-little, 1111:16/integer-unsigned-big,
+            0:32/integer-unsigned-big>>,
     miner_fake_radio_backplane:transmit(Packet, 911.200, 631210968910285823),
 
     ReplyPayload = crypto:strong_rand_bytes(12),
@@ -280,12 +343,21 @@ default_routers(Config) ->
             ?assert(blockchain_state_channel_packet_v1:validate(Thing)),
             ?assertEqual(PubKeyBin, blockchain_state_channel_packet_v1:hotspot(Thing)),
             HeliumPacket = blockchain_state_channel_packet_v1:packet(Thing),
-            ?assertEqual({eui, DevEUI, AppEUI}, blockchain_helium_packet_v1:routing_info(HeliumPacket)),
+            ?assertEqual(
+                {eui, DevEUI, AppEUI},
+                blockchain_helium_packet_v1:routing_info(HeliumPacket)
+            ),
             ?assertEqual(Packet, blockchain_helium_packet_v1:payload(HeliumPacket)),
-            Resp = blockchain_state_channel_response_v1:new(true,
-                                                            blockchain_helium_packet_v1:new_downlink(ReplyPayload,
-                                                                                                     erlang:system_time(millisecond) + 1000,
-                                                                                                     28, 911.6, <<"SF8BW500">>)),
+            Resp = blockchain_state_channel_response_v1:new(
+                true,
+                blockchain_helium_packet_v1:new_downlink(
+                    ReplyPayload,
+                    erlang:system_time(millisecond) + 1000,
+                    28,
+                    911.6,
+                    <<"SF8BW500">>
+                )
+            ),
             miner_fake_radio_backplane:get_next_packet(),
             blockchain_state_channel_handler:send_response(HandlerPid, Resp),
             ok;

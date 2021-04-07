@@ -7,28 +7,29 @@
 -include("miner_ct_macros.hrl").
 
 -export([
-         init_per_suite/1,
-         end_per_suite/1,
-         init_per_testcase/2,
-         end_per_testcase/2,
-         all/0
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -export([
-         single_payment_test/1,
-         self_payment_test/1,
-         bad_payment_test/1,
-         dependent_payment_test/1
-        ]).
+    single_payment_test/1,
+    self_payment_test/1,
+    bad_payment_test/1,
+    dependent_payment_test/1
+]).
 
 %% common test callbacks
 
-all() -> [
-          single_payment_test,
-          self_payment_test,
-          bad_payment_test,
-          dependent_payment_test
-         ].
+all() ->
+    [
+        single_payment_test,
+        self_payment_test,
+        bad_payment_test,
+        dependent_payment_test
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -39,49 +40,70 @@ end_per_suite(Config) ->
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     try
-    Miners = ?config(miners, Config),
-    Addresses = ?config(addresses, Config),
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
+        Miners = ?config(miners, Config),
+        Addresses = ?config(addresses, Config),
+        InitialPaymentTransactions = [
+            blockchain_txn_coinbase_v1:new(Addr, 5000)
+         || Addr <- Addresses
+        ],
+        AddGwTxns = [
+            blockchain_txn_gen_gateway_v1:new(
+                Addr,
+                Addr,
+                h3:from_geo({37.780586, -122.469470}, 13),
+                0
+            )
+         || Addr <- Addresses
+        ],
 
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
-    %% VarCommitInterval = ?config(var_commit_interval, Config),
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime = ?config(block_time, Config),
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
+        %% VarCommitInterval = ?config(var_commit_interval, Config),
 
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+        Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   %% rule out rewards
-                                                   ?election_interval => infinity,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve,
-                                                   ?allow_zero_amount => false}),
+        InitialVars = miner_ct_utils:make_vars(Keys, #{
+            ?block_time => BlockTime,
+            %% rule out rewards
+            ?election_interval => infinity,
+            ?num_consensus_members => NumConsensusMembers,
+            ?batch_size => BatchSize,
+            ?dkg_curve => Curve,
+            ?allow_zero_amount => false
+        }),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
-                                             Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+        DKGResults = miner_ct_utils:initial_dkg(
+            Miners,
+            InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+            Addresses,
+            NumConsensusMembers,
+            Curve
+        ),
+        true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+        %% Get both consensus and non consensus miners
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
+            hd(ConsensusMiners),
+            NonConsensusMiners
+        ),
 
-    %% confirm we have a height of 1
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
+        %% confirm we have a height of 1
+        ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
-    [   {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config]
+        [
+            {consensus_miners, ConsensusMiners},
+            {non_consensus_miners, NonConsensusMiners}
+            | Config
+        ]
     catch
         What:Why ->
             end_per_testcase(_TestCase, Config),
             erlang:What(Why)
     end.
-
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -173,7 +195,6 @@ self_payment_test(Config) ->
     5000 = miner_ct_utils:get_balance(Payer, PayerAddr),
     5000 = miner_ct_utils:get_balance(Payee, PayerAddr),
 
-
     %% send some helium tokens from payer to payee
     Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, 1]),
 
@@ -191,7 +212,6 @@ self_payment_test(Config) ->
     %% XXX: wait till the blockchain grows by 2 blocks
     %% assuming that the transaction makes it within 2 blocks
     miner_ct_utils:wait_for_gte(height, Miners, CurrentHeight + 2),
-
 
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
@@ -246,7 +266,6 @@ bad_payment_test(Config) ->
     %% assuming that the transaction makes it within 2 blocks
     miner_ct_utils:wait_for_gte(height, Miners, CurrentHeight + 2),
 
-
     PayerBalance = miner_ct_utils:get_balance(Payer, PayerAddr),
     PayeeBalance = miner_ct_utils:get_balance(Payee, PayeeAddr),
 
@@ -262,49 +281,76 @@ dependent_payment_test(Config) ->
     AddrList = ?config(tagged_miner_addresses, Config),
     Count = 50,
 
-    lists:foreach(fun(Miner) ->
-                        PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
-                        Payee = hd(miner_ct_utils:shuffle(Miners -- [Miner])),
-                        PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
-                        {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
-                        UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Nonce]) || Nonce <- lists:seq(1, Count) ],
-                        SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
-                        put(a_txn, {Miner, lists:last(SignedTxns)}),
-                        [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- lists:reverse(SignedTxns) ]
-                end, Miners),
-
+    lists:foreach(
+        fun(Miner) ->
+            PayerAddr = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+            Payee = hd(miner_ct_utils:shuffle(Miners -- [Miner])),
+            PayeeAddr = ct_rpc:call(Payee, blockchain_swarm, pubkey_bin, []),
+            {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+            UnsignedTxns = [
+                ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Nonce])
+             || Nonce <- lists:seq(1, Count)
+            ],
+            SignedTxns = [
+                ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun])
+             || Txn <- UnsignedTxns
+            ],
+            put(a_txn, {Miner, lists:last(SignedTxns)}),
+            [
+                ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn])
+             || SignedTxn <- lists:reverse(SignedTxns)
+            ]
+        end,
+        Miners
+    ),
 
     {AMiner, ATxn} = get(a_txn),
-    ct:pal("txn_mgr txn_status ~p ", [ct_rpc:call(AMiner, blockchain_txn_mgr, txn_status, [blockchain_txn:hash(ATxn)])]),
-    Result = miner_ct_utils:wait_until(fun() ->
-                                             HaveNoncesIncremented = lists:map(fun(Miner) ->
-                                                               Addr = miner_ct_utils:node2addr(Miner, AddrList),
-                                                               Nonce = miner_ct_utils:get_nonce(Miner, Addr),
-                                                               case Nonce == Count of
-                                                                   true ->
-                                                                       true;
-                                                                   false ->
-                                                                       TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
-                                                                       C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-                                                                       H = ct_rpc:call(Miner, blockchain, height, [C]),
-                                                                       ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [Miner, Nonce, maps:size(TxnList), H]),
-                                                                       false
-                                                               end
-                                                       end, Miners),
-                                             [true] == lists:usort(HaveNoncesIncremented)
-                                     end, 100, 5000),
+    ct:pal("txn_mgr txn_status ~p ", [
+        ct_rpc:call(AMiner, blockchain_txn_mgr, txn_status, [blockchain_txn:hash(ATxn)])
+    ]),
+    Result = miner_ct_utils:wait_until(
+        fun() ->
+            HaveNoncesIncremented = lists:map(
+                fun(Miner) ->
+                    Addr = miner_ct_utils:node2addr(Miner, AddrList),
+                    Nonce = miner_ct_utils:get_nonce(Miner, Addr),
+                    case Nonce == Count of
+                        true ->
+                            true;
+                        false ->
+                            TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                            C = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+                            H = ct_rpc:call(Miner, blockchain, height, [C]),
+                            ct:pal("nonce for ~p is ~p, ~p transactions in queue at height ~p", [
+                                Miner,
+                                Nonce,
+                                maps:size(TxnList),
+                                H
+                            ]),
+                            false
+                    end
+                end,
+                Miners
+            ),
+            [true] == lists:usort(HaveNoncesIncremented)
+        end,
+        100,
+        5000
+    ),
     case Result of
         true ->
             ok;
         false ->
-            lists:foreach(fun(Miner) ->
-                                  TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
-                                  ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)])
-                          end, Miners),
+            lists:foreach(
+                fun(Miner) ->
+                    TxnList = ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []),
+                    ct:pal("~p", [miner_ct_utils:format_txn_mgr_list(TxnList)])
+                end,
+                Miners
+            ),
             ct:fail("boom")
     end,
     ok.
-
 
 %% ------------------------------------------------------------------
 %% Local Helper functions

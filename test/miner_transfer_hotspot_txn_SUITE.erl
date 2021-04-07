@@ -9,26 +9,27 @@
 -define(TIMEOUT, 15000).
 
 -export([
-         init_per_suite/1,
-         end_per_suite/1,
-         init_per_testcase/2,
-         end_per_testcase/2,
-         all/0
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -export([
-         basic_test/1,
-         simple_replay_test/1,
-         refund_replay_test/1
-        ]).
+    basic_test/1,
+    simple_replay_test/1,
+    refund_replay_test/1
+]).
 
 %% common test callbacks
 
-all() -> [
-          basic_test,
-          simple_replay_test,
-          refund_replay_test
-         ].
+all() ->
+    [
+        basic_test,
+        simple_replay_test,
+        refund_replay_test
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -39,52 +40,72 @@ end_per_suite(Config) ->
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     try
-    [Seller | _ ] = Miners = ?config(miners, Config),
-    SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
-    Addresses = ?config(addresses, Config),
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, SellerAddr,
-                                                   h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
+        [Seller | _] = Miners = ?config(miners, Config),
+        SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
+        Addresses = ?config(addresses, Config),
+        InitialPaymentTransactions = [
+            blockchain_txn_coinbase_v1:new(Addr, 5000)
+         || Addr <- Addresses
+        ],
+        AddGwTxns = [
+            blockchain_txn_gen_gateway_v1:new(
+                Addr,
+                SellerAddr,
+                h3:from_geo({37.780586, -122.469470}, 13),
+                0
+            )
+         || Addr <- Addresses
+        ],
 
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
-    %% VarCommitInterval = ?config(var_commit_interval, Config),
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime = ?config(block_time, Config),
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
+        %% VarCommitInterval = ?config(var_commit_interval, Config),
 
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+        Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   %% rule out rewards
-                                                   ?election_interval => infinity,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve,
-                                                   ?max_payments => 10,
-                                                   ?transfer_hotspot_stale_poc_blocks => 100,
-                                                   ?allow_zero_amount => false}),
+        InitialVars = miner_ct_utils:make_vars(Keys, #{
+            ?block_time => BlockTime,
+            %% rule out rewards
+            ?election_interval => infinity,
+            ?num_consensus_members => NumConsensusMembers,
+            ?batch_size => BatchSize,
+            ?dkg_curve => Curve,
+            ?max_payments => 10,
+            ?transfer_hotspot_stale_poc_blocks => 100,
+            ?allow_zero_amount => false
+        }),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
-                                           Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+        DKGResults = miner_ct_utils:initial_dkg(
+            Miners,
+            InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+            Addresses,
+            NumConsensusMembers,
+            Curve
+        ),
+        true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+        %% Get both consensus and non consensus miners
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
+            hd(ConsensusMiners),
+            NonConsensusMiners
+        ),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
+        ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
-    [   {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config]
+        [
+            {consensus_miners, ConsensusMiners},
+            {non_consensus_miners, NonConsensusMiners}
+            | Config
+        ]
     catch
         What:Why ->
             end_per_testcase(_TestCase, Config),
             erlang:What(Why)
     end.
-
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -92,7 +113,7 @@ end_per_testcase(_TestCase, Config) ->
 basic_test(Config) ->
     Miners = ?config(miners, Config),
     [GwAddr | _] = ?config(addresses, Config),
-    [Seller, Buyer | _ ] = Miners,
+    [Seller, Buyer | _] = Miners,
     SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
     BuyerAddr = ct_rpc:call(Buyer, blockchain_swarm, pubkey_bin, []),
 
@@ -106,18 +127,30 @@ basic_test(Config) ->
     SellerAddr = miner_ct_utils:get_gw_owner(Seller, GwAddr),
 
     %% make transfer hotspot transaction
-    Txn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, new,
-                      [GwAddr, SellerAddr, BuyerAddr, 1, 1000]),
+    Txn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        new,
+        [GwAddr, SellerAddr, BuyerAddr, 1, 1000]
+    ),
 
     {ok, _, SellerSigFun, _} = ct_rpc:call(Seller, blockchain_swarm, keys, []),
-    {ok, _, BuyerSigFun , _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
+    {ok, _, BuyerSigFun, _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
 
-    SellerSignedTxn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, sign_seller,
-                                  [Txn, SellerSigFun]),
+    SellerSignedTxn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_seller,
+        [Txn, SellerSigFun]
+    ),
     ct:pal("SellerSignedTxn: ~p", [SellerSignedTxn]),
 
-    SignedTxn = ct_rpc:call(Buyer, blockchain_txn_transfer_hotspot_v1, sign_buyer,
-                                  [SellerSignedTxn, BuyerSigFun]),
+    SignedTxn = ct_rpc:call(
+        Buyer,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_buyer,
+        [SellerSignedTxn, BuyerSigFun]
+    ),
     ct:pal("SignedTxn: ~p", [SignedTxn]),
 
     ok = ct_rpc:call(Seller, blockchain_worker, submit_txn, [SignedTxn]),
@@ -126,7 +159,8 @@ basic_test(Config) ->
     %% wait until all the nodes agree the payment has happened
     %% NOTE: Fee is zero
     wait_until(
-      fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end),
+        fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end
+    ),
 
     %% ensure the buyer is the owner of the gateway
     miner_ct_utils:wait_until(fun() -> BuyerAddr == miner_ct_utils:get_gw_owner(Seller, GwAddr) end),
@@ -135,7 +169,7 @@ basic_test(Config) ->
 simple_replay_test(Config) ->
     Miners = ?config(miners, Config),
     [GwAddr | _] = ?config(addresses, Config),
-    [Seller, Buyer | _ ] = Miners,
+    [Seller, Buyer | _] = Miners,
     SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
     BuyerAddr = ct_rpc:call(Buyer, blockchain_swarm, pubkey_bin, []),
 
@@ -149,18 +183,30 @@ simple_replay_test(Config) ->
     SellerAddr = miner_ct_utils:get_gw_owner(Seller, GwAddr),
 
     %% make transfer hotspot transaction
-    Txn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, new,
-                      [GwAddr, SellerAddr, BuyerAddr, 1, 1000]),
+    Txn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        new,
+        [GwAddr, SellerAddr, BuyerAddr, 1, 1000]
+    ),
 
     {ok, _, SellerSigFun, _} = ct_rpc:call(Seller, blockchain_swarm, keys, []),
-    {ok, _, BuyerSigFun , _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
+    {ok, _, BuyerSigFun, _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
 
-    SellerSignedTxn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, sign_seller,
-                                  [Txn, SellerSigFun]),
+    SellerSignedTxn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_seller,
+        [Txn, SellerSigFun]
+    ),
     ct:pal("SellerSignedTxn: ~p", [SellerSignedTxn]),
 
-    SignedTxn = ct_rpc:call(Buyer, blockchain_txn_transfer_hotspot_v1, sign_buyer,
-                                  [SellerSignedTxn, BuyerSigFun]),
+    SignedTxn = ct_rpc:call(
+        Buyer,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_buyer,
+        [SellerSignedTxn, BuyerSigFun]
+    ),
     ct:pal("SignedTxn: ~p", [SignedTxn]),
 
     ok = ct_rpc:call(Seller, blockchain_worker, submit_txn, [SignedTxn]),
@@ -168,7 +214,8 @@ simple_replay_test(Config) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
 
     wait_until(
-      fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end),
+        fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end
+    ),
 
     %% ensure the buyer is the owner of the gateway
     wait_until(fun() -> BuyerAddr == miner_ct_utils:get_gw_owner(Seller, GwAddr) end),
@@ -191,7 +238,8 @@ simple_replay_test(Config) ->
 
     %% ensure this is unchanged
     wait_until(
-      fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end),
+        fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end
+    ),
     wait_until(fun() -> BuyerAddr == miner_ct_utils:get_gw_owner(Seller, GwAddr) end),
 
     ok.
@@ -199,7 +247,7 @@ simple_replay_test(Config) ->
 refund_replay_test(Config) ->
     Miners = ?config(miners, Config),
     [GwAddr | _] = ?config(addresses, Config),
-    [Seller, Buyer | _ ] = Miners,
+    [Seller, Buyer | _] = Miners,
     SellerAddr = ct_rpc:call(Seller, blockchain_swarm, pubkey_bin, []),
     BuyerAddr = ct_rpc:call(Buyer, blockchain_swarm, pubkey_bin, []),
 
@@ -213,17 +261,29 @@ refund_replay_test(Config) ->
     SellerAddr = miner_ct_utils:get_gw_owner(Seller, GwAddr),
 
     %% make transfer hotspot transaction
-    Txn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, new,
-                      [GwAddr, SellerAddr, BuyerAddr, 1, 1000]),
+    Txn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        new,
+        [GwAddr, SellerAddr, BuyerAddr, 1, 1000]
+    ),
 
     {ok, _, SellerSigFun, _} = ct_rpc:call(Seller, blockchain_swarm, keys, []),
-    {ok, _, BuyerSigFun , _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
+    {ok, _, BuyerSigFun, _} = ct_rpc:call(Buyer, blockchain_swarm, keys, []),
 
-    SellerSignedTxn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, sign_seller,
-                                  [Txn, SellerSigFun]),
+    SellerSignedTxn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_seller,
+        [Txn, SellerSigFun]
+    ),
 
-    SignedTxn = ct_rpc:call(Buyer, blockchain_txn_transfer_hotspot_v1, sign_buyer,
-                                  [SellerSignedTxn, BuyerSigFun]),
+    SignedTxn = ct_rpc:call(
+        Buyer,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_buyer,
+        [SellerSignedTxn, BuyerSigFun]
+    ),
 
     ok = ct_rpc:call(Seller, blockchain_worker, submit_txn, [SignedTxn]),
 
@@ -231,28 +291,41 @@ refund_replay_test(Config) ->
     %% wait until all the nodes agree the payment has happened
     %% NOTE: Fee is zero
     wait_until(
-      fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end),
+        fun() -> 6000 == miner_ct_utils:get_balance(Seller, SellerAddr) end
+    ),
 
     %% ensure the buyer is the owner of the gateway
     wait_until(fun() -> BuyerAddr == miner_ct_utils:get_gw_owner(Seller, GwAddr) end),
 
     %% send gw back to seller (maybe because RMA/refund)
-    RefundTxn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, new,
-                            [GwAddr, BuyerAddr, SellerAddr, 1, 1000]),
+    RefundTxn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        new,
+        [GwAddr, BuyerAddr, SellerAddr, 1, 1000]
+    ),
 
-    SignedRefundTxn0 = ct_rpc:call(Buyer, blockchain_txn_transfer_hotspot_v1, sign_seller,
-                                   [RefundTxn, BuyerSigFun]),
+    SignedRefundTxn0 = ct_rpc:call(
+        Buyer,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_seller,
+        [RefundTxn, BuyerSigFun]
+    ),
 
-
-    SignedRefundTxn = ct_rpc:call(Seller, blockchain_txn_transfer_hotspot_v1, sign_buyer,
-                                  [SignedRefundTxn0, SellerSigFun]),
+    SignedRefundTxn = ct_rpc:call(
+        Seller,
+        blockchain_txn_transfer_hotspot_v1,
+        sign_buyer,
+        [SignedRefundTxn0, SellerSigFun]
+    ),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10),
     ok = ct_rpc:call(Buyer, blockchain_worker, submit_txn, [SignedRefundTxn]),
 
     %% wait until all nodes agree to refund
     wait_until(
-      fun() -> 5000 == miner_ct_utils:get_balance(Seller, BuyerAddr) end),
+        fun() -> 5000 == miner_ct_utils:get_balance(Seller, BuyerAddr) end
+    ),
     wait_until(fun() -> SellerAddr == miner_ct_utils:get_gw_owner(Seller, GwAddr) end),
 
     %% now replay original transaction where the seller transfers to the buyer
@@ -273,7 +346,8 @@ refund_replay_test(Config) ->
 
     %% validate that state remains unchanged after replay attempt
     wait_until(
-      fun() -> 5000 == miner_ct_utils:get_balance(Buyer, BuyerAddr) end),
+        fun() -> 5000 == miner_ct_utils:get_balance(Buyer, BuyerAddr) end
+    ),
     SellerAddr = miner_ct_utils:get_gw_owner(Seller, GwAddr),
 
     ok.

@@ -1,38 +1,42 @@
-{application, miner,
- [{description, "Helium Miner OTP application"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, { miner_app, []}},
-  {applications,
-   [
-    kernel,
-    stdlib,
-    syntax_tools,
-    compiler,
-    crypto,
-    ssl,
-    lager,
-    ranch,
-    libp2p,
-    erl_base58,
-    dkg,
-    hbbft,
-    relcast, %% dialyzer needs this to build plt
-    clique, %% dialyzer needs this to build plt
-    ebus,
-    ecc508,
-    rand_compat, %% nat_upnp has a missing dep
-    inets, %% nat_upnp has a missing dep
-    xmerl,  %% nat_upnp has a missing dep
-    jsx,
-    kvc,
-    longfi
-   ]},
-  {included_applications, [blockchain]},
-  {env,[]},
-  {modules, []},
+{application, miner, [
+    {description, "Helium Miner OTP application"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {miner_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        syntax_tools,
+        compiler,
+        crypto,
+        ssl,
+        lager,
+        ranch,
+        libp2p,
+        erl_base58,
+        dkg,
+        hbbft,
+        %% dialyzer needs this to build plt
+        relcast,
+        %% dialyzer needs this to build plt
+        clique,
+        ebus,
+        ecc508,
+        %% nat_upnp has a missing dep
+        rand_compat,
+        %% nat_upnp has a missing dep
+        inets,
+        %% nat_upnp has a missing dep
+        xmerl,
+        jsx,
+        kvc,
+        longfi
+    ]},
+    {included_applications, [blockchain]},
+    {env, []},
+    {modules, []},
 
-  {maintainers, ["Helium"]},
-  {licenses, ["Apache 2.0"]},
-  {links, []}
- ]}.
+    {maintainers, ["Helium"]},
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.

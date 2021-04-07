@@ -1,4 +1,3 @@
-
 %% packet forwarder protocol
 -define(PROTOCOL_2, 2).
 -define(PUSH_DATA, 0).
@@ -15,5 +14,3 @@
 -define(UNCONFIRMED_DOWN, 2#011).
 -define(CONFIRMED_UP, 2#100).
 -define(CONFIRMED_DOWN, 2#101).
-
-

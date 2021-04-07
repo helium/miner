@@ -63,9 +63,18 @@ us915_dwell_time_test() ->
 
     %% None of the following cases are allowed because they all exceed
     %% maximum dwell time by 1.
-    ?assertEqual(false, miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 1, Ch1, HalfMax + 1)),
-    ?assertEqual(false, miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 2, Ch1, HalfMax + 1)),
-    ?assertEqual(false, miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 3, Ch1, HalfMax + 1)),
+    ?assertEqual(
+        false,
+        miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 1, Ch1, HalfMax + 1)
+    ),
+    ?assertEqual(
+        false,
+        miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 2, Ch1, HalfMax + 1)
+    ),
+    ?assertEqual(
+        false,
+        miner_lora_throttle:can_send(S2, T0 + Period - HalfMax - 3, Ch1, HalfMax + 1)
+    ),
 
     %% The following cases are all allowed because they all begin a full
     %% period of concern after the currently tracked transmissions.
@@ -101,7 +110,7 @@ eu868_duty_cycle_test() ->
     %% course of one hour. All should be accepted because 3599 * 10ms
     %% = 35.99s, or approx 0.9997 % duty-cycle.
     {S1, Now} = lists:foldl(
-        fun (N, {State, _T}) ->
+        fun(N, {State, _T}) ->
             Now = (N - 1) * 1000,
             ?assertEqual(true, miner_lora_throttle:can_send(State, Now, Ch0, Ten_ms)),
             {miner_lora_throttle:track_sent(State, Now, Ch0, Ten_ms), Now + 1000}

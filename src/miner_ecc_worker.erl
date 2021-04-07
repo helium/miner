@@ -1,20 +1,24 @@
 -module(miner_ecc_worker).
 -behavior(gen_server).
 
--export([sign/1,
-         ecdh/1,
-         get_pid/0]).
+-export([
+    sign/1,
+    ecdh/1,
+    get_pid/0
+]).
 
--export([start_link/1,
-         init/1,
-         handle_call/3,
-         handle_cast/2,
-         terminate/2]).
+-export([
+    start_link/1,
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    terminate/2
+]).
 
 -record(state, {
-                ecc_handle :: pid(),
-                key_slot :: non_neg_integer()
-               }).
+    ecc_handle :: pid(),
+    key_slot :: non_neg_integer()
+}).
 
 -define(SHORT_RETRY_WAIT, 10).
 -define(LONG_RETRY_WAIT, 150).
@@ -24,11 +28,11 @@
 %% all signing requests for the system
 -define(CALL_TIMEOUT, (?MAX_TXN_RETRIES * ?LONG_RETRY_WAIT) * 10).
 
--spec sign(binary()) -> {ok, Signature::binary()} | {error, term()}.
+-spec sign(binary()) -> {ok, Signature :: binary()} | {error, term()}.
 sign(Binary) ->
     gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
--spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed::binary()} | {error, term()}.
+-spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed :: binary()} | {error, term()}.
 ecdh({ecc_compact, PubKey}) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
@@ -38,36 +42,40 @@ get_pid() ->
 start_link(KeySlot) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [KeySlot], []).
 
-
 init([KeySlot]) ->
     {ok, ECCHandle} = ecc508:start_link(),
-    {ok, #state{ecc_handle=ECCHandle, key_slot=KeySlot}}.
+    {ok, #state{ecc_handle = ECCHandle, key_slot = KeySlot}}.
 
-
-handle_call({sign, Binary}, _From, State=#state{ecc_handle=Pid}) ->
-    Reply = txn(Pid, fun() ->
-                             ecc508:sign(Pid, State#state.key_slot, Binary)
-                     end, ?MAX_TXN_RETRIES),
+handle_call({sign, Binary}, _From, State = #state{ecc_handle = Pid}) ->
+    Reply = txn(
+        Pid,
+        fun() ->
+            ecc508:sign(Pid, State#state.key_slot, Binary)
+        end,
+        ?MAX_TXN_RETRIES
+    ),
     {reply, Reply, State};
-handle_call({ecdh, PubKey}, _From, State=#state{ecc_handle=Pid}) ->
-    Reply = txn(Pid, fun() ->
-                             ecc508:ecdh(Pid, State#state.key_slot, PubKey)
-                     end, ?MAX_TXN_RETRIES),
+handle_call({ecdh, PubKey}, _From, State = #state{ecc_handle = Pid}) ->
+    Reply = txn(
+        Pid,
+        fun() ->
+            ecc508:ecdh(Pid, State#state.key_slot, PubKey)
+        end,
+        ?MAX_TXN_RETRIES
+    ),
     {reply, Reply, State};
-handle_call(get_pid, _From, State=#state{ecc_handle=Pid}) ->
+handle_call(get_pid, _From, State = #state{ecc_handle = Pid}) ->
     {reply, {ok, Pid}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
 
-
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, State=#state{}) ->
+terminate(_Reason, State = #state{}) ->
     catch ecc508:stop(State#state.ecc_handle).
-
 
 txn(_Pid, _Fun, 0) ->
     {error, retries_exceeded};

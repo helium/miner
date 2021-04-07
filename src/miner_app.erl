@@ -15,7 +15,6 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-
     persistent_term:put(ospid, os:getpid()),
 
     GlobalOpts = application:get_env(rocksdb, global_opts, []),
@@ -23,9 +22,12 @@ start(_StartType, _StartArgs) ->
     {ok, BufferMgr} = rocksdb:new_write_buffer_manager(4 * 1024 * 1024, Cache),
     BBOpts = proplists:get_value(block_based_table_options, GlobalOpts, []),
     Opts1 = proplists:delete(block_based_table_options, GlobalOpts),
-    Opts = Opts1 ++ [{write_buffer_manager, BufferMgr},
-                     {block_based_table_options,
-                      BBOpts ++ [{block_cache, Cache}]}],
+    Opts =
+        Opts1 ++
+            [
+                {write_buffer_manager, BufferMgr},
+                {block_based_table_options, BBOpts ++ [{block_cache, Cache}]}
+            ],
     application:set_env(rocksdb, global_opts, Opts),
 
     BaseDir = application:get_env(blockchain, base_dir, "data"),
@@ -41,7 +43,8 @@ start(_StartType, _StartArgs) ->
         {ok, Pid} ->
             miner_cli_registry:register_cli(),
             {ok, Pid};
-        {error, Reason} -> {error, Reason}
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
