@@ -933,7 +933,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
            genesis_block_done, N, Curve, true, State).
 
-do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
+do_dkg(Addrs, Artifact, Sign, Done, N, _Curve, Create,
        State=#state{initial_height = Height,
                     delay = Delay,
                     current_dkgs = DKGs,

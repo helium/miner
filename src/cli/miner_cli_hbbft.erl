@@ -253,7 +253,7 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
                 {Input, Failures0} = lists:unzip(Input0),
                 Failures = lists:zip(ConsensusAddrs, Failures0),
                 Penalties =
-                    case Height > (Start + 2) of
+                    case End > (Start0 + 2) of
                         true ->
                             blockchain_election:adjust_old_group_v2(Input, Ledger);
                         false ->
