@@ -7,44 +7,45 @@
 -include("miner_ct_macros.hrl").
 
 -export([
-         init_per_suite/1,
-         end_per_suite/1,
-         init_per_testcase/2,
-         end_per_testcase/2,
-         all/0
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -export([
-         basic_test/1,
-         negative_test/1,
-         double_spend_test/1,
-         successive_test/1,
-         invalid_successive_test/1,
-         single_payer_test/1,
-         single_payer_invalid_test/1,
-         full_circle_test/1,
-         add_assert_test/1,
-         invalid_add_assert_test/1,
-         single_txn_bundle_test/1,
-         bundleception_test/1
-        ]).
+    basic_test/1,
+    negative_test/1,
+    double_spend_test/1,
+    successive_test/1,
+    invalid_successive_test/1,
+    single_payer_test/1,
+    single_payer_invalid_test/1,
+    full_circle_test/1,
+    add_assert_test/1,
+    invalid_add_assert_test/1,
+    single_txn_bundle_test/1,
+    bundleception_test/1
+]).
 
 %% common test callbacks
 
-all() -> [
-          basic_test,
-          negative_test,
-          double_spend_test,
-          successive_test,
-          invalid_successive_test,
-          single_payer_test,
-          single_payer_invalid_test,
-          full_circle_test,
-          add_assert_test,
-          invalid_add_assert_test,
-          single_txn_bundle_test,
-          bundleception_test
-         ].
+all() ->
+    [
+        basic_test,
+        negative_test,
+        double_spend_test,
+        successive_test,
+        invalid_successive_test,
+        single_payer_test,
+        single_payer_invalid_test,
+        full_circle_test,
+        add_assert_test,
+        invalid_add_assert_test,
+        single_txn_bundle_test,
+        bundleception_test
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -55,43 +56,61 @@ end_per_suite(Config) ->
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     try
-    Miners = ?config(miners, Config),
-    Addresses = ?config(addresses, Config),
-    Balance = 5000,
-    InitialCoinbaseTxns = [ blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
-    CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
-    NewConfig = [{rpc_timeout, timer:seconds(5)} | Config],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
+        Miners = ?config(miners, Config),
+        Addresses = ?config(addresses, Config),
+        Balance = 5000,
+        InitialCoinbaseTxns = [blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
+        CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addresses],
+        NewConfig = [{rpc_timeout, timer:seconds(5)} | Config],
+        AddGwTxns = [
+            blockchain_txn_gen_gateway_v1:new(
+                Addr,
+                Addr,
+                h3:from_geo({37.780586, -122.469470}, 13),
+                0
+            )
+         || Addr <- Addresses
+        ],
 
-    NumConsensusMembers= ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    %% Don't want an election to happen, messes up checking the balances later
-    Interval = 100,
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime = ?config(block_time, Config),
+        %% Don't want an election to happen, messes up checking the balances later
+        Interval = 100,
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
 
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+        Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   ?election_interval => Interval,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve}),
+        InitialVars = miner_ct_utils:make_vars(Keys, #{
+            ?block_time => BlockTime,
+            ?election_interval => Interval,
+            ?num_consensus_members => NumConsensusMembers,
+            ?batch_size => BatchSize,
+            ?dkg_curve => Curve
+        }),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns,
-                                    Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+        DKGResults = miner_ct_utils:initial_dkg(
+            Miners,
+            InitialVars ++ InitialCoinbaseTxns ++ CoinbaseDCTxns ++ AddGwTxns,
+            Addresses,
+            NumConsensusMembers,
+            Curve
+        ),
+        true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        %% Get both consensus and non consensus miners
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
 
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-    [
-        {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | NewConfig]
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
+            hd(ConsensusMiners),
+            NonConsensusMiners
+        ),
+        [
+            {consensus_miners, ConsensusMiners},
+            {non_consensus_miners, NonConsensusMiners}
+            | NewConfig
+        ]
     catch
         What:Why ->
             end_per_testcase(_TestCase, Config),
@@ -233,13 +252,23 @@ successive_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerBPubkeyBin,
+        5000,
+        1
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [
+        MinerBPubkeyBin,
+        MinerCPubkeyBin,
+        10000,
+        1
+    ]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
@@ -279,13 +308,23 @@ invalid_successive_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 4000, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerBPubkeyBin,
+        4000,
+        1
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [
+        MinerBPubkeyBin,
+        MinerCPubkeyBin,
+        10000,
+        1
+    ]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
@@ -324,13 +363,23 @@ single_payer_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerBPubkeyBin,
+        2000,
+        1
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 3000, 2]),
+    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerCPubkeyBin,
+        3000,
+        2
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToC, SigFunA]),
     ct:pal("SignedTxnAToC: ~p", [SignedTxnAToC]),
@@ -369,13 +418,23 @@ single_payer_invalid_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 2000, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerBPubkeyBin,
+        2000,
+        1
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerCPubkeyBin, 4000, 2]),
+    TxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerCPubkeyBin,
+        4000,
+        2
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToC = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToC, SigFunA]),
     ct:pal("SignedTxnAToC: ~p", [SignedTxnAToC]),
@@ -416,28 +475,46 @@ full_circle_test(Config) ->
     5000 = miner_ct_utils:get_balance(MinerC, MinerCPubkeyBin),
 
     %% Create first payment txn from A -> B
-    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [MinerAPubkeyBin, MinerBPubkeyBin, 5000, 1]),
+    TxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, new, [
+        MinerAPubkeyBin,
+        MinerBPubkeyBin,
+        5000,
+        1
+    ]),
     {ok, _PubkeyA, SigFunA, _ECDHFunA} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
     SignedTxnAToB = ct_rpc:call(MinerA, blockchain_txn_payment_v1, sign, [TxnAToB, SigFunA]),
     ct:pal("SignedTxnAToB: ~p", [SignedTxnAToB]),
 
     %% Create second payment txn from B -> C
-    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerBPubkeyBin, MinerCPubkeyBin, 10000, 1]),
+    TxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [
+        MinerBPubkeyBin,
+        MinerCPubkeyBin,
+        10000,
+        1
+    ]),
     {ok, _PubkeyB, SigFunB, _ECDHFunB} = ct_rpc:call(MinerB, blockchain_swarm, keys, []),
     SignedTxnBToC = ct_rpc:call(MinerB, blockchain_txn_payment_v1, sign, [TxnBToC, SigFunB]),
     ct:pal("SignedTxnBToC: ~p", [SignedTxnBToC]),
 
     %% Create third payment txn from C -> A
-    TxnCToA = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [MinerCPubkeyBin, MinerAPubkeyBin, 15000, 1]),
+    TxnCToA = ct_rpc:call(MinerB, blockchain_txn_payment_v1, new, [
+        MinerCPubkeyBin,
+        MinerAPubkeyBin,
+        15000,
+        1
+    ]),
     {ok, _PubkeyC, SigFunC, _ECDHFunC} = ct_rpc:call(MinerC, blockchain_swarm, keys, []),
     SignedTxnCToA = ct_rpc:call(MinerC, blockchain_txn_payment_v1, sign, [TxnCToA, SigFunC]),
     ct:pal("SignedTxnCToA: ~p", [SignedTxnCToA]),
 
     %% Create bundle with txns
-    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [[SignedTxnAToB,
-                                                                     SignedTxnBToC,
-                                                                     SignedTxnCToA
-                                                                    ]]),
+    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [
+        [
+            SignedTxnAToB,
+            SignedTxnBToC,
+            SignedTxnCToA
+        ]
+    ]),
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
@@ -461,24 +538,47 @@ add_assert_test(Config) ->
     [MinerA | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
 
-    {ok, _OwnerPubkey, OwnerSigFun, _OwnerECDHFun} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
+    {ok, _OwnerPubkey, OwnerSigFun, _OwnerECDHFun} = ct_rpc:call(
+        MinerA,
+        blockchain_swarm,
+        keys,
+        []
+    ),
 
     %% Create add_gateway txn
-    [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(1),
+    [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(
+        1
+    ),
     AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin),
     SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
-    SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
+    SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(
+        SignedOwnerAddGatewayTx,
+        GatewaySigFun
+    ),
     ct:pal("SignedAddGatewayTxn: ~p", [SignedAddGatewayTxn]),
 
     %% Create assert loc txn
     Index = 631210968910285823,
-    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1),
-    PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
-    SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
+    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(
+        GatewayPubkeyBin,
+        MinerAPubkeyBin,
+        Index,
+        1
+    ),
+    PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(
+        AssertLocationRequestTx,
+        GatewaySigFun
+    ),
+    SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(
+        PartialAssertLocationTxn,
+        OwnerSigFun
+    ),
     ct:pal("SignedAssertLocationTxn: ~p", [SignedAssertLocationTxn]),
 
     %% Create bundle with txns
-    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [[SignedAddGatewayTxn, SignedAssertLocationTxn]]),
+    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [
+        [SignedAddGatewayTxn, SignedAssertLocationTxn]
+    ]),
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
@@ -509,24 +609,47 @@ invalid_add_assert_test(Config) ->
     [MinerA | _Tail] = Miners,
     MinerAPubkeyBin = ct_rpc:call(MinerA, blockchain_swarm, pubkey_bin, []),
 
-    {ok, _OwnerPubkey, OwnerSigFun, _OwnerECDHFun} = ct_rpc:call(MinerA, blockchain_swarm, keys, []),
+    {ok, _OwnerPubkey, OwnerSigFun, _OwnerECDHFun} = ct_rpc:call(
+        MinerA,
+        blockchain_swarm,
+        keys,
+        []
+    ),
 
     %% Create add_gateway txn
-    [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(1),
+    [{GatewayPubkeyBin, {_GatewayPubkey, _GatewayPrivkey, GatewaySigFun}}] = miner_ct_utils:generate_keys(
+        1
+    ),
     AddGatewayTx = blockchain_txn_add_gateway_v1:new(MinerAPubkeyBin, GatewayPubkeyBin),
     SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
-    SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
+    SignedAddGatewayTxn = blockchain_txn_add_gateway_v1:sign_request(
+        SignedOwnerAddGatewayTx,
+        GatewaySigFun
+    ),
     ct:pal("SignedAddGatewayTxn: ~p", [SignedAddGatewayTxn]),
 
     %% Create assert loc txn
     Index = 631210968910285823,
-    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(GatewayPubkeyBin, MinerAPubkeyBin, Index, 1),
-    PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
-    SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
+    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(
+        GatewayPubkeyBin,
+        MinerAPubkeyBin,
+        Index,
+        1
+    ),
+    PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(
+        AssertLocationRequestTx,
+        GatewaySigFun
+    ),
+    SignedAssertLocationTxn = blockchain_txn_assert_location_v1:sign(
+        PartialAssertLocationTxn,
+        OwnerSigFun
+    ),
     ct:pal("SignedAssertLocationTxn: ~p", [SignedAssertLocationTxn]),
 
     %% Create bundle with txns in bad order
-    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [[SignedAssertLocationTxn, SignedAddGatewayTxn]]),
+    BundleTxn = ct_rpc:call(MinerA, blockchain_txn_bundle_v1, new, [
+        [SignedAssertLocationTxn, SignedAddGatewayTxn]
+    ]),
     ct:pal("BundleTxn: ~p", [BundleTxn]),
 
     %% Submit the bundle txn
@@ -623,7 +746,6 @@ bundleception_test(Config) ->
     ct:pal("BundleTxn2: ~p", [BundleTxn2]),
     %% --------------------------------------------------------------
 
-
     %% Do bundleception
     BundleInBundleTxn = ct_rpc:call(Payer, blockchain_txn_bundle_v1, new, [[BundleTxn1, BundleTxn2]]),
     ct:pal("BundleInBundleTxn: ~p", [BundleInBundleTxn]),
@@ -644,7 +766,3 @@ bundleception_test(Config) ->
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-
-
-

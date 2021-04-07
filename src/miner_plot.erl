@@ -4,13 +4,19 @@
 
 %% API
 -export([
-         start_link/0,
-         stop/0
-        ]).
+    start_link/0,
+    stop/0
+]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
@@ -26,24 +32,22 @@
 %% ideal HNT / s in bones
 -define(bones_per_sec, 192901234).
 
--record(stats,
-        {
-         times = [] :: [integer()],
-         tlens = [] :: [integer()],
-         last_rewards = 0 :: integer(),
-         delay = 0 :: integer()
-        }).
+-record(stats, {
+    times = [] :: [integer()],
+    tlens = [] :: [integer()],
+    last_rewards = 0 :: integer(),
+    delay = 0 :: integer()
+}).
 
--record(state,
-        {
-         chain :: undefined | blockchain:blockchain(),
-         stats :: undefined | #stats{},
-         height = 0 :: integer(),
-         %% before we merge this, get it from the env
-         start_block = 187000,
-         start_time :: undefined | pos_integer(),
-         fd :: undefined | file:io_device()
-        }).
+-record(state, {
+    chain :: undefined | blockchain:blockchain(),
+    stats :: undefined | #stats{},
+    height = 0 :: integer(),
+    %% before we merge this, get it from the env
+    start_block = 187000,
+    start_time :: undefined | pos_integer(),
+    fd :: undefined | file:io_device()
+}).
 
 %%%===================================================================
 %%% API
@@ -88,48 +92,57 @@ handle_info(timeout, _) ->
     Filename = application:get_env(miner, stats_file, "/tmp/miner-chain-stats"),
     {ok, File} = file:open(Filename, [write]),
     Infos =
-        [begin
-             {ok, B} = blockchain:get_block(H, Chain),
-             Time = blockchain_block:time(B),
-             Txns = blockchain_block:transactions(B),
-             Size = byte_size(blockchain_block:serialize(B)),
-             %% rewrite this eventually
-             {ok, BAgo} = blockchain:get_block(H - 100000, Chain),
-             TAgo = blockchain_block:time(BAgo),
+        [
+            begin
+                {ok, B} = blockchain:get_block(H, Chain),
+                Time = blockchain_block:time(B),
+                Txns = blockchain_block:transactions(B),
+                Size = byte_size(blockchain_block:serialize(B)),
+                %% rewrite this eventually
+                {ok, BAgo} = blockchain:get_block(H - 100000, Chain),
+                TAgo = blockchain_block:time(BAgo),
 
-             %% Txns = lists:filter(
-             %%          fun(T) ->
-             %%                  blockchain_txn:type(T) ==
-             %%                      blockchain_txn_poc_request_v1
-             %%          end, Txns0),
-             Epoch = blockchain_block_v1:election_info(B),
-             Avg = ((Time - TAgo) / 100000),
-             {Time, Txns, Epoch, H, Avg, Size, Interval}
-         end
-         || H <- lists:seq(Start, CurrHeight)],
+                %% Txns = lists:filter(
+                %%          fun(T) ->
+                %%                  blockchain_txn:type(T) ==
+                %%                      blockchain_txn_poc_request_v1
+                %%          end, Txns0),
+                Epoch = blockchain_block_v1:election_info(B),
+                Avg = ((Time - TAgo) / 100000),
+                {Time, Txns, Epoch, H, Avg, Size, Interval}
+            end
+         || H <- lists:seq(Start, CurrHeight)
+        ],
     %% calculate a moving average over the history of the blockchain
     %% eventually we might want to scan an existing file so we don't
     %% always have to recalculate this from the beginning.
     Stats =
         lists:foldl(
-          fun(Info, Acc) ->
-                  {Iolist, Acc1} = process_line(Info, Acc),
-                  file:write(File, Iolist),
-                  Acc1
-          end,
-          #stats{},
-          Infos),
+            fun(Info, Acc) ->
+                {Iolist, Acc1} = process_line(Info, Acc),
+                file:write(File, Iolist),
+                Acc1
+            end,
+            #stats{},
+            Infos
+        ),
     ok = blockchain_event:add_handler(self()),
-    {noreply, #state{chain = Chain,
-                     stats = Stats,
-                     height = CurrHeight,
-                     start_time = TAgo0,
-                     fd = File}};
-handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
-            #state{chain = Chain,
-                   height = CurrHeight,
-                   fd = File,
-                   stats = Stats} = State) ->
+    {noreply, #state{
+        chain = Chain,
+        stats = Stats,
+        height = CurrHeight,
+        start_time = TAgo0,
+        fd = File
+    }};
+handle_info(
+    {blockchain_event, {add_block, Hash, _, Ledger}},
+    #state{
+        chain = Chain,
+        height = CurrHeight,
+        fd = File,
+        stats = Stats
+    } = State
+) ->
     {ok, Interval} = blockchain:config(?election_interval, Ledger),
 
     case blockchain:get_block(Hash, Chain) of
@@ -143,13 +156,16 @@ handle_info({blockchain_event, {add_block, Hash, _, Ledger}},
                     Size = byte_size(blockchain_block:serialize(Block)),
                     Epoch = blockchain_block_v1:election_info(Block),
                     Avg = ((Time - TAgo) / 100000),
-                    {Iolist, Stats1} = process_line({Time, Txns, Epoch, Height,
-                                                     Avg, Size, Interval},
-                                                    Stats),
+                    {Iolist, Stats1} = process_line(
+                        {Time, Txns, Epoch, Height, Avg, Size, Interval},
+                        Stats
+                    ),
                     lager:debug("writing:~n ~s to dat file", [Iolist]),
                     file:write(File, Iolist),
-                    {noreply, State#state{height = Height,
-                                          stats = Stats1}};
+                    {noreply, State#state{
+                        height = Height,
+                        stats = Stats1
+                    }};
                 _ ->
                     {noreply, State}
             end;
@@ -198,13 +214,13 @@ truncate(New, List, Limit) ->
 
 avg_interval([_H]) ->
     ?minutes(2);
-avg_interval([H|T]) ->
+avg_interval([H | T]) ->
     Is = get_intervals(H, T, []),
     lists:sum(Is) div length(Is).
 
 median_interval([_H]) ->
     ?minutes(2);
-median_interval([H|T]) ->
+median_interval([H | T]) ->
     case lists:sort(get_intervals(H, T, [])) of
         [I] ->
             I;
@@ -215,16 +231,20 @@ median_interval([H|T]) ->
 
 get_intervals(_Prev, [], Acc) ->
     lists:reverse(Acc);
-get_intervals(Prev, [H|T], Acc) ->
+get_intervals(Prev, [H | T], Acc) ->
     Int = H - Prev,
     get_intervals(H, T, [Int | Acc]).
 
 process_line({0, _Txns, _Epoch, _Height, _Size, _Interval}, Acc) ->
     {[], Acc};
-process_line({Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
-             #stats{times = Times0,
-                    last_rewards = Last,
-                    tlens = TLens1}) ->
+process_line(
+    {Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
+    #stats{
+        times = Times0,
+        last_rewards = Last,
+        tlens = TLens1
+    }
+) ->
     TLen = length(Txns),
     TLens0 = TLens1 ++ [TLen],
     Times = truncate(Time, Times0, 24 * 60),
@@ -245,7 +265,7 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
     AvgTxns = lists:sum(TLens2) div length(TLens2),
 
     ConsensusDelay = extract_delay(Txns),
-    {HNTRatio, Last1}  =
+    {HNTRatio, Last1} =
         case ConsensusDelay of
             "" ->
                 {"", Last};
@@ -256,33 +276,52 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
                         Bones = get_bones(Rwds),
                         EpochSecs = Time - Last,
                         Ideal = ?bones_per_sec * EpochSecs,
-                        {integer_to_list(trunc( (Bones/Ideal) * 100 )),
-                         Time};
+                        {integer_to_list(trunc((Bones / Ideal) * 100)), Time};
                     _ ->
                         {"", Last}
                 end
         end,
 
-    {[integer_to_list(Time), "\t",
-      integer_to_list(Interval), "\t",
-      integer_to_list(TLen), "\t",
-      integer_to_list(Size div 1024), "\t",
-      integer_to_list(AvgInterval), "\t",
-      integer_to_list(MedInterval), "\t",
-      integer_to_list(AvgTxns), "\t",
-      integer_to_list(Height), "\t",
-      float_to_list(Height / Epoch), "\t",
-      integer_to_list(Delay), "\t",
-      float_to_list(Avg), "\t",
-      ConsensusDelay, "\t",
-      HNTRatio, "\n"],
-     #stats{times = Times, last_rewards = Last1, tlens = TLens}}.
+    {[
+            integer_to_list(Time),
+            "\t",
+            integer_to_list(Interval),
+            "\t",
+            integer_to_list(TLen),
+            "\t",
+            integer_to_list(Size div 1024),
+            "\t",
+            integer_to_list(AvgInterval),
+            "\t",
+            integer_to_list(MedInterval),
+            "\t",
+            integer_to_list(AvgTxns),
+            "\t",
+            integer_to_list(Height),
+            "\t",
+            float_to_list(Height / Epoch),
+            "\t",
+            integer_to_list(Delay),
+            "\t",
+            float_to_list(Avg),
+            "\t",
+            ConsensusDelay,
+            "\t",
+            HNTRatio,
+            "\n"
+        ],
+        #stats{times = Times, last_rewards = Last1, tlens = TLens}}.
 
 extract_delay(Txns) ->
-    case lists:filter(fun(T) ->
-                              %% TODO: ideally move to versionless types?
-                              blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                      end, Txns) of
+    case
+        lists:filter(
+            fun(T) ->
+                %% TODO: ideally move to versionless types?
+                blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+            end,
+            Txns
+        )
+    of
         [Txn] ->
             integer_to_list(blockchain_txn_consensus_group_v1:delay(Txn));
         _ ->
@@ -290,10 +329,15 @@ extract_delay(Txns) ->
     end.
 
 extract_rewards(Txns) ->
-    case lists:filter(fun(T) ->
-                              %% TODO: ideally move to versionless types?
-                              blockchain_txn:type(T) == blockchain_txn_rewards_v1
-                      end, Txns) of
+    case
+        lists:filter(
+            fun(T) ->
+                %% TODO: ideally move to versionless types?
+                blockchain_txn:type(T) == blockchain_txn_rewards_v1
+            end,
+            Txns
+        )
+    of
         [Txn] ->
             {ok, Txn};
         _ ->

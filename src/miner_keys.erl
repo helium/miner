@@ -2,14 +2,15 @@
 
 -export([key_config/0, keys/0, keys/1, print_keys/1]).
 
--type key_configuration() :: {ecc, proplists:proplist()} | {file, BaseDir::string()}.
+-type key_configuration() :: {ecc, proplists:proplist()} | {file, BaseDir :: string()}.
 
--type key_info() :: #{ pubkey => libp2p_crypto:pubkey(),
-                       key_slot => non_neg_integer() | undefined,
-                       ecdh_fun => libp2p_crypto:ecdh_fun(),
-                       sig_fun => libp2p_crypto:sig_fun(),
-                       onboarding_key => string() | undefined
-                     }.
+-type key_info() :: #{
+    pubkey => libp2p_crypto:pubkey(),
+    key_slot => non_neg_integer() | undefined,
+    ecdh_fun => libp2p_crypto:ecdh_fun(),
+    sig_fun => libp2p_crypto:sig_fun(),
+    onboarding_key => string() | undefined
+}.
 
 -export_type([key_info/0, key_configuration/0]).
 
@@ -17,14 +18,14 @@
 get_onboarding_filename() ->
     case application:get_env(blockchain, onboarding_dir) of
         undefined -> undefined;
-        {ok, OnboardingDir} ->
-            filename:join([OnboardingDir, "onboarding_key"])
+        {ok, OnboardingDir} -> filename:join([OnboardingDir, "onboarding_key"])
     end.
 
 -spec get_onboarding_key(string()) -> string() | undefined.
 get_onboarding_key(Default) ->
     case get_onboarding_filename() of
-        undefined -> Default;
+        undefined ->
+            Default;
         OnboardingKey ->
             case file:read_file(OnboardingKey) of
                 {ok, Bin} -> string:trim(binary_to_list(Bin));
@@ -51,35 +52,39 @@ keys({file, BaseDir}) ->
     case libp2p_crypto:load_keys(SwarmKey) of
         {ok, #{secret := PrivKey0, public := PubKey}} ->
             FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
-            #{ pubkey => PubKey,
-               key_slot => undefined,
-               ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
-               sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
-             };
+            #{
+                pubkey => PubKey,
+                key_slot => undefined,
+                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
+                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
+                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
+            };
         {error, enoent} ->
-            KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+            KeyMap =
+                #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
             ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
             FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
-            #{ pubkey => PubKey,
-               key_slot => undefined,
-               ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
-               sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
-               onboarding_key => get_onboarding_key(FallbackOnboardingKey)
-             }
+            #{
+                pubkey => PubKey,
+                key_slot => undefined,
+                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
+                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
+                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
+            }
     end;
 keys({ecc, Props}) when is_list(Props) ->
     KeySlot0 = proplists:get_value(key_slot, Props, 0),
     OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
-    {ok, ECCPid} = case whereis(miner_ecc_worker) of
-                       undefined ->
-                           %% Create a temporary ecc link to get the public key and
-                           %% onboarding keys for the given slots as well as the
-                           ecc508:start_link();
-                       _ECCWorker ->
-                           %% use the existing ECC pid
-                           miner_ecc_worker:get_pid()
-                   end,
+    {ok, ECCPid} =
+        case whereis(miner_ecc_worker) of
+            undefined ->
+                %% Create a temporary ecc link to get the public key and
+                %% onboarding keys for the given slots as well as the
+                ecc508:start_link();
+            _ECCWorker ->
+                %% use the existing ECC pid
+                miner_ecc_worker:get_pid()
+        end,
     {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
     {ok, OnboardingKey} =
         case get_public_key(ECCPid, OnboardingKeySlot) of
@@ -89,7 +94,8 @@ keys({ecc, Props}) when is_list(Props) ->
                 %% Key not present, this slot is (assumed to be) empty so use the public key
                 %% as the onboarding key
                 {ok, PubKey};
-            Other -> Other
+            Other ->
+                Other
         end,
     case whereis(miner_ecc_worker) of
         undefined ->
@@ -99,20 +105,21 @@ keys({ecc, Props}) when is_list(Props) ->
             ok
     end,
 
-    #{ pubkey => PubKey,
-       key_slot => KeySlot,
-       %% The signing and ecdh functions will use an actual
-       %% worker against a named process.
-       ecdh_fun => fun(PublicKey) ->
-                           {ok, Bin} = miner_ecc_worker:ecdh(PublicKey),
-                           Bin
-                   end,
-       sig_fun => fun(Bin) ->
-                          {ok, Sig} = miner_ecc_worker:sign(Bin),
-                          Sig
-                  end,
-       onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
-     }.
+    #{
+        pubkey => PubKey,
+        key_slot => KeySlot,
+        %% The signing and ecdh functions will use an actual
+        %% worker against a named process.
+        ecdh_fun => fun(PublicKey) ->
+            {ok, Bin} = miner_ecc_worker:ecdh(PublicKey),
+            Bin
+        end,
+        sig_fun => fun(Bin) ->
+            {ok, Sig} = miner_ecc_worker:sign(Bin),
+            Sig
+        end,
+        onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
+    }.
 
 -spec key_config() -> key_configuration().
 key_config() ->
@@ -127,15 +134,26 @@ key_config() ->
 %% gateway_config) to get read access to the public keys
 print_keys(_) ->
     #{
-       pubkey := PubKey,
-       onboarding_key := OnboardingKey
-     } = keys(),
-    MaybeB58 = fun(undefined) -> undefined;
-                  (Key) -> libp2p_crypto:pubkey_to_b58(Key)
-               end,
-    Props = [{pubkey, MaybeB58(PubKey)},
-             {onboarding_key, OnboardingKey}
-            ] ++ [ {animal_name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:pubkey_to_b58(PubKey)))} || PubKey /= undefined ],
+        pubkey := PubKey,
+        onboarding_key := OnboardingKey
+    } = keys(),
+    MaybeB58 = fun
+        (undefined) -> undefined;
+        (Key) -> libp2p_crypto:pubkey_to_b58(Key)
+    end,
+    Props =
+        [
+            {pubkey, MaybeB58(PubKey)},
+            {onboarding_key, OnboardingKey}
+        ] ++
+            [
+                {animal_name,
+                    element(
+                        2,
+                        erl_angry_purple_tiger:animal_name(libp2p_crypto:pubkey_to_b58(PubKey))
+                    )}
+             || PubKey /= undefined
+            ],
     lists:foreach(fun(Term) -> io:format("~tp.~n", [Term]) end, Props).
 
 %%

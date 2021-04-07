@@ -9,11 +9,13 @@
 
 -module(miner_query).
 
--export([poc_analyze/2,
-         txns/2, txns/3,
-         blocks/2,
-         lookup_txns_by_hash/2,
-         lookup_txns_by_type/2]).
+-export([
+    poc_analyze/2,
+    txns/2, txns/3,
+    blocks/2,
+    lookup_txns_by_hash/2,
+    lookup_txns_by_type/2
+]).
 
 poc_analyze(_Start, _End) ->
     ok.
@@ -30,29 +32,54 @@ txns(Start, End) ->
 
 blocks(Start, End) ->
     Chain = blockchain_worker:blockchain(),
-    [begin
-         {ok, B} = blockchain:get_block(N, Chain),
-         B
-     end
-     || N <- lists:seq(Start, End)].
+    [
+        begin
+            {ok, B} = blockchain:get_block(N, Chain),
+            B
+        end
+     || N <- lists:seq(Start, End)
+    ].
 
 lookup_txns_by_type(LastXBlocks, TxnType) ->
     C = blockchain_worker:blockchain(),
     {ok, Current} = blockchain:height(C),
     Range = lists:seq(Current - LastXBlocks, Current),
     Blocks = [{I, element(2, blockchain:get_block(I, C))} || I <- Range],
-    Txns = lists:map(fun({I, B}) -> Ts = blockchain_block:transactions(B), {I, Ts}  end, Blocks),
-    X = lists:map(fun({I, Ts}) -> {I, lists:filter(fun(T) ->
-                                                           blockchain_txn:type(T) == TxnType
-                                                   end, Ts)}  end, Txns),
-    lists:filter(fun({_I, List}) -> length(List) /= 0  end, X).
+    Txns = lists:map(
+        fun({I, B}) ->
+            Ts = blockchain_block:transactions(B),
+            {I, Ts}
+        end,
+        Blocks
+    ),
+    X = lists:map(
+        fun({I, Ts}) ->
+            {I,
+                lists:filter(
+                    fun(T) ->
+                        blockchain_txn:type(T) == TxnType
+                    end,
+                    Ts
+                )}
+        end,
+        Txns
+    ),
+    lists:filter(fun({_I, List}) -> length(List) /= 0 end, X).
 
 lookup_txns_by_hash(LastXBlocks, TxnHash) ->
     C = blockchain_worker:blockchain(),
     {ok, Current} = blockchain:height(C),
     Range = lists:seq(Current - LastXBlocks, Current),
     Blocks = [{I, element(2, blockchain:get_block(I, C))} || I <- Range],
-    Txns = lists:map(fun({I, B}) -> Ts = blockchain_block:transactions(B), {I, Ts}  end, Blocks),
-    X = lists:map(fun({I, Ts}) -> {I, lists:filter(fun(T) -> blockchain_txn:hash(T) == TxnHash
-                                                   end, Ts)}  end, Txns),
-    lists:filter(fun({_I, List}) -> length(List) /= 0  end, X).
+    Txns = lists:map(
+        fun({I, B}) ->
+            Ts = blockchain_block:transactions(B),
+            {I, Ts}
+        end,
+        Blocks
+    ),
+    X = lists:map(
+        fun({I, Ts}) -> {I, lists:filter(fun(T) -> blockchain_txn:hash(T) == TxnHash end, Ts)} end,
+        Txns
+    ),
+    lists:filter(fun({_I, List}) -> length(List) /= 0 end, X).

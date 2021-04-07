@@ -13,27 +13,27 @@
 %% ------------------------------------------------------------------
 
 -export([
-         server/4,
-         client/2,
-         version/0
-        ]).
+    server/4,
+    client/2,
+    version/0
+]).
 
 %% ------------------------------------------------------------------
 %% libp2p_framed_stream Function Exports
 %% ------------------------------------------------------------------
 -export([
-         init/3,
-         handle_data/3,
-         handle_info/3
-        ]).
+    init/3,
+    handle_data/3,
+    handle_info/3
+]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
 -record(state, {
-                endpoint :: pid() | undefined
-               }).
+    endpoint :: pid() | undefined
+}).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -52,20 +52,20 @@ version() ->
 %% libp2p_framed_stream Function Definitions
 %% ------------------------------------------------------------------
 
-init(server, _Conn, [_, Endpoint]=_Args) ->
+init(server, _Conn, [_, Endpoint] = _Args) ->
     lager:info("server started with ~p", [_Args]),
-    {ok, #state{endpoint=Endpoint}};
-init(client, _Conn, [Data]=_Args) ->
+    {ok, #state{endpoint = Endpoint}};
+init(client, _Conn, [Data] = _Args) ->
     lager:info("client started with ~p", [_Args]),
     {ok, #state{}, Data};
 init(_Type, _Conn, _Args) ->
     lager:error("~p started with ~p", [_Type, _Args]),
     {ok, #state{}}.
 
-handle_data(server, _Bin, #state{endpoint=undefined}=State) ->
+handle_data(server, _Bin, #state{endpoint = undefined} = State) ->
     lager:warning("server ignoring data ~p (cause no endpoint)", [_Bin]),
     {noreply, State};
-handle_data(server, Data, #state{endpoint=Endpoint}=State) ->
+handle_data(server, Data, #state{endpoint = Endpoint} = State) ->
     lager:info("got data ~p", [Data]),
     Endpoint ! {simple_http_stream_test, Data},
     {noreply, State};

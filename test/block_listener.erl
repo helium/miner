@@ -4,25 +4,30 @@
 
 %% API
 -export([
-         start_link/1,
-         register_txns/1,
-         register_listener/1,
-         stop/0
-        ]).
+    start_link/1,
+    register_txns/1,
+    register_listener/1,
+    stop/0
+]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -define(SERVER, ?MODULE).
 
--record(state,
-        {
-         remote,
-         regs = [],
-         height = 1,
-         listeners = []
-        }).
+-record(state, {
+    remote,
+    regs = [],
+    height = 1,
+    listeners = []
+}).
 
 %%%===================================================================
 %%% API
@@ -64,31 +69,37 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
-            #state{remote = RemoteNode,
-                   regs = Regs,
-                   height = Height,
-                   listeners = Listeners} = State) ->
+handle_info(
+    {blockchain_event, {add_block, Hash, _Sync, _Ledger}},
+    #state{
+        remote = RemoteNode,
+        regs = Regs,
+        height = Height,
+        listeners = Listeners
+    } = State
+) ->
     Height1 = Height + 1,
     Chain = ct_rpc:call(RemoteNode, blockchain_worker, blockchain, []),
     {ok, Block} = ct_rpc:call(RemoteNode, blockchain, get_block, [Hash, Chain]),
     Txns = blockchain_block:transactions(Block),
     lists:foreach(
-      fun(T) ->
-              lists:foreach(
+        fun(T) ->
+            lists:foreach(
                 fun(R) ->
-                        Type = blockchain_txn:type(T),
-                        %% ct:pal("got txn type ~p vs ~p", [Type, R]),
-                        case Type == R of
-                            true ->
-                                [L ! {Type, Height1, T} || L <- Listeners];
-                            _ ->
-                                ok
-                        end
+                    Type = blockchain_txn:type(T),
+                    %% ct:pal("got txn type ~p vs ~p", [Type, R]),
+                    case Type == R of
+                        true ->
+                            [L ! {Type, Height1, T} || L <- Listeners];
+                        _ ->
+                            ok
+                    end
                 end,
-                Regs)
-      end,
-      Txns),
+                Regs
+            )
+        end,
+        Txns
+    ),
     {noreply, State#state{height = Height1}};
 handle_info(_Info, State) ->
     lager:warning("unexpected message ~p", [_Info]),

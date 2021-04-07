@@ -6,22 +6,23 @@
 -include("miner_ct_macros.hrl").
 
 -export([
-         init_per_suite/1
-         ,end_per_suite/1
-         ,init_per_testcase/2
-         ,end_per_testcase/2
-         ,all/0
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -export([
-         initial_dkg_test/1
-        ]).
+    initial_dkg_test/1
+]).
 
 %% common test callbacks
 
-all() -> [
-          initial_dkg_test
-         ].
+all() ->
+    [
+        initial_dkg_test
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -46,14 +47,17 @@ initial_dkg_test(Config) ->
     NumConsensusMembers = ?config(num_consensus_members, Config),
     Curve = ?config(dkg_curve, Config),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialTransactions, Addresses,
-                                            NumConsensusMembers, Curve),
+    DKGResults = miner_ct_utils:initial_dkg(
+        Miners,
+        InitialTransactions,
+        Addresses,
+        NumConsensusMembers,
+        Curve
+    ),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
     {comment, DKGResults}.
 
-
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-

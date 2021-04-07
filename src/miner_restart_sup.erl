@@ -53,8 +53,8 @@ init([SigFun, ECDHFun]) ->
     %% Miner Options
 
     POCOpts = #{
-                base_dir => BaseDir
-               },
+        base_dir => BaseDir
+    },
 
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
@@ -70,8 +70,10 @@ init([SigFun, ECDHFun]) ->
                     sig_fun => SigFun,
                     region_override => RegionOverRide
                 },
-                [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts])];
+                [
+                    ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora, [OnionOpts])
+                ];
             _ ->
                 []
         end,
@@ -84,27 +86,26 @@ init([SigFun, ECDHFun]) ->
 
     ChildSpecs =
         [
-         ?WORKER(miner_hbbft_sidecar, []),
-         ?WORKER(miner, [])
-         ] ++
-        EbusServer ++
-        OnionServer ++
-        [?WORKER(miner_poc_statem, [POCOpts])],
+            ?WORKER(miner_hbbft_sidecar, []),
+            ?WORKER(miner, [])
+        ] ++
+            EbusServer ++
+            OnionServer ++
+            [?WORKER(miner_poc_statem, [POCOpts])],
     {ok, {SupFlags, ChildSpecs}}.
-
 
 %% check if the region is being supplied to us
 %% can be supplied either via the sys config or via an optional OS env var
 %% with sys config taking priority if both exist
 -spec check_for_region_override() -> atom().
-check_for_region_override()->
+check_for_region_override() ->
     check_for_region_override(application:get_env(miner, region_override, undefined)).
 
 -spec check_for_region_override(atom()) -> atom().
-check_for_region_override(undefined)->
+check_for_region_override(undefined) ->
     case os:getenv("REGION_OVERRIDE") of
         false -> undefined;
         Region -> list_to_atom(Region)
     end;
-check_for_region_override(SysConfigRegion)->
+check_for_region_override(SysConfigRegion) ->
     SysConfigRegion.

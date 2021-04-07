@@ -7,32 +7,32 @@
 -include("miner_ct_macros.hrl").
 
 -export([
-         init_per_suite/1,
-         end_per_suite/1,
-         init_per_testcase/2,
-         end_per_testcase/2,
-         all/0
-
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -compile([export_all]).
 
 %% common test callbacks
 
-all() -> [
-          restart_test,
-          dkg_restart_test,
-          election_test,
-          election_multi_test,
-          group_change_test,
-          master_key_test,
-          version_change_test,
-          election_v3_test,
-          %% this is an OK smoke test but doesn't hit every time, the
-          %% high test is more reliable
-          %% snapshot_test,
-          high_snapshot_test
-         ].
+all() ->
+    [
+        restart_test,
+        dkg_restart_test,
+        election_test,
+        election_multi_test,
+        group_change_test,
+        master_key_test,
+        version_change_test,
+        election_v3_test,
+        %% this is an OK smoke test but doesn't hit every time, the
+        %% high test is more reliable
+        %% snapshot_test,
+        high_snapshot_test
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -43,95 +43,122 @@ end_per_suite(Config) ->
 init_per_testcase(TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
     try
-    Miners = ?config(miners, Config),
-    Addresses = ?config(addresses, Config),
+        Miners = ?config(miners, Config),
+        Addresses = ?config(addresses, Config),
 
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = case TestCase of
-                    restart_test ->
-                        3000;
-                    _ ->
-                        ?config(block_time, Config)
-                end,
-    Interval = ?config(election_interval, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime =
+            case TestCase of
+                restart_test ->
+                    3000;
+                _ ->
+                    ?config(block_time, Config)
+            end,
+        Interval = ?config(election_interval, Config),
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
 
-    #{secret := Priv, public := Pub} = Keys =
-        libp2p_crypto:generate_keys(ecc_compact),
+        #{secret := Priv, public := Pub} =
+            Keys =
+            libp2p_crypto:generate_keys(ecc_compact),
 
-    Extras =
-        case TestCase of
-            dkg_restart_test ->
-                #{?election_interval => 10,
-                  ?election_restart_interval => 99};
-            T when T == snapshot_test;
-                   T == high_snapshot_test;
-                   T == group_change_test ->
-                #{?snapshot_version => 1,
-                  ?snapshot_interval => 5,
-                  ?election_bba_penalty => 0.01,
-                  ?election_seen_penalty => 0.05,
-                  ?election_version => 3};
-            election_v3_test ->
-                #{
-                  ?election_version => 2
-                 };
-            _ ->
-                #{}
-        end,
+        Extras =
+            case TestCase of
+                dkg_restart_test ->
+                    #{
+                        ?election_interval => 10,
+                        ?election_restart_interval => 99
+                    };
+                T when
+                    T == snapshot_test;
+                    T == high_snapshot_test;
+                    T == group_change_test
+                ->
+                    #{
+                        ?snapshot_version => 1,
+                        ?snapshot_interval => 5,
+                        ?election_bba_penalty => 0.01,
+                        ?election_seen_penalty => 0.05,
+                        ?election_version => 3
+                    };
+                election_v3_test ->
+                    #{
+                        ?election_version => 2
+                    };
+                _ ->
+                    #{}
+            end,
 
-    Vars = #{garbage_value => totes_garb,
-             ?block_time => max(1500, BlockTime),
-             ?election_interval => Interval,
-             ?num_consensus_members => NumConsensusMembers,
-             ?batch_size => BatchSize,
-             ?dkg_curve => Curve},
-    FinalVars = maps:merge(Vars, Extras),
-    ct:pal("final vars ~p", [FinalVars]),
+        Vars = #{
+            garbage_value => totes_garb,
+            ?block_time => max(1500, BlockTime),
+            ?election_interval => Interval,
+            ?num_consensus_members => NumConsensusMembers,
+            ?batch_size => BatchSize,
+            ?dkg_curve => Curve
+        },
+        FinalVars = maps:merge(Vars, Extras),
+        ct:pal("final vars ~p", [FinalVars]),
 
-    InitialVars =
-        case TestCase of
-            version_change_test ->
-                miner_ct_utils:make_vars(Keys, FinalVars, legacy);
-            _ ->
-                miner_ct_utils:make_vars(Keys, FinalVars)
-        end,
+        InitialVars =
+            case TestCase of
+                version_change_test ->
+                    miner_ct_utils:make_vars(Keys, FinalVars, legacy);
+                _ ->
+                    miner_ct_utils:make_vars(Keys, FinalVars)
+            end,
 
-    InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    Locations = lists:foldl(
-        fun(I, Acc) ->
-            [h3:from_geo({37.780586, -122.469470 + I/50}, 13)|Acc]
-        end,
-        [],
-        lists:seq(1, length(Addresses))
-    ),
-    InitGen = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- lists:zip(Addresses, Locations)],
-    Txns = InitialVars ++ InitialPayment ++ InitGen,
+        InitialPayment = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+        Locations = lists:foldl(
+            fun(I, Acc) ->
+                [h3:from_geo({37.780586, -122.469470 + I / 50}, 13) | Acc]
+            end,
+            [],
+            lists:seq(1, length(Addresses))
+        ),
+        InitGen = [
+            blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+         || {Addr, Loc} <- lists:zip(Addresses, Locations)
+        ],
+        Txns = InitialVars ++ InitialPayment ++ InitGen,
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+        DKGResults = miner_ct_utils:initial_dkg(
+            Miners,
+            Txns,
+            Addresses,
+            NumConsensusMembers,
+            Curve
+        ),
+        true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    timer:sleep(500),
-    %% Get both consensus and non consensus miners
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-                     length(NCMiners) == (length(Miners) - NumConsensusMembers)
-             end, 25, 200),
+        timer:sleep(500),
+        %% Get both consensus and non consensus miners
+        true = miner_ct_utils:wait_until(
+            fun() ->
+                {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+                length(NCMiners) == (length(Miners) - NumConsensusMembers)
+            end,
+            25,
+            200
+        ),
 
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-    ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
 
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
+            hd(ConsensusMiners),
+            NonConsensusMiners
+        ),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
+        ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
 
-    [   {master_key, {Priv, Pub}},
-        {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config]
+        [
+            {master_key, {Priv, Pub}},
+            {consensus_miners, ConsensusMiners},
+            {non_consensus_miners, NonConsensusMiners}
+            | Config
+        ]
     catch
         What:Why ->
             end_per_testcase(TestCase, Config),
@@ -140,8 +167,6 @@ init_per_testcase(TestCase, Config0) ->
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
-
-
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -152,10 +177,12 @@ restart_test(Config) ->
 
     Env = miner_ct_utils:stop_miners(lists:sublist(Miners, 1, 2)),
 
-    [begin
-          ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
-     end
-     || Miner <- lists:sublist(Miners, 3, 4)],
+    [
+        begin
+            ct_rpc:call(Miner, miner_consensus_mgr, cancel_dkg, [], 300)
+        end
+     || Miner <- lists:sublist(Miners, 3, 4)
+    ],
 
     %% just kill the consensus groups, we should be able to restore them
     ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{1,2}*", "/blockchain_swarm/groups/consensus_*"),
@@ -164,10 +191,9 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
-    Heights =  miner_ct_utils:heights(Miners),
+    Heights = miner_ct_utils:heights(Miners),
 
     {comment, Heights}.
-
 
 dkg_restart_test(Config) ->
     Miners = ?config(miners, Config),
@@ -176,7 +202,9 @@ dkg_restart_test(Config) ->
 
     %% stop the out of consensus miners and the last two consensus
     %% members.  this should keep the dkg from completing
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, any, 90), % wait up to 90s for epoch to or exceed 2
+
+    % wait up to 90s for epoch to or exceed 2
+    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, any, 90),
 
     Members = miner_ct_utils:consensus_members(2, Miners),
 
@@ -194,7 +222,13 @@ dkg_restart_test(Config) ->
     ct:pal("stopping nc ~p stoppers ~p", [NCMiners, Stoppers]),
 
     %% wait until we're sure that the election is running
-    ok = miner_ct_utils:wait_for_gte(height, lists:sublist(CMiners, 1, 4), Height + (Interval * 2), all, 180),
+    ok = miner_ct_utils:wait_for_gte(
+        height,
+        lists:sublist(CMiners, 1, 4),
+        Height + (Interval * 2),
+        all,
+        180
+    ),
 
     %% stop half of the remaining miners
     Restarters = lists:sublist(CMiners, 1, 2),
@@ -225,7 +259,8 @@ election_test(Config) ->
     Me = self(),
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
-    fun Loop(0) ->
+    fun
+        Loop(0) ->
             error(seen_timeout);
         Loop(N) ->
             receive
@@ -239,16 +274,19 @@ election_test(Config) ->
                         Height = miner_ct_utils:height(Miner),
                         {_, _, Epoch} = ct_rpc:call(Miner, miner_cli_info, get_info, [], 500),
                         ct:pal("not seen: ~p height ~p epoch ~p", [Not, Height, Epoch])
-                    catch _:_ ->
+                    catch
+                        _:_ ->
                             ct:pal("not seen: ~p ", [Not]),
                             ok
                     end,
                     timer:sleep(100),
                     Loop(N - 1)
             after timer:seconds(30) ->
-                    error(message_timeout)
+                error(message_timeout)
             end
-    end(60),
+    end(
+        60
+    ),
 
     %% we've seen all of the nodes, yay.  now make sure that more than
     %% one election can happen.
@@ -308,16 +346,20 @@ election_test(Config) ->
     GrpTxn = blockchain_txn_consensus_group_v1:new(NewGroup, <<>>, Height, 0),
 
     RescueBlock = blockchain_block_v1:rescue(
-                    #{prev_hash => Hash,
-                      height => NewHeight,
-                      transactions => [VarsTxn, GrpTxn],
-                      hbbft_round => NewHeight,
-                      time => erlang:system_time(seconds),
-                      election_epoch => ElectionEpoch + 1,
-                      epoch_start => NewHeight}),
+        #{
+            prev_hash => Hash,
+            height => NewHeight,
+            transactions => [VarsTxn, GrpTxn],
+            hbbft_round => NewHeight,
+            time => erlang:system_time(seconds),
+            election_epoch => ElectionEpoch + 1,
+            epoch_start => NewHeight
+        }
+    ),
 
     EncodedBlock = blockchain_block:serialize(
-                     blockchain_block_v1:set_signatures(RescueBlock, [])),
+        blockchain_block_v1:set_signatures(RescueBlock, [])
+    ),
 
     RescueSigFun = libp2p_crypto:mk_sig_fun(Priv),
 
@@ -334,7 +376,12 @@ election_test(Config) ->
     ct:pal("FirstNode Swarm: ~p", [Swarm]),
     N = length(Miners),
     ct:pal("N: ~p", [N]),
-    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain, self(), blockchain_swarm:tid()]),
+    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [
+        SignedBlock,
+        Chain,
+        self(),
+        blockchain_swarm:tid()
+    ]),
 
     %% wait until height has increased by 3
     ok = miner_ct_utils:wait_for_gte(height, Miners, NewHeight + 2),
@@ -380,10 +427,14 @@ election_multi_test(Config) ->
     BinPub5 = libp2p_crypto:pubkey_to_bin(Pub5),
 
     Txn7_0 = blockchain_txn_vars_v1:new(
-               #{?use_multi_keys => true}, 2,
-               #{multi_keys => [BinPub1, BinPub2, BinPub3, BinPub4, BinPub5]}),
-    Proofs7 = [blockchain_txn_vars_v1:create_proof(P, Txn7_0)
-               || P <- [Priv1, Priv2, Priv3, Priv4, Priv5]],
+        #{?use_multi_keys => true},
+        2,
+        #{multi_keys => [BinPub1, BinPub2, BinPub3, BinPub4, BinPub5]}
+    ),
+    Proofs7 = [
+        blockchain_txn_vars_v1:create_proof(P, Txn7_0)
+     || P <- [Priv1, Priv2, Priv3, Priv4, Priv5]
+    ],
     Txn7_1 = blockchain_txn_vars_v1:multi_key_proofs(Txn7_0, Proofs7),
     Proof7 = blockchain_txn_vars_v1:create_proof(Priv, Txn7_1),
     Txn7 = blockchain_txn_vars_v1:proof(Txn7_1, Proof7),
@@ -408,20 +459,28 @@ election_multi_test(Config) ->
     miner_ct_utils:start_miners(Stop),
 
     NewAddrs =
-        [begin
-             Swarm = ct_rpc:call(Target, blockchain_swarm, swarm, [], 2000),
-             [H|_] = LAs= ct_rpc:call(Target, libp2p_swarm, listen_addrs, [Swarm], 2000),
-             ct:pal("addrs ~p ~p", [Target, LAs]),
-             H
-         end || Target <- TargetMiners],
+        [
+            begin
+                Swarm = ct_rpc:call(Target, blockchain_swarm, swarm, [], 2000),
+                [H | _] = LAs = ct_rpc:call(Target, libp2p_swarm, listen_addrs, [Swarm], 2000),
+                ct:pal("addrs ~p ~p", [Target, LAs]),
+                H
+            end
+         || Target <- TargetMiners
+        ],
 
     miner_ct_utils:pmap(
-      fun(M) ->
-              [begin
-                   Sw = ct_rpc:call(M, blockchain_swarm, swarm, [], 2000),
-                   ct_rpc:call(M, libp2p_swarm, connect, [Sw, Addr], 2000)
-               end || Addr <- NewAddrs]
-      end, Miners),
+        fun(M) ->
+            [
+                begin
+                    Sw = ct_rpc:call(M, blockchain_swarm, swarm, [], 2000),
+                    ct_rpc:call(M, libp2p_swarm, connect, [Sw, Addr], 2000)
+                end
+             || Addr <- NewAddrs
+            ]
+        end,
+        Miners
+    ),
 
     %% second: make sure we're not making blocks anymore
     HChain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
@@ -437,11 +496,15 @@ election_multi_test(Config) ->
 
     {NewHeight, HighBlock} =
         lists:max(
-          [begin
-               C = ct_rpc:call(M, blockchain_worker, blockchain, []),
-               {ok, HB} = ct_rpc:call(M, blockchain, head_block, [C]),
-               {blockchain_block:height(HB) + 1, HB}
-           end || M <- Miners]),
+            [
+                begin
+                    C = ct_rpc:call(M, blockchain_worker, blockchain, []),
+                    {ok, HB} = ct_rpc:call(M, blockchain, head_block, [C]),
+                    {blockchain_block:height(HB) + 1, HB}
+                end
+             || M <- Miners
+            ]
+        ),
     ct:pal("new height is ~p", [NewHeight]),
 
     Hash2 = blockchain_block:hash_block(HighBlock),
@@ -450,24 +513,30 @@ election_multi_test(Config) ->
 
     RescueBlock2 =
         blockchain_block_v1:rescue(
-                    #{prev_hash => Hash2,
-                      height => NewHeight,
-                      transactions => [GrpTxn2],
-                      hbbft_round => NewHeight,
-                      time => erlang:system_time(seconds),
-                      election_epoch => ElectionEpoch1 + 1,
-                      epoch_start => NewHeight}),
+            #{
+                prev_hash => Hash2,
+                height => NewHeight,
+                transactions => [GrpTxn2],
+                hbbft_round => NewHeight,
+                time => erlang:system_time(seconds),
+                election_epoch => ElectionEpoch1 + 1,
+                epoch_start => NewHeight
+            }
+        ),
 
     EncodedBlock2 = blockchain_block:serialize(
-                      blockchain_block_v1:set_signatures(RescueBlock2, [])),
+        blockchain_block_v1:set_signatures(RescueBlock2, [])
+    ),
 
     RescueSigs =
-        [begin
-             RescueSigFun2 = libp2p_crypto:mk_sig_fun(P),
+        [
+            begin
+                RescueSigFun2 = libp2p_crypto:mk_sig_fun(P),
 
-             RescueSigFun2(EncodedBlock2)
-         end
-         || P <- [Priv1, Priv2, Priv3, Priv4, Priv5]],
+                RescueSigFun2(EncodedBlock2)
+            end
+         || P <- [Priv1, Priv2, Priv3, Priv4, Priv5]
+        ],
 
     SignedBlock = blockchain_block_v1:set_signatures(RescueBlock2, [], RescueSigs),
 
@@ -479,18 +548,31 @@ election_multi_test(Config) ->
     Chain2 = ct_rpc:call(SecondNode, blockchain_worker, blockchain, []),
     N = length(Miners),
     ct:pal("first node ~p second ~pN: ~p", [FirstNode, SecondNode, N]),
-    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain1, self(), blockchain_swarm:tid()]),
-    ok = ct_rpc:call(SecondNode, blockchain_gossip_handler, add_block, [SignedBlock, Chain2, self(), blockchain_swarm:tid()]),
+    ok = ct_rpc:call(FirstNode, blockchain_gossip_handler, add_block, [
+        SignedBlock,
+        Chain1,
+        self(),
+        blockchain_swarm:tid()
+    ]),
+    ok = ct_rpc:call(SecondNode, blockchain_gossip_handler, add_block, [
+        SignedBlock,
+        Chain2,
+        self(),
+        blockchain_swarm:tid()
+    ]),
 
     %% wait until height has increased
     case miner_ct_utils:wait_for_gte(height, Miners, NewHeight + 3, any, 30) of
-        ok -> ok;
+        ok ->
+            ok;
         _ ->
-            [begin
-                 Status = ct_rpc:call(M, miner, hbbft_status, []),
-                 ct:pal("miner ~p, status: ~p", [M, Status])
-             end
-             || M <- Miners],
+            [
+                begin
+                    Status = ct_rpc:call(M, miner, hbbft_status, []),
+                    ct:pal("miner ~p, status: ~p", [M, Status])
+                end
+             || M <- Miners
+            ],
             error(rescue_group_made_no_progress)
     end.
 
@@ -510,20 +592,27 @@ group_change_test(Config) ->
 
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger1 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain1]),
-    ?assertEqual({ok, totes_garb}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger1])),
+    ?assertEqual(
+        {ok, totes_garb},
+        ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger1])
+    ),
 
     Vars = #{num_consensus_members => 7},
 
     {Priv, _Pub} = ?config(master_key, Config),
 
-    Txn = blockchain_txn_vars_v1:new(Vars, 2, #{version_predicate => 2,
-                                                unsets => [garbage_value]}),
+    Txn = blockchain_txn_vars_v1:new(Vars, 2, #{
+        version_predicate => 2,
+        unsets => [garbage_value]
+    }),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
     Txn1 = blockchain_txn_vars_v1:proof(Txn, Proof),
 
     %% wait for it to take effect
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
+     || Miner <- Miners
+    ],
 
     HChain = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height} = ct_rpc:call(hd(Miners), blockchain, height, [HChain]),
@@ -550,38 +639,51 @@ group_change_test(Config) ->
 
     %% alter the "version" for all of them that are up.
     lists:foreach(
-      fun(Miner) ->
-              ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)]) %% make sure we're exercising the summing
-      end, Miners1),
+        fun(Miner) ->
+            %% make sure we're exercising the summing
+            ct_rpc:call(Miner, miner, inc_tv, [rand:uniform(4)])
+        end,
+        Miners1
+    ),
 
     true = miner_ct_utils:wait_until(
-             fun() ->
-                     lists:all(
-                       fun(Miner) ->
-                               NewVersion = ct_rpc:call(Miner, miner, test_version, [], 1000),
-                               ct:pal("test version ~p ~p", [Miner, NewVersion]),
-                               NewVersion > 1
-                       end, Miners1)
-             end),
+        fun() ->
+            lists:all(
+                fun(Miner) ->
+                    NewVersion = ct_rpc:call(Miner, miner, test_version, [], 1000),
+                    ct:pal("test version ~p ~p", [Miner, NewVersion]),
+                    NewVersion > 1
+                end,
+                Miners1
+            )
+        end
+    ),
 
     %% wait for the change to take effect
     Timeout = 200,
     true = miner_ct_utils:wait_until(
-             fun() ->
-                     lists:all(
-                       fun(Miner) ->
-                               C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
-                               L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
-                               case ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout) of
-                                   {ok, Sz} ->
-                                       ct:pal("size = ~p", [Sz]),
-                                       Sz == 7;
-                                   _ ->
-                                       %% badrpc
-                                       false
-                               end
-                       end, Miners1)
-             end, 120, 1000),
+        fun() ->
+            lists:all(
+                fun(Miner) ->
+                    C1 = ct_rpc:call(Miner, blockchain_worker, blockchain, [], Timeout),
+                    L1 = ct_rpc:call(Miner, blockchain, ledger, [C1], Timeout),
+                    case
+                        ct_rpc:call(Miner, blockchain, config, [num_consensus_members, L1], Timeout)
+                    of
+                        {ok, Sz} ->
+                            ct:pal("size = ~p", [Sz]),
+                            Sz == 7;
+                        _ ->
+                            %% badrpc
+                            false
+                    end
+                end,
+                Miners1
+            )
+        end,
+        120,
+        1000
+    ),
 
     ok = miner_ct_utils:delete_dirs(BaseDir ++ "_*{8}*/*", ""),
     [EightDir] = filelib:wildcard(BaseDir ++ "_*{8}*"),
@@ -596,8 +698,13 @@ group_change_test(Config) ->
     %% clean out everything from the stopped node
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = [
+        {blessed_snapshot_block_hash, SnapshotHash},
+        {blessed_snapshot_block_height, SnapshotBlockHeight},
+        {quick_sync_mode, blessed_snapshot},
+        {honor_quick_sync, true}
+        | BlockchainEnv
+    ],
 
     MinerEnv = proplists:get_value(miner, TargetEnv),
     NewMinerEnv = [{update_dir, EightDir ++ "/update"} | MinerEnv],
@@ -609,17 +716,22 @@ group_change_test(Config) ->
     miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
 
     Swarm = ct_rpc:call(Target, blockchain_swarm, swarm, [], 2000),
-    [H|_] = ct_rpc:call(Target, libp2p_swarm, listen_addrs, [Swarm], 2000),
+    [H | _] = ct_rpc:call(Target, libp2p_swarm, listen_addrs, [Swarm], 2000),
 
     miner_ct_utils:pmap(
-      fun(M) ->
-              Sw = ct_rpc:call(M, blockchain_swarm, swarm, [], 2000),
-              ct_rpc:call(M, libp2p_swarm, connect, [Sw, H], 2000)
-      end, Miners1),
+        fun(M) ->
+            Sw = ct_rpc:call(M, blockchain_swarm, swarm, [], 2000),
+            ct_rpc:call(M, libp2p_swarm, connect, [Sw, H], 2000)
+        end,
+        Miners1
+    ),
 
     Blockchain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     Ledger2 = ct_rpc:call(hd(Miners), blockchain, ledger, [Blockchain2]),
-    ?assertEqual({error, not_found}, ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger2])),
+    ?assertEqual(
+        {error, not_found},
+        ct_rpc:call(hd(Miners), blockchain, config, [garbage_value, Ledger2])
+    ),
 
     HChain2 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {ok, Height2} = ct_rpc:call(hd(Miners), blockchain, height, [HChain2]),
@@ -677,8 +789,10 @@ master_key_test(Config) ->
     %% good master key
 
     Txn2_2 = blockchain_txn_vars_v1:key_proof(Txn2_1, KeyProof2),
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
+     || Miner <- Miners
+    ],
 
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
@@ -689,8 +803,10 @@ master_key_test(Config) ->
     Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Txn4_0),
     Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
+     || Miner <- Miners
+    ],
 
     false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_too_garb, 10),
 
@@ -701,8 +817,10 @@ master_key_test(Config) ->
     Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Txn5_0),
     Txn5_1 = blockchain_txn_vars_v1:proof(Txn5_0, Proof5),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
+     || Miner <- Miners
+    ],
 
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_always_win),
 
@@ -725,17 +843,26 @@ master_key_test(Config) ->
     BinPub7 = libp2p_crypto:pubkey_to_bin(Pub7),
 
     Txn7_0 = blockchain_txn_vars_v1:new(
-               #{garbage_value => goat_jokes_are_so_single_key}, 6,
-               #{multi_keys => [BinPub2, BinPub3, BinPub4, BinPub5, BinPub6]}),
-    Proofs7 = [blockchain_txn_vars_v1:create_proof(P, Txn7_0)
-               %% shuffle the proofs to make sure we no longer need
-               %% them in the correct order
-               || P <- miner_ct_utils:shuffle([Priv2, Priv3, Priv4, Priv5, Priv6])],
+        #{garbage_value => goat_jokes_are_so_single_key},
+        6,
+        #{multi_keys => [BinPub2, BinPub3, BinPub4, BinPub5, BinPub6]}
+    ),
+    Proofs7 = [
+        blockchain_txn_vars_v1:create_proof(P, Txn7_0)
+     || %% shuffle the proofs to make sure we no longer need
+
+        %% them in the correct order
+        P <- miner_ct_utils:shuffle([Priv2, Priv3, Priv4, Priv5, Priv6])
+    ],
     Txn7_1 = blockchain_txn_vars_v1:multi_key_proofs(Txn7_0, Proofs7),
     Proof7 = blockchain_txn_vars_v1:create_proof(Priv2, Txn7_1),
     Txn7 = blockchain_txn_vars_v1:proof(Txn7_1, Proof7),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn7]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goat_jokes_are_so_single_key),
+    ok = miner_ct_utils:wait_for_chain_var_update(
+        Miners,
+        garbage_value,
+        goat_jokes_are_so_single_key
+    ),
 
     %% try with only three keys (and succeed)
     ct:pal("submitting 8"),
@@ -753,8 +880,10 @@ master_key_test(Config) ->
 
     %% try with two valid and one corrupted key proof (and fail again)
     Txn10_0 = blockchain_txn_vars_v1:new(#{garbage_value => cmon}, 8),
-    Proofs10_0 = [blockchain_txn_vars_v1:create_proof(P, Txn10_0)
-                || P <- [Priv2, Priv3, Priv4]],
+    Proofs10_0 = [
+        blockchain_txn_vars_v1:create_proof(P, Txn10_0)
+     || P <- [Priv2, Priv3, Priv4]
+    ],
     [Proof10 | Rem] = Proofs10_0,
     Proof10Corrupted = <<Proof10/binary, "asdasdasdas">>,
     Txn10 = blockchain_txn_vars_v1:multi_proofs(Txn10_0, [Proof10Corrupted | Rem]),
@@ -768,33 +897,58 @@ master_key_test(Config) ->
     %% make sure that we safely ignore bad proofs and keys
     #{secret := Priv8, public := _Pub8} = libp2p_crypto:generate_keys(ecc_compact),
 
-    Txn11a = mvars(#{garbage_value => sheep_are_inherently_unfunny}, 8,
-                   [Priv2, Priv3, Priv4, Priv5, Priv6, Priv8]),
+    Txn11a = mvars(
+        #{garbage_value => sheep_are_inherently_unfunny},
+        8,
+        [Priv2, Priv3, Priv4, Priv5, Priv6, Priv8]
+    ),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn11a]) || M <- Miners],
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, sheep_are_inherently_unfunny, 10),
+    false = miner_ct_utils:wait_for_chain_var_update(
+        Miners,
+        garbage_value,
+        sheep_are_inherently_unfunny,
+        10
+    ),
 
-    Txn11b = mvars(#{garbage_value => sheep_are_inherently_unfunny}, 8,
-                   [Priv2, Priv3, Priv5, Priv6, Priv8]),
+    Txn11b = mvars(
+        #{garbage_value => sheep_are_inherently_unfunny},
+        8,
+        [Priv2, Priv3, Priv5, Priv6, Priv8]
+    ),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn11b]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, sheep_are_inherently_unfunny),
+    ok = miner_ct_utils:wait_for_chain_var_update(
+        Miners,
+        garbage_value,
+        sheep_are_inherently_unfunny
+    ),
 
     Txn12_0 = blockchain_txn_vars_v1:new(
-                #{garbage_value => so_true}, 9,
-                #{multi_keys => [BinPub3, BinPub4, BinPub5, BinPub6, BinPub7]}),
-    Proofs12 = [blockchain_txn_vars_v1:create_proof(P, Txn12_0)
-                %% shuffle the proofs to make sure we no longer need
-                %% them in the correct order
-                || P <- miner_ct_utils:shuffle([Priv7])],
+        #{garbage_value => so_true},
+        9,
+        #{multi_keys => [BinPub3, BinPub4, BinPub5, BinPub6, BinPub7]}
+    ),
+    Proofs12 = [
+        blockchain_txn_vars_v1:create_proof(P, Txn12_0)
+     || %% shuffle the proofs to make sure we no longer need
+
+        %% them in the correct order
+        P <- miner_ct_utils:shuffle([Priv7])
+    ],
     Txn12_1 = blockchain_txn_vars_v1:multi_key_proofs(Txn12_0, Proofs12),
-    Proofs = [blockchain_txn_vars_v1:create_proof(P, Txn12_1)
-               || P <- [Priv3, Priv4, Priv5]],
+    Proofs = [
+        blockchain_txn_vars_v1:create_proof(P, Txn12_1)
+     || P <- [Priv3, Priv4, Priv5]
+    ],
     Txn12 = blockchain_txn_vars_v1:multi_proofs(Txn12_1, Proofs),
 
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn12]) || M <- Miners],
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, so_true),
 
-    Txn13 = mvars(#{garbage_value => lets_all_hate_on_sheep}, 10,
-                  [Priv5, Priv6, Priv7]),
+    Txn13 = mvars(
+        #{garbage_value => lets_all_hate_on_sheep},
+        10,
+        [Priv5, Priv6, Priv7]
+    ),
     _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn13]) || M <- Miners],
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, lets_all_hate_on_sheep),
 
@@ -802,8 +956,10 @@ master_key_test(Config) ->
 
 mvars(Map, Nonce, Privs) ->
     Txn0 = blockchain_txn_vars_v1:new(Map, Nonce),
-    Proofs = [blockchain_txn_vars_v1:create_proof(P, Txn0)
-               || P <- Privs],
+    Proofs = [
+        blockchain_txn_vars_v1:create_proof(P, Txn0)
+     || P <- Privs
+    ],
     blockchain_txn_vars_v1:multi_proofs(Txn0, Proofs).
 
 vars(Map, Nonce, Priv) ->
@@ -815,7 +971,6 @@ version_change_test(Config) ->
     %% get all the miners
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
-
 
     ?assertNotEqual([], ConsensusMiners),
     ?assertEqual(7, length(ConsensusMiners)),
@@ -833,8 +988,10 @@ version_change_test(Config) ->
     Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
     Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
+     || Miner <- Miners
+    ],
 
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
 
@@ -845,8 +1002,10 @@ version_change_test(Config) ->
     Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3),
     Txn2_1 = blockchain_txn_vars_v1:proof(Txn2_0, Proof2),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_1])
+     || Miner <- Miners
+    ],
 
     %% make sure that it has taken effect
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?chain_vars_version, 2),
@@ -858,8 +1017,10 @@ version_change_test(Config) ->
     Proof3 = blockchain_txn_vars_v1:create_proof(Priv, Txn3_0),
     Txn3_1 = blockchain_txn_vars_v1:proof(Txn3_0, Proof3),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
+     || Miner <- Miners
+    ],
 
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
@@ -872,8 +1033,10 @@ version_change_test(Config) ->
 
     {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
+     || Miner <- Miners
+    ],
 
     %% wait until height has increased by 15
     ok = miner_ct_utils:wait_for_gte(height, Miners, Start4 + 15),
@@ -881,7 +1044,6 @@ version_change_test(Config) ->
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
 
     ok.
-
 
 election_v3_test(Config) ->
     %% get all the miners
@@ -897,16 +1059,20 @@ election_v3_test(Config) ->
     Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
     {Priv, _Pub} = ?config(master_key, Config),
 
-    Vars = #{?election_version => 3,
-             ?election_bba_penalty => 0.01,
-             ?election_seen_penalty => 0.05},
+    Vars = #{
+        ?election_version => 3,
+        ?election_bba_penalty => 0.01,
+        ?election_seen_penalty => 0.05
+    },
 
     Txn = blockchain_txn_vars_v1:new(Vars, 2),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
     Txn1 = blockchain_txn_vars_v1:proof(Txn, Proof),
 
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
-         || Miner <- Miners],
+    _ = [
+        ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1])
+     || Miner <- Miners
+    ],
 
     ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?election_version, 3),
 
@@ -918,34 +1084,44 @@ election_v3_test(Config) ->
     %% get all blocks and check that they have the appropriate
     %% metadata
 
-    [begin
-         PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
-         Block = miner_ct_utils:get_block(N, hd(Miners)),
-         ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
-         case N of
-             _ when N < Start ->
-                 ?assertEqual([], blockchain_block_v1:seen_votes(Block)),
-                 ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block));
-             %% skip these because we're not 100% certain when the var
-             %% will become effective.
-             _ when N < Start + 5 ->
-                 ok;
-             _ ->
-                 Ts = blockchain_block:transactions(PrevBlock),
-                 case lists:filter(fun(T) ->
-                                           blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                                   end, Ts) of
-                     [] ->
-                         ?assertNotEqual([], blockchain_block_v1:seen_votes(Block)),
-                         ?assertNotEqual(<<>>, blockchain_block_v1:bba_completion(Block));
-                     %% first post-election block has no info
-                     _ ->
-                         ?assertEqual([<<>>], lists:usort([X || {_, X} <- blockchain_block_v1:seen_votes(Block)])),
-                         ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
-                 end
-         end
-     end
-     || N <- lists:seq(2, Start + 10)],
+    [
+        begin
+            PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
+            Block = miner_ct_utils:get_block(N, hd(Miners)),
+            ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
+            case N of
+                _ when N < Start ->
+                    ?assertEqual([], blockchain_block_v1:seen_votes(Block)),
+                    ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block));
+                %% skip these because we're not 100% certain when the var
+                %% will become effective.
+                _ when N < Start + 5 ->
+                    ok;
+                _ ->
+                    Ts = blockchain_block:transactions(PrevBlock),
+                    case
+                        lists:filter(
+                            fun(T) ->
+                                blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                            end,
+                            Ts
+                        )
+                    of
+                        [] ->
+                            ?assertNotEqual([], blockchain_block_v1:seen_votes(Block)),
+                            ?assertNotEqual(<<>>, blockchain_block_v1:bba_completion(Block));
+                        %% first post-election block has no info
+                        _ ->
+                            ?assertEqual(
+                                [<<>>],
+                                lists:usort([X || {_, X} <- blockchain_block_v1:seen_votes(Block)])
+                            ),
+                            ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
+                    end
+            end
+        end
+     || N <- lists:seq(2, Start + 10)
+    ],
 
     %% two should guarantee at least one consensus member is down but
     %% that block production is still happening
@@ -959,43 +1135,51 @@ election_v3_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(height, lists:sublist(Miners, 1, 6), Start2 + 10, all, 120),
 
-    [begin
-         PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
-         Block = miner_ct_utils:get_block(N, hd(Miners)),
-         ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
-         Ts = blockchain_block:transactions(PrevBlock),
-         case lists:filter(fun(T) ->
-                                   blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
-                           end, Ts) of
-             [] ->
-                 Seen = blockchain_block_v1:seen_votes(Block),
-                 %% given the current code, BBA will always be 2f+1,
-                 %% so there's no point in checking it other than
-                 %% seeing that it is not <<>> or <<0>>
-                 %% when we have something to check, this might be
-                 %% helpful: lists:sum([case $; band (1 bsl N) of 0 -> 0; _ -> 1 end || N <- lists:seq(1, 7)]).
-                 BBA = blockchain_block_v1:bba_completion(Block),
+    [
+        begin
+            PrevBlock = miner_ct_utils:get_block(N - 1, hd(Miners)),
+            Block = miner_ct_utils:get_block(N, hd(Miners)),
+            ct:pal("n ~p s ~p b ~p", [N, Start, Block]),
+            Ts = blockchain_block:transactions(PrevBlock),
+            case
+                lists:filter(
+                    fun(T) ->
+                        blockchain_txn:type(T) == blockchain_txn_consensus_group_v1
+                    end,
+                    Ts
+                )
+            of
+                [] ->
+                    Seen = blockchain_block_v1:seen_votes(Block),
+                    %% given the current code, BBA will always be 2f+1,
+                    %% so there's no point in checking it other than
+                    %% seeing that it is not <<>> or <<0>>
+                    %% when we have something to check, this might be
+                    %% helpful: lists:sum([case $; band (1 bsl N) of 0 -> 0; _ -> 1 end || N <- lists:seq(1, 7)]).
+                    BBA = blockchain_block_v1:bba_completion(Block),
 
-                 ?assertNotEqual([], Seen),
-                 ?assertNotEqual(<<>>, BBA),
-                 ?assertNotEqual(<<0>>, BBA),
+                    ?assertNotEqual([], Seen),
+                    ?assertNotEqual(<<>>, BBA),
+                    ?assertNotEqual(<<0>>, BBA),
 
-                 Len = length(Seen),
-                 ?assert(Len == 6 orelse Len == 5),
+                    Len = length(Seen),
+                    ?assert(Len == 6 orelse Len == 5),
 
-                 Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
-                 [?assertNotEqual(<<127>>, V) || V <- Votes];
-             %% first post-election block has no info
-             _ ->
-                 Seen = blockchain_block_v1:seen_votes(Block),
-                 Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
-                 ?assertEqual([<<>>], Votes),
-                 ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
-         end
-     end
-     %% start at +2 so we don't get a stale block that saw the
-     %% stopping nodes.
-     || N <- lists:seq(Start2 + 2, Start2 + 10)],
+                    Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
+                    [?assertNotEqual(<<127>>, V) || V <- Votes];
+                %% first post-election block has no info
+                _ ->
+                    Seen = blockchain_block_v1:seen_votes(Block),
+                    Votes = lists:usort([Vote || {_ID, Vote} <- Seen]),
+                    ?assertEqual([<<>>], Votes),
+                    ?assertEqual(<<>>, blockchain_block_v1:bba_completion(Block))
+            end
+        end
+     || %% start at +2 so we don't get a stale block that saw the
+
+        %% stopping nodes.
+        N <- lists:seq(Start2 + 2, Start2 + 10)
+    ],
 
     ok.
 
@@ -1022,12 +1206,19 @@ snapshot_test(Config) ->
     ?assert(is_binary(SnapshotHash)),
     ?assert(is_binary(SnapshotBlockHash)),
     ?assert(is_integer(SnapshotBlockHeight)),
-    ct:pal("Snapshot hash is ~p at height ~p~n in block ~p",
-           [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]),
+    ct:pal(
+        "Snapshot hash is ~p at height ~p~n in block ~p",
+        [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]
+    ),
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = [
+        {blessed_snapshot_block_hash, SnapshotHash},
+        {blessed_snapshot_block_height, SnapshotBlockHeight},
+        {quick_sync_mode, blessed_snapshot},
+        {honor_quick_sync, true}
+        | BlockchainEnv
+    ],
     NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
 
     ct:pal("new blockchain env ~p", [NewTargetEnv]),
@@ -1035,20 +1226,22 @@ snapshot_test(Config) ->
     miner_ct_utils:start_miners([{Target, NewTargetEnv}]),
 
     miner_ct_utils:wait_until(
-      fun() ->
-              try
-                  undefined =/= ct_rpc:call(Target, blockchain_worker, blockchain, [])
-              catch _:_ ->
-                       false
-              end
-      end, 50, 200),
+        fun() ->
+            try
+                undefined =/= ct_rpc:call(Target, blockchain_worker, blockchain, [])
+            catch
+                _:_ ->
+                    false
+            end
+        end,
+        50,
+        200
+    ),
 
     ok = ct_rpc:call(Target, blockchain, reset_ledger_to_snap, []),
 
-
     ok = miner_ct_utils:wait_for_gte(height, Miners0, 25, all, 20),
     ok.
-
 
 high_snapshot_test(Config) ->
     %% get all the miners
@@ -1073,15 +1266,22 @@ high_snapshot_test(Config) ->
     ?assert(is_binary(SnapshotHash)),
     ?assert(is_binary(SnapshotBlockHash)),
     ?assert(is_integer(SnapshotBlockHeight)),
-    ct:pal("Snapshot hash is ~p at height ~p~n in block ~p",
-           [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]),
+    ct:pal(
+        "Snapshot hash is ~p at height ~p~n in block ~p",
+        [SnapshotHash, SnapshotBlockHeight, SnapshotBlockHash]
+    ),
 
     %% TODO: probably at this step we should delete all the blocks
     %% that the downed node has
 
     BlockchainEnv = proplists:get_value(blockchain, TargetEnv),
-    NewBlockchainEnv = [{blessed_snapshot_block_hash, SnapshotHash}, {blessed_snapshot_block_height, SnapshotBlockHeight},
-                        {quick_sync_mode, blessed_snapshot}, {honor_quick_sync, true}|BlockchainEnv],
+    NewBlockchainEnv = [
+        {blessed_snapshot_block_hash, SnapshotHash},
+        {blessed_snapshot_block_height, SnapshotBlockHeight},
+        {quick_sync_mode, blessed_snapshot},
+        {honor_quick_sync, true}
+        | BlockchainEnv
+    ],
     NewTargetEnv = lists:keyreplace(blockchain, 1, TargetEnv, {blockchain, NewBlockchainEnv}),
 
     ct:pal("new blockchain env ~p", [NewTargetEnv]),
@@ -1094,16 +1294,6 @@ high_snapshot_test(Config) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners0, 80, all, 30),
     ok.
 
-
-
-
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
-
-
-
-
-
-
-
