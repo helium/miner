@@ -2,6 +2,8 @@
 
 -behavior(libp2p_framed_stream).
 
+-include_lib("helium_proto/include/discovery_pb.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -54,8 +56,29 @@ init(server, _Conn, _Args) ->
     {ok, #state{}}.
 
 handle_data(server, Data, State) ->
-    _DiscoveryMessage = discovery_pb:decode_msg(Data, discovery_start_pb),
-
+    #discovery_start_pb{
+        hotspot = PubKeyBin,
+        transaction_id = TxnID,
+        signature = Sig
+    } =  discovery_pb:decode_msg(Data, discovery_start_pb),
+    Hostpost = erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
+    case
+        libp2p_crypto:verify(
+            <<Hostpost/binary, ",", TxnID/binary>>,
+            base64:decode(Sig),
+            libp2p_crypto:bin_to_pubkey(PubKeyBin)
+        )
+    of
+        false ->
+            lager:info("failed to verify signature for ~p (txn_id=~p sig=~p)", [
+                blockchain_utils:addr2name(PubKeyBin),
+                TxnID,
+                Sig
+            ]);
+        true ->
+            %% TODO
+            ok
+    end,
     {noreply, State};
 handle_data(_Type, _Data, State) ->
     lager:warning("~p got data ~p", [_Type, _Data]),
