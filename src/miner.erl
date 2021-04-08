@@ -13,7 +13,7 @@
     relcast_info/1,
     relcast_queue/1,
     hbbft_status/0,
-    hbbft_skip/0,
+    hbbft_skip/0, hbbft_skip/1,
     create_block/3,
     signed_block/2,
 
@@ -243,11 +243,14 @@ hbbft_status() ->
 
 %% TODO: spec
 hbbft_skip() ->
+    hbbft_skip(next).
+
+hbbft_skip(Round) ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
         Pid ->
             Ref = make_ref(),
-            ok = libp2p_group_relcast:handle_input(Pid, {skip, Ref, self()}),
+            ok = libp2p_group_relcast:handle_input(Pid, {skip, Round, Ref, self()}),
             receive
                 {Ref, Result} ->
                     miner ! block_timeout,
@@ -308,7 +311,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0000010038.
+       0000010039.
 
 %% ------------------------------------------------------------------
 %% gen_server
