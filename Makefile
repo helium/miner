@@ -40,6 +40,9 @@ aws:
 seed:
 	$(REBAR) as seed release
 
+docker:
+	$(REBAR) as docker release
+
 devrel:
 	$(REBAR) as testdev, miner1 release -n miner1
 	$(REBAR) as testdev, miner2 release -n miner2
