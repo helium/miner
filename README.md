@@ -46,10 +46,16 @@ This is for development purposes only and if you are interested in running a min
 
 ## Installing Miner from Source
 
-First, you'll need [git](https://git-scm.com/). If you don't have it installed:
+### AMD64 (AMD/Intel)
+
+You need a processor with `avx` extensions. You can check this exists by running the following- if it is empty, your processor doesn't support AVX.
+```bash
+grep avx /proc/cpuinfo
+```
+Next, install [git](https://git-scm.com/) and build dependencies.
 
 ```bash
-sudo apt-get install git
+apt install -y git erlang libdbus-1-dev autoconf automake libtool flex libgmp-dev cmake libsodium-dev libssl-dev bison libsnappy-dev libclang-dev doxygen vim build-essential cargo parallel
 ```
 
 Clone the git repository:
@@ -58,7 +64,13 @@ Clone the git repository:
 git clone https://github.com/helium/miner.git
 ```
 
-### Install Erlang
+And build:
+```bash
+cd miner/
+make release
+```
+
+### ARM (Raspbian) Install
 
 Miner has been tested against Erlang OTP 22 and 23. Follow [this PR](https://github.com/helium/miner/pull/655) for progress on Erlang OTP 24 support. 
 
@@ -76,7 +88,7 @@ sudo dpkg -i esl-erlang_22.1.6-1~raspbian~buster_armhf.deb
 sudo apt-get install -f
 ```
 
-### Compile the Miner
+#### Compile the Miner
 
 Now it's time to build the miner. This will take a while:
 
@@ -85,4 +97,3 @@ cd miner
 make release
 ```
 
-Note that Miner for AMD64 requires AVX support on the processor due to the erasure library.
