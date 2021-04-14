@@ -258,9 +258,15 @@ process_line({Time, Txns, {Epoch, EpochStart}, Height, Avg, Size, Int},
                 {"", Last};
             _else ->
                 case extract_rewards(Txns) of
-                    {ok, Rwds} ->
+                    {ok, Type, Rwds} ->
                         %% count up the tokens generated
-                        Bones = get_bones(Rwds),
+                        Bones =
+                            case Type of
+                                blockchain_txn_rewards_v1 ->
+                                    get_bones_v1(Rwds);
+                                blockchain_txn_rewards_v2 ->
+                                    get_bones_v2(Rwds)
+                            end,
                         EpochSecs = Time - Last,
                         Ideal = ?bones_per_sec * EpochSecs,
                         {integer_to_list(trunc( (Bones/Ideal) * 100 )),
@@ -300,13 +306,18 @@ extract_rewards(Txns) ->
     case lists:filter(fun(T) ->
                               %% TODO: ideally move to versionless types?
                               blockchain_txn:type(T) == blockchain_txn_rewards_v1
+                                  orelse blockchain_txn:type(T) == blockchain_txn_rewards_v2
                       end, Txns) of
         [Txn] ->
-            {ok, Txn};
+            {ok, blockchain_txn:type(Txn), Txn};
         _ ->
             no_txn
     end.
 
-get_bones(T) ->
+get_bones_v1(T) ->
     Rewards = blockchain_txn_rewards_v1:rewards(T),
     lists:sum([blockchain_txn_reward_v1:amount(R) || R <- Rewards]).
+
+get_bones_v2(T) ->
+    Rewards = blockchain_txn_rewards_v2:rewards(T),
+    lists:sum([blockchain_txn_rewards_v2:reward_amount(R) || R <- Rewards]).

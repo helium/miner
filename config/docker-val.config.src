@@ -44,7 +44,7 @@
  {miner,
   [
    {mode, validator},
-   {stabilization_period, 5000},
+   {stabilization_period, 8000},
    {network, testnet},
    %% these two now disable all the poc stuff
    {use_ebus, false},

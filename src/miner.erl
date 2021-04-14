@@ -308,7 +308,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0000010030.
+       0000010040.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -339,11 +339,8 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
                                                  blockchain = Chain})};
-handle_call(
-    {create_block, Metadata, Txns, HBBFTRound},
-    _From,
-    #state{blockchain=Chain, swarm_keys=SK}=State
-) ->
+handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
+            #state{blockchain = Chain, swarm_keys = SK} = State) ->
     Result = try_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
     {reply, Result, State};
 handle_call(keys, _From, State) ->
