@@ -26,9 +26,7 @@
     xmerl,  %% nat_upnp has a missing dep
     jsx,
     kvc,
-    longfi,
-    grpcbox,
-    grpc_lib
+    longfi
    ]},
   {included_applications, [blockchain, sibyl]},
   {env,[]},

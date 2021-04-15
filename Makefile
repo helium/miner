@@ -1,7 +1,5 @@
 .PHONY: deps compile test typecheck cover
 
-grpc_services_directory=_build/default/lib/sibyl/src/grpc/autogen
-
 REBAR=./rebar3
 ifeq ($(BUILDKITE), true)
   # get branch name and replace any forward slashes it may contain
@@ -15,11 +13,10 @@ all: compile
 deps:
 	$(REBAR) get-deps
 
-compile: | $(grpc_services_directory)
+compile:
 	$(REBAR) compile
 
 clean:
-	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 test: compile
@@ -31,16 +28,16 @@ typecheck:
 ci: compile
 	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
-release: | $(grpc_services_directory)
+release:
 	$(REBAR) as prod release -n miner
 
 cover:
 	$(REBAR) cover
 
-aws: | $(grpc_services_directory)
+aws:
 	$(REBAR) as aws release
 
-seed: | $(grpc_services_directory)
+seed:
 	$(REBAR) as seed release
 
 docker:
@@ -56,14 +53,6 @@ devrel:
 	$(REBAR) as testdev, miner7 release -n miner7
 	$(REBAR) as testdev, miner8 release -n miner8
 
-devrelease: | $(grpc_services_directory)
+devrelease:
 	$(REBAR) as dev release
 
-grpc:
-	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
-
-$(grpc_services_directory):
-	@echo "grpc service directory $(directory) does not exist, will generate services"
-	$(REBAR) get-deps
-	$(MAKE) grpc
