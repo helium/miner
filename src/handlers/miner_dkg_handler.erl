@@ -343,7 +343,7 @@ deserialize(MapState0) when is_map(MapState0) ->
       delay := Delay} = MapState,
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
     CC = commitment_cache_fun(),
-    DKG = dkg_hybriddkg:deserialize(DKG0, undefined, ReadySigFun,
+    DKG = dkg_hybriddkg:deserialize(DKG0, ReadySigFun,
                                     mk_verification_fun(Members), CC),
     PrivKey = case maps:get(privkey, MapState, undefined) of
         undefined ->
