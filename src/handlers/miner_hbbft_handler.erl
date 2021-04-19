@@ -413,7 +413,7 @@ deserialize(#{sk := SKSer,
     SK = try tc_key_share:deserialize(SKSer) of
              Res -> Res
          catch _:_ ->
-                   tpke_privkey:deserialize(SKSer)
+                   tpke_privkey:deserialize(binary_to_term(SKSer))
          end,
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
