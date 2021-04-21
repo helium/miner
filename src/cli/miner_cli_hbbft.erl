@@ -240,30 +240,25 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
     #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
-    {Start, GroupWithPenalties, Fails} =
+    {Start, GroupWithPenalties} =
         case blockchain:config(?election_version, Ledger) of
             {ok, N} when N >= 5 ->
-                Input0 = lists:map(
-                          fun(A) ->
-                                  {ok, V} = blockchain_ledger_v1:get_validator(A, Ledger),
-                                  HB = blockchain_ledger_validator_v1:last_heartbeat(V),
-                                  Fail = blockchain_ledger_validator_v1:recent_failures(V),
-                                  {{val_v1, 1.0, HB, Fail, A}, length(Fail)}
-                          end, ConsensusAddrs),
-                {Input, Failures0} = lists:unzip(Input0),
-                Failures = lists:zip(ConsensusAddrs, Failures0),
-                Penalties =
-                    case End > (Start0 + 2) of
-                        true ->
-                            blockchain_election:adjust_old_group_v2(Input, Ledger);
-                        false ->
-                            []
-                    end,
-                {Start0 + 2, Penalties, Failures};
+                Penalties = blockchain_election:validator_penalties(ConsensusAddrs, Chain, Ledger),
+                Start1 = case End > (Start0 + 2) of
+                             true -> Start0 + 2;
+                             false -> End + 1
+                         end,
+                Penalties1 =
+                    maps:map(
+                      fun(Addr, Pen) ->
+                              {ok, V} = blockchain_ledger_v1:get_validator(Addr, Ledger),
+                              Pen + blockchain_ledger_validator_v1:calculate_penalty_value(V, Ledger)
+                      end, Penalties),
+                {Start1, maps:to_list(Penalties1)};
             _ ->
                 {Start0 + 1,
                  [{A, S} || {S, _L, A} <- blockchain_election:adjust_old_group(
-                                            [{0, 0, A} || A <- ConsensusAddrs], Ledger)], []}
+                                            [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
         end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
                     || Ht <- lists:seq(Start, End)],
@@ -292,7 +287,6 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
              {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
              {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
              {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
-             {recent_failures, io_lib:format("~b", [element(2, lists:keyfind(A, 1, Fails))])},
              {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
             ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->

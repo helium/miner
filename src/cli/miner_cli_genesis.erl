@@ -395,8 +395,8 @@ make_vars() ->
       ?rewards_txn_version => 2,
       ?validator_version => 2,
       ?validator_minimum_stake => 10000 * 100000000,
-      ?validator_liveness_grace_period => 50,
-      ?validator_liveness_interval => 200,
+      ?validator_liveness_grace_period => 10,
+      ?validator_liveness_interval => 20,
       ?dkg_penalty => 1.0,
-      ?penalty_history_limit => 1000
+      ?penalty_history_limit => 100
      }.
