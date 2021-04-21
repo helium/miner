@@ -1,6 +1,19 @@
 #!/bin/sh
 if [ -t 0 ] ; then
-    export CLIQUE_COLUMNS=`stty size 2>/dev/null | cut -d ' ' -f 2`
+    CLIQUE_COLUMNS=$(stty size 2>/dev/null | cut -d ' ' -f 2)
+    export CLIQUE_COLUMNS
 fi
-relx_nodetool rpc miner_console command dkg $@
+
+j=1
+l=$#
+buf="[[\"dkg\","
+while [ $j -le $l ]; do
+    buf="$buf\"$1\","
+    j=$(( j + 1 ))
+    shift
+done
+
+buf="${buf%?}]]"
+
+relx_nodetool rpc blockchain_console command "$buf"
 exit $?

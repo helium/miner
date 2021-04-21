@@ -4,7 +4,7 @@ CONFIG=$(find $ROOTDIR/releases -name sys.config)
 LIB_DIR=$ROOTDIR/lib
 
 if relx_nodetool "ping" > /dev/null 2>&1; then
-    relx_nodetool rpc miner_keys print_keys
+    relx_nodetool rpc miner_keys print_keys "[[]]"
     exit $?
 fi
 
