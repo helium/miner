@@ -57,26 +57,22 @@ init(server, _Conn, _Args) ->
 
 handle_data(server, Data, State) ->
     #discovery_start_pb{
-        hotspot = PubKeyBin,
-        transaction_id = TxnID,
+        hotspot = HostpostPubKeyBin,
+        packet = Packet,
         signature = Sig
     } =  discovery_pb:decode_msg(Data, discovery_start_pb),
-    Hostpost = erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
+    Hostpost = erlang:list_to_binary(libp2p_crypto:bin_to_b58(HostpostPubKeyBin)),
     case
-        libp2p_crypto:verify(
-            <<Hostpost/binary, ",", TxnID/binary>>,
-            base64:decode(Sig),
-            libp2p_crypto:bin_to_pubkey(PubKeyBin)
-        )
+        verify_signature(Hostpost, HostpostPubKeyBin, Sig)
     of
         false ->
             lager:info("failed to verify signature for ~p (txn_id=~p sig=~p)", [
-                blockchain_utils:addr2name(PubKeyBin),
-                TxnID,
+                blockchain_utils:addr2name(HostpostPubKeyBin),
+                Packet,
                 Sig
             ]);
         true ->
-            %% TODO
+            %% TODO: Send Packet as un uplink
             ok
     end,
     {noreply, State};
@@ -93,3 +89,31 @@ handle_info(_Type, _Msg, State) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec verify_signature(
+    Hostpost :: binary(),
+    HostpostPubKeyBin :: libp2p_crypto:pubkey_bin(),
+    Sig :: binary()
+) -> boolean().
+verify_signature(Hostpost, HostpostPubKeyBin, Sig) ->
+    case get_hotspot_owner(HostpostPubKeyBin) of
+        {error, _Reason} ->
+            lager:info("failed to find owner for hotspot ~p: ~p", [
+                {Hostpost, HostpostPubKeyBin},
+                _Reason
+            ]),
+            false;
+        {ok, OwnerPubKeyBin} ->
+            libp2p_crypto:verify(
+                <<Hostpost/binary>>,
+                base64:decode(Sig),
+                libp2p_crypto:bin_to_pubkey(OwnerPubKeyBin)
+            )
+    end.
+
+-spec get_hotspot_owner(PubKeyBin :: libp2p_crypto:pubkey_bin()) ->
+    {ok, libp2p_crypto:pubkey_bin()} | {error, any()}.
+get_hotspot_owner(PubKeyBin) ->
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    blockchain_ledger_v1:find_gateway_owner(PubKeyBin, Ledger).
