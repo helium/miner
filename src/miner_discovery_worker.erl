@@ -47,6 +47,11 @@ start(Packet) ->
 %% `gen_server' implementation
 %% ------------------------------------------------------------------
 init([Packet]) ->
+    lager:info("starting discovery mode with ~p uplinks every ~p ms and packet ~p", [
+        ?DEFAULT_UPLINKS,
+        ?DEFAULT_TRANSMIT_DELAY_MS,
+        Packet
+    ]),
     {ok, Region} = miner_lora:region(),
     TxPower = tx_power(Region),
     Spreading = spreading(Region, byte_size(Packet)),

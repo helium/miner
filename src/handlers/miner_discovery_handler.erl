@@ -72,10 +72,9 @@ handle_data(server, Data, State) ->
         true ->
             case miner_lora:location_ok() of
                 true ->
-                    lager:info("TODO: add a log"),
                     miner_discovery_worker:start(Packet);
                 false ->
-                    lager:warning("TODO: add a log"),
+                    lager:warning("can not start discovery mode until location is ok"),
                     ok
             end,
             ok
