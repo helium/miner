@@ -27,14 +27,14 @@
     packet = <<>> :: binary(),
     %% Number of uplinks remaining until we're done with discovery
     %% mode.
-    remaining_uplinks = 0 :: pos_integer(),
-    tx_power = 0 :: integer(),
+    remaining_uplinks = 0 :: non_neg_integer(),
+    tx_power = 0 :: number(),
     spreading = "" :: string(),
     region = undefined :: atom()
 }).
 
--define(DEFAULT_TRANSMIT_DELAY, 100).
--define(DEFAULT_UPLINKS, 50).
+-define(DEFAULT_TRANSMIT_DELAY_MS, 9000).
+-define(DEFAULT_UPLINKS, 10).
 
 %% ------------------------------------------------------------------
 %% API implementation
@@ -50,7 +50,7 @@ init([Packet]) ->
     {ok, Region} = miner_lora:region(),
     TxPower = tx_power(Region),
     Spreading = spreading(Region, byte_size(Packet)),
-    timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
+    timer:send_after(?DEFAULT_TRANSMIT_DELAY_MS, self(), tick),
     {ok, #state{
         region = Region,
         tx_power = TxPower,
@@ -87,7 +87,7 @@ handle_info(
         TxPower
     ),
 
-    timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
+    timer:send_after(?DEFAULT_TRANSMIT_DELAY_MS, self(), tick),
     {noreply, State#state{remaining_uplinks = Rem - 1}};
 handle_info(_Info, State) ->
     {noreply, State}.
