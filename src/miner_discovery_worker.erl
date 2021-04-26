@@ -6,7 +6,7 @@
 %% API exports
 %% ------------------------------------------------------------------
 -export([
-    begin_discovery_mode/1
+         start/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -16,60 +16,79 @@
     init/1,
     handle_call/3,
     handle_cast/2,
-    handle_info/2,
-    terminate/2
+    handle_info/2
 ]).
 
-%% ------------------------------------------------------------------
-%% API implementation
-%% ------------------------------------------------------------------
--spec begin_discovery_mode(Packet :: binary()) -> ok.
-begin_discovery_mode(Packet) ->
-    gen_server:call(?MODULE, {begin_discovery_mode, Packet}).
-
-%% ------------------------------------------------------------------
-%% Internal
-%% ------------------------------------------------------------------
 -record(state, {
     %% Raw binary packet.
     %%
     %% Although it is a LoRaWAN packet, we're operating at a low level
     %% so we just treat it like a binary blob.
     packet = <<>> :: binary(),
-    %% Delay between each uplink.
-    tansmit_period = 9999 :: pos_integer(),
     %% Number of uplinks remaining until we're done with discovery
     %% mode.
-    remaining_uplinks = 0 :: pos_integer()
+    remaining_uplinks = 0 :: pos_integer(),
+                tx_power = 0 :: integer(),
+                spreading = "" :: string(),
+                region = undefined :: atom()
 }).
 
--spec send_discovery_uplink(State :: #state{}) -> #state{}.
-send_discovery_uplink(State0) when State0#state.remaining_uplinks > 0 ->
+-define(DEFAULT_TRANSMIT_DELAY, 100).
+-define(DEFAULT_UPLINKS, 50).
+
+%% ------------------------------------------------------------------
+%% API implementation
+%% ------------------------------------------------------------------
+-spec start(binary()) -> {ok, pid()} | ignore | {error, any()}.
+start(Packet) ->
+    gen_server:start({local, ?MODULE}, ?MODULE, [Packet], []).
+
+%% ------------------------------------------------------------------
+%% `gen_server' implementation
+%% ------------------------------------------------------------------
+init([Packet]) ->
+    {ok, Region} = miner_lora:region(),
+    TxPower = tx_power(Region),
+    Spreading = spreading(Region, byte_size(Packet)),
+    timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
+    {ok, #state{
+            region = Region,
+            tx_power = TxPower,
+            spreading = Spreading,
+            packet=Packet,
+            remaining_uplinks=?DEFAULT_UPLINKS}}.
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(tick, #state{remaining_uplinks=0}=State) ->
+    {stop, normal, State};
+handle_info(tick, #state{remaining_uplinks=Rem, packet=Packet, spreading=Spreading, tx_power = TxPower}=State) ->
     %% Reviewer: I cargo-culted this from other parts of this code
     %%           base. I don't know if it's needed or if the call to
     %%           `miner_lora:region/0' below is enough.
-    case miner_lora:location_ok() of
-        false ->
-            #state{};
-        true ->
-            ChannelSelectorFun = fun (FreqList) ->
-                lists:nth(rand:uniform(length(FreqList)), FreqList)
-            end,
-            %% Reviewer: is this ok? Will this crash be handled?
-            {ok, Region} = miner_lora:region(),
-            TxPower = tx_power(Region),
-            Spreading = spreading(Region, byte_size(State0#state.packet)),
-            ok = miner_lora:send_poc(
-                State0#state.packet,
-                immediate,
-                ChannelSelectorFun,
-                Spreading,
-                TxPower
-            ),
-            State0#state{remaining_uplinks = State0#state.remaining_uplinks - 1}
-    end;
-send_discovery_uplink(State0) ->
-    State0.
+    ChannelSelectorFun = fun (FreqList) ->
+                                 lists:nth(rand:uniform(length(FreqList)), FreqList)
+                         end,
+    ok = miner_lora:send_poc(
+           Packet,
+           immediate,
+           ChannelSelectorFun,
+           Spreading,
+           TxPower
+          ),
+
+    timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
+    {noreply, State#state{remaining_uplinks = Rem - 1}};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% ------------------------------------------------------------------
+%% Internal
+%% ------------------------------------------------------------------
 
 %% TODO: taken from miner_onion_server, refactor to common module
 -spec tx_power(Region :: atom()) -> integer().
@@ -96,20 +115,3 @@ spreading(_, L) when L < 139 ->
     "SF8BW125";
 spreading(_, _) ->
     "SF7BW125".
-
-%% ------------------------------------------------------------------
-%% `gen_server' implementation
-%% ------------------------------------------------------------------
-init({}) ->
-    {ok, #state{}}.
-
-handle_call({begin_discovery_mode, Packet}, _From, State) ->
-    %% Reviewer: should this be handle_cast instead?
-handle_call(_Request, _From, State) ->
-    {reply, {error, unknown_call}, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
