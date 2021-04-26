@@ -60,11 +60,9 @@ handle_data(server, Data, State) ->
         hotspot = HostpostPubKeyBin,
         packet = Packet,
         signature = Sig
-    } =  discovery_pb:decode_msg(Data, discovery_start_pb),
+    } = discovery_pb:decode_msg(Data, discovery_start_pb),
     Hostpost = erlang:list_to_binary(libp2p_crypto:bin_to_b58(HostpostPubKeyBin)),
-    case
-        verify_signature(Hostpost, HostpostPubKeyBin, Sig)
-    of
+    case verify_signature(Hostpost, HostpostPubKeyBin, Sig) of
         false ->
             lager:info("failed to verify signature for ~p (txn_id=~p sig=~p)", [
                 blockchain_utils:addr2name(HostpostPubKeyBin),

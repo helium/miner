@@ -6,7 +6,7 @@
 %% API exports
 %% ------------------------------------------------------------------
 -export([
-         start/1
+    start/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -28,9 +28,9 @@
     %% Number of uplinks remaining until we're done with discovery
     %% mode.
     remaining_uplinks = 0 :: pos_integer(),
-                tx_power = 0 :: integer(),
-                spreading = "" :: string(),
-                region = undefined :: atom()
+    tx_power = 0 :: integer(),
+    spreading = "" :: string(),
+    region = undefined :: atom()
 }).
 
 -define(DEFAULT_TRANSMIT_DELAY, 100).
@@ -52,11 +52,12 @@ init([Packet]) ->
     Spreading = spreading(Region, byte_size(Packet)),
     timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
     {ok, #state{
-            region = Region,
-            tx_power = TxPower,
-            spreading = Spreading,
-            packet=Packet,
-            remaining_uplinks=?DEFAULT_UPLINKS}}.
+        region = Region,
+        tx_power = TxPower,
+        spreading = Spreading,
+        packet = Packet,
+        remaining_uplinks = ?DEFAULT_UPLINKS
+    }}.
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
@@ -64,22 +65,27 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(tick, #state{remaining_uplinks=0}=State) ->
+handle_info(tick, #state{remaining_uplinks = 0} = State) ->
     {stop, normal, State};
-handle_info(tick, #state{remaining_uplinks=Rem, packet=Packet, spreading=Spreading, tx_power = TxPower}=State) ->
-    %% Reviewer: I cargo-culted this from other parts of this code
-    %%           base. I don't know if it's needed or if the call to
-    %%           `miner_lora:region/0' below is enough.
+handle_info(
+    tick,
+    #state{
+        remaining_uplinks = Rem,
+        packet = Packet,
+        spreading = Spreading,
+        tx_power = TxPower
+    } = State
+) ->
     ChannelSelectorFun = fun (FreqList) ->
-                                 lists:nth(rand:uniform(length(FreqList)), FreqList)
-                         end,
+        lists:nth(rand:uniform(length(FreqList)), FreqList)
+    end,
     ok = miner_lora:send_poc(
-           Packet,
-           immediate,
-           ChannelSelectorFun,
-           Spreading,
-           TxPower
-          ),
+        Packet,
+        immediate,
+        ChannelSelectorFun,
+        Spreading,
+        TxPower
+    ),
 
     timer:send_after(?DEFAULT_TRANSMIT_DELAY, self(), tick),
     {noreply, State#state{remaining_uplinks = Rem - 1}};
@@ -90,7 +96,7 @@ handle_info(_Info, State) ->
 %% Internal
 %% ------------------------------------------------------------------
 
-%% TODO: taken from miner_onion_server, refactor to common module
+%% TODO: taken from miner_onion_server, refactor to common module?
 -spec tx_power(Region :: atom()) -> integer().
 tx_power('EU868') ->
     14;
@@ -99,7 +105,7 @@ tx_power('US915') ->
 tx_power(_) ->
     27.
 
-%% TODO: taken from miner_onion_server, refactor to common module
+%% TODO: taken from miner_onion_server, refactor to common module?
 -spec spreading(Region :: atom(), Len :: pos_integer()) -> string().
 spreading('EU868', L) when L < 65 ->
     "SF12BW125";
