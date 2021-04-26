@@ -135,7 +135,7 @@ handle_command({status, Ref, Worker}, State) ->
     Sigs = map_ids(State#state.signatures, State#state.members),
     PubKeyHash = case tc_key_share:is_key_share(State#state.sk) of
                      true ->
-                         crypto:hash(sha256, term_to_binary(pubkey:serialize(tc_key_share:public_key(State#state.sk))));
+                         crypto:hash(sha256, term_to_binary(tc_pubkey:serialize(tc_key_share:public_key(State#state.sk))));
                      false ->
                          crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk))))
                  end,
@@ -410,7 +410,7 @@ deserialize(BinState) when is_binary(BinState) ->
     State#state{hbbft=HBBFT, sk=SK};
 deserialize(#{sk := SKSer,
               hbbft := HBBFTSer} = StateMap) ->
-    SK = try tc_key_share:deserialize(SKSer) of
+    SK = try tc_key_share:deserialize(binary_to_term(SKSer)) of
              Res -> Res
          catch _:_ ->
                    tpke_privkey:deserialize(binary_to_term(SKSer))

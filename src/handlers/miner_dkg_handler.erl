@@ -408,7 +408,7 @@ commitment_cache_fun() ->
         Self(Ser) ->
             case ets:lookup(T, erlang:phash2(Ser)) of
                 [] ->
-                    DeSer = bicommitment:deserialize(Ser),
+                    DeSer = tc_bicommitment:deserialize(Ser),
                     ok = Self({Ser, DeSer}),
                     DeSer;
                 [{_, Res}] ->
