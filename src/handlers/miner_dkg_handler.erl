@@ -16,10 +16,7 @@
          t :: non_neg_integer(),
          id :: non_neg_integer(),
          dkg :: dkg_hybriddkg:dkg() | dkg_hybriddkg:serialized_dkg(),
-         curve :: atom(),
-         g1 :: erlang_pbc:element() | binary(),
-         g2 :: erlang_pbc:element() | binary(),
-         privkey :: undefined | tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+         privkey :: undefined | tc_key_share:tc_key_share() | binary(),
          members = [] :: [libp2p_crypto:address()],
          artifact :: binary(),
          signatures = [] :: [{libp2p_crypto:address(), binary()}],
@@ -33,27 +30,27 @@
          sent_conf = false :: boolean(),
          dkg_completed = false :: boolean(),
          height :: pos_integer(),
-         delay :: non_neg_integer()
+         delay :: non_neg_integer(),
+         commitment_cache_fun :: undefined | fun()
         }).
 
-init([Members, Id, N, F, T, Curve,
+init([Members, Id, N, F, T,
       ThingToSign,
       {SigMod, SigFun},
       {DoneMod, DoneFun}, Round,
       Height, Delay]) ->
-    {G1, G2} = generate(Curve, Members),
     %% get the fun used to sign things with our swarm key
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-    DKG = dkg_hybriddkg:init(Id, N, F, T, G1, G2, Round, [{callback, true}, {elections, false},
+    CCFun = commitment_cache_fun(),
+    DKG = dkg_hybriddkg:init(Id, N, F, T, Round, [{callback, true}, {elections, false},
                                                           {signfun, ReadySigFun},
-                                                          {verifyfun, mk_verification_fun(Members)}]),
+                                                          {verifyfun, mk_verification_fun(Members)},
+                                                          {commitment_cache_fun, CCFun}]),
     lager:info("DKG~p started", [Id]),
     {ok, #state{n = N,
                 id = Id,
                 f = F,
                 t = T,
-                g1 = G1, g2 = G2,
-                curve = Curve,
                 dkg = DKG,
                 signatures_required = N,
                 artifact = ThingToSign,
@@ -61,6 +58,7 @@ init([Members, Id, N, F, T, Curve,
                 donemod = DoneMod, donefun = DoneFun,
                 members = Members,
                 height = Height,
+                commitment_cache_fun = CCFun,
                 delay = Delay}}.
 
 handle_command(start, State) ->
@@ -215,9 +213,7 @@ handle_message({signature, Address, Signature}, Index, State=#state{members = Me
 handle_message({signature, _Address, _Signature}, _Index, _State) ->
     %% we have already completed
     ignore;
-handle_message(Msg, Index, State = #state{n = N, t = T, g1 = G1, g2 = G2,
-                                          sigmod = SigMod, sigfun = SigFun,
-                                          curve = Curve}) ->
+handle_message(Msg, Index, State = #state{sigmod = SigMod, sigfun = SigFun}) ->
     case dkg_hybriddkg:handle_msg(State#state.dkg, Index, Msg) of
         %% NOTE: We cover all possible return values from handle_msg hence
         %% eliminating the need for a final catch-all clause
@@ -231,10 +227,8 @@ handle_message(Msg, Index, State = #state{n = N, t = T, g1 = G1, g2 = G2,
         {NewDKG, start_timer} ->
             %% this is unused, as it's used to time out DKG elections which we're not doing
             {State#state{dkg=NewDKG}, []};
-        {NewDKG, {result, {Shard, VK, VKs}}} when State#state.privkey == undefined ->
+        {NewDKG, {result, PrivateKey}} when State#state.privkey == undefined ->
             lager:info("Completed DKG ~p", [State#state.id]),
-            PrivateKey = tpke_privkey:init(tpke_pubkey:init(N, T, G1, G2, VK, VKs, Curve),
-                                           Shard, State#state.id - 1),
             %% We need to accumulate `Threshold` count ECDSA signatures over
             %% the provided artifact.  The artifact is (just once) going to be
             %% a genesis block, the other times it will be the evidence an
@@ -254,7 +248,7 @@ handle_message(Msg, Index, State = #state{n = N, t = T, g1 = G1, g2 = G2,
                          dkg_completed=true,
                          signatures=[{Address, Signature}|State#state.signatures]},
              [{multicast, t2b({signature, Address, Signature})}]};
-        {_NewDKG, {result, {_Shard, _VK, _VKs}}} ->
+        {_NewDKG, {result, _PrivKey}} ->
             lager:info("dkg completed again?"),
             ignore
     end.
@@ -272,13 +266,11 @@ callback_message(Actor, Message, _State) ->
 %% helper functions
 serialize(State) ->
     #state{dkg = DKG0,
-           g1 = G1_0, g2 = G2_0,
            privkey = PrivKey0,
            n = N,
            f = F,
            t = T,
            id = ID,
-           curve = Curve,
            members = Members,
            artifact = Artifact,
            signatures = Sigs,
@@ -293,15 +285,13 @@ serialize(State) ->
            height = Height,
            delay = Delay} = State,
     SerializedDKG = dkg_hybriddkg:serialize(DKG0),
-    G1 = erlang_pbc:element_to_binary(G1_0),
-    G2 = erlang_pbc:element_to_binary(G2_0),
-    PreSer = #{g1 => G1, g2 => G2},
+    PreSer = #{},
     PrivKey =
         case PrivKey0 of
             undefined ->
                 undefined;
             Other ->
-                tpke_privkey:serialize(Other)
+                tc_key_share:serialize(Other)
         end,
     M0 = #{dkg => SerializedDKG,
            privkey => PrivKey,
@@ -309,7 +299,6 @@ serialize(State) ->
            f => F,
            t => T,
            id => ID,
-           curve => Curve,
            members => Members,
            artifact => Artifact,
            signatures => Sigs,
@@ -330,11 +319,7 @@ serialize(State) ->
 deserialize(_Bin) when is_binary(_Bin) ->
     {error, format_deprecated};
 deserialize(MapState0) when is_map(MapState0) ->
-    MapState = maps:map(fun(g1, B) ->
-                                B;
-                           (g2, B) ->
-                                B;
-                           (_K, undefined) ->
+    MapState = maps:map(fun(_K, undefined) ->
                                 undefined;
                            (_K, B) ->
                                 binary_to_term(B)
@@ -344,9 +329,6 @@ deserialize(MapState0) when is_map(MapState0) ->
       t := T,
       id := ID,
       dkg := DKG0,
-      curve := Curve,
-      g1 := G1_0,
-      g2 := G2_0,
       members := Members,
       artifact := Artifact,
       signatures := Sigs,
@@ -360,25 +342,21 @@ deserialize(MapState0) when is_map(MapState0) ->
       height := Height,
       delay := Delay} = MapState,
     {ok, _, ReadySigFun, _ECDHFun} = blockchain_swarm:keys(),
-    Group = erlang_pbc:group_new(Curve),
-    G1 = erlang_pbc:binary_to_element(Group, G1_0),
-    G2 = erlang_pbc:binary_to_element(Group, G2_0),
-    DKG = dkg_hybriddkg:deserialize(DKG0, G1, ReadySigFun,
-                                    mk_verification_fun(Members)),
+    CC = commitment_cache_fun(),
+    DKG = dkg_hybriddkg:deserialize(DKG0, ReadySigFun,
+                                    mk_verification_fun(Members), CC),
     PrivKey = case maps:get(privkey, MapState, undefined) of
         undefined ->
             undefined;
         Other ->
-            tpke_privkey:deserialize(Other)
+            tc_key_share:deserialize(Other)
     end,
     #state{dkg = DKG,
-           g1 = G1, g2 = G2,
            privkey = PrivKey,
            n = N,
            f = F,
            t = T,
            id = ID,
-           curve = Curve,
            members = Members,
            artifact = Artifact,
            signatures = Sigs,
@@ -391,11 +369,13 @@ deserialize(MapState0) when is_map(MapState0) ->
            done_acked = maps:get(done_acked, MapState, false),
            sent_conf = SentConf,
            height = Height,
+           commitment_cache_fun=CC,
            delay = Delay}.
 
-restore(OldState, _NewState) ->
+restore(OldState, NewState) ->
     lager:debug("called restore with ~p ~p", [OldState#state.privkey,
-                                              _NewState#state.privkey]),
+                                              NewState#state.privkey]),
+    %% we needed to (re)create the funs in deserialize so there's nothing to do here
     {ok, OldState}.
 
 fixup_msgs(Msgs) ->
@@ -410,16 +390,6 @@ fixup_msgs(Msgs) ->
 %% ==================================================================
 %% Internal functions
 %% ==================================================================
-generate(Curve, Members) ->
-    Group = erlang_pbc:group_new(Curve),
-    G1 = erlang_pbc:element_from_hash(erlang_pbc:element_new('G1', Group), term_to_binary(Members)),
-    G2 = case erlang_pbc:pairing_is_symmetric(Group) of
-             true -> G1;
-             %% XXX breaks for asymmetric curve
-             false -> erlang_pbc:element_from_hash(erlang_pbc:element_new('G2', Group), crypto:strong_rand_bytes(32))
-         end,
-    {G1, G2}.
-
 mk_verification_fun(Members) ->
     fun(PeerID, Msg, Signature) ->
             PeerAddr = lists:nth(PeerID, Members),
@@ -429,3 +399,20 @@ mk_verification_fun(Members) ->
 
 t2b(Term) ->
     term_to_binary(Term, [{compressed, 1}]).
+
+commitment_cache_fun() ->
+    T = ets:new(t, []),
+    fun Self({Ser, DeSer0}) ->
+            ets:insert(T, {erlang:phash2(Ser), DeSer0}),
+            ok;
+        Self(Ser) ->
+            case ets:lookup(T, erlang:phash2(Ser)) of
+                [] ->
+                    DeSer = tc_bicommitment:deserialize(Ser),
+                    ok = Self({Ser, DeSer}),
+                    DeSer;
+                [{_, Res}] ->
+                    Res
+            end
+    end.
+

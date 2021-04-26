@@ -90,7 +90,7 @@ sign_artifact(Artifact, _DeprecatedBackCompat) ->
 -spec genesis_block_done(GenesisBLock :: binary(),
                          Signatures :: [{libp2p_crypto:pubkey_bin(), binary()}],
                          Members :: [libp2p_crypto:address()],
-                         PrivKey :: tpke_privkey:privkey(),
+                         PrivKey :: tc_key_share:tc_key_share(),
                          Height :: pos_integer(),
                          Delay :: non_neg_integer()
                         ) -> ok.
@@ -99,7 +99,7 @@ genesis_block_done(GenesisBlock, Signatures, Members, PrivKey, Height, Delay) ->
                               Members, PrivKey, Height, Delay}, infinity).
 
 -spec election_done(binary(), [{libp2p_crypto:pubkey_bin(), binary()}],
-                    [libp2p_crypto:address()], tpke_privkey:privkey(),
+                    [libp2p_crypto:address()], tc_key_share:tc_key_share(),
                     pos_integer(), non_neg_integer()) -> ok.
 election_done(Artifact, Signatures, Members, PrivKey, Height, Delay) ->
     gen_server:cast(?MODULE, {election_done, Artifact, Signatures,
@@ -933,7 +933,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
            genesis_block_done, N, Curve, true, State).
 
-do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
+do_dkg(Addrs, Artifact, Sign, Done, N, _Curve, Create,
        State=#state{initial_height = Height,
                     delay = Delay,
                     current_dkgs = DKGs,
@@ -971,7 +971,6 @@ do_dkg(Addrs, Artifact, Sign, Done, N, Curve, Create,
                                             N,
                                             0, %% NOTE: F for DKG is 0
                                             F, %% NOTE: T for DKG is the byzantine F
-                                            Curve,
                                             Artifact,
                                             Sign,
                                             {?MODULE, Done}, list_to_binary(DKGGroupName),
