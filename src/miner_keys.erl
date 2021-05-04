@@ -136,7 +136,8 @@ print_keys(_) ->
     Props = [{pubkey, MaybeB58(PubKey)},
              {onboarding_key, OnboardingKey}
             ] ++ [ {animal_name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:pubkey_to_b58(PubKey)))} || PubKey /= undefined ],
-    lists:foreach(fun(Term) -> io:format("~tp.~n", [Term]) end, Props).
+    lists:foreach(fun(Term) -> io:format("~tp.~n", [Term]) end, Props),
+    rpc_ok.
 
 %%
 %% Utilities
