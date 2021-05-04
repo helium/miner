@@ -9,6 +9,6 @@ if relx_nodetool "ping" > /dev/null 2>&1; then
 fi
 
 # find the start_clean bootfile from the latest release and remove the .boot suffix
-BOOTFILE=$(find /opt/miner/ -name start_clean.boot | sort | tail -1 | sed 's/\.boot$//')
+BOOTFILE=$(find $RELEASE_ROOT_DIR -name start_clean.boot | sort | tail -1 | sed 's/\.boot$//')
 
 exec $BINDIR/$PROGNAME erl -pa $LIB_DIR/*/ebin -boot $(basename $BOOTFILE) -boot_var SYSTEM_LIB_DIR "$SYSTEM_LIB_DIR" -config "$RELX_CONFIG_PATH" -noshell -eval "ok = application:load(blockchain), miner_keys:print_keys([])" -eval 'init:stop()'
