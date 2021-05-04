@@ -23,7 +23,7 @@
          f :: non_neg_integer(),
          id :: non_neg_integer(),
          hbbft :: hbbft:hbbft_data(),
-         sk :: tpke_privkey:privkey() | tpke_privkey:privkey_serialized(),
+         sk :: tc_key_share:tc_key_share() | tpke_privkey:privkey() | binary(),
          seq = 0,
          deferred = [],
          signatures = [],
@@ -133,12 +133,18 @@ handle_command({status, Ref, Worker}, State) ->
                        A -> blockchain_utils:bin_to_hex(crypto:hash(sha256, A))
                    end,
     Sigs = map_ids(State#state.signatures, State#state.members),
+    PubKeyHash = case tc_key_share:is_key_share(State#state.sk) of
+                     true ->
+                         crypto:hash(sha256, term_to_binary(tc_pubkey:serialize(tc_key_share:public_key(State#state.sk))));
+                     false ->
+                         crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk))))
+                 end,
     Worker ! {Ref, maps:merge(#{signatures_required =>
                                     max(State#state.signatures_required - length(Sigs), 0),
                                 signatures => Sigs,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
-                                public_key_hash => blockchain_utils:bin_to_hex(crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk)))))
+                                public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)
                                }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
 handle_command({skip, Ref, Worker}, State) ->
@@ -389,12 +395,20 @@ serialize(State) ->
 
 deserialize(BinState) when is_binary(BinState) ->
     State = binary_to_term(BinState),
-    SK = tpke_privkey:deserialize(State#state.sk),
+    SK = try tc_key_share:deserialize(State#state.sk) of
+             Res -> Res
+         catch _:_ ->
+                   tpke_privkey:deserialize(State#state.sk)
+         end,
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK};
 deserialize(#{sk := SKSer,
               hbbft := HBBFTSer} = StateMap) ->
-    SK = tpke_privkey:deserialize(binary_to_term(SKSer)),
+    SK = try tc_key_share:deserialize(binary_to_term(SKSer)) of
+             Res -> Res
+         catch _:_ ->
+                   tpke_privkey:deserialize(binary_to_term(SKSer))
+         end,
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
     Bundef = term_to_binary(undefined, [compressed]),
