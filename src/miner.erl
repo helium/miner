@@ -310,6 +310,8 @@ version() ->
 init(_Args) ->
     lager:info("STARTING UP MINER"),
     ok = blockchain_event:add_handler(self()),
+    %% TODO: Maybe put this somewhere else?
+    ok = miner_discovery_handler:add_stream_handler(blockchain_swarm:tid()),
     BlockchainRef = erlang:monitor(process, blockchain_worker),
     {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
     SwarmTID = blockchain_swarm:tid(), % We don't actually use this for
