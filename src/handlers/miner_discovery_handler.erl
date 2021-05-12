@@ -58,15 +58,15 @@ init(server, _Conn, _Args) ->
 handle_data(server, Data, State) ->
     lager:info("got ~p ~p", [Data, State]),
     #discovery_start_pb{
-        hotspot = HostpostPubKeyBin,
+        hotspot = HotspotPubkeyBin,
         packets = Packets,
         signature = Sig
     } = discovery_pb:decode_msg(Data, discovery_start_pb),
-    Hostpost = erlang:list_to_binary(libp2p_crypto:bin_to_b58(HostpostPubKeyBin)),
-    case verify_signature(Hostpost, HostpostPubKeyBin, Sig) of
+    Hotspot = erlang:list_to_binary(libp2p_crypto:bin_to_b58(HotspotPubkeyBin)),
+    case verify_signature(Hotspot, HotspotPubkeyBin, Sig) of
         false ->
             lager:info("failed to verify signature for ~p (sig=~p)", [
-                blockchain_utils:addr2name(HostpostPubKeyBin),
+                blockchain_utils:addr2name(HotspotPubkeyBin),
                 Sig
             ]);
         true ->
@@ -95,21 +95,21 @@ handle_info(_Type, _Msg, State) ->
 %% ------------------------------------------------------------------
 
 -spec verify_signature(
-    Hostpost :: binary(),
-    HostpostPubKeyBin :: libp2p_crypto:pubkey_bin(),
+    Hotspot :: binary(),
+    HotspotPubkeyBin :: libp2p_crypto:pubkey_bin(),
     Sig :: binary()
 ) -> boolean().
-verify_signature(Hostpost, HostpostPubKeyBin, Sig) ->
-    case get_hotspot_owner(HostpostPubKeyBin) of
+verify_signature(Hotspot, HotspotPubkeyBin, Sig) ->
+    case get_hotspot_owner(HotspotPubkeyBin) of
         {error, _Reason} ->
             lager:info("failed to find owner for hotspot ~p: ~p", [
-                {Hostpost, HostpostPubKeyBin},
+                {Hotspot, HotspotPubkeyBin},
                 _Reason
             ]),
             false;
         {ok, OwnerPubKeyBin} ->
             libp2p_crypto:verify(
-                <<Hostpost/binary>>,
+                <<Hotspot/binary>>,
                 base64:decode(Sig),
                 libp2p_crypto:bin_to_pubkey(OwnerPubKeyBin)
             )
