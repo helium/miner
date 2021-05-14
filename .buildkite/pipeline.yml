@@ -24,25 +24,10 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-# There is some kind of compiler bug in 32 bit ARM
-# and rocksdb, so comment out for now. Can revisit
-# later if need be.
-#
-#  - if: build.tag != null
-#    name: ":whale: ARM32 docker"
-#   agents:
-#     queue: "erlang"
-#    env:
-#      - MINER_REGISTRY_NAME: "quay.io/team-helium/miner"
-#      - IMAGE_FORMAT: "docker"
-#      - IMAGE_ARCH: "arm32"
-#   commands:
-#     - "git fetch -t"
-#     - ".buildkite/scripts/make_image.sh"
   - if: build.tag =~ /\_GA$$/
     name: ":whale: ARM64 docker"
     agents:
-      queue: "erlang"
+      queue: "arm64"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
