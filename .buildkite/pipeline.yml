@@ -66,7 +66,7 @@ steps:
       IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "arm64"
     agents:
-      queue: "erlang"
+      queue: "arm64"
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
@@ -74,7 +74,7 @@ steps:
   - if: build.tag =~ /\_GA$$/
     name: ":whale: ARM64 docker"
     agents:
-      queue: "erlang"
+      queue: "arm64"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
