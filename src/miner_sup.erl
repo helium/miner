@@ -58,10 +58,12 @@ init(_Args) ->
         {ecc, Props} when is_list(Props) ->
             #{ pubkey := PublicKey,
                key_slot := KeySlot,
+               bus := Bus,
+               address := Address,
                ecdh_fun := ECDHFun,
                sig_fun := SigFun
              } = miner_keys:keys({ecc, Props}),
-            ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot])];
+            ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])];
         {PublicKey, ECDHFun, SigFun} ->
             ECCWorker = [],
             ok

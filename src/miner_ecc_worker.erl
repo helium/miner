@@ -5,7 +5,7 @@
          ecdh/1,
          get_pid/0]).
 
--export([start_link/1,
+-export([start_link/3,
          init/1,
          handle_call/3,
          handle_cast/2,
@@ -35,12 +35,12 @@ ecdh({ecc_compact, PubKey}) ->
 get_pid() ->
     gen_server:call(?MODULE, get_pid).
 
-start_link(KeySlot) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [KeySlot], []).
+start_link(KeySlot, Bus, Address) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [KeySlot, Bus, Address], []).
 
 
-init([KeySlot]) ->
-    {ok, ECCHandle} = ecc508:start_link(),
+init([KeySlot, Bus, Address]) ->
+    {ok, ECCHandle} = ecc508:start_link(Bus, Address),
     {ok, #state{ecc_handle=ECCHandle, key_slot=KeySlot}}.
 
 
