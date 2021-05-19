@@ -11,7 +11,7 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  - if: build.tag =~ /\_GA$$/
+  - if: build.tag != null
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -24,7 +24,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag =~ /\_GA$$/
+  - if: build.tag != null
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
