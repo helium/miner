@@ -15,7 +15,18 @@
 
         ]).
 
--compile([export_all]).
+-export([
+    restart_test/1,
+    dkg_restart_test/1,
+    election_test/1,
+    election_multi_test/1,
+    group_change_test/1,
+    master_key_test/1,
+    version_change_test/1,
+    election_v3_test/1,
+    high_snapshot_test/1,
+    autoskip_chain_vars_test/1
+]).
 
 %% common test callbacks
 
@@ -61,10 +72,13 @@ init_per_testcase(TestCase, Config0) ->
         libp2p_crypto:generate_keys(ecc_compact),
 
     Extras =
+        %% TODO Parametarize init_per_testcase instead leaking per-case internals.
         case TestCase of
             dkg_restart_test ->
                 #{?election_interval => 10,
                   ?election_restart_interval => 99};
+            autoskip_chain_vars_test ->
+                #{?election_interval => 100};
             T when T == snapshot_test;
                    T == high_snapshot_test;
                    T == group_change_test ->
@@ -112,7 +126,7 @@ init_per_testcase(TestCase, Config0) ->
     DKGResults = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
     true = lists:all(fun(Res) -> Res == ok end, DKGResults),
 
-    timer:sleep(500),
+    timer:sleep(3000),
     %% Get both consensus and non consensus miners
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -141,7 +155,86 @@ init_per_testcase(TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
+autoskip_chain_vars_test(Config) ->
+    %% The idea here is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members recognize a new chain var;
+    %% 2. 1/2 of consensus members do not;
+    %% 3. No more blocks are created on any of the nodes (member or not).
 
+    MinersAll = ?config(miners, Config),
+    MinersInConsensus = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersInConsensus),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersWithBogusVar = lists:sublist(MinersInConsensus, M),
+
+    BogusKey = bogus_key,
+    BogusVal = bogus_val,
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("M: ~p", [M]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersInConsensus: ~p", [MinersInConsensus]),
+    ct:pal("MinersWithBogusVar: ~p", [MinersWithBogusVar]),
+
+    %% The mocked 1/2 of consensus group will allow bogus vars:
+    [
+        ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_vars_v1, is_valid, fun(_, _) -> ok end],
+                300
+            )
+    ||
+        Node <- MinersWithBogusVar
+    ],
+
+    %% Submit bogus var transaction:
+    (fun() ->
+        {SecretKey, _} = ?config(master_key, Config),
+        Txn0 = blockchain_txn_vars_v1:new(#{BogusKey => BogusVal}, 2),
+        Proof = blockchain_txn_vars_v1:create_proof(SecretKey, Txn0),
+        Txn = blockchain_txn_vars_v1:proof(Txn0, Proof),
+        miner_ct_utils:submit_txn(Txn, MinersInConsensus)
+    end)(),
+
+    AllHeights =
+        fun() ->
+            lists:usort([H || {_, H} <- miner_ct_utils:heights(MinersAll)])
+        end,
+
+    timer:sleep(10000),
+    ?assert(
+        miner_ct_utils:wait_until(
+            fun() ->
+                case AllHeights() of
+                    [_] -> true;
+                    [_|_] -> false
+                end
+            end,
+            50,
+            1000
+        ),
+        "Heights equalized."
+    ),
+    lists:foldl(
+        fun (_, Heights1) ->
+            ?assertMatch([_], Heights1, "Prev heights are equal"),
+            [Height1] = Heights1,
+            Heights2 = AllHeights(),
+            ?assertMatch([_], Heights2, "Curr heights are equal"),
+            [Height2] = Heights2,
+            ?assertEqual(Height1, Height2, "Chain still stuck"),
+            timer:sleep(5000),
+            Heights2
+        end,
+        AllHeights(),
+        lists:duplicate(20, {})
+    ),
+    {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),

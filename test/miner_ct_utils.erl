@@ -348,7 +348,7 @@ wait_for_chain_var_update(Miners, Key, Value, Retries)->
                              C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
                              Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
                              R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], 500),
-                             ct:pal("var = ~p", [R]),
+                             ct:pal("var: ~p, miner: ~p.", [R, Miner]),
                              {ok, Value} == R
                      end, miner_ct_utils:shuffle(Miners))
            end,
@@ -368,14 +368,23 @@ delete_dirs(DirWildcard, SubDir)->
     ok.
 
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
-    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
+    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 60000).
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [Txns, Addresses, NumConsensusMembers, Curve], Timeout)
-                   end, Miners),
-    DKGResults.
+    DKG =
+        fun(Miner) ->
+            Result =
+                ct_rpc:call(
+                    Miner,
+                    miner_consensus_mgr,
+                    initial_dkg,
+                    [Txns, Addresses, NumConsensusMembers, Curve],
+                    Timeout
+                ),
+            {Miner, Result}
+        end,
+    ResultPairs = miner_ct_utils:pmap(DKG, Miners),
+    ct:pal("DKGResults: ~p", [ResultPairs]),
+    [R || {_, R} <- ResultPairs].
 
 
 
@@ -565,6 +574,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
     end,
 
     %% Miner configuration, can be input from os env
+    %%
+    %% TODO Parametarize init_per_testcase instead leaking per-case internals.
     TotalMiners =
         case TestCase of
             restart_test ->
@@ -577,6 +588,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
             group_change_test ->
                 4;
             restart_test ->
+                4;
+            autoskip_chain_vars_test ->
                 4;
             _ ->
                 get_config("N", 7)
@@ -1158,7 +1171,9 @@ handle_get_consensus_miners(Miner)->
 handle_miners_by_consensus(Mod, Bool, Miners)->
     lists:Mod(
             fun(Miner) ->
-                Bool == ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, [])
+                Out = ct_rpc:call(Miner, miner_consensus_mgr, in_consensus, []),
+                ct:pal("in_consensus : ~p -> ~p", [Miner, Out]),
+                Out == Bool
             end, Miners).
 
 handle_gte_type(height, Miner, Threshold)->
