@@ -101,7 +101,7 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.9.1">>},1},
  {<<"libp2p">>,
   {git,"https://github.com/helium/erlang-libp2p.git",
-       {ref,"a15fc3f5e1b7e84e49d88fb00ad74a65811c61bd"}},
+       {ref,"323760a35181e3ffe630e83099a987cbf8a157a8"}},
   1},
  {<<"libp2p_crypto">>,{pkg,<<"libp2p_crypto">>,<<"1.4.0">>},2},
  {<<"longfi">>,

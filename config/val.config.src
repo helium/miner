@@ -16,8 +16,11 @@
    {seed_node_dns, ""},
    {ports, [2154]},
    {honor_quick_sync, false},  % clean this up to have its own mode?
-   {quick_sync_mode, assumed_valid},
    {validation_width, 8},
+   {quick_sync_mode, blessed_snapshot},
+   {blessed_snapshot_block_height, 85681},
+   {blessed_snapshot_block_hash,
+    <<23,66,132,9,61,159,196,120,79,167,74,204,92,210,230,101,44,52,216,234,208,110,13,0,54,250,76,252,147,9,34,6>>},
    {key, undefined},
    {relay_limit, 100},
    {base_dir, "data"},
