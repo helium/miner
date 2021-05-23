@@ -16,7 +16,7 @@ docker build -t helium:$DOCKER_NAME -f "${DOCKERFILE_NAME}" .
 docker tag helium:$DOCKER_NAME "$MINER_REGISTRY_NAME:$DOCKER_NAME"
 docker push "$MINER_REGISTRY_NAME:$DOCKER_NAME"
 # only update latest if github tag contains `_GA$`
-if [ "$BUILDKITE_TAG" =~ _GA$ ]; then
+if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
     docker tag helium:$DOCKER_NAME "$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
     docker push "$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
 fi
