@@ -16,6 +16,7 @@
     hbbft_skip/0,
     create_block/3,
     signed_block/2,
+    sign/1,
 
     start_chain/2,
     install_consensus/1,
@@ -215,6 +216,16 @@ relcast_queue(Group) ->
             end
     end.
 
+-spec sign(Artifact :: binary()) ->
+    {ok, {Addr :: binary(), Sig :: binary()}} | {error, no_miner}.
+sign(Bin) ->
+    try
+        AddrSig = {_, _} = gen_server:call(?MODULE, {sign, Bin}, infinity),
+        {ok, AddrSig}
+    catch exit:{noproc, _} ->
+            {error, no_miner}
+    end.
+
 -spec create_block(metadata(), blockchain_txn:txns(), non_neg_integer()) ->
     create_block_result().
 create_block(Metadata, Txns, HBBFTRound) ->
@@ -341,6 +352,10 @@ handle_call(
 ) ->
     Result = try_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
     {reply, Result, State};
+handle_call({sign, Bin}, _From, #state{swarm_keys={PubKey, SignFun}}=State) ->
+    Sig = SignFun(Bin),
+    Addr = libp2p_crypto:pubkey_to_bin(PubKey),
+    {reply, {Addr, Sig}, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.

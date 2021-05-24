@@ -368,7 +368,7 @@ delete_dirs(DirWildcard, SubDir)->
     ok.
 
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
-    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 60000).
+    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 120000).
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
     DKG =
         fun(Miner) ->

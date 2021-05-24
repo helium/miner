@@ -68,7 +68,6 @@ txn_buf() ->
         Res -> Res
     end.
 
-
 -spec consensus_pos() -> integer() | undefined.
 consensus_pos() ->
     gen_server:call(?MODULE, consensus_pos).
@@ -1016,6 +1015,7 @@ wait_for_group(Group, Retries) ->
             wait_for_group(Group, Retries - 1)
     end.
 
+-spec set_buf(pid(), [binary()]) -> ok | {error, no_group}.
 set_buf(ConsensusGroup, Buf) ->
     case ConsensusGroup of
         P when is_pid(P) ->

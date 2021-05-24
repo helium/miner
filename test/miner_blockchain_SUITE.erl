@@ -140,7 +140,7 @@ init_per_testcase(TestCase, Config0) ->
     %% integrate genesis block
     _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 30),
 
     [   {master_key, {Priv, Pub}},
         {consensus_miners, ConsensusMiners},
@@ -178,6 +178,19 @@ autoskip_chain_vars_test(Config) ->
     ct:pal("MinersInConsensus: ~p", [MinersInConsensus]),
     ct:pal("MinersWithBogusVar: ~p", [MinersWithBogusVar]),
 
+    %[
+    %    ok =
+    %        ct_rpc:call(
+    %            Node,
+    %            lager,
+    %            set_loglevel,
+    %            [{lager_file_backend, "console.log"}, debug],
+    %            300
+    %        )
+    %||
+    %    Node <- MinersWithBogusVar
+    %],
+
     %% The mocked 1/2 of consensus group will allow bogus vars:
     [
         ok =
@@ -189,6 +202,7 @@ autoskip_chain_vars_test(Config) ->
                 300
             )
     ||
+        %Node <- MinersAll
         Node <- MinersWithBogusVar
     ],
 
