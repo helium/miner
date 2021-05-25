@@ -977,8 +977,10 @@ make_vars(Keys, Map, Mode) ->
               ?validator_minimum_stake => ?bones(10000),
               ?validator_liveness_grace_period => 10,
               ?validator_liveness_interval => 5,
-              ?stake_withdrawl_cooldown => 55,
+              ?stake_withdrawal_cooldown => 55,
               ?dkg_penalty => 1.0,
+              ?tenure_penalty => 1.0,
+              ?validator_penalty_filter => 5.0,
               ?penalty_history_limit => 100
              },
 
@@ -1002,7 +1004,8 @@ make_vars(Keys, Map, Mode) ->
                                         ?election_seen_penalty, ?sc_grace_blocks, ?validator_minimum_stake,
                                         ?validator_liveness_grace_period, ?validator_liveness_interval,
                                         ?poc_typo_fixes, ?election_bba_penalty, ?election_seen_penalty,
-                                        ?election_cluster_res, ?stake_withdrawl_cooldown
+                                        ?election_cluster_res, ?stake_withdrawal_cooldown,
+                                        ?validator_penalty_filter
                                        ],
                                        Vars),
                 Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, LegVars),
