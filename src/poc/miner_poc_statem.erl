@@ -46,8 +46,8 @@
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 30).
 -define(CHALLENGE_RETRY, 3).
--define(RECEIVING_TIMEOUT, 10).
--define(RECEIPTS_TIMEOUT, 10).
+-define(RECEIVING_TIMEOUT, 20).
+-define(RECEIPTS_TIMEOUT, 20).
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
@@ -55,7 +55,7 @@
 -ifdef(TEST).
 -define(BLOCK_PROPOGATION_TIME, timer:seconds(1)).
 -else.
--define(BLOCK_PROPOGATION_TIME, timer:seconds(120)).
+-define(BLOCK_PROPOGATION_TIME, timer:seconds(300)).
 -endif.
 
 -record(addr_hash_filter, {
@@ -129,7 +129,8 @@ init(Args) ->
         %% we loaded a state from the saved statem file, initialise with this if its an exported/supported state
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
-                true ->
+                %% don't try to load the state file if we don't have a blockchain
+                true when Blockchain /= undefined ->
                     %% to handle scenario whereby existing hotspots transition to light gateways
                     %% check the GW mode is compatible with the loaded state, if not default to requesting
                     Ledger = blockchain:ledger(Blockchain),
@@ -529,10 +530,12 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
     lager:info("starting blockchain_poc_path:build in ~p", [Pid]),
     receive
         {Attempt, {error, Reason}} ->
+            erlang:demonitor(Ref, [flush]),
             lager:error("could not build path for ~p: ~p", [Target, Reason]),
             lager:info("selecting new target"),
             handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1});
         {Attempt, {ok, Path}} ->
+            erlang:demonitor(Ref, [flush]),
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),

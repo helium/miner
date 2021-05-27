@@ -338,6 +338,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     ok ->
                         ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream);
                     {error, _} ->
+                        lager:info([{poc_id, POCID}], "unable to locate POC ID ~p, dropping", [POCID]),
                         ok
                 end
             end),
