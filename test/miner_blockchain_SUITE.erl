@@ -159,7 +159,11 @@ autoskip_chain_vars_test(Config) ->
     %% The idea here is to reproduce the following chain stall scenario:
     %% 1. 1/2 of consensus members recognize a new chain var;
     %% 2. 1/2 of consensus members do not;
-    %% 3. No more blocks are created on any of the nodes (member or not).
+    %% 3.
+    %%      If autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so autoskip must've worked
 
     MinersAll = ?config(miners, Config),
     MinersInConsensus = miner_ct_utils:in_consensus_miners(MinersAll),
@@ -178,19 +182,6 @@ autoskip_chain_vars_test(Config) ->
     ct:pal("MinersInConsensus: ~p", [MinersInConsensus]),
     ct:pal("MinersWithBogusVar: ~p", [MinersWithBogusVar]),
 
-    %[
-    %    ok =
-    %        ct_rpc:call(
-    %            Node,
-    %            lager,
-    %            set_loglevel,
-    %            [{lager_file_backend, "console.log"}, debug],
-    %            300
-    %        )
-    %||
-    %    Node <- MinersWithBogusVar
-    %],
-
     %% The mocked 1/2 of consensus group will allow bogus vars:
     [
         ok =
@@ -202,7 +193,6 @@ autoskip_chain_vars_test(Config) ->
                 300
             )
     ||
-        %Node <- MinersAll
         Node <- MinersWithBogusVar
     ],
 
@@ -234,19 +224,11 @@ autoskip_chain_vars_test(Config) ->
         ),
         "Heights equalized."
     ),
-    lists:foldl(
-        fun (_, Heights1) ->
-            ?assertMatch([_], Heights1, "Prev heights are equal"),
-            [Height1] = Heights1,
-            Heights2 = AllHeights(),
-            ?assertMatch([_], Heights2, "Curr heights are equal"),
-            [Height2] = Heights2,
-            ?assertEqual(Height1, Height2, "Chain still stuck"),
-            timer:sleep(5000),
-            Heights2
-        end,
-        AllHeights(),
-        lists:duplicate(20, {})
+    [Height1] = AllHeights(),
+    ?assertMatch(
+        ok,
+        miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 1),
+        "Chain has advanced, so autoskip must've worked."
     ),
     {comment, miner_ct_utils:heights(MinersAll)}.
 
