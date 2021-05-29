@@ -155,7 +155,7 @@ einfo() ->
             #{};
         Chain ->
             try
-                blockchain_election:election_info(blockchain:ledger(Chain), Chain)
+                blockchain_election:election_info(blockchain:ledger(Chain))
             catch _:_ ->
                     #{}
             end
@@ -582,7 +582,7 @@ handle_info(timeout, State) ->
                 #{election_height := ElectionHeight,
                   start_height := EpochStart,
                   election_delay := ElectionDelay} =
-                    blockchain_election:election_info(Ledger, Chain),
+                    blockchain_election:election_info(Ledger),
                 NextElection = next_election(EpochStart, ElectionInterval),
                 RestoreState =
                     case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
@@ -650,10 +650,11 @@ handle_info(timeout, State) ->
                         {noreply, RestoreState}
                 end
         end
-    catch _:_ ->
+    catch C:E:S ->
             %% unknown errors in here should not put the node into an
             %% unrepairable state.
-            lager:warning("crash during restore process, going to idle state"),
+            lager:warning("crash during restore process, going to idle state ~p:~p ~p",
+                          [C, E, S]),
             {noreply, State}
 
     end;
@@ -694,7 +695,7 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     #{election_height := ElectionHeight,
       election_delay := ElectionDelay} =
-        blockchain_election:election_info(Ledger, Chain),
+        blockchain_election:election_info(Ledger),
     {ok, Block} = blockchain:head_block(Chain),
     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
     Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
