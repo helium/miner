@@ -239,11 +239,11 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
     Ledger = blockchain:ledger(Chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
-    #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger, Chain),
+    #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger),
     {Start, GroupWithPenalties} =
         case blockchain:config(?election_version, Ledger) of
             {ok, N} when N >= 5 ->
-                Penalties = blockchain_election:validator_penalties(ConsensusAddrs, Chain, Ledger),
+                Penalties = blockchain_election:validator_penalties(ConsensusAddrs, Ledger),
                 Start1 = case End > (Start0 + 2) of
                              true -> Start0 + 2;
                              false -> End + 1
