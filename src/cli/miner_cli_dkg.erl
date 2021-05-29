@@ -181,7 +181,7 @@ dkg_running(["dkg", "running"], [], Flags) ->
     {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
 
-    #{start_height := EpochStart} = blockchain_election:election_info(Ledger, Chain),
+    #{start_height := EpochStart} = blockchain_election:election_info(Ledger),
     Height = EpochStart + ElectionInterval,
     Diff = Curr - Height,
     Delay = max(0, (Diff div RestartInterval) * RestartInterval),
@@ -232,7 +232,7 @@ dkg_next(["dkg", "next"], [], _Flags) ->
     {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
     {ok, RestartInterval} = blockchain:config(?election_restart_interval, Ledger),
 
-    #{start_height := EpochStart} = blockchain_election:election_info(Ledger, Chain),
+    #{start_height := EpochStart} = blockchain_election:election_info(Ledger),
     Height = EpochStart + ElectionInterval,
     Diff = Curr - Height,
     Delay = max(0, (Diff div RestartInterval) * RestartInterval),
