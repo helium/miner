@@ -34,7 +34,8 @@
          chain :: undefined | blockchain:blockchain(),
          signed = 0 :: non_neg_integer(),
          seen = #{} :: #{non_neg_integer() => boolean()},
-         bba = <<>> :: binary()
+         bba = <<>> :: binary(),
+         skip_votes = #{} :: #{pos_integer() => pos_integer()}
         }).
 
 -spec metadata(V, M, C) -> binary()
@@ -199,11 +200,12 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
                 {NextHBBFT, ok} ->
                     {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[],
                                                            artifact=undefined, sig_phase=unsent,
-                                                           bba = <<>>, seen = #{}}};
+                                                           bba = <<>>, seen = #{},
+                                                           skip_votes = #{}}};
                 {NextHBBFT, {send, NextMsgs}} ->
                     {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs),
                      State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                                 bba = <<>>, seen = #{}}}
+                                 bba = <<>>, seen = #{}, skip_votes = #{}}}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -229,6 +231,8 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
+handle_command({maybe_skip, ProposedRound}, State) ->
+    {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound})}], State};
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
@@ -240,9 +244,26 @@ handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
             lager:warning("got truncated message: ~p:", [BinMsg]),
             ignore
     end;
-handle_message(Msg, Index, State=#state{hbbft = HBBFT}) ->
+handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
+        {proposed_skip, ProposedRound} ->
+            case process_skips(ProposedRound, State#state.f, Round, Skips) of
+                skip -> %% do stuff here!
+                    case hbbft:next_round(HBBFT, ProposedRound, []) of
+                        {NextHBBFT, ok} ->
+                            {State#state{hbbft=NextHBBFT, signatures=[],
+                                         artifact=undefined, sig_phase=unsent,
+                                         bba = <<>>, seen = #{}, skip_votes = #{}},
+                             [ new_epoch ]};
+                        {NextHBBFT, {send, NextMsgs}} ->
+                            {State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
+                                         bba = <<>>, seen = #{}, skip_votes = #{}},
+                             [ new_epoch ] ++ fixup_msgs(NextMsgs)}
+                    end;
+                {wait, Skips1} ->
+                    {State#state{skip_votes = Skips1}, []}
+            end;
         {signatures, R, _Signatures} when R > Round ->
             defer;
         {signatures, R, _Signatures} when R < Round ->
@@ -437,6 +458,8 @@ deserialize(#{sk := SKSer,
                           #{};
                       _ when K == bba ->
                           <<>>;
+                      _ when K == skip_votes ->
+                          #{};
                       _ ->
                           undefined
                   end
@@ -527,6 +550,19 @@ md_version(Ledger) ->
             map;
         _ ->
             tuple
+    end.
+
+%% do nothing if we've advanced
+process_skips(Proposed, _F, Current, Votes) when Current >= Proposed ->
+    {wait, Votes};
+process_skips(Proposed, F, _Current, Votes) ->
+    PropVotes = maps:get(Proposed, Votes, 0) + 1,
+    Votes1 = Votes#{Proposed => PropVotes},
+    case PropVotes >= (2 * F) + 1 of
+        true ->
+            skip;
+        false ->
+            {wait, Votes1}
     end.
 
 t2b(Term) ->
