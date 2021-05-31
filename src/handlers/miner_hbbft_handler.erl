@@ -37,7 +37,8 @@
          bba = <<>> :: binary(),
 
          %% For artifact re-signing on var-autoskip:
-         swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
+         swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()},
+         skip_votes = #{} :: #{pos_integer() => pos_integer()}
         }).
 
 -type hbbft_msg() ::
@@ -235,6 +236,14 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
+handle_command(maybe_skip, State = #state{hbbft = HBBFT,
+                                          id = MyIndex,
+                                          skip_votes = Skips}) ->
+    MyRound = hbbft:round(HBBFT),
+    %% put in a fake local vote here for the case where we have no skips
+    ProposedRound = median_not_taken(maps:merge(#{MyIndex => {0, MyRound}}, Skips)),
+    lager:info("voting for round ~p", [ProposedRound]),
+    {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound, MyRound})}], State};
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
@@ -243,7 +252,7 @@ handle_command(_, _State) ->
     RelcastMsg ::
           {multicast, binary()}
         | {unicast, pos_integer(), binary()}.
-handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft=HBBFT}=S0) ->
+handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Skips}=S0) ->
     CurRound = hbbft:round(HBBFT),
     case bin_to_msg(BinMsgIn) of
         %% Multiple sigs
@@ -262,6 +271,39 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft=HBBFT}=S0) ->
         {ok, {signature, _, Addr, Sig}} ->
             handle_sigs({received, [{Addr, Sig}]}, S0);
 
+        {ok, {proposed_skip, ProposedRound, IndexRound}} when ProposedRound =/= CurRound ->
+            lager:info("proposed skip to round ~p", [ProposedRound]),
+            case process_skips(ProposedRound, IndexRound, S0#state.f, Index, Skips) of
+                {skip, Skips1} ->
+                    lager:info("skipping"),
+                    %% ask for some time
+                    miner:reset_late_block_timer(),
+                    SkipGossip = {multicast, t2b({proposed_skip, ProposedRound, CurRound})},
+                    %% skip but don't discard rounds until we get a clean round
+                    {HBBFT1, ToSend1} =
+                        case hbbft:next_round(HBBFT, ProposedRound, []) of
+                            {H1, ok} ->
+                                {H1, []};
+                            {H1, {send, NextMsgs}} ->
+                                {H1, NextMsgs}
+                        end,
+                    {HBBFT2, ToSend2} =
+                        case hbbft:start_on_demand(HBBFT1) of
+                            {H2, already_started} ->
+                                {H2, []};
+                            {H2, {send, Msgs}} ->
+                                {H2, Msgs}
+                        end,
+                    ToSend = fixup_msgs(ToSend1 ++ ToSend2),
+                    {(state_reset(HBBFT2, S0))#state{skip_votes = Skips1},
+                     [ new_epoch , SkipGossip ] ++ ToSend};
+                {wait, Skips1} ->
+                    lager:info("waiting: ~p", [Skips1]),
+                    {S0#state{skip_votes = Skips1}, []}
+            end;
+        {proposed_skip, ProposedRound, IndexRound} ->
+            Skips1 = Skips#{Index => {ProposedRound, IndexRound}},
+            {S0#state{skip_votes = Skips1}, []};
         %% Other
         {ok, MsgIn} ->
             handle_msg_hbbft(MsgIn, Index, S0);
@@ -371,6 +413,8 @@ serialize(State) ->
                         M#{K => term_to_binary(SerializedSK,  [compressed])};
                    ({chain, _}, M) ->
                         M;
+                   ({skip_votes, _}, M) ->
+                        M;
                    ({K, V}, M)->
                         VB = term_to_binary(V, [compressed]),
                         M#{K => VB}
@@ -398,6 +442,8 @@ deserialize(#{sk := SKSer,
                   SK;
              (chain) ->
                   undefined;
+             (skip_votes) ->
+                  #{};
              (K)->
                   case StateMap of
                       #{K := V} when V /= undefined andalso
@@ -471,7 +517,8 @@ state_reset(HBBFT, #state{}=S) ->
         artifact       = undefined,
         sig_phase      = unsent,
         bba            = <<>>,
-        seen           = #{}
+        seen           = #{},
+        skip_votes     = #{}
     }.
 
 -spec handle_sigs(
@@ -697,6 +744,43 @@ kvl_set(K, V, KVL) ->
 -spec b58(binary()) -> string().
 b58(<<Bin/binary>>) ->
     libp2p_crypto:bin_to_b58(Bin).
+
+%% do nothing if we've advanced
+process_skips(Proposed, SenderRound, F, Sender, Votes) ->
+    Votes1 = Votes#{Sender => {Proposed, SenderRound}},
+    PropVotes = maps:fold(fun(_Sender, {Vote, _OwnRound}, Acc) when Vote =:= Proposed ->
+                                  Acc + 1;
+                             (_Sender, {_OtherVote, _OwnRound}, Acc) ->
+                                  Acc
+                          end,
+                          0,
+                          Votes1),
+    %% equal here because we only want to go once, at the point of saturation
+    case PropVotes == (2 * F) + 1 of
+        true -> {skip, Votes1};
+        false -> {wait, Votes1}
+    end.
+
+%% the idea here is to take a clean round that's higher than the median, which should be relatively
+%% hard to manipulate by cheating
+median_not_taken(Map) ->
+    {_Votes, Rounds} = lists:unzip(maps:values(Map)),
+    lager:info("rounds ~p", [lists:sort(Rounds)]),
+    Median = miner_util:median(Rounds),
+    search_lowest(Median, lists:sort(Rounds)).
+
+%% if we haven't found a round in the list, the next highest should work
+search_lowest(Try, []) ->
+    Try;
+%% skip past stuff below the median
+search_lowest(Try, [Lower | Tail]) when Try > Lower ->
+    search_lowest(Try, Tail);
+%% we have a node on this round, and want the round to be fresh
+search_lowest(Try, [Try | Tail]) ->
+    search_lowest(Try + 1, Tail);
+%% here, we should have the next gap that's larger than the median round
+search_lowest(Try, [_OtherValue | _Tail]) ->
+    Try.
 
 -spec t2b(term()) -> binary().
 t2b(Term) ->

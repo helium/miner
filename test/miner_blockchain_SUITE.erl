@@ -100,7 +100,7 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     Vars = #{garbage_value => totes_garb,
-             ?block_time => max(1500, BlockTime),
+             ?block_time => max(3000, BlockTime),
              ?election_interval => Interval,
              ?num_consensus_members => NumConsensusMembers,
              ?batch_size => BatchSize,
@@ -255,6 +255,57 @@ autoskip_chain_vars_test(Config) ->
         "No node accepted the bogus chain var."
     ),
 
+autoskip_on_timeout_test(Config) ->
+    %% The idea is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members produce timed blocks;
+    %% 2. 1/2 of consensus members do not;
+    %% 3.
+    %%      If time-based autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so time-based autoskip must've worked
+
+    MinersAll = ?config(miners, Config),
+    MinersCG = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersCG),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersCGBroken = lists:sublist(MinersCG, M),
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersCG: ~p", [MinersCG]),
+    ct:pal("MinersCGBroken: ~p", [MinersCGBroken]),
+
+    %% Default is 120 sesonds, but for testing we want to trigger skip faster:
+    _ = [
+        ok = ct_rpc:call(Node, application, set_env, [miner, late_block_timeout_seconds, 10], 300)
+    ||
+        Node <- MinersAll
+    ],
+
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
+    Node1 = hd(MinersCGBroken),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+    ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
+
+    ok = miner_ct_utils:assert_chain_halted(MinersAll),
+    ok = miner_ct_utils:assert_chain_advanced(MinersAll, 2500, 5),
+
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
@@ -278,9 +329,7 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
-    Heights =  miner_ct_utils:heights(Miners),
-
-    {comment, Heights}.
+    {comment, miner_ct_utils:heights(Miners)}.
 
 
 dkg_restart_test(Config) ->
