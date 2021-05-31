@@ -331,8 +331,11 @@ init(_Args) ->
             {ok, #state{swarm_keys = {MyPubKey, SignFun},
                         swarm_tid = SwarmTID}};
         Chain ->
+            {ok, Block} = blockchain:head_block(Chain),
+            Round = blockchain_block:hbbft_round(Block),
             {ok, #state{swarm_keys = {MyPubKey, SignFun},
                         swarm_tid = SwarmTID,
+                        round = Round + 1,
                         blockchain = Chain,
                         blockchain_ref = BlockchainRef}}
     end.
@@ -341,7 +344,10 @@ handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
+    {ok, Block} = blockchain:head_block(Chain),
+    Round = blockchain_block:hbbft_round(Block),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
+                                                 round = Round + 1,
                                                  blockchain = Chain})};
 handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
             #state{blockchain = Chain, swarm_keys = SK} = State) ->
@@ -448,11 +454,16 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
-    {noreply, State#state{blockchain = Chain}};
+    {ok, Block} = blockchain:head_block(Chain),
+    Round = blockchain_block:hbbft_round(Block),
+    {noreply, State#state{blockchain = Chain, round = Round + 1}};
 handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref, swarm_keys=SK, swarm_tid=STid}) ->
+    {ok, Block} = blockchain:head_block(NC),
+    Round = blockchain_block:hbbft_round(Block),
     State1 = #state{blockchain = NC,
                     blockchain_ref = Ref,
                     swarm_keys=SK,
+                    round = Round + 1,
                     swarm_tid=STid},
     {noreply, State1};
 handle_info(_Msg, State) ->
