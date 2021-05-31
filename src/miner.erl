@@ -379,11 +379,11 @@ handle_info(block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
 handle_info(late_block_timeout, State) ->
-    {ok, BlockTime} = blockchain:config(?block_time, blockchain:ledger(State#state.blockchain)),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
     lager:info("late block timeout"),
     NextRound = State#state.round + 1,
     libp2p_group_relcast:handle_input(State#state.consensus_group, {maybe_skip, NextRound}),
-    LateTimer = erlang:send_after(BlockTime, self(), late_block_timeout),
+    LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
     {noreply, State#state{late_block_timer = LateTimer, round = NextRound}};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
@@ -733,7 +733,8 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
 
     %% now figure out the late block timer
     erlang:cancel_timer(State#state.late_block_timer),
-    LateTimer = erlang:send_after((BlockTime + NextBlockTime) * 1000, self(), late_block_timeout),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
 
     State#state{block_timer=Timer, late_block_timer = LateTimer}.
 

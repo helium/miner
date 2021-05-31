@@ -248,8 +248,10 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
         {proposed_skip, ProposedRound} ->
+            lager:info("proposed skip to round ~p", [ProposedRound]),
             case process_skips(ProposedRound, State#state.f, Round, Skips) of
-                skip -> %% do stuff here!
+                skip ->
+                    lager:info("skipping"),
                     case hbbft:next_round(HBBFT, ProposedRound, []) of
                         {NextHBBFT, ok} ->
                             {State#state{hbbft=NextHBBFT, signatures=[],
@@ -262,6 +264,7 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
                              [ new_epoch ] ++ fixup_msgs(NextMsgs)}
                     end;
                 {wait, Skips1} ->
+                    lager:info("waiting: ~p", [Skips1]),
                     {State#state{skip_votes = Skips1}, []}
             end;
         {signatures, R, _Signatures} when R > Round ->
