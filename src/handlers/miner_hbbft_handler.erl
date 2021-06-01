@@ -252,7 +252,7 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
             case process_skips(ProposedRound, State#state.f, Index, Round, Skips) of
                 skip ->
                     lager:info("skipping"),
-                    SkipGossip = [{multicast, term_to_binary({proposed_skip, ProposedRound})}],
+                    SkipGossip = {multicast, t2b({proposed_skip, ProposedRound})},
                     %% skip but don't discard rounds until we get a clean round
                     case hbbft:next_round(HBBFT, ProposedRound, []) of
                         {NextHBBFT, ok} ->
@@ -560,7 +560,7 @@ md_version(Ledger) ->
     end.
 
 %% do nothing if we've advanced
-process_skips(Proposed, _F, _Sender, Current, Votes) when Current >= Proposed ->
+process_skips(Proposed, _F, _Sender, Current, Votes) when Current == Proposed ->
     {wait, Votes};
 process_skips(Proposed, F, Sender, _Current, Votes) ->
     PropVotes = maps:get(Proposed, Votes, #{}),
