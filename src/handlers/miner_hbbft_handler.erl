@@ -249,22 +249,24 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
     case Msg of
         {proposed_skip, ProposedRound} ->
             lager:info("proposed skip to round ~p", [ProposedRound]),
-            case process_skips(ProposedRound, State#state.f, Round, Skips) of
+            case process_skips(ProposedRound, State#state.f, Index, Round, Skips) of
                 skip ->
                     lager:info("skipping"),
+                    SkipGossip = [{multicast, term_to_binary({proposed_skip, ProposedRound})}],
+                    %% skip but don't discard rounds until we get a clean round
                     case hbbft:next_round(HBBFT, ProposedRound, []) of
                         {NextHBBFT, ok} ->
                             {State#state{hbbft=NextHBBFT, signatures=[],
                                          artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}, skip_votes = #{}},
-                             [ new_epoch ]};
+                                         bba = <<>>, seen = #{}},
+                             [ new_epoch , SkipGossip ]};
                         {NextHBBFT, {send, NextMsgs}} ->
                             {State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}, skip_votes = #{}},
-                             [ new_epoch ] ++ fixup_msgs(NextMsgs)}
+                                         bba = <<>>, seen = #{}},
+                             [ new_epoch, SkipGossip ] ++ fixup_msgs(NextMsgs)}
                     end;
                 {wait, Skips1} ->
-                    lager:info("waiting: ~p", [Skips1]),
+                    lager:info("waiting: ~p", [maps:map(fun(_, V) -> maps:size(V) end, Skips1)]),
                     {State#state{skip_votes = Skips1}, []}
             end;
         {signatures, R, _Signatures} when R > Round ->
@@ -416,6 +418,8 @@ serialize(State) ->
                         M#{K => term_to_binary(SerializedSK,  [compressed])};
                    ({chain, _}, M) ->
                         M;
+                   ({skip_votes, _}, M) ->
+                        M;
                    ({K, V}, M)->
                         VB = term_to_binary(V, [compressed]),
                         M#{K => VB}
@@ -450,6 +454,8 @@ deserialize(#{sk := SKSer,
                   SK;
              (chain) ->
                   undefined;
+             (skip_votes) ->
+                  #{};
              (K)->
                   case StateMap of
                       #{K := V} when V /= undefined andalso
@@ -461,8 +467,6 @@ deserialize(#{sk := SKSer,
                           #{};
                       _ when K == bba ->
                           <<>>;
-                      _ when K == skip_votes ->
-                          #{};
                       _ ->
                           undefined
                   end
@@ -556,16 +560,15 @@ md_version(Ledger) ->
     end.
 
 %% do nothing if we've advanced
-process_skips(Proposed, _F, Current, Votes) when Current >= Proposed ->
+process_skips(Proposed, _F, _Sender, Current, Votes) when Current >= Proposed ->
     {wait, Votes};
-process_skips(Proposed, F, _Current, Votes) ->
-    PropVotes = maps:get(Proposed, Votes, 0) + 1,
-    Votes1 = Votes#{Proposed => PropVotes},
-    case PropVotes >= (2 * F) + 1 of
-        true ->
-            skip;
-        false ->
-            {wait, Votes1}
+process_skips(Proposed, F, Sender, _Current, Votes) ->
+    PropVotes = maps:get(Proposed, Votes, #{}),
+    PropVotes1 = PropVotes#{Sender => true},
+    Votes1 = Votes#{Proposed => PropVotes1},
+    case maps:size(PropVotes1) >= (2 * F) + 1 of
+        true -> skip;
+        false -> {wait, Votes1}
     end.
 
 t2b(Term) ->
