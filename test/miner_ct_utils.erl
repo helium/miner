@@ -924,7 +924,7 @@ make_vars(Keys, Map, Mode) ->
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.60,
-              ?monthly_reward => 50000 * 1000000,
+              ?monthly_reward => 5000000 * 1000000,
               ?securities_percent => 0.35,
               ?dc_percent => 0.0,
               ?poc_challengees_percent => 0.19 + 0.16,
