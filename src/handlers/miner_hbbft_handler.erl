@@ -250,7 +250,7 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
         {proposed_skip, ProposedRound} ->
             lager:info("proposed skip to round ~p", [ProposedRound]),
             case process_skips(ProposedRound, State#state.f, Index, Round, Skips) of
-                skip ->
+                {skip, Skips1} ->
                     lager:info("skipping"),
                     SkipGossip = {multicast, t2b({proposed_skip, ProposedRound})},
                     %% skip but don't discard rounds until we get a clean round
@@ -258,11 +258,11 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
                         {NextHBBFT, ok} ->
                             {State#state{hbbft=NextHBBFT, signatures=[],
                                          artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}},
+                                         bba = <<>>, seen = #{}, skip_votes = Skips1},
                              [ new_epoch , SkipGossip ]};
                         {NextHBBFT, {send, NextMsgs}} ->
                             {State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}},
+                                         bba = <<>>, seen = #{}, skip_votes = Skips1},
                              [ new_epoch, SkipGossip ] ++ fixup_msgs(NextMsgs)}
                     end;
                 {wait, Skips1} ->
@@ -560,14 +560,14 @@ md_version(Ledger) ->
     end.
 
 %% do nothing if we've advanced
-process_skips(Proposed, _F, _Sender, Current, Votes) when Current == Proposed ->
+process_skips(Proposed, _F, _Sender, Current, Votes) when Current >= Proposed ->
     {wait, Votes};
 process_skips(Proposed, F, Sender, _Current, Votes) ->
     PropVotes = maps:get(Proposed, Votes, #{}),
     PropVotes1 = PropVotes#{Sender => true},
     Votes1 = Votes#{Proposed => PropVotes1},
-    case maps:size(PropVotes1) >= (2 * F) + 1 of
-        true -> skip;
+    case maps:size(PropVotes1) == (2 * F) + 1 of
+        true -> {skip, Votes1};
         false -> {wait, Votes1}
     end.
 
