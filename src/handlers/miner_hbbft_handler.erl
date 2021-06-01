@@ -231,8 +231,11 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
                     {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
-handle_command({maybe_skip, ProposedRound}, State) ->
-    {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound})}], State};
+handle_command(maybe_skip, State = #state{hbbft = HBBFT, skip_votes = Skips}) ->
+    MyRound = hbbft:round(HBBFT),
+    %% put in a fake local vote here for the case where we have no skips
+    ProposedRound = lowest_not_taken(Skips#{MyRound => {0, MyRound}}),
+    {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound, MyRound})}], State};
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
@@ -247,12 +250,14 @@ handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
 handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
-        {proposed_skip, ProposedRound} ->
+        {proposed_skip, ProposedRound, IndexRound} ->
             lager:info("proposed skip to round ~p", [ProposedRound]),
-            case process_skips(ProposedRound, State#state.f, Index, Round, Skips) of
+            case process_skips(ProposedRound, IndexRound, State#state.f, Index, Skips) of
                 {skip, Skips1} ->
                     lager:info("skipping"),
-                    SkipGossip = {multicast, t2b({proposed_skip, ProposedRound})},
+                    %% ask for some time
+                    miner:reset_late_block_timer(),
+                    SkipGossip = {multicast, t2b({proposed_skip, ProposedRound, Round})},
                     %% skip but don't discard rounds until we get a clean round
                     case hbbft:next_round(HBBFT, ProposedRound, []) of
                         {NextHBBFT, ok} ->
@@ -560,16 +565,33 @@ md_version(Ledger) ->
     end.
 
 %% do nothing if we've advanced
-process_skips(Proposed, _F, _Sender, Current, Votes) when Current >= Proposed ->
-    {wait, Votes};
-process_skips(Proposed, F, Sender, _Current, Votes) ->
-    PropVotes = maps:get(Proposed, Votes, #{}),
-    PropVotes1 = PropVotes#{Sender => true},
-    Votes1 = Votes#{Proposed => PropVotes1},
-    case maps:size(PropVotes1) == (2 * F) + 1 of
+process_skips(Proposed, SenderRound, F, Sender, Votes) ->
+    Votes1 = Votes#{Sender => {Proposed, SenderRound}},
+    PropVotes = maps:fold(fun(_Sender, {Vote, _OwnRound}, Acc) when Vote =:= Proposed ->
+                                  Acc + 1;
+                             (_Sender, {_OtherVote, _OwnRound}, Acc) ->
+                                  Acc
+                          end,
+                          0,
+                          Votes),
+    %% equal here because we only want to go once, at the point of saturation
+    case PropVotes == (2 * F) + 1 of
         true -> {skip, Votes1};
         false -> {wait, Votes1}
     end.
+
+lowest_not_taken(Map) ->
+    {_Votes, Rounds0} = lists:unzip(maps:values(Map)),
+    Rounds = lists:sort(Rounds0),
+    [Lowest | Tail] = Rounds,
+    search_lowest(Lowest + 1, Tail).
+
+search_lowest(Try, []) ->
+    Try;
+search_lowest(Try, [Try | Tail]) ->
+    search_lowest(Try + 1, Tail);
+search_lowest(Try, [_OtherValue | _Tail]) ->
+    Try.
 
 t2b(Term) ->
     term_to_binary(Term, [{compressed, 1}]).

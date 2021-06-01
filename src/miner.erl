@@ -19,6 +19,8 @@
 
     keys/0,
 
+    reset_late_block_timer/0,
+
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
@@ -297,6 +299,10 @@ signed_block(Signatures, BinBlock) ->
 keys() ->
     gen_server:call(?MODULE, keys).
 
+-spec reset_late_block_timer() -> ok.
+reset_late_block_timer() ->
+    gen_server:call(?MODULE, reset_late_block_timer).
+
 start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
 
@@ -310,7 +316,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0000010063.
+       0000010064.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -355,6 +361,13 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
     {reply, Result, State};
 handle_call(keys, _From, State) ->
     {reply, {ok, State#state.swarm_keys}, State};
+handle_call(reset_late_block_timer, _From, State) ->
+    %% we do this when the group thinks that it's agreed on a new round, so set the timer extra long
+    erlang:cancel_timer(State#state.late_block_timer),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout * 2) * 1000, self(), late_block_timeout),
+
+    {reply, ok, State#state{late_block_timer = LateTimer}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -388,7 +401,7 @@ handle_info(late_block_timeout, State) ->
     LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
     lager:info("late block timeout"),
     NextRound = State#state.round + 1,
-    libp2p_group_relcast:handle_input(State#state.consensus_group, {maybe_skip, NextRound}),
+    libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
     LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
     {noreply, State#state{late_block_timer = LateTimer, round = NextRound}};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
