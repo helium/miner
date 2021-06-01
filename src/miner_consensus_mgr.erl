@@ -287,7 +287,7 @@ handle_call({initial_dkg, GenesisTransactions, Addrs, N, Curve}, From, State0) -
             {noreply, DKGState#state{dkg_await=From}};
         {false, NonDKGState} ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
-            {reply, ok, NonDKGState}
+            {reply, not_in, NonDKGState}
     end;
 handle_call(consensus_pos, _From, State) ->
     Ledger = blockchain:ledger(State#state.chain),
@@ -556,7 +556,14 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
             {noreply, State}
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    %% check if we're in the consensus group
+    self() ! timeout,
     {noreply, State#state{chain = NC}};
+handle_info({blockchain_event, {integrate_genesis_block, _Hash}}, State = #state{chain=undefined}) ->
+    %% check if we're in the consensus group
+    self() ! timeout,
+    Chain = blockchain_worker:blockchain(),
+    {noreply, State#state{chain=Chain}};
 %% we had a chain to start with, so check restore state
 handle_info(timeout, State) ->
     try

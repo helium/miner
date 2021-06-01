@@ -368,14 +368,49 @@ delete_dirs(DirWildcard, SubDir)->
     ok.
 
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
-    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
-initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [Txns, Addresses, NumConsensusMembers, Curve], Timeout)
-                   end, Miners),
-    DKGResults.
+    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 60000).
+initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout) ->
+    SuperParent = self(),
+    SuperTimeout = Timeout + 5000,
+    Threshold = (NumConsensusMembers - 1) div 3,
+    spawn(fun() ->
+                  Parent = self(),
+
+                  lists:foreach(
+                    fun(Miner) ->
+                            spawn(fun() ->
+                                          Res = ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
+                                                            [Txns, Addresses, NumConsensusMembers, Curve], Timeout),
+                                          Parent ! {Miner, Res}
+                                  end)
+                    end, Miners),
+                  SuperParent ! receive_dkg_results(Threshold, Miners, [])
+          end),
+    receive
+        DKGResults ->
+            DKGResults
+    after SuperTimeout ->
+              {error, dkg_timeout}
+    end.
+
+receive_dkg_results(Threshold, [], OKResults) ->
+    ct:pal("only ~p completed dkg, lower than threshold of ~p", [OKResults, Threshold]),
+    {error, insufficent_dkg_completion};
+receive_dkg_results(Threshold, _Miners, OKResults) when length(OKResults) >= Threshold ->
+    {ok, OKResults};
+receive_dkg_results(Threshold, Miners, OKResults) ->
+    receive
+        {Miner, ok} ->
+            case lists:member(Miner, Miners) of
+                true ->
+                    receive_dkg_results(Threshold, Miners -- [Miner], [Miner|OKResults]);
+                false ->
+                    receive_dkg_results(Threshold, Miners, OKResults)
+            end;
+        {Miner, OtherResult} ->
+            ct:pal("Miner ~p failed DKG: ~p", [Miner, OtherResult]),
+            receive_dkg_results(Threshold, Miners -- [Miner], OKResults)
+    end.
 
 
 
@@ -638,6 +673,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
                 ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
                 %% set blockchain env
+                ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
@@ -686,6 +722,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
     Addrs = miner_ct_utils:pmap(
               fun(Miner) ->
                       Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                      true = miner_ct_utils:wait_until(fun() ->
+                                                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
+                                                       end),
                       [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
                       H
               end, Miners),
@@ -924,7 +963,7 @@ make_vars(Keys, Map, Mode) ->
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.60,
-              ?monthly_reward => 50000 * 1000000,
+              ?monthly_reward => 5000000 * 1000000,
               ?securities_percent => 0.35,
               ?dc_percent => 0.0,
               ?poc_challengees_percent => 0.19 + 0.16,
