@@ -259,17 +259,24 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
                     miner:reset_late_block_timer(),
                     SkipGossip = {multicast, t2b({proposed_skip, ProposedRound, Round})},
                     %% skip but don't discard rounds until we get a clean round
-                    case hbbft:next_round(HBBFT, ProposedRound, []) of
-                        {NextHBBFT, ok} ->
-                            {State#state{hbbft=NextHBBFT, signatures=[],
-                                         artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}, skip_votes = Skips1},
-                             [ new_epoch , SkipGossip ]};
-                        {NextHBBFT, {send, NextMsgs}} ->
-                            {State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                                         bba = <<>>, seen = #{}, skip_votes = Skips1},
-                             [ new_epoch, SkipGossip ] ++ fixup_msgs(NextMsgs)}
-                    end;
+                    {HBBFT1, ToSend1} =
+                        case hbbft:next_round(HBBFT, ProposedRound, []) of
+                            {H1, ok} ->
+                                {H1, []};
+                            {H1, {send, NextMsgs}} ->
+                                {H1, NextMsgs}
+                        end,
+                    {HBBFT2, ToSend2} =
+                        case hbbft:start_on_demand(HBBFT1) of
+                            {H2, already_started} ->
+                                {H2, []};
+                            {H2, {send, Msgs}} ->
+                                {H2, Msgs}
+                        end,
+                    ToSend = fixup_msgs(ToSend1 ++ ToSend2),
+                    {State#state{hbbft=HBBFT2, signatures=[], artifact=undefined, sig_phase=unsent,
+                                 bba = <<>>, seen = #{}, skip_votes = Skips1},
+                     [ new_epoch , SkipGossip ] ++ ToSend};
                 {wait, Skips1} ->
                     lager:info("waiting: ~p", [Skips1]),
                     {State#state{skip_votes = Skips1}, []}
