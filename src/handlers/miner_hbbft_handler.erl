@@ -271,7 +271,7 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
                              [ new_epoch, SkipGossip ] ++ fixup_msgs(NextMsgs)}
                     end;
                 {wait, Skips1} ->
-                    lager:info("waiting: ~p", [maps:map(fun(_, V) -> maps:size(V) end, Skips1)]),
+                    lager:info("waiting: ~p", [Skips1]),
                     {State#state{skip_votes = Skips1}, []}
             end;
         {signatures, R, _Signatures} when R > Round ->
