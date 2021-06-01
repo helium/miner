@@ -250,7 +250,7 @@ handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
 handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
     Round = hbbft:round(HBBFT),
     case Msg of
-        {proposed_skip, ProposedRound, IndexRound} ->
+        {proposed_skip, ProposedRound, IndexRound} when ProposedRound =/= Round ->
             lager:info("proposed skip to round ~p", [ProposedRound]),
             case process_skips(ProposedRound, IndexRound, State#state.f, Index, Skips) of
                 {skip, Skips1} ->
@@ -274,6 +274,9 @@ handle_message(Msg, Index, State=#state{hbbft = HBBFT, skip_votes = Skips}) ->
                     lager:info("waiting: ~p", [Skips1]),
                     {State#state{skip_votes = Skips1}, []}
             end;
+        {proposed_skip, ProposedRound, IndexRound} ->
+            Skips1 = Skips#{Index => {ProposedRound, IndexRound}},
+            {State#state{skip_votes = Skips1}, []};
         {signatures, R, _Signatures} when R > Round ->
             defer;
         {signatures, R, _Signatures} when R < Round ->
