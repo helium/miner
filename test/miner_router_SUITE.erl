@@ -74,23 +74,14 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ InitialGenGatewayTxns,
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ InitialDCTransactions ++ InitialGenGatewayTxns,
                                              Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
     miner_fake_radio_backplane:start_link(8, 45000, lists:zip(RadioPorts, Locations)),
-
-
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-
-
-    %% ensure that blockchain is undefined for non_consensus miners
-    false = miner_ct_utils:blockchain_worker_check(NonConsensusMiners),
-
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     %% confirm height has grown to 1
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),

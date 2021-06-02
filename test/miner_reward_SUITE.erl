@@ -53,9 +53,11 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns,
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialCoinbaseTxns ++ AddGwTxns,
                                             Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
     ok = miner_ct_utils:wait_for_in_consensus(Miners, NumConsensusMembers),
 
@@ -68,9 +70,7 @@ init_per_testcase(_TestCase, Config0) ->
     %% Get consensus miners
     ConsensusMiners = miner_ct_utils:in_consensus_miners(Miners),
 
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
-
+   
     %% confirm height is 1
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
