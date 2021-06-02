@@ -287,7 +287,7 @@ handle_call({initial_dkg, GenesisTransactions, Addrs, N, Curve}, From, State0) -
             {noreply, DKGState#state{dkg_await=From}};
         {false, NonDKGState} ->
             lager:info("Not running DKG, From: ~p, WorkerAddr: ~p", [From, blockchain_swarm:pubkey_bin()]),
-            {reply, ok, NonDKGState}
+            {reply, not_in, NonDKGState}
     end;
 handle_call(consensus_pos, _From, State) ->
     Ledger = blockchain:ledger(State#state.chain),

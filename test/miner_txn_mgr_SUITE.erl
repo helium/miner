@@ -65,14 +65,14 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-
+    ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
     %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletionNodes), Miners -- DKGCompletionNodes),
+    ct:pal("genesis load results: ~p", [_GenesisLoadResults]),
 
     %% confirm we have a height of 1
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
