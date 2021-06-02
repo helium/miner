@@ -673,6 +673,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
                 ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
                 %% set blockchain env
+                ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
                 ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
@@ -721,6 +722,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
     Addrs = miner_ct_utils:pmap(
               fun(Miner) ->
                       Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                      true = miner_ct_utils:wait_until(fun() ->
+                                                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
+                                                       end),
                       [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
                       H
               end, Miners),
