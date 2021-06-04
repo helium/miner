@@ -85,7 +85,6 @@
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     late_block_timer = make_ref() :: reference(),
-    round = 0 :: pos_integer(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
     swarm_tid :: ets:tid() | atom(),
@@ -337,11 +336,8 @@ init(_Args) ->
             {ok, #state{swarm_keys = {MyPubKey, SignFun},
                         swarm_tid = SwarmTID}};
         Chain ->
-            {ok, Block} = blockchain:head_block(Chain),
-            Round = blockchain_block:hbbft_round(Block),
             {ok, #state{swarm_keys = {MyPubKey, SignFun},
                         swarm_tid = SwarmTID,
-                        round = Round + 1,
                         blockchain = Chain,
                         blockchain_ref = BlockchainRef}}
     end.
@@ -350,10 +346,7 @@ handle_call(consensus_group, _From, State) ->
     {reply, State#state.consensus_group, State};
 handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
-    {ok, Block} = blockchain:head_block(Chain),
-    Round = blockchain_block:hbbft_round(Block),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
-                                                 round = Round + 1,
                                                  blockchain = Chain})};
 handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
             #state{blockchain = Chain, swarm_keys = SK} = State) ->
@@ -400,10 +393,9 @@ handle_info(block_timeout, State) ->
 handle_info(late_block_timeout, State) ->
     LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
     lager:info("late block timeout"),
-    NextRound = State#state.round + 1,
     libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
     LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
-    {noreply, State#state{late_block_timer = LateTimer, round = NextRound}};
+    {noreply, State#state{late_block_timer = LateTimer}};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          current_height = CurrHeight,
@@ -429,8 +421,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                   ConsensusGroup, {next_round, NextRound,
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
-                                set_next_block_timer(State#state{current_height = Height,
-                                                                  round = NextRound});
+                                set_next_block_timer(State#state{current_height = Height});
 
                             {true, _, _, _} ->
                                 State#state{block_timer = make_ref(),
@@ -467,16 +458,11 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
             State) when State#state.blockchain == undefined ->
     Chain = blockchain_worker:blockchain(),
-    {ok, Block} = blockchain:head_block(Chain),
-    Round = blockchain_block:hbbft_round(Block),
-    {noreply, State#state{blockchain = Chain, round = Round + 1}};
+    {noreply, State#state{blockchain = Chain}};
 handle_info({blockchain_event, {new_chain, NC}}, #state{blockchain_ref = Ref, swarm_keys=SK, swarm_tid=STid}) ->
-    {ok, Block} = blockchain:head_block(NC),
-    Round = blockchain_block:hbbft_round(Block),
     State1 = #state{blockchain = NC,
                     blockchain_ref = Ref,
                     swarm_keys=SK,
-                    round = Round + 1,
                     swarm_tid=STid},
     {noreply, State1};
 handle_info(_Msg, State) ->
