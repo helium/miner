@@ -234,7 +234,7 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
 handle_command(maybe_skip, State = #state{hbbft = HBBFT, skip_votes = Skips}) ->
     MyRound = hbbft:round(HBBFT),
     %% put in a fake local vote here for the case where we have no skips
-    ProposedRound = lowest_not_taken(Skips#{MyRound => {0, MyRound}}),
+    ProposedRound = median_not_taken(Skips#{MyRound => {0, MyRound}}),
     {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound, MyRound})}], State};
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
@@ -590,16 +590,23 @@ process_skips(Proposed, SenderRound, F, Sender, Votes) ->
         false -> {wait, Votes1}
     end.
 
-lowest_not_taken(Map) ->
-    {_Votes, Rounds0} = lists:unzip(maps:values(Map)),
-    Rounds = lists:sort(Rounds0),
-    [Lowest | Tail] = Rounds,
-    search_lowest(Lowest + 1, Tail).
+%% the idea here is to take a clean round that's higher than the median, which should be relatively
+%% hard to manipulate by cheating
+median_not_taken(Map) ->
+    {_Votes, Rounds} = lists:unzip(maps:values(Map)),
+    Median = miner_util:median(Rounds),
+    search_lowest(Median, Rounds).
 
+%% if we haven't found a round in the list, the next highest should work
 search_lowest(Try, []) ->
     Try;
+%% skip past stuff below the median
+search_lowest(Try, [Lower | Tail]) when Try > Lower ->
+    search_lowest(Try + 1, Tail);
+%% we have a node on this round, and want the round to be fresh
 search_lowest(Try, [Try | Tail]) ->
     search_lowest(Try + 1, Tail);
+%% here, we should have the next gap that's larger than the median round
 search_lowest(Try, [_OtherValue | _Tail]) ->
     Try.
 
