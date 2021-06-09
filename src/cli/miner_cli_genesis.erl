@@ -9,6 +9,7 @@
 -export([register_cli/0]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 register_cli() ->
     register_all_usage(),
@@ -346,7 +347,7 @@ make_vars() ->
       ?predicate_callback_mod => miner,
       ?predicate_callback_fun => version,
       ?predicate_threshold => 0.95,
-      ?monthly_reward => 50000 * 1000000,
+      ?monthly_reward => ?bones(1000000),
       ?securities_percent => 0.35,
       ?dc_percent => 0.0,
       ?poc_centrality_wt => 0.5,

@@ -32,7 +32,7 @@ rm -rf _build/testdev+miner*
 make devrel
 
 start_dev_release() {
-   echo $(./_build/testdev\+miner$1/rel/miner$1/bin/miner$1 start)
+   echo $(./_build/testdev\+miner$1/rel/miner$1/bin/miner$1 daemon)
    echo "Started: miner$1"
 }
 export -f start_dev_release

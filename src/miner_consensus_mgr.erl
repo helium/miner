@@ -566,6 +566,11 @@ handle_info(timeout, State) ->
         lager:info("try cold start consensus group at ~p", [StartHeight]),
 
         Chain = blockchain_worker:blockchain(),
+
+        case application:get_env(blockchain, follow_mode, false) of
+            true -> throw(follow_mode_enabled);
+            false -> ok
+        end,
         Ledger = blockchain:ledger(Chain),
         {ok, N} = blockchain:config(?num_consensus_members, Ledger),
         {ok, ElectionInterval} = blockchain:config(?election_interval, Ledger),
