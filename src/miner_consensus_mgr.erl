@@ -172,12 +172,7 @@ init(_Args) ->
         undefined ->
             {ok, #state{}};
         Chain ->
-            case application:get_env(blockchain, follow_mode, false) of
-                true ->
-                    {ok, #state{}};
-                false ->
-                    {ok, #state{chain = Chain}, 0}
-            end
+            {ok, #state{chain = Chain}, 0}
     end.
 
 %% in the call handlers, we wait for the dkg to return, and then once
@@ -553,20 +548,15 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             {noreply, State}
     end;
 handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}}, State) ->
-    case {State#state.chain, application:get_env(blockchain, follow_mode, false)} of
-        {undefined, false} ->
+    case State#state.chain of
+        undefined ->
             Chain = blockchain_worker:blockchain(),
             {noreply, State#state{chain = Chain}};
         _ ->
             {noreply, State}
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
-    case application:get_env(blockchain, follow_mode, false) of
-        true ->
-            {noreply, State};
-        false ->
-            {noreply, State#state{chain = NC}}
-    end;
+    {noreply, State#state{chain = NC}};
 %% we had a chain to start with, so check restore state
 handle_info(timeout, State) ->
     try
@@ -578,10 +568,8 @@ handle_info(timeout, State) ->
         Chain = blockchain_worker:blockchain(),
 
         case application:get_env(blockchain, follow_mode, false) of
-            true ->
-                throw(follow_mode_enabled);
-            false ->
-                ok
+            true -> throw(follow_mode_enabled);
+            false -> ok
         end,
         Ledger = blockchain:ledger(Chain),
         {ok, N} = blockchain:config(?num_consensus_members, Ledger),
