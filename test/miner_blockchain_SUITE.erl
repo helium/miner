@@ -200,17 +200,23 @@ autoskip_on_timeout_test(Config) ->
         Node <- MinersAll
     ],
 
-    %% Turn off block_timeout on the "broken" 1/2 of the miner CG nodes:
+    %%% Turn off block_timeout on the "broken" 1/2 of the miner CG nodes:
+    %_ = [
+    %    ok = ct_rpc:call(Node, meck, expect,
+    %        [
+    %            miner_, schedule_next_block_timeout,
+    %            fun(_) ->
+    %                make_ref() % Just a type-compatible dummy value.
+    %            end
+    %        ],
+    %        300
+    %    )
+    %||
+    %    Node <- MinersCGBroken
+    %],
+
     _ = [
-        ok = ct_rpc:call(Node, meck, expect,
-            [
-                miner_, schedule_next_block_timeout,
-                fun(_) ->
-                    make_ref() % Just a type-compatible dummy value.
-                end
-            ],
-            300
-        )
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
     ||
         Node <- MinersCGBroken
     ],
