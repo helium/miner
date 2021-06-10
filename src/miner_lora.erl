@@ -10,8 +10,6 @@
     port/0,
     position/0,
     location_ok/0,
-    reg_domain_data_for_addr/1,
-    reg_domain_data_for_countrycode/1,
     region/0
 ]).
 
@@ -152,12 +150,36 @@ location_ok() ->
 
 -spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
 reg_domain_data_for_addr(Addr)->
-    case country_code_for_addr(Addr) of
-        {ok, CC} ->
-            %% use country code to get regulatory domain data
-            ?MODULE:reg_domain_data_for_countrycode(CC);
-        {error, Reason} ->
-            {error, Reason}
+    case blockchain:ledger() of
+        undefined ->
+            {error, no_ledger};
+        Ledger ->
+            %% check if the poc 11 vars are active yet
+            case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                {ok, Location} ->
+                    case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                        {ok, Region} ->
+                            case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                {ok, RegionParams} ->
+                                    RegionParamsAgainIDontKnowWhyINeedToDoThis = blockchain_region_params_v1:region_params(RegionParams),
+                                    {ok, {Region, [ blockchain_region_param_v1:channel_frequency(RP) || RP <- RegionParamsAgainIDontKnowWhyINeedToDoThis ]}};
+                                {error, Reason} ->
+                                    {error, Reason}
+                            end;
+                        {error, regulatory_regions_not_set} ->
+                            case country_code_for_addr(Addr) of
+                                {ok, CC} ->
+                                    %% use country code to get regulatory domain data
+                                    reg_domain_data_for_countrycode(CC);
+                                {error, Reason} ->
+                                    {error, Reason}
+                            end;
+                        {error, Reason} ->
+                            {error, Reason}
+                    end;
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 -spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
@@ -282,7 +304,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     lager:debug("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        case ?MODULE:reg_domain_data_for_addr(Addr) of
+        case reg_domain_data_for_addr(Addr) of
             {error, Reason}->
                 lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
                 %% the hotspot has not yet asserted its location, transmits will remain disabled
@@ -412,7 +434,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             %% likely some kind of error here
             _ = erlang:cancel_timer(Ref),
             State1 = State0#state{packet_timers=maps:remove(Token, Timers)},
-            Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
+            {Reply, NewState} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
                     lager:info("packet sent ok"),
                     Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
@@ -420,43 +442,49 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
                     lager:info("collision"),
-                    {error, collision};
+                    {{error, collision}, State1};
                 <<"TOO_LATE">> ->
                     lager:info("too late"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
-                                     {error, too_late};
+                                     {{error, too_late}, State1};
                         _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
-                                     {error, too_early};
+                                     {{error, too_early}, State1};
                         _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TX_FREQ">> ->
+                    %% unmodified 1301 will send this
                     lager:info("tx frequency not supported"),
-                    {error, bad_tx_frequency};
+                    {{error, bad_tx_frequency}, State1};
                 <<"TX_POWER">> ->
                     lager:info("tx power not supported"),
-                    {error, bad_tx_power};
-                <<"GPL_UNLOCKED">> ->
+                    {{error, bad_tx_power}, State1};
+                <<"GPS_UNLOCKED">> ->
                     lager:info("transmitting on GPS time not supported because no GPS lock"),
-                    {error, no_gps_lock};
+                    {{error, no_gps_lock}, State1};
+                [] ->
+                    %% there was no error, see if there was a warning, which implies we sent the packet
+                    %% but some correction had to be done.
+                    Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
+                    case kvc:path([<<"txpk_ack">>, <<"warn">>], jsx:decode(MaybeJSON)) of
+                        <<"TX_POWER">> ->
+                            %% modified 1301 and unmodified 1302 will send this
+                            {{warning, {tx_power_corrected, kvc:path([<<"txpk_ack">>, <<"value">>], jsx:decode(MaybeJSON))}}, State1#state{reg_throttle=Throttle1}};
+                        Other ->
+                            {{warning, {unknown, Other}}, State1#state{reg_throttle=Throttle1}}
+                    end;
                 Error ->
                     %% any other errors are pretty severe
                     lager:error("Failure enqueing packet for gateway ~p", [Error]),
-                    {error, {unknown, Error}}
+                    {{error, {unknown, Error}}, State1}
             end,
-            case Reply of
-                {ok, State2} ->
-                    gen_server:reply(From, ok),
-                    State2;
-                {error, _} ->
-                    gen_server:reply(From, Reply),
-                    State1
-            end;
+            gen_server:reply(From, Reply),
+            NewState;
         error ->
             State0
     end;

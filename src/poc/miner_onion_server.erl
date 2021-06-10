@@ -366,7 +366,12 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
                     Spreading = spreading(Region, erlang:byte_size(Packet)),
+                    %% TODO find the max eirp for this hotspot's region, add the asserted antenna gain on
+                    %% and then correct the TX power so that we don't exceed the EIRP
                     TxPower = tx_power(Region),
+                    %% TODO capture actual TX power here and attach to receipt
+                    %% miner_lora:send_poc will now return the *actual* tx power used, if there's no mapping entry for
+                    %% the requested power.
                     erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
