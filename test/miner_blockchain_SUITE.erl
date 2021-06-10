@@ -170,6 +170,51 @@ init_per_testcase(TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
+autoskip_on_timeout_test(Config) ->
+    %% The idea here is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members produce timed blocks;
+    %% 2. 1/2 of consensus members do not;
+    %% 3.
+    %%      If time-based autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so time-based autoskip must've worked
+
+    MinersAll = ?config(miners, Config),
+    MinersCG = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersCG),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersCGBroken = lists:sublist(MinersCG, M),
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersCG: ~p", [MinersCG]),
+    ct:pal("MinersCGBroken: ~p", [MinersCGBroken]),
+
+    _ = [
+        ok = ct_rpc:call(Node, meck, expect,
+            [
+                miner_, schedule_next_block_timeout,
+                fun(_) ->
+                    make_ref() % Just a type-compatible dummy value.
+                end
+            ],
+            300
+        )
+    ||
+        Node <- MinersCGBroken
+    ],
+
+    ok = miner_ct_utils:wait_for_chain_stall(
+        MinersAll,
+        #{interval => 5000, streak_target => 3, retries_max => 100}
+    ),
+    ok = miner_ct_utils:assert_chain_halted(MinersAll),
+    %ok = miner_ct_utils:assert_chain_advanced(MinersAll),
+
+    {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -192,9 +237,7 @@ restart_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, 2, all, 90),
 
-    Heights =  miner_ct_utils:heights(Miners),
-
-    {comment, Heights}.
+    {comment, miner_ct_utils:heights(Miners)}.
 
 
 dkg_restart_test(Config) ->

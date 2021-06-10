@@ -41,6 +41,7 @@
          start_miners/1, start_miners/2,
          height/1,
          heights/1,
+         unique_heights/1,
          consensus_members/1, consensus_members/2,
          miners_by_consensus_state/1,
          in_consensus_miners/1,
@@ -63,6 +64,11 @@
          confirm_balance/3,
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5,
+         wait_for_equalized_heights/1,
+         wait_for_chain_stall/2,
+         assert_chain_halted/1,
+         assert_chain_halted/3,
+         assert_chain_advanced/1,
 
          submit_txn/2,
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
@@ -73,6 +79,98 @@
          load_genesis_block/3
         ]).
 
+-spec assert_chain_advanced([node()]) -> ok.
+assert_chain_advanced(Miners) ->
+    Height = wait_for_equalized_heights(Miners),
+    ?assertMatch(
+        ok,
+        miner_ct_utils:wait_for_gte(height, Miners, Height + 1),
+        "Chain advanced."
+    ),
+    ok.
+
+-spec assert_chain_halted([node()]) -> ok.
+assert_chain_halted(Miners) ->
+    assert_chain_halted(Miners, 5000, 20).
+
+-spec assert_chain_halted([node()], timeout(), pos_integer()) -> ok.
+assert_chain_halted(Miners, Interval, Retries) ->
+    _ = lists:foldl(
+        fun (_, HeightPrev) ->
+            HeightCurr = wait_for_equalized_heights(Miners),
+            ?assertEqual(HeightPrev, HeightCurr, "Chain halted."),
+            timer:sleep(Interval),
+            HeightCurr
+        end,
+        wait_for_equalized_heights(Miners),
+        lists:duplicate(Retries, {})
+    ),
+    ok.
+
+wait_for_chain_stall(
+    Miners,
+    #{
+        interval      := Interval,
+        streak_target := StreakTarget,
+        retries_max   := RetriesMax
+     }
+) ->
+    State =
+        #{
+            interval      => Interval,
+            streak_target => StreakTarget,
+            streak_prev   => 0,
+            retries_max   => RetriesMax,
+            retries_cur   => 0,
+            height_prev   => 0
+         },
+    wait_for_chain_stall_(Miners, State).
+
+wait_for_chain_stall_(_, #{streak_target := S, streak_prev := S}) ->
+    ok;
+wait_for_chain_stall_(_, #{retries_cur := Cur, retries_max := Max}) when Cur >= Max ->
+    error;
+wait_for_chain_stall_(
+    Miners,
+    #{
+        interval      := Interval,
+        streak_prev   := StreakPrev,
+        height_prev   := HeightPrev,
+        retries_cur   := RetriesCur
+    }=State0
+) ->
+    {HeightCurr, StreakCurr} =
+        case wait_for_equalized_heights(Miners) of
+            HeightPrev -> {HeightPrev, 1 + StreakPrev};
+            HeightCurr0 -> {HeightCurr0, 0}
+        end,
+    timer:sleep(Interval),
+    State1 = State0#{
+        height_prev := HeightCurr,
+        streak_prev := StreakCurr,
+        retries_cur := RetriesCur + 1
+    },
+    wait_for_chain_stall_(Miners, State1).
+
+-spec wait_for_equalized_heights([node()]) -> non_neg_integer().
+wait_for_equalized_heights(Miners) ->
+    ?assert(
+        miner_ct_utils:wait_until(
+            fun() ->
+                case unique_heights(Miners) of
+                    [_] -> true;
+                    [_|_] -> false
+                end
+            end,
+            50,
+            1000
+        ),
+        "Heights equalized."
+    ),
+    UniqueHeights = unique_heights(Miners),
+    ?assertMatch([_], UniqueHeights, "All heights are equal."),
+    [Height] = UniqueHeights,
+    Height.
 
 stop_miners(Miners) ->
     stop_miners(Miners, 60).
@@ -136,6 +234,10 @@ heights(Miners) ->
                                   {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
                                   [{Miner, H} | Acc]
                           end, [], Miners).
+
+-spec unique_heights([node()]) -> [non_neg_integer()].
+unique_heights(Miners) ->
+    lists:usort([H || {_, H} <- miner_ct_utils:heights(Miners)]).
 
 consensus_members([]) ->
     error(no_members);
@@ -589,6 +691,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
             restart_test ->
                 4;
             validator_transition_test ->
+                4;
+            autoskip_on_timeout_test ->
                 4;
             _ ->
                 get_config("N", 7)
@@ -1073,7 +1177,8 @@ create_tmp_dir(Path)->
 %% generate a tmp directory based off priv_dir to be used as a scratch by common tests
 %% @end
 %%-------------------------------------------------------------------
--spec init_base_dir_config(atom(), atom(), list()) -> {list(), list()}.
+-spec init_base_dir_config(atom(), atom(), Config) -> Config when
+    Config :: ct_suite:ct_config().
 init_base_dir_config(Mod, TestCase, Config)->
     PrivDir = ?config(priv_dir, Config),
     BaseDir = PrivDir ++ "data/" ++ erlang:atom_to_list(Mod) ++ "_" ++ erlang:atom_to_list(TestCase),
