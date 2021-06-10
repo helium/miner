@@ -229,7 +229,7 @@ create_block(Metadata, Txns, HBBFTRound) ->
             {error, no_miner}
     end.
 
-%% TODO: spec
+-spec hbbft_status() -> map() | {error, timeout}.
 hbbft_status() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
@@ -244,7 +244,7 @@ hbbft_status() ->
             end
     end.
 
-%% TODO: spec
+-spec hbbft_skip() -> ok | {error, timeout}.
 hbbft_skip() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
