@@ -79,9 +79,11 @@
          get_txn/2, get_txns/2,
          get_genesis_block/2,
          load_genesis_block/3,
-
          chain_var_lookup_all/2,
-         chain_var_lookup_one/2
+         chain_var_lookup_one/2,
+         build_gateways/2,
+         build_asserts/2,
+         add_block/3
         ]).
 
 chain_var_lookup_all(Key, Nodes) ->
@@ -1431,3 +1433,45 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
     ),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).
+
+build_gateways(LatLongs, {PrivKey, PubKey}) ->
+    lists:foldl(
+        fun({_LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
+            % Create a Gateway
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
+            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
+
+            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
+            SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
+            SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
+            [SignedGatewayAddGatewayTx|Acc]
+
+        end,
+        [],
+        LatLongs
+    ).
+
+build_asserts(LatLongs, {PrivKey, PubKey}) ->
+    lists:foldl(
+        fun({LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
+            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
+            Index = h3:from_geo(LatLong, 12),
+            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
+            PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
+            SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
+            [SignedAssertLocationTx|Acc]
+        end,
+        [],
+        LatLongs
+    ).
+
+add_block(Chain, ConsensusMembers, Txns) ->
+    SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
+    B = create_block(ConsensusMembers, SortedTxns),
+    ok = blockchain:add_block(B, Chain).
+
