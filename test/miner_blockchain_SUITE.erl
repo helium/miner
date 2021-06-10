@@ -171,7 +171,7 @@ end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
 autoskip_on_timeout_test(Config) ->
-    %% The idea here is to reproduce the following chain stall scenario:
+    %% The idea is to reproduce the following chain stall scenario:
     %% 1. 1/2 of consensus members produce timed blocks;
     %% 2. 1/2 of consensus members do not;
     %% 3.
@@ -193,6 +193,14 @@ autoskip_on_timeout_test(Config) ->
     ct:pal("MinersCG: ~p", [MinersCG]),
     ct:pal("MinersCGBroken: ~p", [MinersCGBroken]),
 
+    %% Default is 120 sesonds, but for testing we want to trigger skip faster:
+    _ = [
+        ok = ct_rpc:call(Node, application, set_env, [miner, late_block_timeout_seconds, 5], 300)
+    ||
+        Node <- MinersAll
+    ],
+
+    %% Turn off block_timeout on the "broken" 1/2 of the miner CG nodes:
     _ = [
         ok = ct_rpc:call(Node, meck, expect,
             [
@@ -207,12 +215,8 @@ autoskip_on_timeout_test(Config) ->
         Node <- MinersCGBroken
     ],
 
-    ok = miner_ct_utils:wait_for_chain_stall(
-        MinersAll,
-        #{interval => 5000, streak_target => 3, retries_max => 100}
-    ),
-    ok = miner_ct_utils:assert_chain_halted(MinersAll),
-    %ok = miner_ct_utils:assert_chain_advanced(MinersAll),
+    %ok = miner_ct_utils:assert_chain_halted(MinersAll),
+    ok = miner_ct_utils:assert_chain_advanced(MinersAll, 5000, 5),
 
     {comment, miner_ct_utils:heights(MinersAll)}.
 

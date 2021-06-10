@@ -65,10 +65,12 @@
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5,
          wait_for_equalized_heights/1,
+         wait_for_chain_stall/1,
          wait_for_chain_stall/2,
          assert_chain_halted/1,
          assert_chain_halted/3,
          assert_chain_advanced/1,
+         assert_chain_advanced/3,
 
          submit_txn/2,
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
@@ -89,6 +91,13 @@ assert_chain_advanced(Miners) ->
     ),
     ok.
 
+assert_chain_advanced(_, _, N) when N =< 0 ->
+    ok;
+assert_chain_advanced(Miners, Interval, N) ->
+    ok = assert_chain_advanced(Miners),
+    timer:sleep(Interval),
+    assert_chain_advanced(Miners, Interval, N - 1).
+
 -spec assert_chain_halted([node()]) -> ok.
 assert_chain_halted(Miners) ->
     assert_chain_halted(Miners, 5000, 20).
@@ -107,36 +116,38 @@ assert_chain_halted(Miners, Interval, Retries) ->
     ),
     ok.
 
-wait_for_chain_stall(
-    Miners,
-    #{
-        interval      := Interval,
-        streak_target := StreakTarget,
-        retries_max   := RetriesMax
-     }
-) ->
+wait_for_chain_stall(Miners) ->
+    wait_for_chain_stall(Miners, #{}).
+
+-spec wait_for_chain_stall([node()], Options) -> ok | error when
+    Options :: #{
+        interval      => timeout(),
+        retries_max   => pos_integer(),
+        streak_target => pos_integer()
+    }.
+wait_for_chain_stall(Miners, Options=#{}) ->
     State =
         #{
-            interval      => Interval,
-            streak_target => StreakTarget,
+            interval      => maps:get(interval, Options, 5000),
+            retries_max   => maps:get(retries_max, Options, 100),
+            streak_target => maps:get(streak_target, Options, 5),
             streak_prev   => 0,
-            retries_max   => RetriesMax,
             retries_cur   => 0,
             height_prev   => 0
          },
     wait_for_chain_stall_(Miners, State).
 
-wait_for_chain_stall_(_, #{streak_target := S, streak_prev := S}) ->
+wait_for_chain_stall_(_, #{streak_target := Target, streak_prev := Streak}) when Streak >= Target ->
     ok;
 wait_for_chain_stall_(_, #{retries_cur := Cur, retries_max := Max}) when Cur >= Max ->
     error;
 wait_for_chain_stall_(
     Miners,
     #{
-        interval      := Interval,
-        streak_prev   := StreakPrev,
-        height_prev   := HeightPrev,
-        retries_cur   := RetriesCur
+        interval    := Interval,
+        streak_prev := StreakPrev,
+        height_prev := HeightPrev,
+        retries_cur := RetriesCur
     }=State0
 ) ->
     {HeightCurr, StreakCurr} =
