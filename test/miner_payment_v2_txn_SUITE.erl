@@ -58,14 +58,14 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?max_payments => 10,
                                                    ?allow_zero_amount => false}),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                            Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 

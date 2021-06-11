@@ -47,7 +47,12 @@ init_per_testcase(_TestCase, Config0) ->
                  || Addr <- Addresses],
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
+    BlockTime =
+        case _TestCase of
+            txn_dependent_test -> 2000;
+            _ -> ?config(block_time, Config)
+        end,
+
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
 
@@ -60,14 +65,14 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
-
+    ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
     %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletionNodes), Miners -- DKGCompletionNodes),
+    ct:pal("genesis load results: ~p", [_GenesisLoadResults]),
 
     %% confirm we have a height of 1
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
@@ -135,8 +140,6 @@ txn_in_sequence_nonce_test(Config) ->
     true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
-
-
 
 txn_out_of_sequence_nonce_test(Config) ->
     %% send two standalone payments, but out of order so that the first submitted has an out of sequence nonce
@@ -207,7 +210,6 @@ txn_out_of_sequence_nonce_test(Config) ->
 
     ok.
 
-
 txn_invalid_nonce_test(Config) ->
     %% send two standalone payments, the second with a duplicate/invalid nonce
     %% the first txn will be successful, the second should be declared invalid
@@ -270,45 +272,80 @@ txn_invalid_nonce_test(Config) ->
 
     ok.
 
-
 txn_dependent_test(Config) ->
-    %% send a bunch of dependent txns
-    %% give them time to be accepted by the CG group and
+    %% send a bunch of out of order dependent txns
+    %% they should all end up being accepted in the *same* block
+    %% but only after the txn with the lowest sequenced nonce is submitted
+    %% as until that happens none will pass validations
+    %% confirm the 3 txns remain in the txn mgr cache until the missing txn is submitted
+    %% after which we confirm the txn mgr cache empties due to the txns being accepted
     %% confirm we dont have any strays in the txn mgr cache at the end of it
+    Miners = ?config(miners, Config),
     Miner = hd(?config(non_consensus_miners, Config)),
     ConMiners = ?config(consensus_miners, Config),
     AddrList = ?config(tagged_miner_addresses, Config),
 
-    Count = 50,
     Addr = miner_ct_utils:node2addr(Miner, AddrList),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+
+    ct:pal("miner in use ~p", [Miner]),
 
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
     PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
     {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
-
-    IgnoredTxns = [],
+    IgnoredTxns = [blockchain_txn_poc_request_v1_pb],
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
 
-    %% send a bunch of dependant txns and ensure they are processed by the txn mgr
-    %% and dont hang around it its cache
-    UnsignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1, Nonce]) || Nonce <- lists:seq(1, Count) ],
-    SignedTxns = [ ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn, SigFun]) || Txn <- UnsignedTxns],
-    [ ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn]) || SignedTxn <- miner_ct_utils:shuffle(SignedTxns) ],
+    %% prep the txns, 1 - 4
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
+    SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+2]),
+    SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+    Txn3 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+3]),
+    SignedTxn3 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn3, SigFun]),
+    Txn4 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+4]),
+    SignedTxn4 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn4, SigFun]),
 
-    Result1 = miner_ct_utils:wait_until(
+    %% get the start height
+    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [Chain]),
+
+    %% send txns with nonces 2, 3 and 4, all out of sequence
+    %% we wont send txn with nonce 1 yet
+    %% this means the 3 submitted txns cannot be accepted and will remain in the txn mgr cache
+    %% until txn with nonce 1 gets submitted
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn2]),
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn4]),
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn3]),
+
+    %% Wait a few blocks, confirm txns remain in the cache
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 3),
+
+    %% confirm all txns are still be in txn mgr cache
+    true = miner_ct_utils:wait_until(
                                         fun()->
-                                            case get_cached_txns_with_exclusions(Miner, IgnoredTxns) of
-                                                #{} -> true;
-                                                _ -> false
-                                            end
-                                        end, 60, 2000),
-    ok = handle_get_cached_txn_result(Result1, Miner, IgnoredTxns, Chain),
+                                            maps:size(get_cached_txns_with_exclusions(Miner, IgnoredTxns)) == 3
+                                        end, 60, 100),
 
-    %% check the miners nonce values to be sure the txns have actually been absorbed and not just lost
-    ExpectedNonce = StartNonce +50,
+    %% now submit the remaining txn which will have the missing nonce
+    %% this should result in both this and the previous txns being accepted by the CG
+    %% and cleared out of the txn mgr cache
+    ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn1]),
+
+    %% Wait one more block
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 4),
+
+    %% confirm all txns are are gone from the cache within the span of a single block
+    %% ie they are not carrying across blocks
+    true = miner_ct_utils:wait_until(
+                                        fun()->
+                                            maps:size(get_cached_txns_with_exclusions(Miner, IgnoredTxns)) == 0
+                                        end, 60, 100),
+
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 5),
+
+    ExpectedNonce = StartNonce +4,
     true = nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners),
 
     ok.
@@ -331,11 +368,14 @@ handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain)->
 
 get_cached_txns_with_exclusions(Miner, Exclusions)->
     case ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []) of
-        #{} -> #{};
-        Txns ->
+        TxnMap when map_size(TxnMap) > 0 ->
+            ct:pal("~p txns in txn list", [maps:size(TxnMap)]),
             maps:filter(
                 fun(Txn, _TxnData)->
-                    not lists:member(blockchain_txn:type(Txn), Exclusions) end, Txns)
+                    not lists:member(blockchain_txn:type(Txn), Exclusions) end, TxnMap);
+        _ ->
+            ct:pal("empty txn map", []),
+            #{}
     end.
 
 nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners)->

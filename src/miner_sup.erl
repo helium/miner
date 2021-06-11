@@ -47,6 +47,7 @@ init(_Args) ->
                 },
 
     BaseDir = application:get_env(blockchain, base_dir, "data"),
+    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
 
     ok = libp2p_crypto:set_network(application:get_env(miner, network, mainnet)),
 
@@ -73,6 +74,7 @@ init(_Args) ->
     ChildSpecs =
         [
          ?SUP(miner_critical_sup, [PublicKey, SigFun, ECDHFun, ECCWorker]),
-         ?SUP(miner_restart_sup, [SigFun, ECDHFun])
+         ?SUP(miner_restart_sup, [SigFun, ECDHFun]),
+         ?WORKER(elli, [[{callback, miner_jsonrpc_handler}, {port, JsonRpcPort}]])
         ],
     {ok, {SupFlags, ChildSpecs}}.

@@ -378,14 +378,49 @@ delete_dirs(DirWildcard, SubDir)->
     ok.
 
 initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve)->
-    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 12000).
-initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout)->
-    DKGResults = miner_ct_utils:pmap(
-                   fun(Miner) ->
-                           ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
-                                       [Txns, Addresses, NumConsensusMembers, Curve], Timeout)
-                   end, Miners),
-    DKGResults.
+    initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, 60000).
+initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve, Timeout) ->
+    SuperParent = self(),
+    SuperTimeout = Timeout + 5000,
+    Threshold = (NumConsensusMembers - 1) div 3,
+    spawn(fun() ->
+                  Parent = self(),
+
+                  lists:foreach(
+                    fun(Miner) ->
+                            spawn(fun() ->
+                                          Res = ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg,
+                                                            [Txns, Addresses, NumConsensusMembers, Curve], Timeout),
+                                          Parent ! {Miner, Res}
+                                  end)
+                    end, Miners),
+                  SuperParent ! receive_dkg_results(Threshold, Miners, [])
+          end),
+    receive
+        DKGResults ->
+            DKGResults
+    after SuperTimeout ->
+              {error, dkg_timeout}
+    end.
+
+receive_dkg_results(Threshold, [], OKResults) ->
+    ct:pal("only ~p completed dkg, lower than threshold of ~p", [OKResults, Threshold]),
+    {error, insufficent_dkg_completion};
+receive_dkg_results(Threshold, _Miners, OKResults) when length(OKResults) >= Threshold ->
+    {ok, OKResults};
+receive_dkg_results(Threshold, Miners, OKResults) ->
+    receive
+        {Miner, ok} ->
+            case lists:member(Miner, Miners) of
+                true ->
+                    receive_dkg_results(Threshold, Miners -- [Miner], [Miner|OKResults]);
+                false ->
+                    receive_dkg_results(Threshold, Miners, OKResults)
+            end;
+        {Miner, OtherResult} ->
+            ct:pal("Miner ~p failed DKG: ~p", [Miner, OtherResult]),
+            receive_dkg_results(Threshold, Miners -- [Miner], OKResults)
+    end.
 
 
 
@@ -594,6 +629,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 get_config("N", 7)
         end,
     SeedNodes = [],
+    JsonRpcBase = 4466,
     Port = get_config("PORT", 0),
     Curve = 'SS512',
     BlockTime = get_config("BT", 100),
@@ -603,7 +639,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {start_node(MinerName), {45000, 0}}
+            {miner_ct_utils:start_node(MinerName), {45000, 0, JsonRpcBase + I}}
         end,
         lists:seq(1, TotalMiners)
     ),
@@ -622,10 +658,64 @@ init_per_testcase(Mod, TestCase, Config0) ->
                      make_keys(Miner, Ports)
              end, MinersAndPorts),
 
-    {_Miner, {_TCPPort, _UDPPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
+    {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
-    Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
-    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
+
+    ConfigResult = miner_ct_utils:pmap(
+        fun({Miner, {TCPPort, UDPPort, JsonRpcPort}, ECDH, PubKey, _Addr, SigFun}) ->
+                ct:pal("Miner ~p", [Miner]),
+                ct_rpc:call(Miner, cover, start, []),
+                ct_rpc:call(Miner, application, load, [lager]),
+                ct_rpc:call(Miner, application, load, [miner]),
+                ct_rpc:call(Miner, application, load, [blockchain]),
+                ct_rpc:call(Miner, application, load, [libp2p]),
+                %% give each miner its own log directory
+                LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerLogRoot: ~p", [LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+                ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
+
+                %% set blockchain configuration
+                Key = {PubKey, ECDH, SigFun},
+
+                MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+                ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
+                %% set blockchain env
+                ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
+                %ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
+                ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
+                %% set miner configuration
+                ct_rpc:call(Miner, application, set_env, [miner, jsonrpc_port, JsonRpcPort]),
+                ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+                ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
+                ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+                ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
+                ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
+                ct_rpc:call(Miner, application, set_env, [miner, frequency_data, #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
+                      'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
+                      'EU433' => [433.175, 433.375, 433.575],
+                      'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
+                      'CN779' => [779.5, 779.7, 779.9],
+                      'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
+                      'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
+                      'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
+                      'IN865' => [865.0625, 865.4025, 865.985]}]),
+                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+            ok
+        end,
+        Keys
+    ),
 
     Miners = [M || {M, _} <- MinersAndPorts],
     %% check that the config loaded correctly on each miner
@@ -638,7 +728,15 @@ init_per_testcase(Mod, TestCase, Config0) ->
         ConfigResult
     ),
 
-    Addrs = get_addrs(Miners),
+    Addrs = miner_ct_utils:pmap(
+              fun(Miner) ->
+                      Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+                      true = miner_ct_utils:wait_until(fun() ->
+                                                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
+                                                       end),
+                      [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
+                      H
+              end, Miners),
 
     miner_ct_utils:pmap(
       fun(Miner) ->
@@ -696,10 +794,10 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
     %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
-    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _}}) ->
+    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
                                               {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
                                               ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
-                                              {Miner, {TCPPort, RandomPort}}
+                                              {Miner, {TCPPort, RandomPort, JsonRpcPort}}
                                       end, MinersAndPorts),
 
     [
@@ -945,7 +1043,7 @@ make_vars(Keys, Map, Mode) ->
               ?predicate_callback_mod => miner,
               ?predicate_callback_fun => test_version,
               ?predicate_threshold => 0.60,
-              ?monthly_reward => 50000 * 10000000,
+              ?monthly_reward => 5000000 * 1000000,
               ?securities_percent => 0.35,
               ?dc_percent => 0.0,
               ?poc_challengees_percent => 0.19 + 0.16,

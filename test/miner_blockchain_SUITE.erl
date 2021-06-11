@@ -137,22 +137,13 @@ init_per_testcase(TestCase, Config0) ->
         end,
     Txns = InitialVars ++ InitialPayment ++ InitGen,
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, Txns, Addresses, NumConsensusMembers, Curve),
 
-    timer:sleep(500),
-    %% Get both consensus and non consensus miners
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     {_ConsensusMiners, NCMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-                     length(NCMiners) == (length(Miners) - NumConsensusMembers)
-             end, 25, 200),
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
     ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
-
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 3, all, 15),
 
@@ -162,8 +153,9 @@ init_per_testcase(TestCase, Config0) ->
         {aux_acct, {AuxAddr, AuxKeys}}
         | Config]
     catch
-        What:Why ->
+        What:Why:Stack ->
             end_per_testcase(TestCase, Config),
+            ct:pal("Stack ~p", [Stack]),
             erlang:What(Why)
     end.
 

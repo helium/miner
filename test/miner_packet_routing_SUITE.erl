@@ -36,20 +36,15 @@ init_per_testcase(TestCase, Config0) ->
     AddressesWithLocations = lists:zip(Addresses, Locations),
     InitialGenGatewayTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- AddressesWithLocations],
     InitialTransactions = InitialVars ++ InitialPaymentTransactions ++ InitialGenGatewayTxns,
-    DKGResults = miner_ct_utils:pmap(
-        fun(Miner) ->
-            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [InitialTransactions, Addresses, N, Curve])
-        end,
-        Miners
-    ),
-    ct:pal("results ~p", [DKGResults]),
-    ?assert(lists:all(fun(Res) -> Res == ok end, DKGResults)),
+
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialTransactions, Addresses, N, Curve),
+
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
+
     RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
     miner_fake_radio_backplane:start_link(8, 45000, lists:zip(RadioPorts, Locations)),
 
-    GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
-    timer:sleep(5000),
-    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
     miner_fake_radio_backplane ! go,
     Config
     catch
@@ -59,7 +54,7 @@ init_per_testcase(TestCase, Config0) ->
     end.
 
 end_per_testcase(TestCase, Config) ->
-    gen_server:stop(miner_fake_radio_backplane),
+    catch gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
 
 basic_test(Config) ->

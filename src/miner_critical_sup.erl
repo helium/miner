@@ -77,10 +77,19 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
         {group_delete_predicate, fun miner_consensus_mgr:group_predicate/1}
     ],
 
+    ConsensusMgr =
+        case application:get_env(blockchain, follow_mode, false) of
+            false ->
+                [?WORKER(miner_consensus_mgr, [ignored])];
+            _ ->
+                []
+        end,
+
+
     ChildSpecs =
-        ECCWorker++
+        ECCWorker ++
         [
-         ?SUP(blockchain_sup, [BlockchainOpts]),
-         ?WORKER(miner_consensus_mgr, [ignored])
-        ],
+         ?SUP(blockchain_sup, [BlockchainOpts])
+        ] ++
+        ConsensusMgr,
     {ok, {SupFlags, ChildSpecs}}.
