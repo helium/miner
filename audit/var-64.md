@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction sets changes `witnssess_refresh_interval` from `20000` to `3000` to help reduce write wear on SD cards and refresh witness lists faster.
+This transaction changes `witness_refresh_interval` from `20000` to `3000` to help reduce write wear on SD cards and refresh witness lists faster.
 
 ## Version threshold
 
