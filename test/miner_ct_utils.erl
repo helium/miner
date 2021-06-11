@@ -804,7 +804,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {miners, Miners},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
-        {node_context, Context},
+        %{node_context, Context},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
