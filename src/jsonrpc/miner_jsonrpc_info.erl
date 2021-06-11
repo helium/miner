@@ -51,7 +51,7 @@ handle_rpc_(<<"info_region">>, _Params) ->
     R =
         case miner_lora:region() of
             {ok, undefined} -> <<"undefined">>;
-            {ok, Region} -> atom_to_binary(Region)
+            {ok, Region} -> atom_to_binary(Region, utf8)
         end,
     #{region => R};
 %% TODO handle onboarding key data??
