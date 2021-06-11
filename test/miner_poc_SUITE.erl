@@ -335,7 +335,7 @@ basic_test(Config) ->
             ok = add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
-        lists:seq(1, 10)
+        lists:seq(1, 20)
     ),
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem))),
@@ -929,14 +929,12 @@ initialize_chain(Miners, TestCase, Config, VarMap) ->
     AddressesWithClaimedLocations = lists:zip(Addresses, ClaimedLocations),
     InitialGenGatewayTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- AddressesWithLocations],
     InitialTransactions = InitialVars ++ InitialPaymentTransactions ++ InitialGenGatewayTxns,
-    DKGResults = miner_ct_utils:pmap(
-        fun(Miner) ->
-            ct_rpc:call(Miner, miner_consensus_mgr, initial_dkg, [InitialTransactions, Addresses, N, Curve])
-        end,
-        Miners
-    ),
-    ct:pal("results ~p", [DKGResults]),
-    ?assert(lists:all(fun(Res) -> Res == ok end, DKGResults)),
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialTransactions, Addresses, N, Curve),
+
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
+
+
     AddressesWithClaimedLocations.
 
 find_requests(Miners) ->

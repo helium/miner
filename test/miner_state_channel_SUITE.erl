@@ -146,15 +146,14 @@ init_per_testcase(TestCase, Config0) ->
     AllVars = miner_ct_utils:make_vars(Keys, maps:merge(BaseVars0, maps:merge(SCVars, RewardVars))),
     ct:pal("AllVars: ~p", [AllVars]),
 
-    DKGResults = miner_ct_utils:initial_dkg(Miners,
+    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners,
                                             AllVars ++ InitialPaymentTransactions ++ AddGwTxns ++ InitialDCTxns ++ [InitialPriceTxn],
                                             Addresses, NumConsensusMembers, Curve),
-    true = lists:all(fun(Res) -> Res == ok end, DKGResults),
+    %% integrate genesis block
+    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
     %% Get both consensus and non consensus miners
     {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(ConsensusMiners), NonConsensusMiners),
 
     ListenNode = lists:last(Miners),
 
