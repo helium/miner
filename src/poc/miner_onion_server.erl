@@ -413,9 +413,7 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
--spec spreading(Region :: atom(),
-                Len :: pos_integer()) -> string().
-
+-spec tx_power(atom()) -> pos_integer().
 tx_power('EU868') ->
     14;
 tx_power('US915') ->
@@ -423,6 +421,8 @@ tx_power('US915') ->
 tx_power(_) ->
     27.
 
+-spec spreading(Region :: atom(),
+                Len :: pos_integer()) -> string().
 spreading('EU868', L) when L < 65 ->
     "SF12BW125";
 spreading('EU868', L) when L < 129 ->
