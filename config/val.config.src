@@ -47,6 +47,7 @@
  {miner,
   [
    {mode, validator},
+   {jsonrpc_port, 4467},
    {stabilization_period, 8000},
    {network, testnet},
    %% these two now disable all the poc stuff
