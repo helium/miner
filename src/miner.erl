@@ -739,14 +739,14 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
         end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    BlockTimer = miner_:schedule_next_block_timeout(NextBlockTime),
+    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
 
     %% now figure out the late block timer
     erlang:cancel_timer(State#state.late_block_timer),
     LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
     LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
 
-    State#state{block_timer=BlockTimer, late_block_timer = LateTimer}.
+    State#state{block_timer=Timer, late_block_timer = LateTimer}.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period

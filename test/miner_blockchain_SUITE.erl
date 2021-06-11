@@ -97,7 +97,7 @@ init_per_testcase(TestCase, Config0) ->
         end,
 
     Vars = #{garbage_value => totes_garb,
-             ?block_time => max(1500, BlockTime),
+             ?block_time => max(3000, BlockTime),
              ?election_interval => Interval,
              ?num_consensus_members => NumConsensusMembers,
              ?batch_size => BatchSize,
@@ -195,33 +195,28 @@ autoskip_on_timeout_test(Config) ->
 
     %% Default is 120 sesonds, but for testing we want to trigger skip faster:
     _ = [
-        ok = ct_rpc:call(Node, application, set_env, [miner, late_block_timeout_seconds, 5], 300)
+        ok = ct_rpc:call(Node, application, set_env, [miner, late_block_timeout_seconds, 10], 300)
     ||
         Node <- MinersAll
     ],
-
-    %%% Turn off block_timeout on the "broken" 1/2 of the miner CG nodes:
-    %_ = [
-    %    ok = ct_rpc:call(Node, meck, expect,
-    %        [
-    %            miner_, schedule_next_block_timeout,
-    %            fun(_) ->
-    %                make_ref() % Just a type-compatible dummy value.
-    %            end
-    %        ],
-    %        300
-    %    )
-    %||
-    %    Node <- MinersCGBroken
-    %],
 
     _ = [
         ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
     ||
         Node <- MinersCGBroken
     ],
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
+    _ = [
+        ok = ct_rpc:call(Node, miner, hbbft_skip, [], 300)
+    ||
+        Node <- MinersCGBroken
+    ],
 
-    %ok = miner_ct_utils:assert_chain_halted(MinersAll),
+    ok = miner_ct_utils:assert_chain_halted(MinersAll),
     ok = miner_ct_utils:assert_chain_advanced(MinersAll, 5000, 5),
 
     {comment, miner_ct_utils:heights(MinersAll)}.
