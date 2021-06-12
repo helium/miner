@@ -365,10 +365,11 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
+                    %% TODO: Calculate spreading using region params as well...
                     Spreading = spreading(Region, erlang:byte_size(Packet)),
                     %% TODO find the max eirp for this hotspot's region, add the asserted antenna gain on
                     %% and then correct the TX power so that we don't exceed the EIRP
-                    TxPower = tx_power(Region),
+                    {ok, TxPower} = tx_power(Region, State),
                     %% TODO capture actual TX power here and attach to receipt
                     %% miner_lora:send_poc will now return the *actual* tx power used, if there's no mapping entry for
                     %% the requested power.
@@ -418,13 +419,30 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
--spec tx_power(atom()) -> pos_integer().
-tx_power('EU868') ->
-    14;
-tx_power('US915') ->
-    27;
-tx_power(_) ->
-    27.
+-spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer()} | {error, any()}.
+tx_power(Region, #state{chain=Chain}) ->
+    Ledger = blockchain:ledger(Chain),
+    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+
+    case blockchain_ledger_v1:find_gateway_info(SelfPubKeyBin, Ledger) of
+        {ok, GwInfo} ->
+            case blockchain_ledger_gateway_v2:location(GwInfo) of
+                undefined ->
+                    {error, no_loc};
+                Loc ->
+                    %% NOTE: The region should match the supplied one for this hotspot?
+                    {ok, Region} = blockchain_region_v1:h3_to_region(Loc, Ledger),
+                    {ok, RegionParams} = blockchain_region_params_v1:for_region(Region, Ledger),
+                    Params = blockchain_region_params_v1:region_params(RegionParams),
+                    MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
+                    case blockchain_ledger_gateway_v2:gain(GwInfo) of
+                        undefined -> {ok, MaxEIRP};
+                        AssertGain -> {ok, MaxEIRP + AssertGain}
+                    end
+            end;
+        _ ->
+            {error, no_gw}
+    end.
 
 -spec spreading(Region :: atom(),
                 Len :: pos_integer()) -> string().
