@@ -24,18 +24,39 @@
          id :: non_neg_integer(),
          hbbft :: hbbft:hbbft_data(),
          sk :: tc_key_share:tc_key_share() | tpke_privkey:privkey() | binary(),
-         seq = 0,
-         deferred = [],
-         signatures = [],
+         sigs_valid     = [] :: addr_sigs(),
+         sigs_unchecked = [] :: addr_sigs(),
          signatures_required = 0,
          sig_phase = unsent :: unsent | sig | gossip | done,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
-         chain :: undefined | blockchain:blockchain(),
-         signed = 0 :: non_neg_integer(),
+         chain :: blockchain:blockchain(),
+         last_round_signed = 0 :: non_neg_integer(),
          seen = #{} :: #{non_neg_integer() => boolean()},
          bba = <<>> :: binary()
         }).
+
+-type addr() ::
+    libp2p_crypto:pubkey_bin().
+
+-type addr_sig() ::
+    {addr(), Sig :: binary()}.
+
+-type addr_sigs() ::
+    [addr_sig()].
+
+-type hbbft_msg() ::
+      hbbft_msg_signature()
+    | hbbft_msg_signatures()
+    | hbbft:acs_msg()
+    | hbbft:dec_msg()
+    | hbbft:sign_msg().
+
+-type hbbft_msg_signature() ::
+    {signature, Round :: pos_integer(), addr(), Sig :: binary()}.
+
+-type hbbft_msg_signatures() ::
+    {signatures, Round :: pos_integer(), addr_sigs()}.
 
 -spec metadata(V, M, C) -> binary()
     when V :: tuple | map,
@@ -132,7 +153,7 @@ handle_command({status, Ref, Worker}, State) ->
                        undefined -> undefined;
                        A -> blockchain_utils:bin_to_hex(crypto:hash(sha256, A))
                    end,
-    Sigs = map_ids(State#state.signatures, State#state.members),
+    SigMemIds = addr_sigs_to_mem_pos(State#state.sigs_valid, State),
     PubKeyHash = case tc_key_share:is_key_share(State#state.sk) of
                      true ->
                          crypto:hash(sha256, term_to_binary(tc_pubkey:serialize(tc_key_share:public_key(State#state.sk))));
@@ -140,33 +161,31 @@ handle_command({status, Ref, Worker}, State) ->
                          crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk))))
                  end,
     Worker ! {Ref, maps:merge(#{signatures_required =>
-                                    max(State#state.signatures_required - length(Sigs), 0),
-                                signatures => Sigs,
+                                    max(State#state.signatures_required - length(SigMemIds), 0),
+                                signatures => SigMemIds,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)
                                }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
-handle_command({skip, Ref, Worker}, State) ->
-    Chain = blockchain_worker:blockchain(),
+handle_command({skip, Ref, Worker}, #state{chain=Chain}=S) ->
     Version = md_version(blockchain:ledger(Chain)),
-    HBBFT = hbbft:set_stamp_fun(?MODULE, metadata, [Version, #{}, Chain], State#state.hbbft),
+    HBBFT0 = hbbft:set_stamp_fun(?MODULE, metadata, [Version, #{}, Chain], S#state.hbbft),
     ?mark(skip),
-    case hbbft:next_round(HBBFT) of
-        {NextHBBFT, ok} ->
+    case hbbft:next_round(HBBFT0) of
+        {HBBFT1, ok} ->
             Worker ! {Ref, ok},
-            {reply, ok, [new_epoch],
-             State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                         bba = <<>>, seen = #{}}};
-        {NextHBBFT, {send, NextMsgs}} ->
-            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)],
-             State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                         bba = <<>>, seen = #{}}}
+            {reply, ok, [new_epoch], state_reset(HBBFT1, S)};
+        {HBBFT1, {send, NextMsgs}} ->
+            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], state_reset(HBBFT1, S)}
     end;
 handle_command(mark_done, _State) ->
     {reply, ok, ignore};
 %% XXX this is a hack because we don't yet have a way to message this process other ways
-handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=HBBFT}) ->
+handle_command(
+    {next_round, NextRound, TxnsToRemove, _Sync},
+    #state{chain=Chain, hbbft=HBBFT}=S
+) ->
     PrevRound = hbbft:round(HBBFT),
     case NextRound - PrevRound of
         N when N > 0 ->
@@ -187,23 +206,18 @@ handle_command({next_round, NextRound, TxnsToRemove, _Sync}, State=#state{hbbft=
                         Buf1 = miner_hbbft_sidecar:new_round(Buf, BinTxnsToRemove),
                         hbbft:buf(Buf1, HBBFT)
                 end,
-            Chain = blockchain_worker:blockchain(),
             Ledger = blockchain:ledger(Chain),
             Version = md_version(Ledger),
-            Seen = blockchain_utils:map_to_bitvector(State#state.seen),
+            Seen = blockchain_utils:map_to_bitvector(S#state.seen),
             HBBFT2 = hbbft:set_stamp_fun(?MODULE, metadata, [Version,
                                                              #{seen => Seen,
-                                                               bba_completion => State#state.bba},
+                                                               bba_completion => S#state.bba},
                                                              Chain], HBBFT1),
             case hbbft:next_round(HBBFT2, NextRound, []) of
-                {NextHBBFT, ok} ->
-                    {reply, ok, [ new_epoch ], State#state{hbbft=NextHBBFT, signatures=[],
-                                                           artifact=undefined, sig_phase=unsent,
-                                                           bba = <<>>, seen = #{}}};
-                {NextHBBFT, {send, NextMsgs}} ->
-                    {reply, ok, [ new_epoch ] ++ fixup_msgs(NextMsgs),
-                     State#state{hbbft=NextHBBFT, signatures=[], artifact=undefined, sig_phase=unsent,
-                                 bba = <<>>, seen = #{}}}
+                {HBBFT3, ok} ->
+                    {reply, ok, [new_epoch], state_reset(HBBFT3, S)};
+                {HBBFT3, {send, Msgs}} ->
+                    {reply, ok, [new_epoch] ++ fixup_msgs(Msgs), state_reset(HBBFT3, S)}
             end;
         0 ->
             lager:warning("Already at the current Round: ~p", [NextRound]),
@@ -232,141 +246,113 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
 handle_command(_, _State) ->
     {reply, ignored, ignore}.
 
-handle_message(BinMsg, Index, State) when is_binary(BinMsg) ->
-    try binary_to_term(BinMsg) of
-        Msg ->
-            handle_message(Msg, Index, State)
-    catch _:_ ->
-            lager:warning("got truncated message: ~p:", [BinMsg]),
-            ignore
-    end;
-handle_message(Msg, Index, State=#state{hbbft = HBBFT}) ->
-    Round = hbbft:round(HBBFT),
-    case Msg of
-        {signatures, R, _Signatures} when R > Round ->
+-spec handle_message(binary(), pos_integer(), #state{}) ->
+    defer | ignore | {#state{}, [RelcastMsg]} when
+    RelcastMsg ::
+          {multicast, binary()}
+        | {unicast, pos_integer(), binary()}.
+handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft=HBBFT}=S0) ->
+    CurRound = hbbft:round(HBBFT),
+    case bin_to_msg(BinMsgIn) of
+        %% Multiple sigs
+        {ok, {signatures, SigRound, _   }} when SigRound > CurRound ->
             defer;
-        {signatures, R, _Signatures} when R < Round ->
+        {ok, {signatures, SigRound, _   }} when SigRound < CurRound ->
             ignore;
-        {signatures, _R, Signatures} ->
-            Sigs = dedup_signatures(Signatures, State),
-            NewState = State#state{signatures = Sigs},
-            case enough_signatures(NewState) of
-                {ok, done, MySignatures} when Round > NewState#state.signed ->
-                    ?mark(done_sigs),
-                    %% no point in doing this more than once
-                    ok = miner:signed_block(MySignatures, State#state.artifact),
-                    {NewState#state{signed = Round, sig_phase = done},
-                     [{multicast, t2b({signatures, Round, MySignatures})}]};
-                {ok, gossip, MySignatures} ->
-                    {NewState#state{sig_phase = gossip},
-                     [{multicast, t2b({signatures, Round, MySignatures})}]};
-                _ ->
-                    {NewState, []}
-            end;
-        {signature, R, Address, Signature} ->
-            case R == Round andalso lists:member(Address, State#state.members) andalso
-                 %% provisionally accept signatures if we don't have the means to verify them yet, they get filtered later
-                 (State#state.artifact == undefined orelse libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))) of
-                true ->
-                    NewState = State#state{signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature})},
-                    case enough_signatures(NewState) of
-                        {ok, done, Signatures} when Round > NewState#state.signed ->
-                            ?mark(done_sigs),
-                            %% no point in doing this more than once
-                            ok = miner:signed_block(Signatures, State#state.artifact),
-                            {NewState#state{signed = Round, sig_phase = done},
-                             [{multicast, t2b({signatures, Round, Signatures})}]};
-                        {ok, gossip, Signatures} ->
-                            ?mark(gossip_sigs),
-                            {NewState#state{sig_phase = gossip},
-                             [{multicast, t2b({signatures, Round, Signatures})}]};
-                        _ ->
-                            {NewState, []}
-                    end;
-                false when R > Round ->
-                    defer;
-                false when R < Round ->
-                    %% don't log on late sigs
-                    ignore;
-                false ->
-                    lager:warning("Invalid signature ~p from ~p for round ~p in our round ~p", [Signature, Address, R, Round]),
-                    lager:warning("member? ~p", [lists:member(Address, State#state.members)]),
-                    lager:warning("valid? ~p", [libp2p_crypto:verify(State#state.artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))]),
-                    %% invalid signature somehow
-                    ignore
-            end;
-        _ ->
-            Seen = (State#state.seen)#{Index => true},
-            case hbbft:handle_msg(HBBFT, Index - 1, Msg) of
-                ignore -> ignore;
-                {NewHBBFT, ok} ->
-                    {State#state{hbbft=NewHBBFT, seen = Seen}, []};
-                {_, defer} ->
-                    defer;
-                {NewHBBFT, {send, Msgs}} ->
-                    {State#state{hbbft=NewHBBFT, seen = Seen}, fixup_msgs(Msgs)};
-                {NewHBBFT, {result, {transactions, Metadata0, BinTxns}}} ->
-                    Metadata = lists:map(fun({Id, BMap}) -> {Id, binary_to_term(BMap)} end, Metadata0),
-                    Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
-                    lager:info("Reached consensus ~p ~p", [Index, Round]),
-                    ?mark(done_protocol),
-                    %% send agreed upon Txns to the parent blockchain worker
-                    %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
-                    %% transactions depending on its buffer
-                    NewRound = hbbft:round(NewHBBFT),
-                    Before = erlang:monotonic_time(millisecond),
-                    case miner:create_block(Metadata, Txns, NewRound) of
-                        {ok,
-                            #{
-                                address               := Address,
-                                unsigned_binary_block := Artifact,
-                                signature             := Signature,
-                                pending_txns          := PendingTxns,
-                                invalid_txns          := InvalidTxns
-                             }
-                        } ->
-                            ?mark(block_success),
-                            %% call hbbft finalize round
-                            Duration = erlang:monotonic_time(millisecond) - Before,
-                            lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
-                            %% remove any pending txns or invalid txns from the buffer
-                            BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- PendingTxns ++ InvalidTxns],
-                            NewerHBBFT = hbbft:finalize_round(NewHBBFT, BinTxnsToRemove),
-                            Buf = hbbft:buf(NewerHBBFT),
-                            %% do an async filter of the remaining txn buffer while we finish off the block
-                            Buf1 = miner_hbbft_sidecar:prefilter_round(Buf, PendingTxns),
-                            NewerHBBFT1 = hbbft:buf(Buf1, NewerHBBFT),
-                            put(filtered, NewRound),
-                            Msgs = [{multicast, {signature, NewRound, Address, Signature}}],
-                            BBA = make_bba(State#state.n, Metadata),
-                            NewState = filter_signatures(State#state{hbbft = NewerHBBFT1, sig_phase = sig, bba = BBA,
-                                                                     signatures=lists:keystore(Address, 1, State#state.signatures, {Address, Signature}),
-                                                                     seen = Seen, artifact = Artifact}),
-                            ?mark(finalize_round),
-                            case enough_signatures(NewState) of
-                                {ok, done, Signatures} when Round > NewState#state.signed ->
-                                    %% no point in doing this more than once
-                                    ok = miner:signed_block(Signatures, State#state.artifact),
-                                    {NewState#state{signed = Round, sig_phase = done, seen = Seen},
-                                     [{multicast, t2b({signatures, Round, Signatures})}]};
-                                {ok, gossip, Signatures} ->
-                                    {NewState#state{sig_phase = gossip, seen = Seen},
-                                     [{multicast, t2b({signatures, Round, Signatures})}]};
-                                _ ->
-                                    {NewState#state{seen = Seen}, fixup_msgs(Msgs)}
-                            end;
-                        {error, Reason} ->
-                            ?mark(block_failure),
-                            %% this is almost certainly because we got the new block gossipped before we completed consensus locally
-                            %% which is harmless
-                            lager:warning("failed to create new block ~p", [Reason]),
-                            {State#state{hbbft=NewHBBFT, seen = Seen}, []}
-                    end
-            end
+        {ok, {signatures, _, SigsIn}} ->
+            handle_sigs({received, SigsIn}, S0);
+
+        %% Single sig
+        {ok, {signature, SigRound, _, _}} when SigRound > CurRound ->
+            defer;
+        {ok, {signature, SigRound, _, _}} when SigRound < CurRound ->
+            ignore;
+        {ok, {signature, _, Addr, Sig}} ->
+            handle_sigs({received, [{Addr, Sig}]}, S0);
+
+        %% Other
+        {ok, MsgIn} ->
+            handle_msg_hbbft(MsgIn, Index, S0);
+        {error, truncated} ->
+            lager:warning("got truncated message: ~p:", [BinMsgIn]),
+            ignore
     end.
 
 callback_message(_, _, _) -> none.
 
+-spec handle_msg_hbbft(MsgHBBFT, pos_integer(), #state{}) ->
+    defer | ignore | {#state{}, [MsgRelcast]} when
+    MsgHBBFT :: hbbft:acs_msg() | hbbft:dec_msg() | hbbft:sign_msg(),
+    MsgRelcast ::
+          {multicast, binary()}
+        | {unicast, pos_integer(), binary()}.
+handle_msg_hbbft(Msg, Index, #state{hbbft=HBBFT0}=S0) ->
+    S1 = S0#state{seen = (S0#state.seen)#{Index => true}},
+    case hbbft:handle_msg(HBBFT0, Index - 1, Msg) of
+        ignore ->
+            ignore;
+        {HBBFT1, ok} ->
+            {S1#state{hbbft=HBBFT1}, []};
+        {_, defer} ->
+            defer;
+        {HBBFT1, {send, MsgsOut}} ->
+            {S1#state{hbbft=HBBFT1}, fixup_msgs(MsgsOut)};
+        {HBBFT1, {result, {transactions, Metadata0, BinTxns}}} ->
+            Metadata = lists:map(fun({Id, BMap}) -> {Id, binary_to_term(BMap)} end, Metadata0),
+            Txns = [blockchain_txn:deserialize(B) || B <- BinTxns],
+            CurRound = hbbft:round(HBBFT0),
+            lager:info("Reached consensus ~p ~p", [Index, CurRound]),
+            ?mark(done_protocol),
+            %% send agreed upon Txns to the parent blockchain worker
+            %% the worker sends back its address, signature and txnstoremove which contains all or a subset of
+            %% transactions depending on its buffer
+            NewRound = hbbft:round(HBBFT1),
+            Before = erlang:monotonic_time(millisecond),
+            case miner:create_block(Metadata, Txns, NewRound) of
+                {ok,
+                    #{
+                        address               := Address,
+                        unsigned_binary_block := Artifact,
+                        signature             := Signature,
+                        pending_txns          := PendingTxns,
+                        invalid_txns          := InvalidTxns
+                     }
+                } ->
+                    lager:info("self-made artifact: ~p ",
+                        [[
+                            {addr, b58(Address)},
+                            {sig, b58(Signature)},
+                            {art, b58(Artifact)}
+                        ]]),
+                    ?mark(block_success),
+                    %% call hbbft finalize round
+                    Duration = erlang:monotonic_time(millisecond) - Before,
+                    lager:info("block creation for round ~p took: ~p ms", [NewRound, Duration]),
+                    %% remove any pending txns or invalid txns from the buffer
+                    BinTxnsToRemove = [blockchain_txn:serialize(T) || T <- PendingTxns ++ InvalidTxns],
+                    HBBFT2 = hbbft:finalize_round(HBBFT1, BinTxnsToRemove),
+                    Buf = hbbft:buf(HBBFT2),
+                    %% do an async filter of the remaining txn buffer while we finish off the block
+                    Buf1 = miner_hbbft_sidecar:prefilter_round(Buf, PendingTxns),
+                    put(filtered, NewRound),
+                    S2 = S1#state{
+                        hbbft     = hbbft:buf(Buf1, HBBFT2),
+                        sig_phase = sig,
+                        bba       = make_bba(S1#state.n, Metadata),
+                        artifact  = Artifact
+                    },
+                    ?mark(finalize_round),
+                    handle_sigs({produced, {Address, Signature}, NewRound}, S2);
+                {error, Reason} ->
+                    ?mark(block_failure),
+                    %% this is almost certainly because we got the new block gossipped before we completed consensus locally
+                    %% which is harmless
+                    lager:warning("failed to create new block ~p", [Reason]),
+                    {S1#state{hbbft=HBBFT1}, []}
+            end
+    end.
+
+-spec make_bba(non_neg_integer(), [{non_neg_integer(), _}]) -> binary().
 make_bba(Sz, Metadata) ->
     %% note that BBA indices are 0 indexed, but bitvectors are 1 indexed
     %% so we correct that here
@@ -381,6 +367,7 @@ make_bba(Sz, Metadata) ->
                      end, M, lists:seq(1, Sz)),
     blockchain_utils:map_to_bitvector(M1).
 
+-spec serialize(#state{}) -> #{atom() => binary()}.
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
     Fields = record_info(fields, state),
@@ -399,6 +386,7 @@ serialize(State) ->
                 #{},
                 lists:zip(Fields, StateList)).
 
+-spec deserialize(binary() | #{atom() => binary()}) -> #state{}.
 deserialize(BinState) when is_binary(BinState) ->
     State = binary_to_term(BinState),
     SK = try tc_key_share:deserialize(State#state.sk) of
@@ -444,6 +432,7 @@ deserialize(#{sk := SKSer,
           Fields),
     list_to_tuple([state | DeserList]).
 
+-spec restore(#state{}, #state{}) -> {ok, #state{}}.
 restore(OldState, NewState) ->
     %% replace the stamp fun from the old state with the new one
     %% because we have non-serializable data in it (rocksdb refs)
@@ -455,72 +444,30 @@ restore(OldState, NewState) ->
     {ok, OldState#state{hbbft = hbbft:set_stamp_fun(M, F, A, HBBFT1)}}.
 
 %% helper functions
+-spec fixup_msgs([MsgIn]) -> [MsgOut] when
+    MsgIn  :: {unicast, non_neg_integer(), term()}   | {multicast, term()},
+    MsgOut :: {unicast, non_neg_integer(), binary()} | {multicast, binary()}.
 fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
-                      {unicast, J+1, t2b(NextMsg)};
+                      {unicast, J+1, msg_to_bin(NextMsg)};
                  ({multicast, NextMsg}) ->
-                      {multicast, t2b(NextMsg)}
+                      {multicast, msg_to_bin(NextMsg)}
               end, Msgs).
 
-dedup_signatures(InSigs, #state{signatures = Sigs}) ->
-    %% favor existing sigs, in case they differ, but don't revalidate
-    %% at this point
-    lists:usort(Sigs ++ InSigs).
+%% @doc Finds unique member positions (if any) of addresses in the given
+%% `{Address, Signature}' tuples.
+%% @end
+-spec addr_sigs_to_mem_pos(addr_sigs(), #state{}) -> [pos_integer()].
+addr_sigs_to_mem_pos(AddrSigs, #state{members=MemberAddresses}) ->
+    lists:usort(positions([Addr || {Addr, _} <- AddrSigs], MemberAddresses)).
 
-enough_signatures(#state{artifact=undefined}) ->
-    false;
-enough_signatures(#state{sig_phase = sig, signatures = Sigs, f = F}) when length(Sigs) < F + 1 ->
-    false;
-enough_signatures(#state{sig_phase = done, signatures = Signatures}) ->
-    {ok, done, Signatures};
-enough_signatures(#state{sig_phase = Phase, artifact = Artifact, members = Members,
-                         f = F, signatures = Signatures, signatures_required = Threshold0}) ->
-    Threshold = case Phase of
-                    sig -> F + 1;
-                    gossip -> Threshold0
-                end,
+-spec positions([A], [A]) -> [pos_integer()].
+positions(Unordered, Ordered) ->
+    Positions = lists:zip(Ordered, lists:seq(1, length(Ordered))),
+    FindPosition = fun (X) -> {_, I} = lists:keyfind(X, 1, Positions), I end,
+    lists:map(FindPosition, Unordered).
 
-    %% filter out any signatures that are invalid or are not for a member of this DKG and dedup
-    case blockchain_block:verify_signatures(blockchain_block:deserialize(Artifact),
-                                            Members,
-                                            Signatures,
-                                            Threshold) of
-        {true, ValidSignatures} ->
-            %% So, this is a little dicey, if we don't need all N signatures, we might have competing subsets
-            %% depending on message order. Given that the underlying artifact they're signing is the same though,
-            %% it should be ok as long as we disregard the signatures for testing equality but check them for validity
-            case Phase of
-                gossip ->
-                    {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold0)};
-                sig ->
-                    case length(ValidSignatures) >= Threshold0 of
-                        true ->
-                            {ok, done, lists:sublist(lists:sort(ValidSignatures), Threshold0)};
-                        false ->
-                            {ok, gossip, lists:sort(ValidSignatures)}
-                    end
-            end;
-        false ->
-            false
-    end.
-
-filter_signatures(State=#state{artifact=Artifact, signatures=Signatures, members=Members}) ->
-    FilteredSignatures = lists:filter(fun({Address, Signature}) ->
-                         lists:member(Address, Members) andalso
-                         libp2p_crypto:verify(Artifact, Signature, libp2p_crypto:bin_to_pubkey(Address))
-                 end, Signatures),
-    State#state{signatures=FilteredSignatures}.
-
-map_ids(Sigs, Members0) ->
-    Members = lists:zip(Members0, lists:seq(1, length(Members0))),
-    IDs = lists:map(fun({Addr, _Sig}) ->
-                            %% find member index
-                            {_, ID} = lists:keyfind(Addr, 1, Members),
-                            ID
-                    end,
-                    Sigs),
-    lists:usort(IDs).
-
+-spec md_version(blockchain_ledger_v1:ledger()) -> map | tuple.
 md_version(Ledger) ->
     case blockchain:config(?election_version, Ledger) of
         {ok, N} when N >= 3 ->
@@ -529,5 +476,208 @@ md_version(Ledger) ->
             tuple
     end.
 
+-spec state_reset(hbbft:hbbft_data(), #state{}) -> #state{}.
+state_reset(HBBFT, #state{}=S) ->
+    S#state{
+        hbbft          = HBBFT,
+        sigs_valid     = [],
+        sigs_unchecked = [],
+        artifact       = undefined,
+        sig_phase      = unsent,
+        bba            = <<>>,
+        seen           = #{}
+    }.
+
+-spec handle_sigs(
+    {received, addr_sigs()} | {produced, addr_sig(), non_neg_integer()},
+    #state{}
+) ->
+    {#state{}, [{multicast, binary()}]}.
+handle_sigs(Given, #state{hbbft=HBBFT}=S0) ->
+    SigsIn =
+        case Given of
+            {received, Sigs} -> Sigs;
+            {produced, Sig, _} -> [Sig]
+        end,
+    CurRound = hbbft:round(HBBFT),
+    case state_sigs_input(SigsIn, S0) of
+        {{done, SigsOut}, S1} ->
+            ?mark(done_sigs),
+            MsgOut = msg_to_bin({signatures, CurRound, SigsOut}),
+            {S1, [{multicast, MsgOut}]};
+        {{gossip, SigsOut}, S1} ->
+            ?mark(gossip_sigs),
+            MsgOut = msg_to_bin({signatures, CurRound, SigsOut}),
+            {S1, [{multicast, MsgOut}]};
+        {pending, S1} ->
+            MsgsOut =
+                case Given of
+                    {received, _} ->
+                        [];
+                    {produced, {SelfAddr, SelfSig}, NewRound} ->
+                        [{multicast, {signature, NewRound, SelfAddr, SelfSig}}]
+                end,
+            {S1, fixup_msgs(MsgsOut)}
+    end.
+
+-spec state_sigs_input(addr_sigs(), #state{}) ->
+    {
+        {done, addr_sigs()} | {gossip, addr_sigs()} | pending,
+        #state{}
+    }.
+state_sigs_input(SigsIn, #state{hbbft=HBBFT}=S0) ->
+    CurRound = hbbft:round(HBBFT),
+    S1 = state_sigs_add(SigsIn, S0),
+    S2 = state_sigs_retry_unchecked(S1),
+    case state_sigs_check_if_enough(S2) of
+        {{enough_for, {gossip, _}=Gossip}, S3} ->
+            {Gossip, S3#state{sig_phase = gossip}};
+        {
+            {enough_for, {done, Sigs}=Done},
+            #state{artifact = <<Art/binary>>, last_round_signed=LastRoundSigned}=S3
+        } when CurRound > LastRoundSigned ->
+            ok = miner:signed_block(Sigs, Art),
+            S4 =
+                S3#state{
+                    last_round_signed = CurRound,
+                    sig_phase = done
+                },
+            {Done, S4};
+        {{enough_for, {done, _}}, S3} ->
+            {pending, S3};
+        {not_enough, S3} ->
+            {pending, S3}
+    end.
+
+-spec state_sigs_add(addr_sigs(), #state{}) -> #state{}.
+state_sigs_add(Sigs, #state{}=S) ->
+    lists:foldl(fun state_sigs_add_one/2, S, Sigs).
+
+-spec state_sigs_add_one(addr_sig(), #state{}) -> #state{}.
+state_sigs_add_one({Addr, Sig}, #state{artifact = undefined, sigs_unchecked=Unchecked}=S) ->
+    %% Provisionally accept signatures if we don't have the means to
+    %% verify them yet. We'll retry verifying them later.
+    S#state{sigs_unchecked = kvl_set(Addr, Sig, Unchecked)};
+state_sigs_add_one({Addr, Sig}, #state{}=S) ->
+    case sig_is_valid({Addr, Sig}, S) of
+        true  -> S#state{sigs_valid = kvl_set(Addr, Sig, S#state.sigs_valid)};
+        false -> S
+    end.
+
+-spec state_sigs_retry_unchecked(#state{}) -> #state{}.
+state_sigs_retry_unchecked(#state{artifact=undefined}=S0) ->
+    S0;
+state_sigs_retry_unchecked(#state{artifact = <<_/binary>>, sigs_unchecked = Unchecked}=S) ->
+    state_sigs_add(Unchecked, S).
+
+-spec state_sigs_check_if_enough(#state{}) ->
+    {not_enough | {enough_for, Next}, #state{}} when
+    Next :: {gossip, addr_sigs()} | {done, addr_sigs()}.
+state_sigs_check_if_enough(#state{artifact=undefined}=S) ->
+    {not_enough, S};
+state_sigs_check_if_enough(#state{sig_phase = sig, sigs_valid = Sigs, f = F}=S) when length(Sigs) < F + 1 ->
+    {not_enough, S};
+state_sigs_check_if_enough(#state{sig_phase = done, sigs_valid = SigsValid}=S) ->
+    {{enough_for, {done, SigsValid}}, S};
+state_sigs_check_if_enough(
+    #state{
+        sig_phase = Phase,
+        artifact = <<_/binary>>,
+        f = F,
+        sigs_valid = SigsValidAll,
+        signatures_required = Threshold0
+    }=S0
+) ->
+    Threshold1 =
+        case Phase of
+            sig -> F + 1;
+            gossip -> Threshold0
+        end,
+    SigsValidRand =
+        lists:sublist(blockchain_utils:shuffle(SigsValidAll), Threshold1),
+    case
+        length(SigsValidAll) =< (3*F)+1 andalso
+        length(SigsValidRand) >= Threshold1
+    of
+        true ->
+            %% So, this is a little dicey, if we don't need all N signatures,
+            %% we might have competing subsets depending on message order.
+            %% Given that the underlying artifact they're signing is the same
+            %% though, it should be ok as long as we disregard the signatures
+            %% for testing equality but check them for validity
+            SigsValidRandSubset =
+                lists:sublist(lists:sort(SigsValidRand), Threshold0),
+            case Phase of
+                gossip ->
+                    {{enough_for, {done, SigsValidRandSubset}}, S0};
+                sig ->
+                    case length(SigsValidRand) >= Threshold0 of
+                        true ->
+                            {{enough_for, {done, SigsValidRandSubset}}, S0};
+                        false ->
+                            {{enough_for, {gossip, lists:sort(SigsValidRand)}}, S0}
+                    end
+            end;
+        false ->
+            {not_enough, S0}
+    end.
+
+-spec sig_is_valid(addr_sig(), #state{}) -> boolean().
+sig_is_valid(
+    {<<Addr/binary>>, <<Sig/binary>>}=AddrSig,
+    #state{artifact=Art, members=MemberAddresses, hbbft=HBBFT}=S
+) ->
+    IsMember = lists:member(Addr, MemberAddresses),
+    IsValid =
+        IsMember
+        andalso
+        libp2p_crypto:verify(Art, Sig, libp2p_crypto:bin_to_pubkey(Addr)),
+    case IsValid of
+        true ->
+            ok;
+        false ->
+            CurRound = hbbft:round(HBBFT),
+            case IsMember of
+                true ->
+                    [MemId] = addr_sigs_to_mem_pos([AddrSig], S),
+                    lager:warning("Invalid signature from member ~b in our round ~p", [MemId, CurRound]);
+                false ->
+                    lager:warning("Invalid signature from non-member ~s in our round ~p", [b58(Addr), CurRound])
+            end
+    end,
+    IsValid.
+
+-spec kvl_set(K, V, KVL) -> KVL when KVL :: [{K, V}].
+kvl_set(K, V, KVL) ->
+    lists:keystore(K, 1, KVL, {K, V}).
+
+-spec b58(binary()) -> string().
+b58(<<Bin/binary>>) ->
+    libp2p_crypto:bin_to_b58(Bin).
+
+-spec t2b(term()) -> binary().
 t2b(Term) ->
     term_to_binary(Term, [{compressed, 1}]).
+
+-spec msg_to_bin(hbbft_msg()) -> binary().
+msg_to_bin(Msg) ->
+    t2b(Msg).
+
+-spec bin_to_msg(binary()) -> {ok, hbbft_msg()} | {error, truncated}.
+bin_to_msg(<<Bin/binary>>) ->
+    try
+        {ok, binary_to_term(Bin)}
+    catch _:_ ->
+        {error, truncated}
+    end.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+positions_test() ->
+    ?assertMatch([1], positions([a], [a]), "Position 1 of 1"),
+    ?assertMatch([1], positions([a], [a, b]), "Position 1 of 2"),
+    ?assertMatch([2], positions([b], [a, b, c]), "Position 2 of 3"),
+    ?assertMatch([2, 2], positions([b, b], [a, b, c]), "Position 2,2 of 3").
+
+-endif.
