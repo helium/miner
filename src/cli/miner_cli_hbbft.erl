@@ -252,7 +252,8 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
                     maps:map(
                       fun(Addr, Pen) ->
                               {ok, V} = blockchain_ledger_v1:get_validator(Addr, Ledger),
-                              Pen + blockchain_ledger_validator_v1:calculate_penalty_value(V, Ledger)
+                              Pens = blockchain_ledger_validator_v1:calculate_penalties(V, Ledger),
+                              {Pen + lists:sum(maps:values(Pens)), maps:get(tenure, Pens, 0.0)}
                       end, Penalties),
                 {Start1, maps:to_list(Penalties1)};
             _ ->
@@ -287,7 +288,8 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
              {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
              {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
              {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
-             {penalty, io_lib:format("~.2f", [element(2, lists:keyfind(A, 1, GroupWithPenalties))])}
+             {tenure, io_lib:format("~.2f", [element(2, element(2, lists:keyfind(A, 1, GroupWithPenalties)))])},
+             {penalty, io_lib:format("~.2f", [element(1, element(2, lists:keyfind(A, 1, GroupWithPenalties)))])}
             ] || A <- ConsensusAddrs])];
 hbbft_perf([], [], []) ->
     usage.
