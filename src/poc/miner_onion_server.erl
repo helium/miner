@@ -18,7 +18,7 @@
     decrypt_p2p/2,
     decrypt_radio/7,
     retry_decrypt/11,
-    send_receipt/11,
+    send_receipt/12,
     send_witness/9
 ]).
 
@@ -87,12 +87,13 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, 
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
                    Stream :: undefined | pid(),
+                   Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
-send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State) ->
+send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State) ->
     case miner_lora:location_ok() of
         true ->
             lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
-            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State, ?BLOCK_RETRY_COUNT);
+            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
     end.
@@ -107,12 +108,13 @@ send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, 
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
                    Stream :: undefined | pid(),
+                   Power :: non_neg_integer(),
                    State :: state(),
                    Retry :: non_neg_integer()) -> ok | {error, any()}.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State, 0) ->
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _Power, _State, 0) ->
     lager:error("failed to send receipts, max retry"),
     {error, too_many_retries};
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, #state{chain=Chain}=State, Retry) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
@@ -132,6 +134,9 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
                                        {ok, 2} ->
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate);
+                                       {ok, 3} ->
+                                           R0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate),
+                                           blockchain_poc_receipt_v1:tx_power(R0, Power);
                                        _ ->
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
                                    end,
@@ -163,7 +168,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                     ok;
                 false ->
                     timer:sleep(timer:seconds(30)),
-                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State, Retry-1)
+                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State, Retry-1)
             end
     end.
 
@@ -367,15 +372,31 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     {ok, Region} = miner_lora:region(),
                     %% TODO: Calculate spreading using region params as well...
                     Spreading = spreading(Region, erlang:byte_size(Packet)),
-                    %% TODO find the max eirp for this hotspot's region, add the asserted antenna gain on
-                    %% and then correct the TX power so that we don't exceed the EIRP
-                    {ok, TxPower} = tx_power(Region, State),
-                    %% TODO capture actual TX power here and attach to receipt
-                    %% miner_lora:send_poc will now return the *actual* tx power used, if there's no mapping entry for
-                    %% the requested power.
-                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
-                    erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                               RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
+                    case tx_power(Region, State) of
+                        {error, Reason} ->
+                            %% could not calculate txpower, don't do anything
+                            lager:error("unable to get tx_power, reason: ~p", [Reason]),
+                            ok;
+                        {ok, TxPower} ->
+                            case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) of
+                                {ok, _LoraState} ->
+                                    lager:info("sending receipt at power: ~p", [TxPower]),
+                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
+                                {warning, {tx_power_corrected, CorrectedPower}} ->
+                                    lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
+                                                  [TxPower, CorrectedPower]),
+                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
+                                {warning, {unknown, Other}} ->
+                                    %% This should not happen
+                                    lager:warning("What is this? ~p", [Other]),
+                                    ok;
+                                {error, Reason} ->
+                                    lager:error("unable to send_poc, reason: ~p", [Reason]),
+                                    ok
+                            end
+                    end;
                 false ->
                     ok
             end,
@@ -420,24 +441,16 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
     end.
 
 -spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer()} | {error, any()}.
-tx_power(Region, #state{chain=Chain}) ->
+tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
     Ledger = blockchain:ledger(Chain),
-    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
 
-    case blockchain_ledger_v1:find_gateway_info(SelfPubKeyBin, Ledger) of
+    case blockchain_ledger_v1:find_gateway_info(CK, Ledger) of
         {ok, GwInfo} ->
-            case blockchain_ledger_gateway_v2:location(GwInfo) of
-                undefined ->
-                    {error, no_loc};
-                Loc ->
-                    %% NOTE: The region should match the supplied one for this hotspot?
-                    {ok, Region} = blockchain_region_v1:h3_to_region(Loc, Ledger),
-                    {ok, Params} = blockchain_region_params_v1:for_region(Region, Ledger),
-                    MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
-                    case blockchain_ledger_gateway_v2:gain(GwInfo) of
-                        undefined -> {ok, MaxEIRP};
-                        AssertGain -> {ok, MaxEIRP + AssertGain}
-                    end
+            {ok, Params} = blockchain_region_params_v1:for_region(Region, Ledger),
+            MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
+            case blockchain_ledger_gateway_v2:gain(GwInfo) of
+                undefined -> {ok, MaxEIRP};
+                AssertGain -> {ok, MaxEIRP - AssertGain}
             end;
         _ ->
             {error, no_gw}

@@ -195,6 +195,8 @@ reg_domain_data_for_countrycode(CC)->
 
 -spec region() -> {ok, atom()}.
 region()->
+    %% TODO: recalc region if hotspot re-asserts
+    %% region_us915, region_au915
     gen_server:call(?MODULE, region, 5000).
 
 
