@@ -3,7 +3,7 @@ FROM erlang:22.3.2-alpine as builder
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
     dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
-    sed wget curl
+    sed wget curl apk-tools
 
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -29,7 +29,7 @@ RUN cp genesis /opt/docker/update/genesis
 
 FROM erlang:22.3.2-alpine as runner
 
-RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
+RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc apk-tools
 RUN ulimit -n 64000
 
 WORKDIR /opt/miner
