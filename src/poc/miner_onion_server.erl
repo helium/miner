@@ -432,8 +432,7 @@ tx_power(Region, #state{chain=Chain}) ->
                 Loc ->
                     %% NOTE: The region should match the supplied one for this hotspot?
                     {ok, Region} = blockchain_region_v1:h3_to_region(Loc, Ledger),
-                    {ok, RegionParams} = blockchain_region_params_v1:for_region(Region, Ledger),
-                    Params = blockchain_region_params_v1:region_params(RegionParams),
+                    {ok, Params} = blockchain_region_params_v1:for_region(Region, Ledger),
                     MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
                     case blockchain_ledger_gateway_v2:gain(GwInfo) of
                         undefined -> {ok, MaxEIRP};

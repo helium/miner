@@ -161,8 +161,7 @@ reg_domain_data_for_addr(Addr)->
                         {ok, Region} ->
                             case blockchain_region_params_v1:for_region(Region, Ledger) of
                                 {ok, RegionParams} ->
-                                    RegionParamsAgainIDontKnowWhyINeedToDoThis = blockchain_region_params_v1:region_params(RegionParams),
-                                    {ok, {Region, [ blockchain_region_param_v1:channel_frequency(RP) || RP <- RegionParamsAgainIDontKnowWhyINeedToDoThis ]}};
+                                    {ok, {Region, [ blockchain_region_param_v1:channel_frequency(RP) || RP <- RegionParams ]}};
                                 {error, Reason} ->
                                     {error, Reason}
                             end;
