@@ -10,8 +10,18 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(<<"account_get">>, {Param}) ->
-    Address = ?jsonrpc_b58_to_bin(<<"address">>, Param),
+handle_rpc(Method, []) ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, {Params}) ->
+    handle_rpc(Method, kvc:to_proplist({Params}));
+handle_rpc(Method, Params) when is_list(Params) ->
+    handle_rpc(Method, maps:from_list(Params));
+handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, Params) when is_map(Params) ->
+    handle_rpc_(Method, Params).
+
+handle_rpc_(<<"account_get">>, #{ <<"address">> := Address }) ->
     Ledger = blockchain:ledger(blockchain_worker:blockchain()),
     GetBalance = fun() ->
                          case blockchain_ledger_v1:find_entry(Address, Ledger) of
@@ -56,6 +66,7 @@ handle_rpc(<<"account_get">>, {Param}) ->
                   address => ?BIN_TO_B58(Address)
                  },
                 [GetBalance, GetSecurities, GetDCs]);
-
-handle_rpc(_, _) ->
+handle_rpc_(<<"account_get">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
+handle_rpc_(_, _) ->
     ?jsonrpc_error(method_not_found).

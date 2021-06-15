@@ -5,49 +5,46 @@
 -behavior(miner_jsonrpc_handler).
 
 %% jsonrpc_handler
--export([handle_rpc/2]).
+-export([handle_rpc/2, handle_rpc_/2]).
 
 %%
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, Params) ->
-    lager:info("got ~p, ~p", [Method, Params]),
+handle_rpc(Method, []) ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, {Params}) ->
+    handle_rpc(Method, kvc:to_proplist({Params}));
+handle_rpc(Method, Params) when is_list(Params) ->
+    handle_rpc(Method, maps:from_list(Params));
+handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, Params) when is_map(Params) ->
     handle_rpc_(Method, Params).
 
-handle_rpc_(<<"info_height">>, _Params) ->
-    lager:info("in handle info_height method: ~p", [_Params]),
+handle_rpc_(<<"info_height">>, []) ->
     Chain = blockchain_worker:blockchain(),
-    lager:info("in handle info_height method1: ~p", [_Params]),
     {ok, Height} = blockchain:height(Chain),
-    lager:info("in handle info_height method2: ~p", [_Params]),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    lager:info("in handle info_height method3: ~p", [_Params]),
     {ok, HeadBlock} = blockchain:head_block(Chain),
-    lager:info("in handle info_height method4: ~p", [_Params]),
     {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
-    lager:info("in handle info_height method5: ~p", [_Params]),
     Output = #{
         epoch => Epoch,
         height => Height
     },
-    lager:info("in handle info_height method6: ~p", [_Params]),
-    Reply = case SyncHeight == Height of
+    case SyncHeight == Height of
         true -> Output;
         false -> Output#{sync_height => SyncHeight}
-    end,
-    lager:info("sending reply ~p", [Reply]),
-    Reply;
-handle_rpc_(<<"info_in_consensus">>, _Params) ->
+    end;
+handle_rpc_(<<"info_in_consensus">>, []) ->
     #{in_consensus => miner_consensus_mgr:in_consensus()};
-handle_rpc_(<<"info_name">>, _Params) ->
-    Name = ?TO_ANIMAL_NAME(blockchain_swarm:pubkey_bin()),
-    #{name => Name};
-handle_rpc_(<<"info_block_age">>, _Params) ->
+handle_rpc_(<<"info_name">>, []) ->
+    #{name => iolist_to_binary(?TO_ANIMAL_NAME(blockchain_swarm:pubkey_bin()))};
+handle_rpc_(<<"info_block_age">>, []) ->
     #{block_age => miner:block_age()};
-handle_rpc_(<<"info_p2p_status">>, _Params) ->
+handle_rpc_(<<"info_p2p_status">>, []) ->
     maps:from_list(miner:p2p_status());
-handle_rpc_(<<"info_region">>, _Params) ->
+handle_rpc_(<<"info_region">>, []) ->
     R =
         case miner_lora:region() of
             {ok, undefined} -> <<"undefined">>;
@@ -55,12 +52,12 @@ handle_rpc_(<<"info_region">>, _Params) ->
         end,
     #{region => R};
 %% TODO handle onboarding key data??
-handle_rpc_(<<"info_summary">>, _Params) ->
+handle_rpc_(<<"info_summary">>, []) ->
     PubKey = blockchain_swarm:pubkey_bin(),
     Chain = blockchain_worker:blockchain(),
 
     %% get gateway info
-    MinerName = ?TO_ANIMAL_NAME(PubKey),
+    MinerName = iolist_to_binary(?TO_ANIMAL_NAME(PubKey)),
     Macs = get_mac_addrs(),
     BlockAge = miner:block_age(),
     Uptime = get_uptime(),

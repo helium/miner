@@ -5,25 +5,47 @@
 
 -export([handle_rpc/2]).
 
-handle_rpc(<<"block_height">>, _Params) ->
+handle_rpc(Method, []) ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, {Params}) ->
+    handle_rpc(Method, kvc:to_proplist({Params}));
+handle_rpc(Method, Params) when is_list(Params) ->
+    handle_rpc(Method, maps:from_list(Params));
+handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
+    handle_rpc_(Method, []);
+handle_rpc(Method, Params) when is_map(Params) ->
+    handle_rpc_(Method, Params).
+
+handle_rpc_(<<"block_height">>, []) ->
     {ok, Height} = blockchain:height(blockchain_worker:blockchain()),
     #{ height => Height };
+handle_rpc_(<<"block_height">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
 
-handle_rpc(<<"block_get">>, {Param}) ->
-    HeightOrHash =
-        case ?jsonrpc_get_param(<<"height">>, Param, false) of
-            false -> ?jsonrpc_b64_to_bin(<<"hash">>, Param);
-            V when is_integer(V) -> V;
-            _ -> ?jsonrpc_error({invalid_params, Param})
-        end,
-    case blockchain:get_block(HeightOrHash, blockchain_worker:blockchain()) of
+handle_rpc_(<<"block_get">>, #{ <<"height">> := Height }) when is_integer(Height) ->
+    lookup_block(Height);
+handle_rpc_(<<"block_get">>, #{ <<"hash">> := Hash }) when is_binary(Hash) ->
+    try
+        BinHash = ?B64_TO_BIN(Hash),
+        lookup_block(BinHash)
+    catch
+        _:_ -> ?jsonrpc_error({invalid_params, Hash})
+    end;
+handle_rpc_(<<"block_get">>, []) ->
+    {ok, Height} = blockchain:height(blockchain_worker:blockchain()),
+    lookup_block(Height);
+handle_rpc_(<<"block_get">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
+handle_rpc_(_, _) ->
+    ?jsonrpc_error(method_not_found).
+
+lookup_block(BlockId) ->
+    case blockchain:get_block(BlockId, blockchain_worker:blockchain()) of
         {ok, Block} ->
             blockchain_block:to_json(Block, []);
         {error, not_found} ->
-            ?jsonrpc_error({not_found, "Block not found: ~p", [Param]});
+            ?jsonrpc_error({not_found, "Block not found: ~p", [BlockId]});
         {error, _}=Error ->
             ?jsonrpc_error(Error)
-    end;
+    end.
 
-handle_rpc(_, _) ->
-    ?jsonrpc_error(method_not_found).
