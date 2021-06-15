@@ -499,8 +499,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         miner_hbbft_sidecar:set_group(undefined),
                                         State2#state{current_dkgs =
                                                          maps:remove(EID, cleanup_groups(EID,
-                                                                                         State2#state.current_dkgs, true)),
-                                                     started_groups = cleanup_groups(EID, State#state.started_groups),
+                                                                                         State2#state.current_dkgs, Ledger, true)),
+                                                     started_groups = cleanup_groups(EID, State#state.started_groups, Ledger),
                                                      active_group = undefined};
                                     {ok, ElectionGroup} ->
                                         HBBFTGroup =
@@ -527,8 +527,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, State#state.ag_monitor, Round),
                                         Ref = erlang:monitor(process, HBBFTGroup),
-                                        State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs, true)),
-                                                     started_groups = cleanup_groups(EID, State#state.started_groups),
+                                        State2#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State2#state.current_dkgs, Ledger, true)),
+                                                     started_groups = cleanup_groups(EID, State#state.started_groups, Ledger),
                                                      active_group = HBBFTGroup, ag_monitor = Ref}
                                 end,
                             {noreply, State3#state{delay = 0}};
@@ -791,8 +791,8 @@ restart_election(#state{delay = Delay,
 
 -spec limit_dkgs(State :: #state{}) -> #state{}.
 limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
-    Limit = case blockchain:config(?election_restart_interval_range,
-                                   blockchain:ledger(State#state.chain)) of
+    Ledger = blockchain:ledger(State#state.chain),
+    Limit = case blockchain:config(?election_restart_interval_range, Ledger) of
                 {ok, IR} -> IR + 1;
                 _ -> 2
             end,
@@ -806,7 +806,7 @@ limit_dkgs(#state{current_dkgs = CurrentDKGs} = State) ->
             DKGList = lists:sort(maps:to_list(CurrentDKGs)),
             {Stop0, Rem} = lists:split(Sz - Limit, DKGList),
             {_, Stop} = lists:unzip(Stop0),
-            lists:foreach(fun maybe_penalize/1, Stop),
+            lists:foreach(fun(G) -> maybe_penalize(G, Ledger) end, Stop),
             lists:foreach(fun stop_group/1, Stop),
             State#state{current_dkgs = maps:from_list(Rem)}
     end.
@@ -857,8 +857,8 @@ restart_dkg(Height, Delay, State) ->
                 {ok, HBBFTGroup} ->
                     activate_hbbft(HBBFTGroup, State#state.active_group, State#state.ag_monitor, Round),
                     Ref = erlang:monitor(process, HBBFTGroup),
-                    {ok, State#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State#state.current_dkgs, true)),
-                                     started_groups = cleanup_groups(EID, State#state.started_groups),
+                    {ok, State#state{current_dkgs = maps:remove(EID, cleanup_groups(EID, State#state.current_dkgs, Ledger, true)),
+                                     started_groups = cleanup_groups(EID, State#state.started_groups, Ledger),
                                      active_group = HBBFTGroup, ag_monitor = Ref}};
                 {error, _} -> no_dkg
             end
@@ -1113,39 +1113,44 @@ stop_group(Pid) ->
           end),
     ok.
 
-maybe_penalize(undefined) ->
+maybe_penalize(undefined, _) ->
     ok;
-maybe_penalize(out) ->
+maybe_penalize(out, _) ->
     ok;
-maybe_penalize(Pid) ->
-    spawn(fun() ->
-                  case libp2p_group_relcast:handle_command(Pid, final_status) of
-                      {ok, {PrivKey, Signatures, Members, Delay, Height}} ->
-                          Name = penalize_group_name(Height, Delay, Members),
-                          %% we intentionally don't use create here
-                          GroupArg = [miner_dkg_penalty_handler, [Members,
-                                                                  PrivKey,
-                                                                  Signatures,
-                                                                  Delay,
-                                                                  Height],
-                                      [{create, true}]],
-                          lager:info("starting penalize group ~p", [Name]),
-                          {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
-                                                               Name,
-                                                               libp2p_group_relcast, GroupArg),
-                          libp2p_group_relcast:handle_input(Group, start),
-                          %% TODO we need to tell the consensus manager about this group?
-                          spawn(fun() ->
-                                        Timeout = application:get_env(miner, penalty_group_timeout, 120),
-                                        timer:sleep(timer:seconds(Timeout)),
-                                        catch libp2p_group_relcast:handle_command(Group, stop)
-                                end),
-                          Group;
-                      _ ->
-                          ok
-                  end
-          end),
-    ok.
+maybe_penalize(Pid, Ledger) ->
+    case blockchain:config(?election_version, Ledger) of
+        {ok, V} when V >= 5 ->
+            spawn(fun() ->
+                          case libp2p_group_relcast:handle_command(Pid, final_status) of
+                              {ok, {PrivKey, Signatures, Members, Delay, Height}} ->
+                                  Name = penalize_group_name(Height, Delay, Members),
+                                  %% we intentionally don't use create here
+                                  GroupArg = [miner_dkg_penalty_handler, [Members,
+                                                                          PrivKey,
+                                                                          Signatures,
+                                                                          Delay,
+                                                                          Height],
+                                              [{create, true}]],
+                                  lager:info("starting penalize group ~p", [Name]),
+                                  {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
+                                                                       Name,
+                                                                       libp2p_group_relcast, GroupArg),
+                                  libp2p_group_relcast:handle_input(Group, start),
+                                  %% TODO we need to tell the consensus manager about this group?
+                                  spawn(fun() ->
+                                                Timeout = application:get_env(miner, penalty_group_timeout, 120),
+                                                timer:sleep(timer:seconds(Timeout)),
+                                                catch libp2p_group_relcast:handle_command(Group, stop)
+                                        end),
+                                  Group;
+                              _ ->
+                                  ok
+                          end
+                  end),
+            ok;
+        _ ->
+            ok
+    end.
 
 get_buf(ConsensusGroup) ->
     case ConsensusGroup of
@@ -1173,10 +1178,10 @@ next_election(_Base, Interval) when is_atom(Interval) ->
 next_election(Base, Interval) ->
     Base + Interval.
 
-cleanup_groups(EID, Groups) ->
-    cleanup_groups(EID, Groups, false).
+cleanup_groups(EID, Groups, Ledger) ->
+    cleanup_groups(EID, Groups, Ledger, false).
 
-cleanup_groups({Start, _Delay} = EID, Groups, Retain) ->
+cleanup_groups({Start, _Delay} = EID, Groups, Ledger, Retain) ->
     lager:info("cleaning up old groups on election of ~p", [EID]),
     maps:fold(
       %% this is the new active group. remove but don't stop
@@ -1190,7 +1195,7 @@ cleanup_groups({Start, _Delay} = EID, Groups, Retain) ->
               %% from this election cycle (older ones will have been successful).
               case Retain andalso S == Start of
                   true ->
-                      maybe_penalize(V);
+                      maybe_penalize(V, Ledger);
                   _ -> ok
               end,
               stop_group(V),
