@@ -216,10 +216,17 @@ handle_call({genesis_block_done, BinaryGenesisBlock, Signatures, Members, PrivKe
     miner_hbbft_sidecar:set_group(Group),
     miner:start_chain(Group, Chain),
 
-    #{ {1,0} := DKGGroup} = State#state.current_dkgs,
+    OldCancelDKGs = State#state.cancel_dkgs,
+
+    CancelDKGs = case State#state.current_dkgs of
+        #{ {1,0} := DKGGroup} ->
+            OldCancelDKGs#{3 => DKGGroup};
+        _ ->
+            OldCancelDKGs
+    end,
     {reply, ok, State#state{active_group = Group,
                             current_dkgs = #{},
-                            cancel_dkgs = #{3 => DKGGroup},
+                            cancel_dkgs = CancelDKGs,
                             chain = Chain}};
 
 handle_call(txn_buf, _From, State) ->
