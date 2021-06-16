@@ -51,6 +51,8 @@ handle_rpc_(<<"txn_", _/binary>> = Method, Params) ->
     miner_jsonrpc_txn:handle_rpc(Method, Params);
 handle_rpc_(<<"ledger_", _/binary>> = Method, Params) ->
     miner_jsonrpc_ledger:handle_rpc(Method, Params);
+handle_rpc_(<<"snapshot_", _/binary>> = Method, Params) ->
+    miner_jsonrpc_snapshot:handle_rpc(Method, Params);
 handle_rpc_(_, _) ->
     ?jsonrpc_error(method_not_found).
 
