@@ -10,18 +10,7 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"txn_queue">>, []) ->
+handle_rpc(<<"txn_queue">>, []) ->
     case (catch blockchain_txn_mgr:txn_list()) of
         {'EXIT', _} -> #{ error => <<"timeout">> };
         [] -> [];
@@ -39,7 +28,7 @@ handle_rpc_(<<"txn_queue">>, []) ->
                                    accepted_height => AcceptHeight } | Acc ]
                       end, [], Txns)
     end;
-handle_rpc_(<<"txn_add_gateway">>, #{ owner := OwnerB58 } = Params) ->
+handle_rpc(<<"txn_add_gateway">>, #{ owner := OwnerB58 } = Params) ->
     try
         Payer = case maps:get(payer, Params, undefined) of
                     undefined -> undefined;
@@ -55,7 +44,7 @@ handle_rpc_(<<"txn_add_gateway">>, #{ owner := OwnerB58 } = Params) ->
             Error = io_lib:format("~p", [E]),
             #{ <<"error">> => Error }
     end;
-handle_rpc_(<<"txn_assert_location">>, #{ owner := OwnerB58,
+handle_rpc(<<"txn_assert_location">>, #{ owner := OwnerB58,
                                          location := Loc } = Params) ->
     try
         Payer = case maps:get(payer, Params, undefined) of
@@ -78,7 +67,7 @@ handle_rpc_(<<"txn_assert_location">>, #{ owner := OwnerB58,
             Error = io_lib:format("~p", [E]),
             #{ <<"error">> => Error }
     end;
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
 parse_location(L) ->

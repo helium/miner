@@ -13,23 +13,12 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"hbbft_status">>, []) ->
+handle_rpc(<<"hbbft_status">>, []) ->
     miner:hbbft_status();
-handle_rpc_(<<"hbbft_skip">>, []) ->
+handle_rpc(<<"hbbft_skip">>, []) ->
     Result = miner:hbbft_skip(),
     #{result => Result};
-handle_rpc_(<<"hbbft_queue">>, []) ->
+handle_rpc(<<"hbbft_queue">>, []) ->
     #{
         inbound := Inbound,
         outbound := Outbound
@@ -64,5 +53,5 @@ handle_rpc_(<<"hbbft_queue">>, []) ->
         inbound => length(Inbound),
         outbound => Outbound1
     };
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).

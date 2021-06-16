@@ -14,18 +14,7 @@
 
 %% TODO: add an optional start block height parameter
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"transaction_get">>, #{ <<"hash">> := Hash }) ->
+handle_rpc(<<"transaction_get">>, #{ <<"hash">> := Hash }) ->
     try
         BinHash = ?B64_TO_BIN(Hash),
         case get_transaction(BinHash) of
@@ -39,7 +28,7 @@ handle_rpc_(<<"transaction_get">>, #{ <<"hash">> := Hash }) ->
         _:_ ->
             ?jsonrpc_error({invalid_params, Hash})
     end;
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
 %%

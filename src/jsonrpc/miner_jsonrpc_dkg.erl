@@ -12,19 +12,7 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    %% empty map
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"dkg_status">>, []) ->
+handle_rpc(<<"dkg_status">>, []) ->
     Status = try
                  miner_consensus_mgr:dkg_status() of
                  Stat -> Stat
@@ -32,7 +20,7 @@ handle_rpc_(<<"dkg_status">>, []) ->
                        <<"not_running">>
              end,
     #{ status => Status };
-handle_rpc_(<<"dkg_queue">>, []) ->
+handle_rpc(<<"dkg_queue">>, []) ->
     #{ inbound := Inbound,
        outbound := Outbound } = miner:relcast_queue(dkg_queue),
     Workers = miner:relcast_info(dkg_queue),
@@ -60,7 +48,7 @@ handle_rpc_(<<"dkg_queue">>, []) ->
                          end, Outbound),
     #{ inbound => length(Inbound),
        outbound => Outbound1 };
-handle_rpc_(<<"dkg_running">>, []) ->
+handle_rpc(<<"dkg_running">>, []) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, Curr} = blockchain_ledger_v1:current_height(Ledger),
@@ -83,7 +71,7 @@ handle_rpc_(<<"dkg_running">>, []) ->
                  address => ?TO_B58(A) }
               || A <- ConsensusAddrs ]
     end;
-handle_rpc_(<<"dkg_next">>, []) ->
+handle_rpc(<<"dkg_next">>, []) ->
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, Curr} = blockchain_ledger_v1:current_height(Ledger),
@@ -105,5 +93,5 @@ handle_rpc_(<<"dkg_next">>, []) ->
                next_restart_height => NextRestart,
                blocks_to_restart => NextRestart - Curr }
     end;
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).

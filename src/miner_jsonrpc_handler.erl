@@ -33,7 +33,7 @@ handle(_, _, _Req) ->
 
 handle_rpc(Method, Params) ->
     lager:info("Dispatching method ~p with params: ~p", [Method, Params]),
-    handle_rpc_(Method, Params).
+    handle_rpc_(Method, format_params(Params)).
 
 handle_rpc_(<<"block_", _/binary>> = Method, Params) ->
     miner_jsonrpc_blocks:handle_rpc(Method, Params);
@@ -80,9 +80,6 @@ handle_event(request_error, [Req, Error, Stack], _Config) ->
 handle_event(_, _, _) ->
     ok.
 
-%%
-%% Param conversion
-%%
 jsonrpc_get_param(Key, PropList) ->
     case proplists:get_value(Key, PropList, false) of
         false -> ?jsonrpc_error(invalid_params);
@@ -142,12 +139,37 @@ jsonrpc_error({error, E}) ->
 %% Internal
 %%
 
+%% @doc We want params to be sent in as a map if there
+%% _are_ parameters and as empty list (e.g., `[]') if
+%% the parameter list is empty. We are using empty
+%% _list_ instead of an empty map because Erlang
+%% uses record style matching for maps so an
+%% empty map in a function head does _NOT_ match
+%% an empty map, it matches _any_ map. You have
+%% to use the `map_size/1' function in a guard
+%% to decide if a map is empty in a function head.
+%% With an empty list, we can just literally
+%% match that in the function head and it makes
+%% the intention of the function clearer (in my
+%% opinion anyway)
+%%
+%% So we will figure out the current shape of the
+%% parameter argument (proplist, map, EEP18)
+%% and convert as needed.
+%%
+%% We are doing this _here_ so that the conversion
+%% is centralized and standardized and not copypasta'd
+%% into every single jsonrpc module
+format_params([]) -> [];
+format_params({Params}) -> format_params(kvc:to_proplist(Params));
+format_params(Params) when is_list(Params) ->
+    maps:from_list(Params);
+format_params(Params) when is_map(Params) andalso map_size(Params) == 0 -> [];
+format_params(Params) when is_map(Params) -> Params.
+
 decode_helper(Bin) ->
     %% returns proplists but uh, whatever, when in Rome...
-    lager:info("decode in: ~p", [Bin]),
-    Decode = jsx:decode(Bin),
-    lager:info("decode out: ~p", [Decode]),
-    {Decode}.
+    jsx:decode(Bin).
 
 encode_helper(Json) ->
     %% jsonrpc2 emits EEP18 which is god awful and ancient, but rather than
@@ -158,7 +180,4 @@ encode_helper(Json) ->
     %% a whole new JSON library to handle it, so we will use kvc's
     %% `to_proplist/1' function to turn EEP18 -> a proplist format that jsx
     %% _will_ encode
-    lager:info("encode in: ~p", [Json]),
-    Encode  = jsx:encode(kvc:to_proplist(Json)),
-    lager:info("encode out: ~p", [Encode]),
-    Encode.
+    jsx:encode(kvc:to_proplist(Json)).

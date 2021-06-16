@@ -5,24 +5,13 @@
 -behavior(miner_jsonrpc_handler).
 
 %% jsonrpc_handler
--export([handle_rpc/2, handle_rpc_/2]).
+-export([handle_rpc/2]).
 
 %%
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"info_height">>, []) ->
+handle_rpc(<<"info_height">>, []) ->
     Chain = blockchain_worker:blockchain(),
     {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
@@ -36,15 +25,15 @@ handle_rpc_(<<"info_height">>, []) ->
         true -> Output;
         false -> Output#{sync_height => SyncHeight}
     end;
-handle_rpc_(<<"info_in_consensus">>, []) ->
+handle_rpc(<<"info_in_consensus">>, []) ->
     #{in_consensus => miner_consensus_mgr:in_consensus()};
-handle_rpc_(<<"info_name">>, []) ->
+handle_rpc(<<"info_name">>, []) ->
     #{name => iolist_to_binary(?TO_ANIMAL_NAME(blockchain_swarm:pubkey_bin()))};
-handle_rpc_(<<"info_block_age">>, []) ->
+handle_rpc(<<"info_block_age">>, []) ->
     #{block_age => miner:block_age()};
-handle_rpc_(<<"info_p2p_status">>, []) ->
+handle_rpc(<<"info_p2p_status">>, []) ->
     maps:from_list(miner:p2p_status());
-handle_rpc_(<<"info_region">>, []) ->
+handle_rpc(<<"info_region">>, []) ->
     R =
         case miner_lora:region() of
             {ok, undefined} -> <<"undefined">>;
@@ -52,7 +41,7 @@ handle_rpc_(<<"info_region">>, []) ->
         end,
     #{region => R};
 %% TODO handle onboarding key data??
-handle_rpc_(<<"info_summary">>, []) ->
+handle_rpc(<<"info_summary">>, []) ->
     PubKey = blockchain_swarm:pubkey_bin(),
     Chain = blockchain_worker:blockchain(),
 
@@ -89,7 +78,7 @@ handle_rpc_(<<"info_summary">>, []) ->
         firmware_version => FirmwareVersion,
         gateway_details => GWInfo
     };
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
 %% internal

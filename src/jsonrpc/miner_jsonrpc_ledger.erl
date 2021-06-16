@@ -12,18 +12,7 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(Method, []) ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, {Params}) ->
-    handle_rpc(Method, kvc:to_proplist({Params}));
-handle_rpc(Method, Params) when is_list(Params) ->
-    handle_rpc(Method, maps:from_list(Params));
-handle_rpc(Method, Params) when is_map(Params) andalso map_size(Params) == 0 ->
-    handle_rpc_(Method, []);
-handle_rpc(Method, Params) when is_map(Params) ->
-    handle_rpc_(Method, Params).
-
-handle_rpc_(<<"ledger_balance">>, []) ->
+handle_rpc(<<"ledger_balance">>, []) ->
     %% get all
     Entries = maps:filter(
         fun(K, _V) ->
@@ -32,7 +21,7 @@ handle_rpc_(<<"ledger_balance">>, []) ->
         blockchain_ledger_v1:entries(get_ledger())
     ),
     [format_ledger_balance(A, E) || {A, E} <- maps:to_list(Entries)];
-handle_rpc_(<<"ledger_balance">>, #{<<"address">> := Address}) ->
+handle_rpc(<<"ledger_balance">>, #{<<"address">> := Address}) ->
     %% get for address
     try
         BinAddr = ?B58_TO_BIN(Address),
@@ -43,7 +32,7 @@ handle_rpc_(<<"ledger_balance">>, #{<<"address">> := Address}) ->
     catch
         _:_ -> ?jsonrpc_error({invalid_params, Address})
     end;
-handle_rpc_(<<"ledger_balance">>, #{<<"htlc">> := true}) ->
+handle_rpc(<<"ledger_balance">>, #{<<"htlc">> := true}) ->
     %% get htlc
     H = maps:filter(
         fun(K, _V) -> is_binary(K) end,
@@ -68,11 +57,11 @@ handle_rpc_(<<"ledger_balance">>, #{<<"htlc">> := true}) ->
         [],
         H
     );
-handle_rpc_(<<"ledger_balance">>, Params) ->
+handle_rpc(<<"ledger_balance">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
-handle_rpc_(<<"ledger_gateways">>, []) ->
-    handle_rpc_(<<"ledger_gateways">>, #{<<"verbose">> => false});
-handle_rpc_(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
+handle_rpc(<<"ledger_gateways">>, []) ->
+    handle_rpc(<<"ledger_gateways">>, #{<<"verbose">> => false});
+handle_rpc(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
     L = get_ledger(),
     {ok, Height} = blockchain_ledger_v1:current_height(L),
     blockchain_ledger_v1:cf_fold(
@@ -84,11 +73,11 @@ handle_rpc_(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
         [],
         L
     );
-handle_rpc_(<<"ledger_gateways">>, Params) ->
+handle_rpc(<<"ledger_gateways">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
-handle_rpc_(<<"ledger_validators">>, []) ->
-    handle_rpc_(<<"ledger_validators">>, #{<<"verbose">> => false});
-handle_rpc_(<<"ledger_validators">>, #{<<"verbose">> := Verbose}) ->
+handle_rpc(<<"ledger_validators">>, []) ->
+    handle_rpc(<<"ledger_validators">>, #{<<"verbose">> => false});
+handle_rpc(<<"ledger_validators">>, #{<<"verbose">> := Verbose}) ->
     Ledger = get_ledger(),
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
     blockchain_ledger_v1:cf_fold(
@@ -100,16 +89,16 @@ handle_rpc_(<<"ledger_validators">>, #{<<"verbose">> := Verbose}) ->
         [],
         Ledger
     );
-handle_rpc_(<<"ledger_validators">>, Params) ->
+handle_rpc(<<"ledger_validators">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
-handle_rpc_(<<"ledger_variables">>, []) ->
+handle_rpc(<<"ledger_variables">>, []) ->
     Vars = blockchain_ledger_v1:snapshot_vars(get_ledger()),
     lists:foldl(fun({K, V}, Acc) ->
                       BinK = to_key(K),
                       BinV = to_value(V),
                       Acc#{ BinK => BinV }
               end, #{}, Vars);
-handle_rpc_(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
+handle_rpc(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
     try
         NameAtom = binary_to_existing_atom(Name, utf8),
         case blockchain_ledger_v1:config(NameAtom, get_ledger()) of
@@ -122,10 +111,9 @@ handle_rpc_(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
         error:badarg ->
             ?jsonrpc_error({invalid_params, Name})
     end;
-handle_rpc_(<<"ledger_variables">>, Params) ->
+handle_rpc(<<"ledger_variables">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
-
-handle_rpc_(_, _) ->
+handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
 get_ledger() ->
