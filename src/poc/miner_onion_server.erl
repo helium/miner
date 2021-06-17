@@ -371,30 +371,42 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
                     Params = blockchain_region_params_v1:for_region(Region, Ledger),
-                    {ok, Spreading} = blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)),
-                    case tx_power(Region, State) of
-                        {error, Reason} ->
-                            %% could not calculate txpower, don't do anything
-                            lager:error("unable to get tx_power, reason: ~p", [Reason]),
+                    case blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)) of
+                        {error, Why} ->
+                            lager:error("unable to get spreading, reason: ~p", [Why]),
                             ok;
-                        {ok, TxPower} ->
-                            case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) of
-                                {ok, _LoraState} ->
-                                    lager:info("sending receipt at power: ~p", [TxPower]),
-                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
-                                {warning, {tx_power_corrected, CorrectedPower}} ->
-                                    lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
-                                                  [TxPower, CorrectedPower]),
-                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
-                                {warning, {unknown, Other}} ->
-                                    %% This should not happen
-                                    lager:warning("What is this? ~p", [Other]),
-                                    ok;
+                        {ok, Spreading} ->
+                            case tx_power(Region, State) of
                                 {error, Reason} ->
-                                    lager:error("unable to send_poc, reason: ~p", [Reason]),
-                                    ok
+                                    %% could not calculate txpower, don't do anything
+                                    lager:error("unable to get tx_power, reason: ~p", [Reason]),
+                                    ok;
+                                {ok, TxPower} ->
+                                    case blockchain_region_params_v1:get_bandwidth(Params) of
+                                        {error, _R} ->
+                                            lager:error("unable to get bw, reason: ~p", [_R]),
+                                            ok;
+                                        {ok, BW} ->
+                                            DR = datarate(Spreading, BW),
+                                            case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
+                                                {ok, _LoraState} ->
+                                                    lager:info("sending receipt at power: ~p", [TxPower]),
+                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
+                                                {warning, {tx_power_corrected, CorrectedPower}} ->
+                                                    lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
+                                                                  [TxPower, CorrectedPower]),
+                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
+                                                {warning, {unknown, Other}} ->
+                                                    %% This should not happen
+                                                    lager:warning("What is this? ~p", [Other]),
+                                                    ok;
+                                                {error, Reason} ->
+                                                    lager:error("unable to send_poc, reason: ~p", [Reason]),
+                                                    ok
+                                            end
+                                    end
                             end
                     end;
                 false ->
@@ -406,18 +418,6 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             State
     end,
     NewState.
-
--ifdef(EQC).
--spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
-try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    case blockchain_worker:blockchain() of
-        undefined->
-            {error, chain_not_ready};
-        Chain ->
-            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-            try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain)
-    end.
--endif.
 
 -spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
@@ -456,23 +456,19 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
             {error, no_gw}
     end.
 
--ifdef(TEST).
+-spec datarate(Spreading :: atom(), BW :: pos_integer()) -> binary().
+datarate(Spreading, BW) ->
+    BWInKhz = trunc(BW / 1000),
+    atom_to_list(Spreading) ++ "BW" ++ integer_to_list(BWInKhz).
 
-spreading_test() ->
-    ?assertEqual("SF12BW125", spreading('EU868', 10)),
-    ?assertEqual("SF12BW125", spreading('EU868', 14)),
-    ?assertEqual("SF12BW125", spreading('EU868', 54)),
-    ?assertEqual("SF9BW125", spreading('EU868', 117)),
-    ?assertEqual("SF8BW125", spreading('EU868', 200)),
-    ?assertEqual("SF7BW125", spreading('EU868', 252)),
-    ?assertEqual("SF10BW125", spreading('US915', 10)),
-    ?assertEqual("SF9BW125", spreading('US915', 50)),
-    ?assertEqual("SF9BW125", spreading('US915', 55)),
-    ?assertEqual("SF8BW125", spreading('US915', 120)),
-    ?assertEqual("SF8BW125", spreading('US915', 127)),
-    ?assertEqual("SF7BW125", spreading('US915', 200)),
-    ?assertEqual("SF7BW125", spreading('US915', 242)),
-    ?assertEqual("SF7BW125", spreading('US915', 255)),
-    ok.
-
+-ifdef(EQC).
+-spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
+try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
+    case blockchain_worker:blockchain() of
+        undefined->
+            {error, chain_not_ready};
+        Chain ->
+            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+            try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain)
+    end.
 -endif.
