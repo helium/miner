@@ -328,9 +328,9 @@ wait_for_block_(Fun, Count) ->
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    Ledger = blockchain:ledger(Chain),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
         poc_not_found ->
-            Ledger = blockchain:ledger(Chain),
             _ = erlang:spawn(fun() ->
                 case wait_for_block(fun() ->
                     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
@@ -370,9 +370,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
-                    {ok, Spreading} = blockchain_region_params_v1:get_spreading(
-                                        blockchain_region_params_v1:for_region(Region),
-                                        erlang:byte_size(Packet)),
+                    Params = blockchain_region_params_v1:for_region(Region, Ledger),
+                    {ok, Spreading} = blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)),
                     case tx_power(Region, State) of
                         {error, Reason} ->
                             %% could not calculate txpower, don't do anything
@@ -456,23 +455,6 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
         _ ->
             {error, no_gw}
     end.
-
--spec spreading(Region :: atom(),
-                Len :: pos_integer()) -> string().
-spreading('EU868', L) when L < 65 ->
-    "SF12BW125";
-spreading('EU868', L) when L < 129 ->
-    "SF9BW125";
-spreading('EU868', L) when L < 238 ->
-    "SF8BW125";
-spreading(_, L) when L < 25 ->
-    "SF10BW125";
-spreading(_, L) when L < 67 ->
-    "SF9BW125";
-spreading(_, L) when L < 139 ->
-    "SF8BW125";
-spreading(_, _) ->
-    "SF7BW125".
 
 -ifdef(TEST).
 
