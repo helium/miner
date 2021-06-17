@@ -101,7 +101,7 @@
   0},
  {<<"helium_proto">>,
   {git,"https://github.com/helium/proto.git",
-       {ref,"69a6452a682bf2e1e2f20cdde15368459c50166a"}},
+       {ref,"66e7957eb2721097597dda89b68033c1530a96df"}},
   1},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},3},
  {<<"inert">>,{pkg,<<"inert">>,<<"1.0.2">>},3},

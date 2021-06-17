@@ -370,8 +370,9 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
-                    %% TODO: Calculate spreading using region params as well...
-                    Spreading = spreading(Region, erlang:byte_size(Packet)),
+                    {ok, Spreading} = blockchain_region_params_v1:get_spreading(
+                                        blockchain_region_params_v1:for_region(Region),
+                                        erlang:byte_size(Packet)),
                     case tx_power(Region, State) of
                         {error, Reason} ->
                             %% could not calculate txpower, don't do anything
