@@ -48,9 +48,10 @@
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
     reg_freq_list :: [float()],
-    reg_throttle :: miner_lora_throttle:handle(),
-    last_tmst_us = undefined :: undefined | integer(), % last concentrator tmst reported by the packet forwarder
-    last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    reg_throttle = undefined :: undefined | miner_lora_throttle:handle(),
+    last_tmst_us = undefined :: undefined | integer(),  % last concentrator tmst reported by the packet forwarder
+    last_mono_us = undefined :: undefined | integer(),  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    chain = undefined :: undefined | blockchain:blockchain()
 }).
 
 -record(country, {
@@ -148,9 +149,9 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
-reg_domain_data_for_addr(Addr)->
-    case blockchain:ledger() of
+-spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin(), state())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
+    case blockchain:ledger(Chain) of
         undefined ->
             {error, no_ledger};
         Ledger ->
@@ -240,14 +241,25 @@ init(Args) ->
                         {true, Region, FreqList}
                 end
         end,
-    {ok, #state{socket=Socket,
+
+    S0 = #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 mirror_socket = {MirrorSocket, undefined},
                 pubkey_bin = blockchain_swarm:pubkey_bin(),
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
-                reg_freq_list = DefaultRegFreqList,
-                reg_throttle = miner_lora_throttle:new(DefaultRegRegion)}}.
+                reg_freq_list = DefaultRegFreqList},
+
+    case blockchain_worker:blockchain() of
+        undefined ->
+            erlang:send_after(500, self(), chain_check),
+            {ok, S0};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            Ledger = blockchain:ledger(Chain),
+            Throttle = miner_lora_throttle:new(Ledger, DefaultRegRegion),
+            {ok, S0#state{chain = Chain, reg_throttle=Throttle}}
+    end.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -301,27 +313,44 @@ handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr} = State) ->
+handle_info(chain_check, State) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            erlang:send_after(500, self(), chain_check),
+            {noreply, State};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            {noreply, State#state{chain = Chain}}
+    end;
+handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    State1 = State#state{chain = NC},
+    {noreply, State1};
+handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
+    %% There is no chain, we cannot lookup regulatory domain data yet
+    %% Keep waiting for chain
+    erlang:send_after(500, self(), chain_check),
+    {noreply, State};
+handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr, chain=Chain} = State) ->
     lager:debug("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        case reg_domain_data_for_addr(Addr) of
+        case reg_domain_data_for_addr(Addr, State) of
             {error, Reason}->
                 lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
                 %% the hotspot has not yet asserted its location, transmits will remain disabled
                 %% we will check again after a period
-                erlang:send_after(30000, self(), reg_domain_timeout),
+                erlang:send_after(1000, self(), reg_domain_timeout),
                 {noreply, State};
             {ok, {Region, FrequencyList}} ->
                 lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
                     [Addr, Region, FrequencyList]),
                 {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
-                        reg_freq_list = FrequencyList, reg_throttle = miner_lora_throttle:new(Region)}}
+                        reg_freq_list = FrequencyList, reg_throttle = miner_lora_throttle:new(blockchain:ledger(Chain), Region)}}
         end
     catch
         _Type:Exception ->
-            lager:warning("error whilst checking regulatory domain: ~p.  Will try again...",[Exception]),
-            erlang:send_after(30000, self(), reg_domain_timeout),
+            lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
+            erlang:send_after(1000, self(), reg_domain_timeout),
             {noreply, State}
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->

@@ -18,7 +18,6 @@
          get_addrs/1,
          start_miner/2,
          start_node/1,
-         config_node/2,
          partition_cluster/2,
          heal_cluster/2,
          connect/1,
@@ -83,7 +82,8 @@
          chain_var_lookup_one/2,
          build_gateways/2,
          build_asserts/2,
-         add_block/3
+         add_block/3,
+         gen_gateways/2, gen_payments/1
         ]).
 
 chain_var_lookup_all(Key, Nodes) ->
@@ -223,10 +223,10 @@ stop_miners(Miners, Retries) ->
            || Miner <- Miners],
     Res.
 
-start_miner(Name0, Context) ->
+start_miner(Name0, Options) ->
     Name = start_node(Name0),
     Keys = make_keys(Name, {45000, 0, 4466}),
-    config_node(Keys, Context),
+    config_node(Keys, Options),
     {Name, Keys}.
 
 start_miners(Miners) ->
@@ -789,8 +789,16 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
-    Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
-    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
+    Options = [{mod, Mod},
+               {logdir, LogDir},
+               {basedir, BaseDir},
+               {seed_nodes, SeedNodes},
+               {total_miners, TotalMiners},
+               {curve, Curve},
+               {default_routers, DefaultRouters},
+               {port, Port}],
+
+    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Options) end, Keys),
 
     Miners = [M || {M, _} <- MinersAndPorts],
     %% check that the config loaded correctly on each miner
@@ -821,6 +829,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                        fun(Miner) ->
                                try
                                    GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 500),
+                                   ct:pal("Miner: ~p, GossipPeers: ~p", [Miner, GossipPeers]),
                                    case length(GossipPeers) >= (length(Miners) / 2) + 1 of
                                        true -> true;
                                        false ->
@@ -871,7 +880,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {miners, Miners},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
-        {node_context, Context},
+        {node_options, Options},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
@@ -904,8 +913,16 @@ make_keys(Miner, Ports) ->
     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
-config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun},
-            {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
+config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun}, Options) ->
+    Mod = proplists:get_value(mod, Options),
+    LogDir = proplists:get_value(logdir, Options),
+    BaseDir = proplists:get_value(basedir, Options),
+    SeedNodes = proplists:get_value(seed_nodes, Options),
+    TotalMiners = proplists:get_value(total_miners, Options),
+    Curve = proplists:get_value(curve, Options),
+    DefaultRouters = proplists:get_value(default_routers, Options),
+    Port = proplists:get_value(port, Options),
+
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
     ct_rpc:call(Miner, application, load, [lager]),
@@ -945,18 +962,24 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
-    ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
-    ct_rpc:call(Miner, application, set_env,
-                [miner, frequency_data,
-                 #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
-                   'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
-                   'EU433' => [433.175, 433.375, 433.575],
-                   'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
-                   'CN779' => [779.5, 779.7, 779.9],
-                   'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
-                   'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
-                   'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
-                   'IN865' => [865.0625, 865.4025, 865.985]}]),
+    case Mod of
+        miner_poc_v11_SUITE ->
+            %% Don't set anything region related with poc-v11
+            ok;
+        _ ->
+            ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
+            ct_rpc:call(Miner, application, set_env,
+                        [miner, frequency_data,
+                         #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
+                           'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
+                           'EU433' => [433.175, 433.375, 433.575],
+                           'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
+                           'CN779' => [779.5, 779.7, 779.9],
+                           'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
+                           'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
+                           'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
+                           'IN865' => [865.0625, 865.4025, 865.985]}])
+    end,
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
     ok.
 
@@ -1475,3 +1498,40 @@ add_block(Chain, ConsensusMembers, Txns) ->
     B = create_block(ConsensusMembers, SortedTxns),
     ok = blockchain:add_block(B, Chain).
 
+create_block(ConsensusMembers, Txs) ->
+    Blockchain = blockchain_worker:blockchain(),
+    {ok, PrevHash} = blockchain:head_hash(Blockchain),
+    {ok, HeadBlock} = blockchain:head_block(Blockchain),
+    Height = blockchain_block:height(HeadBlock) + 1,
+    Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
+                                       height => Height,
+                                       transactions => Txs,
+                                       signatures => [],
+                                       time => 0,
+                                       hbbft_round => 0,
+                                       election_epoch => 1,
+                                       epoch_start => 1,
+                                       seen_votes => [],
+                                       bba_completion => <<>>}),
+    BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
+    Signatures = signatures(ConsensusMembers, BinBlock),
+    Block1 = blockchain_block:set_signatures(Block0, Signatures),
+    Block1.
+
+signatures(ConsensusMembers, BinBlock) ->
+    lists:foldl(
+        fun({A, {_, _, F}}, Acc) ->
+            Sig = F(BinBlock),
+            [{A, Sig}|Acc]
+        end
+        ,[]
+        ,ConsensusMembers
+    ).
+
+gen_gateways(Addresses, Locations) ->
+    [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+     || {Addr, Loc} <- lists:zip(Addresses, Locations)].
+
+gen_payments(Addresses) ->
+    [ blockchain_txn_coinbase_v1:new(Addr, 5000)
+      || Addr <- Addresses].

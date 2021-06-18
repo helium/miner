@@ -690,36 +690,6 @@ send_receipts(LatLongs, Challengees) ->
         LatLongs
     ).
 
-create_block(ConsensusMembers, Txs) ->
-    Blockchain = blockchain_worker:blockchain(),
-    {ok, PrevHash} = blockchain:head_hash(Blockchain),
-    {ok, HeadBlock} = blockchain:head_block(Blockchain),
-    Height = blockchain_block:height(HeadBlock) + 1,
-    Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
-                                       height => Height,
-                                       transactions => Txs,
-                                       signatures => [],
-                                       time => 0,
-                                       hbbft_round => 0,
-                                       election_epoch => 1,
-                                       epoch_start => 1,
-                                       seen_votes => [],
-                                       bba_completion => <<>>}),
-    BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
-    Signatures = signatures(ConsensusMembers, BinBlock),
-    Block1 = blockchain_block:set_signatures(Block0, Signatures),
-    Block1.
-
-signatures(ConsensusMembers, BinBlock) ->
-    lists:foldl(
-        fun({A, {_, _, F}}, Acc) ->
-            Sig = F(BinBlock),
-            [{A, Sig}|Acc]
-        end
-        ,[]
-        ,ConsensusMembers
-    ).
-
 new_random_key(Curve) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
     {PrivKey, PubKey}.
