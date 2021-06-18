@@ -270,14 +270,14 @@ basic_test(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
@@ -289,7 +289,7 @@ basic_test(Config) ->
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
@@ -307,7 +307,7 @@ basic_test(Config) ->
     ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem)))),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
@@ -332,7 +332,7 @@ basic_test(Config) ->
     % Passing receiving_timeout
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 20)
@@ -340,7 +340,7 @@ basic_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem))),
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     true = miner_ct_utils:wait_until(fun() ->
                                              case sys:get_state(Statem) of
@@ -431,14 +431,14 @@ basic_test_light_gateway(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
@@ -464,11 +464,11 @@ basic_test_light_gateway(Config) ->
     % Mock submit_txn to  add blocks
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process ( no POC req txn will have been submitted by the statem )
     true = miner_ct_utils:wait_until(fun() -> ct:pal("height: ~p", [blockchain:height(Chain)]), {ok, 4} =:= blockchain:height(Chain) end),
@@ -485,7 +485,7 @@ basic_test_light_gateway(Config) ->
     % Passing poc interval
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 25)
@@ -557,14 +557,14 @@ restart_test(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
@@ -578,7 +578,7 @@ restart_test(Config) ->
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
@@ -596,7 +596,7 @@ restart_test(Config) ->
     ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem0)))),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
@@ -633,7 +633,7 @@ restart_test(Config) ->
     % Passing receiving_timeout
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 10)
@@ -641,7 +641,7 @@ restart_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem1))),
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem1)))), % Get receiving_timeout
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     true = miner_ct_utils:wait_until(
            fun() ->
@@ -671,12 +671,6 @@ restart_test(Config) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
-add_block(Chain, ConsensusMembers, Txns) ->
-    SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
-    B = create_block(ConsensusMembers, SortedTxns),
-    ok = blockchain:add_block(B, Chain).
-
 send_receipts(LatLongs, Challengees) ->
     lists:foreach(
         fun({_LatLong, {PrivKey, PubKey}}) ->
@@ -693,42 +687,6 @@ send_receipts(LatLongs, Challengees) ->
                     ok
             end
         end,
-        LatLongs
-    ).
-
-build_asserts(LatLongs, {PrivKey, PubKey}) ->
-    lists:foldl(
-        fun({LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
-            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
-            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-            Index = h3:from_geo(LatLong, 12),
-            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
-            PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
-            SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
-            [SignedAssertLocationTx|Acc]
-        end,
-        [],
-        LatLongs
-    ).
-
-build_gateways(LatLongs, {PrivKey, PubKey}) ->
-    lists:foldl(
-        fun({_LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
-            % Create a Gateway
-            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
-            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-
-            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
-            SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
-            SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
-            [SignedGatewayAddGatewayTx|Acc]
-
-        end,
-        [],
         LatLongs
     ).
 
