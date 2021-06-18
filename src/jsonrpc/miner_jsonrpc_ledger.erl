@@ -3,8 +3,6 @@
 -include("miner_jsonrpc.hrl").
 -behavior(miner_jsonrpc_handler).
 
--define(MAYBE(X), jsonrpc_maybe(X)).
-
 %% jsonrpc_handler
 -export([handle_rpc/2]).
 
@@ -94,8 +92,8 @@ handle_rpc(<<"ledger_validators">>, Params) ->
 handle_rpc(<<"ledger_variables">>, []) ->
     Vars = blockchain_ledger_v1:snapshot_vars(get_ledger()),
     lists:foldl(fun({K, V}, Acc) ->
-                      BinK = to_key(K),
-                      BinV = to_value(V),
+                      BinK = ?TO_KEY(K),
+                      BinV = ?TO_VALUE(V),
                       Acc#{ BinK => BinV }
               end, #{}, Vars);
 handle_rpc(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
@@ -103,7 +101,7 @@ handle_rpc(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
         NameAtom = binary_to_existing_atom(Name, utf8),
         case blockchain_ledger_v1:config(NameAtom, get_ledger()) of
             {ok, Var} ->
-                #{ Name => to_value(Var) };
+                #{ Name => ?TO_VALUE(Var) };
             {error, not_found} ->
                 #{ error => not_found}
         end
@@ -157,23 +155,9 @@ format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
 
 last_challenge(_Height, undefined) -> <<"undefined">>;
 last_challenge(Height, LC) -> Height - LC.
-jsonrpc_maybe(undefined) -> <<"undefined">>;
-jsonrpc_maybe(X) -> X.
 
 format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
     maps:from_list([
         {name, blockchain_utils:addr2name(Addr)}
         | blockchain_ledger_validator_v1:print(Val, Height, Verbose, Ledger)
     ]).
-
-to_key(X) when is_atom(X) -> atom_to_binary(X, utf8);
-to_key(X) when is_list(X) -> iolist_to_binary(X);
-to_key(X) when is_binary(X) -> X.
-
-to_value(X) when is_float(X) -> float_to_binary(blockchain_utils:normalize_float(X), 2);
-to_value(X) when is_integer(X) -> X;
-to_value(X) when is_list(X) -> iolist_to_binary(X);
-to_value(X) when is_atom(X) -> atom_to_binary(X, utf8);
-to_value(X) when is_binary(X) -> X;
-to_value(X) when is_map(X) -> X;
-to_value(X) -> iolist_to_binary(io_lib:format("~p", [X])).

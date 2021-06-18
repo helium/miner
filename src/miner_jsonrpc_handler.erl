@@ -8,7 +8,10 @@
     jsonrpc_b64_to_bin/2,
     jsonrpc_get_param/2,
     jsonrpc_get_param/3,
-    jsonrpc_error/1
+    jsonrpc_error/1,
+    to_key/1,
+    to_value/1,
+    jsonrpc_maybe/1
 ]).
 
 -include("miner_jsonrpc.hrl").
@@ -183,3 +186,31 @@ encode_helper(Json) ->
     %% `to_proplist/1' function to turn EEP18 -> a proplist format that jsx
     %% _will_ encode
     jsx:encode(kvc:to_proplist(Json)).
+
+to_key(X) when is_atom(X) -> atom_to_binary(X, utf8);
+to_key(X) when is_list(X) -> iolist_to_binary(X);
+to_key(X) when is_binary(X) -> X.
+
+%% don't want these atoms stringified
+to_value(true) -> true;
+to_value(false) -> false;
+to_value(undefined) -> null;
+%% lightly format floats, but pass through integers as-is
+to_value(X) when is_float(X) -> float_to_binary(blockchain_utils:normalize_float(X), 2);
+to_value(X) when is_integer(X) -> X;
+%% make sure we have valid representations of other types which may show up in values
+to_value(X) when is_list(X) -> iolist_to_binary(X);
+to_value(X) when is_atom(X) -> atom_to_binary(X, utf8);
+to_value(X) when is_binary(X) -> X;
+to_value(X) when is_map(X) -> ensure_binary_map(X);
+to_value(X) -> iolist_to_binary(io_lib:format("~p", [X])).
+
+ensure_binary_map(M) ->
+    maps:fold(fun(K, V, Acc) ->
+                      BinK = to_key(K),
+                      BinV = to_value(V),
+                      Acc#{BinK => BinV}
+              end, #{}, M).
+
+jsonrpc_maybe(undefined) -> <<"undefined">>;
+jsonrpc_maybe(X) -> X.
