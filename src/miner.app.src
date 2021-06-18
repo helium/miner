@@ -28,6 +28,8 @@
     jsx,
     kvc,
     longfi,
+    public_key,
+    erltss2,
     elli,
     jsonrpc2,
     xorf,

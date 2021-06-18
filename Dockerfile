@@ -13,6 +13,7 @@ RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
     dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 \
     openssl-dev pkgconfig protoc sed tar wget \
+    tpm2-tss-dev \
     ${EXTRA_BUILD_APK_PACKAGES}
 
 # Install Rust toolchain
@@ -58,6 +59,8 @@ ARG VERSION
 ARG EXTRA_RUNNER_APK_PACKAGES
 
 RUN apk add --no-cache --update ncurses dbus libsodium libstdc++ \
+                                gmp gcc tpm2-tss-esys tpm2-tss-fapi \
+                                tpm2-tss-mu tpm2-tss-rc tpm2-tss-tcti-device \
                                 ${EXTRA_RUNNER_APK_PACKAGES}
 
 RUN ulimit -n 64000
