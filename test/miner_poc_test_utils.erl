@@ -58,9 +58,9 @@ region_urls() ->
     ].
 
 download_regions(RegionURLs) ->
-    blockchain_ct_utils:pmap(
+    miner_ct_utils:pmap(
         fun({Region, URL}) ->
-            Ser = blockchain_ct_utils:download_serialized_region(URL),
+            Ser = download_serialized_region(URL),
             {Region, Ser}
         end,
         RegionURLs
@@ -228,3 +228,17 @@ region_params_eu433() ->
         10, 5, 8, 1, 16, 128, 2, 10, 51, 8, 252, 241, 211, 20, 16, 200, 208, 7, 24, 121, 34, 38, 10,
         4, 8, 6, 16, 25, 10, 4, 8, 5, 16, 25, 10, 4, 8, 4, 16, 25, 10, 4, 8, 3, 16, 67, 10, 5, 8, 2,
         16, 139, 1, 10, 5, 8, 1, 16, 128, 2>>.
+
+download_serialized_region(URL) ->
+    %% Example URL: "https://github.com/JayKickliter/lorawan-h3-regions/blob/main/serialized/US915.res7.h3idx?raw=true"
+    {ok, Dir} = file:get_cwd(),
+    %% Ensure priv dir exists
+    PrivDir = filename:join([Dir, "priv"]),
+    ok = filelib:ensure_dir(PrivDir ++ "/"),
+    ok = ssl:start(),
+    {ok, {{_, 200, "OK"}, _, Body}} = httpc:request(URL),
+    FName = hd(string:tokens(hd(lists:reverse(string:tokens(URL, "/"))), "?")),
+    FPath = filename:join([PrivDir, FName]),
+    ok = file:write_file(FPath, Body),
+    {ok, Data} = file:read_file(FPath),
+    Data.
