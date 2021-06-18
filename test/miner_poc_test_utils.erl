@@ -1,4 +1,4 @@
--module(miner_ct_utils).
+-module(miner_poc_test_utils).
 
 -include("miner_poc_v11_vars.hrl").
 -export([send_receipts/2, poc_v11_vars/0]).
