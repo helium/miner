@@ -28,6 +28,7 @@ poc_v11_vars() ->
     Regions = download_regions(RegionURLs),
     V0 = maps:put(regulatory_regions, ?regulatory_region_bin_str, maps:from_list(Regions)),
     V1 = #{
+           poc_version => 11,
            region_params_us915 => region_params_us915(),
            region_params_eu868 => region_params_eu868(),
            region_params_au915 => region_params_au915(),
