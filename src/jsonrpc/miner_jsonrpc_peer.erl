@@ -44,7 +44,14 @@ handle_rpc(<<"peer_book">>, #{<<"addr">> := Addr}) ->
     peer_book_response(Addr);
 handle_rpc(<<"peer_book">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
-
+handle_rpc(<<"peer_gossip_peers">>, []) ->
+    [ ?TO_VALUE(A) || A <- blockchain_swarm:gossip_peers() ];
+handle_rpc(<<"peer_gossip_peers">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
+handle_rpc(<<"peer_refresh">>, #{ <<"addr">> := Addr}) ->
+    do_peer_refresh(Addr);
+handle_rpc(<<"peer_refresh">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -168,3 +175,14 @@ format_peer_sessions(Swarm) ->
         maps:map(fun(_K, V) -> ?TO_VALUE(V) end, M)
     end,
     #{ <<"sessions">> => [FormatEntry(E) || E <- Rs] }.
+
+do_peer_refresh(Addr) when is_list(Addr) ->
+    TID = blockchain_swarm:tid(),
+    Peerbook = libp2p_swarm:peerkbook(TID),
+    [ #{ A => do_refresh(Peerbook, A) } ||
+      A <- Addr ];
+do_peer_refresh(Addr) ->
+    do_peer_refresh([Addr]).
+
+do_refresh(Peerbook, A) ->
+    libp2p_peerbook:refresh(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(A)).
