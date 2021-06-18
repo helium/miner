@@ -456,7 +456,7 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
             {error, no_gw}
     end.
 
--spec datarate(Spreading :: atom(), BW :: pos_integer()) -> binary().
+-spec datarate(Spreading :: atom(), BW :: pos_integer()) -> string().
 datarate(Spreading, BW) ->
     BWInKhz = trunc(BW / 1000),
     atom_to_list(Spreading) ++ "BW" ++ integer_to_list(BWInKhz).

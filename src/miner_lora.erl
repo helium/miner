@@ -112,7 +112,7 @@ send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true, Packet}, 11000).
 
--spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
+-spec send_poc(binary(), any(), function(), iolist(), any()) -> {ok, state()} | {error, any()} | {warning, any()}.
 send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
 
