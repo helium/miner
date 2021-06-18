@@ -39,7 +39,7 @@ start_link(PublicKey, SigFun, ECDHFun, ECCWorker) ->
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
+init([PublicKey, SigFun, ECDHFun, CryptoWorker]) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 0,
@@ -87,7 +87,7 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
 
 
     ChildSpecs =
-        ECCWorker ++
+        CryptoWorker++
         [
          ?SUP(blockchain_sup, [BlockchainOpts])
         ] ++
