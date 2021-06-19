@@ -26,10 +26,8 @@ handle(Req, _Args) ->
 
 handle('POST', _, Req) ->
     Json = elli_request:body(Req),
-    lager:info("Got json: ~p", [Json]),
     {reply, Reply} =
         jsonrpc2:handle(Json, fun handle_rpc/2, fun decode_helper/1, fun encode_helper/1),
-    lager:info("Got reply: ~p", [Reply]),
     {ok, [], Reply};
 handle(_, _, _Req) ->
     {404, [], <<"Not Found">>}.
@@ -56,6 +54,10 @@ handle_rpc_(<<"ledger_", _/binary>> = Method, Params) ->
     miner_jsonrpc_ledger:handle_rpc(Method, Params);
 handle_rpc_(<<"snapshot_", _/binary>> = Method, Params) ->
     miner_jsonrpc_snapshot:handle_rpc(Method, Params);
+handle_rpc_(<<"sc_", _/binary>> = Method, Params) ->
+    miner_jsonrpc_sc:handle_rpc(Method, Params);
+handle_rpc_(<<"peer_", _/binary>> = Method, Params) ->
+    miner_jsonrpc_peer:handle_rpc(Method, Params);
 handle_rpc_(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -172,9 +174,14 @@ format_params(Params) when is_list(Params) ->
 format_params(Params) when is_map(Params) andalso map_size(Params) == 0 -> [];
 format_params(Params) when is_map(Params) -> Params.
 
+%% Note to future me - this function **MUST** return an EEP18 style term
+%% otherwise ALL requests WILL be always rejected as "invalid request"
+%%
+%% That's an hour I'll never get back. And I already fscking figured it
+%% out once before...
 decode_helper(Bin) ->
     %% returns proplists but uh, whatever, when in Rome...
-    jsx:decode(Bin).
+    {jsx:decode(Bin)}.
 
 encode_helper(Json) ->
     %% jsonrpc2 emits EEP18 which is god awful and ancient, but rather than

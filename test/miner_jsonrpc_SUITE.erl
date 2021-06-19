@@ -61,7 +61,8 @@ info_height_success(Config0) ->
     [{_Miner, {_TCP, _UCP, JsonRpcPort}} | _Tail] = ?config(ports, Config),
     miner_ct_utils:wait_for_gte(height, Miners, 3),
     Req = make_request(<<"info_height">>, []),
-    {ok, {_Id, #{<<"height">> := 3}} = Result} = send_request(JsonRpcPort, Req),
+    {ok, {_Id, #{<<"height">> := H}} = Result} = send_request(JsonRpcPort, Req),
+    ?assert(H >= 3),
     ct:pal("got ~p", [Result]),
     ok.
 
@@ -110,7 +111,7 @@ make_request(Method, []) ->
         #{
             <<"jsonrpc">> => <<"2.0">>,
             <<"method">> => Method,
-            <<"id">> => <<"test">>
+            <<"id">> => <<"qux">>
         }
     );
 make_request(Method, Params) ->
@@ -119,7 +120,7 @@ make_request(Method, Params) ->
             <<"jsonrpc">> => <<"2.0">>,
             <<"method">> => Method,
             <<"params">> => Params,
-            <<"id">> => <<"test">>
+            <<"id">> => <<"baz">>
         }
     ).
 
