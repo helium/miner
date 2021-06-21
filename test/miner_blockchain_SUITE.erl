@@ -65,6 +65,7 @@ init_per_testcase(TestCase, Config0) ->
         libp2p_crypto:generate_keys(ecc_compact),
 
     Extras =
+        %% TODO Parametarize init_per_testcase instead leaking per-case internals.
         case TestCase of
             dkg_restart_test ->
                 #{?election_interval => 10,
@@ -80,6 +81,8 @@ init_per_testcase(TestCase, Config0) ->
                 #{?election_version => 4,
                   ?election_interval => 5,
                   ?election_restart_interval => 5};
+            autoskip_chain_vars_test ->
+                #{?election_interval => 100};
             T when T == snapshot_test;
                    T == high_snapshot_test;
                    T == group_change_test ->
@@ -170,6 +173,100 @@ init_per_testcase(TestCase, Config0) ->
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
 
+autoskip_chain_vars_test(Config) ->
+    %% The idea here is to reproduce the following chain stall scenario:
+    %% 1. 1/2 of consensus members recognize a new chain var;
+    %% 2. 1/2 of consensus members do not;
+    %% 3.
+    %%      If autoskip doesn't work:
+    %%          chain halts - no more blocks are created on any of the nodes
+    %%      otherwise
+    %%          chain advances, so autoskip must've worked
+
+    MinersAll = ?config(miners, Config),
+    MinersInConsensus = miner_ct_utils:in_consensus_miners(MinersAll),
+    N = length(MinersInConsensus),
+    ?assert(N > 1, "We have at least 2 miner nodes."),
+    M = N div 2,
+    ?assertEqual(N, 2 * M, "Even split of consensus nodes."),
+    MinersWithBogusVar = lists:sublist(MinersInConsensus, M),
+
+    BogusKey = bogus_key,
+    BogusVal = bogus_val,
+
+    ct:pal("N: ~p", [N]),
+    ct:pal("M: ~p", [M]),
+    ct:pal("MinersAll: ~p", [MinersAll]),
+    ct:pal("MinersInConsensus: ~p", [MinersInConsensus]),
+    ct:pal("MinersWithBogusVar: ~p", [MinersWithBogusVar]),
+
+    %% The mocked 1/2 of consensus group will allow bogus vars:
+    [
+        ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_vars_v1, is_valid, fun(_, _) -> ok end],
+                300
+            )
+    ||
+        Node <- MinersWithBogusVar
+    ],
+
+    %% Submit bogus var transaction:
+    (fun() ->
+        {SecretKey, _} = ?config(master_key, Config),
+        Txn0 = blockchain_txn_vars_v1:new(#{BogusKey => BogusVal}, 2),
+        Proof = blockchain_txn_vars_v1:create_proof(SecretKey, Txn0),
+        Txn = blockchain_txn_vars_v1:proof(Txn0, Proof),
+        miner_ct_utils:submit_txn(Txn, MinersInConsensus)
+    end)(),
+
+    AllHeights =
+        fun() ->
+            lists:usort([H || {_, H} <- miner_ct_utils:heights(MinersAll)])
+        end,
+
+    ?assert(
+        miner_ct_utils:wait_until(
+            fun() ->
+                case AllHeights() of
+                    [_] -> true;
+                    [_|_] -> false
+                end
+            end,
+            50,
+            1000
+        ),
+        "Heights equalized."
+    ),
+    [Height1] = AllHeights(),
+    ?assertMatch(
+        ok,
+        miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 1),
+        "Chain has advanced, so autoskip must've worked."
+    ),
+
+    %% Extra sanity check - no one should've accepted the bogus var:
+    BogusKeyLookupResults =
+        lists:map(
+            fun (Node) ->
+                Chain = ct_rpc:call(Node, blockchain_worker, blockchain, [], 500),
+                Ledger = ct_rpc:call(Node, blockchain, ledger, [Chain]),
+                Result = ct_rpc:call(Node, blockchain, config, [BogusKey, Ledger], 500),
+                ct:pal("Bogus var lookup. Node:~p, Result:~p", [Node, Result]),
+                Result
+            end,
+            MinersAll
+        ),
+    ?assertMatch(
+        [{error, not_found}],
+        lists:usort(BogusKeyLookupResults),
+        "No node accepted the bogus chain var."
+    ),
+
+    {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
     BaseDir = ?config(base_dir, Config),
