@@ -244,9 +244,17 @@ autoskip_chain_vars_test(Config) ->
     [Height1] = AllHeights(),
     ?assertMatch(
         ok,
-        miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 1),
+        miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 10),
         "Chain has advanced, so autoskip must've worked."
     ),
+
+    %% Extra sanity check - no one should've accepted the bogus var:
+    ?assertMatch(
+        [{error, not_found}],
+        lists:usort(miner_ct_utils:chain_var_lookup_all(BogusKey, MinersAll)),
+        "No node accepted the bogus chain var."
+    ),
+
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
