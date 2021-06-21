@@ -247,6 +247,25 @@ autoskip_chain_vars_test(Config) ->
         miner_ct_utils:wait_for_gte(height, MinersAll, Height1 + 1),
         "Chain has advanced, so autoskip must've worked."
     ),
+
+    %% Extra sanity check - no one should've accepted the bogus var:
+    BogusKeyLookupResults =
+        lists:map(
+            fun (Node) ->
+                Chain = ct_rpc:call(Node, blockchain_worker, blockchain, [], 500),
+                Ledger = ct_rpc:call(Node, blockchain, ledger, [Chain]),
+                Result = ct_rpc:call(Node, blockchain, config, [BogusKey, Ledger], 500),
+                ct:pal("Bogus var lookup. Node:~p, Result:~p", [Node, Result]),
+                Result
+            end,
+            MinersAll
+        ),
+    ?assertMatch(
+        [{error, not_found}],
+        lists:usort(BogusKeyLookupResults),
+        "No node accepted the bogus chain var."
+    ),
+
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
