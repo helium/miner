@@ -16,6 +16,10 @@
          has_valid_local_capability/2
         ]).
 
+%% get the firmware release data from a hotspot
+-define(LSB_FILE, "/etc/lsb_release").
+-define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
+
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
 %% @end
@@ -90,7 +94,14 @@ metadata_fun() ->
         case application:get_env(miner, mode, gateway) of
             validator ->
                 Vsn = element(2, hd(release_handler:which_releases(permanent))),
-                Map#{<<"release_version">> => list_to_binary(Vsn)};
+                FWRelease = case filelib:is_regular(?LSB_FILE) of
+                                true ->
+                                    iolist_to_binary(string:trim(os:cmd(?RELEASE_CMD)));
+                                false ->
+                                    <<"unknown">>
+                            end,
+                Map#{ <<"release_version">> => list_to_binary(Vsn),
+                      <<"release_info">> => FWRelease };
             gateway ->
                 case miner_lora:position() of
                     %% GPS location that's adequately close to the asserted
