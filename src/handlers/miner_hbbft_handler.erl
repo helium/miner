@@ -25,9 +25,9 @@
          id :: non_neg_integer(),
          hbbft :: hbbft:hbbft_data(),
          sk :: tc_key_share:tc_key_share() | tpke_privkey:privkey() | binary(),
-         sigs_valid     = [] :: addr_sigs(),
-         sigs_invalid   = [] :: addr_sigs(),
-         sigs_unchecked = [] :: addr_sigs(),
+         sigs_valid     = [] :: [blockchain_block:signature()],
+         sigs_invalid   = [] :: [blockchain_block:signature()],
+         sigs_unchecked = [] :: [blockchain_block:signature()],
          signatures_required = 0,
          sig_phase = unsent :: unsent | sig | gossip | done,
          artifact :: undefined | binary(),
@@ -41,15 +41,6 @@
          swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
         }).
 
--type addr() ::
-    libp2p_crypto:pubkey_bin().
-
--type addr_sig() ::
-    {addr(), Sig :: binary()}.
-
--type addr_sigs() ::
-    [addr_sig()].
-
 -type hbbft_msg() ::
       hbbft_msg_signature()
     | hbbft_msg_signatures()
@@ -58,10 +49,10 @@
     | hbbft:sign_msg().
 
 -type hbbft_msg_signature() ::
-    {signature, Round :: pos_integer(), addr(), Sig :: binary()}.
+    {signature, Round :: pos_integer(), libp2p_crypto:pubkey_bin(), Sig :: binary()}.
 
 -type hbbft_msg_signatures() ::
-    {signatures, Round :: pos_integer(), addr_sigs()}.
+    {signatures, Round :: pos_integer(), [blockchain_block:signature()]}.
 
 -spec metadata(V, M, C) -> binary()
     when V :: tuple | map,
@@ -464,7 +455,8 @@ fixup_msgs(Msgs) ->
 %% @doc Finds unique member positions (if any) of addresses in the given
 %% `{Address, Signature}' tuples.
 %% @end
--spec addr_sigs_to_mem_pos(addr_sigs(), #state{}) -> [pos_integer()].
+-spec addr_sigs_to_mem_pos([blockchain_block:signature()], #state{}) ->
+    [pos_integer()].
 addr_sigs_to_mem_pos(AddrSigs, #state{members=MemberAddresses}) ->
     lists:usort(positions([Addr || {Addr, _} <- AddrSigs], MemberAddresses)).
 
@@ -497,7 +489,8 @@ state_reset(HBBFT, #state{}=S) ->
     }.
 
 -spec handle_sigs(
-    {received, addr_sigs()} | {produced, addr_sig(), non_neg_integer()},
+    {received, [blockchain_block:signature()]}
+    | {produced, blockchain_block:signature(), non_neg_integer()},
     #state{}
 ) ->
     {#state{}, [{multicast, binary()}]}.
@@ -528,9 +521,11 @@ handle_sigs(Given, #state{hbbft=HBBFT}=S0) ->
             {S1, fixup_msgs(MsgsOut)}
     end.
 
--spec state_sigs_input(addr_sigs(), #state{}) ->
+-spec state_sigs_input([blockchain_block:signature()], #state{}) ->
     {
-        {done, addr_sigs()} | {gossip, addr_sigs()} | pending,
+        {done, [blockchain_block:signature()]}
+        | {gossip, [blockchain_block:signature()]}
+        | pending,
         #state{}
     }.
 state_sigs_input(SigsIn, #state{hbbft=HBBFT}=S0) ->
@@ -563,7 +558,7 @@ state_sigs_input(SigsIn, #state{hbbft=HBBFT}=S0) ->
     end.
 
 -spec state_sigs_maybe_switch_to_varless(#state{}) ->
-    {{varless, addr_sigs()} | original, #state{}}.
+    {{varless, [blockchain_block:signature()]} | original, #state{}}.
 state_sigs_maybe_switch_to_varless(
     #state{
         artifact     = <<_/binary>>,
@@ -613,11 +608,11 @@ state_remove_var_txns_from_artifact(#state{artifact=A0}=S) ->
     A1 = blockchain_block:serialize(B#blockchain_block_v1_pb{transactions=T1}),
     S#state{artifact=A1}.
 
--spec state_sigs_add(addr_sigs(), #state{}) -> #state{}.
+-spec state_sigs_add([blockchain_block:signature()], #state{}) -> #state{}.
 state_sigs_add(Sigs, #state{}=S) ->
     lists:foldl(fun state_sigs_add_one/2, S, Sigs).
 
--spec state_sigs_add_one(addr_sig(), #state{}) -> #state{}.
+-spec state_sigs_add_one(blockchain_block:signature(), #state{}) -> #state{}.
 state_sigs_add_one({Addr, Sig}, #state{artifact = undefined, sigs_unchecked=Unchecked}=S) ->
     %% Provisionally accept signatures if we don't have the means to
     %% verify them yet. We'll retry verifying them later.
@@ -636,7 +631,9 @@ state_sigs_retry_unchecked(#state{artifact = <<_/binary>>, sigs_unchecked = Unch
 
 -spec state_sigs_check_if_enough(#state{}) ->
     {not_enough | {enough_for, Next}, #state{}} when
-    Next :: {gossip, addr_sigs()} | {done, addr_sigs()}.
+    Next ::
+        {gossip, [blockchain_block:signature()]}
+        | {done, [blockchain_block:signature()]}.
 state_sigs_check_if_enough(#state{artifact=undefined}=S) ->
     {not_enough, S};
 state_sigs_check_if_enough(#state{sig_phase = sig, sigs_valid = Sigs, f = F}=S) when length(Sigs) < F + 1 ->
@@ -686,7 +683,7 @@ state_sigs_check_if_enough(
             {not_enough, S0}
     end.
 
--spec sig_is_valid(addr_sig(), #state{}) -> boolean().
+-spec sig_is_valid(blockchain_block:signature(), #state{}) -> boolean().
 sig_is_valid(
     {<<Addr/binary>>, <<Sig/binary>>}=AddrSig,
     #state{artifact=Art, members=MemberAddresses, hbbft=HBBFT}=S
