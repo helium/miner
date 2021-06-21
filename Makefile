@@ -55,3 +55,4 @@ devrel:
 
 devrelease:
 	$(REBAR) as dev release
+

@@ -82,6 +82,12 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
+    SibylServer =
+        case application:get_env(miner, mode, gateway) of
+            validator -> [?SUP(sibyl_sup, [])];
+            _ -> []
+        end,
+
     ChildSpecs =
         [
          ?WORKER(miner_hbbft_sidecar, []),
@@ -89,7 +95,9 @@ init([SigFun, ECDHFun]) ->
          ] ++
         EbusServer ++
         OnionServer ++
-        [?WORKER(miner_poc_statem, [POCOpts])],
+        [?WORKER(miner_poc_statem, [POCOpts])] ++
+        SibylServer,
+
     {ok, {SupFlags, ChildSpecs}}.
 
 
