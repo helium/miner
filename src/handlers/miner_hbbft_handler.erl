@@ -23,7 +23,7 @@
          f :: non_neg_integer(),
          id :: non_neg_integer(),
          hbbft :: hbbft:hbbft_data(),
-         sk :: tc_key_share:tc_key_share() | tpke_privkey:privkey() | binary(),
+         sk :: tc_key_share:tc_key_share() | binary(),
          seq = 0,
          deferred = [],
          signatures = [],
@@ -133,12 +133,7 @@ handle_command({status, Ref, Worker}, State) ->
                        A -> blockchain_utils:bin_to_hex(crypto:hash(sha256, A))
                    end,
     Sigs = map_ids(State#state.signatures, State#state.members),
-    PubKeyHash = case tc_key_share:is_key_share(State#state.sk) of
-                     true ->
-                         crypto:hash(sha256, term_to_binary(tc_pubkey:serialize(tc_key_share:public_key(State#state.sk))));
-                     false ->
-                         crypto:hash(sha256, term_to_binary(tpke_pubkey:serialize(tpke_privkey:public_key(State#state.sk))))
-                 end,
+    PubKeyHash = crypto:hash(sha256, term_to_binary(tc_pubkey:serialize(tc_key_share:public_key(State#state.sk)))),
     Worker ! {Ref, maps:merge(#{signatures_required =>
                                     max(State#state.signatures_required - length(Sigs), 0),
                                 signatures => Sigs,
@@ -401,20 +396,12 @@ serialize(State) ->
 
 deserialize(BinState) when is_binary(BinState) ->
     State = binary_to_term(BinState),
-    SK = try tc_key_share:deserialize(State#state.sk) of
-             Res -> Res
-         catch _:_ ->
-                   tpke_privkey:deserialize(State#state.sk)
-         end,
+    SK = tc_key_share:deserialize(State#state.sk),
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK};
 deserialize(#{sk := SKSer,
               hbbft := HBBFTSer} = StateMap) ->
-    SK = try tc_key_share:deserialize(binary_to_term(SKSer)) of
-             Res -> Res
-         catch _:_ ->
-                   tpke_privkey:deserialize(binary_to_term(SKSer))
-         end,
+    SK = tc_key_share:deserialize(binary_to_term(SKSer)),
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
     Bundef = term_to_binary(undefined, [compressed]),
