@@ -590,6 +590,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 4;
             validator_transition_test ->
                 4;
+            autoskip_chain_vars_test ->
+                4;
             _ ->
                 get_config("N", 7)
         end,
