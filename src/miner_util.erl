@@ -16,6 +16,10 @@
          has_valid_local_capability/2
         ]).
 
+%% get the firmware release data from a hotspot
+-define(LSB_FILE, "/etc/lsb_release").
+-define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
+
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
 %% @end
@@ -87,7 +91,7 @@ mark(Module, Mark) ->
 metadata_fun() ->
     try
         Map = blockchain_worker:signed_metadata_fun(),
-        case miner_lora:position() of
+        Map1 = case miner_lora:position() of
             %% GPS location that's adequately close to the asserted
             %% location
             {ok, _} ->
@@ -104,7 +108,14 @@ metadata_fun() ->
             %% got nonsense or a hopefully transient error, return nothing
             _ ->
                 Map#{<<"gps_fix_quality">> => <<"no_fix">>}
-        end
+        end,
+        FWRelease = case filelib:is_regular(?LSB_FILE) of
+                        true ->
+                            iolist_to_binary(string:trim(os:cmd(?RELEASE_CMD)));
+                        false ->
+                            <<"unknown">>
+                    end,
+        Map1#{ <<"release_info">> => FWRelease}
     catch _:_ ->
             #{}
     end.
