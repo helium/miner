@@ -15,6 +15,7 @@
         ]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("helium_proto/include/blockchain_block_pb.hrl").
 -include("miner_util.hrl").
 
 -record(state,
@@ -25,6 +26,7 @@
          hbbft :: hbbft:hbbft_data(),
          sk :: tc_key_share:tc_key_share() | tpke_privkey:privkey() | binary(),
          sigs_valid     = [] :: addr_sigs(),
+         sigs_invalid   = [] :: addr_sigs(),
          sigs_unchecked = [] :: addr_sigs(),
          signatures_required = 0,
          sig_phase = unsent :: unsent | sig | gossip | done,
@@ -33,7 +35,10 @@
          chain :: blockchain:blockchain(),
          last_round_signed = 0 :: non_neg_integer(),
          seen = #{} :: #{non_neg_integer() => boolean()},
-         bba = <<>> :: binary()
+         bba = <<>> :: binary(),
+
+         %% For artifact re-signing on var-autoskip:
+         swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
         }).
 
 -type addr() ::
@@ -112,6 +117,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                        {?MODULE, metadata, [Version, #{}, Chain]}, Round, Buf),
     Ledger = blockchain_ledger_v1:new_context(Ledger0),
     Chain1 = blockchain:ledger(Ledger, Chain),
+    {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
 
     lager:info("HBBFT~p started~n", [Id]),
     {ok, #state{n = N,
@@ -121,6 +127,7 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 members = Members,
                 signatures_required = N - F,
                 hbbft = HBBFT,
+                swarm_keys = {MyPubKey, SignFun},  % For re-signing on var-autoskip
                 chain = Chain1}}.
 
 handle_command(start_acs, State) ->
@@ -481,6 +488,7 @@ state_reset(HBBFT, #state{}=S) ->
     S#state{
         hbbft          = HBBFT,
         sigs_valid     = [],
+        sigs_invalid   = [],
         sigs_unchecked = [],
         artifact       = undefined,
         sig_phase      = unsent,
@@ -546,8 +554,64 @@ state_sigs_input(SigsIn, #state{hbbft=HBBFT}=S0) ->
         {{enough_for, {done, _}}, S3} ->
             {pending, S3};
         {not_enough, S3} ->
-            {pending, S3}
+            case state_sigs_maybe_switch_to_varless(S3) of
+                {{varless, SigsVarless}, S4} ->
+                    {{gossip, SigsVarless}, S4};
+                {original, S4} ->
+                    {pending, S4}
+            end
     end.
+
+-spec state_sigs_maybe_switch_to_varless(#state{}) ->
+    {{varless, addr_sigs()} | original, #state{}}.
+state_sigs_maybe_switch_to_varless(
+    #state{
+        artifact     = <<_/binary>>,
+        f            = F,
+        sigs_invalid = SigsInvalid,
+        swarm_keys   = {PubKey, SignFun}
+    }=S0
+) when length(SigsInvalid) >= F + 1 ->
+    S1 = state_remove_var_txns_from_artifact(S0),
+    SigsVarlesslyValid0 =
+        lists:filter(
+            fun ({_, _}=AddrSig) -> sig_is_valid(AddrSig, S1) end,
+            SigsInvalid
+        ),
+    case length(SigsVarlesslyValid0) >= F + 1 of
+        true ->
+            #state{artifact = <<ArtVarless/binary>>} = S1,
+            <<Addr/binary>> = libp2p_crypto:pubkey_to_bin(PubKey),
+            <<Sig/binary>> = SignFun(ArtVarless),
+            SigsVarlesslyValid1 = kvl_set(Addr, Sig, SigsVarlesslyValid0),
+            S2 = S1#state{
+                sigs_valid     = SigsVarlesslyValid1,
+                sigs_invalid   = [],
+                sigs_unchecked = []
+            },
+            lager:warning(
+                "Autoskip to varlessly valid sigs from: ~p",
+                [addr_sigs_to_mem_pos(SigsVarlesslyValid0, S2)]
+                %% _not_ including self!
+            ),
+            {{varless, SigsVarlesslyValid1}, S2};
+        false ->
+            {original, S0}
+    end;
+state_sigs_maybe_switch_to_varless(#state{}=S) ->
+    {original, S}.
+
+-spec state_remove_var_txns_from_artifact(#state{}) ->
+    #state{}.
+state_remove_var_txns_from_artifact(#state{artifact=A0}=S) ->
+    #blockchain_block_v1_pb{transactions=T0}=B = blockchain_block:deserialize(A0),
+    NotVar =
+        fun (#blockchain_txn_pb{txn={vars, _}}) -> false;
+            (#blockchain_txn_pb{txn=_}) -> true
+        end,
+    T1 = lists:filter(NotVar, T0),
+    A1 = blockchain_block:serialize(B#blockchain_block_v1_pb{transactions=T1}),
+    S#state{artifact=A1}.
 
 -spec state_sigs_add(addr_sigs(), #state{}) -> #state{}.
 state_sigs_add(Sigs, #state{}=S) ->
@@ -560,8 +624,8 @@ state_sigs_add_one({Addr, Sig}, #state{artifact = undefined, sigs_unchecked=Unch
     S#state{sigs_unchecked = kvl_set(Addr, Sig, Unchecked)};
 state_sigs_add_one({Addr, Sig}, #state{}=S) ->
     case sig_is_valid({Addr, Sig}, S) of
-        true  -> S#state{sigs_valid = kvl_set(Addr, Sig, S#state.sigs_valid)};
-        false -> S
+        true  -> S#state{sigs_valid   = kvl_set(Addr, Sig, S#state.sigs_valid)};
+        false -> S#state{sigs_invalid = kvl_set(Addr, Sig, S#state.sigs_invalid)}
     end.
 
 -spec state_sigs_retry_unchecked(#state{}) -> #state{}.
