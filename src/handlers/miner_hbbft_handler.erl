@@ -15,7 +15,6 @@
         ]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
--include_lib("helium_proto/include/blockchain_block_pb.hrl").
 -include("miner_util.hrl").
 
 -record(state,
@@ -598,15 +597,11 @@ state_sigs_maybe_switch_to_varless(#state{}=S) ->
 
 -spec state_remove_var_txns_from_artifact(#state{}) ->
     #state{}.
-state_remove_var_txns_from_artifact(#state{artifact=A0}=S) ->
-    #blockchain_block_v1_pb{transactions=T0}=B = blockchain_block:deserialize(A0),
-    NotVar =
-        fun (#blockchain_txn_pb{txn={vars, _}}) -> false;
-            (#blockchain_txn_pb{txn=_}) -> true
-        end,
-    T1 = lists:filter(NotVar, T0),
-    A1 = blockchain_block:serialize(B#blockchain_block_v1_pb{transactions=T1}),
-    S#state{artifact=A1}.
+state_remove_var_txns_from_artifact(#state{artifact=Art0}=S) ->
+    Block0 = blockchain_block:deserialize(Art0),
+    Block1 = blockchain_block_v1:remove_var_txns(Block0),
+    Art1 = blockchain_block:serialize(Block1),
+    S#state{artifact=Art1}.
 
 -spec state_sigs_add([blockchain_block:signature()], #state{}) -> #state{}.
 state_sigs_add(Sigs, #state{}=S) ->
