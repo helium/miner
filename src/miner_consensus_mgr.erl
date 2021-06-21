@@ -146,7 +146,7 @@ group_predicate("penalize" ++ _ = Name) ->
         #{election_height := ElectionHeight} ->
             case string:tokens(Name, "_") of
                 [_Tag, Height0, _Delay, _Hash] ->
-                    lager:debug("con pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
+                    lager:debug("penalize pred ~p eh ~p h ~p", [Name, Height0, ElectionHeight]),
                     Height = list_to_integer(Height0),
                     Height < ElectionHeight;
                 _ ->

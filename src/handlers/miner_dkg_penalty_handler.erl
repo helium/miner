@@ -94,7 +94,7 @@ handle_message({conf, Signatures}, _Index, State)
                           Acc
                   end
           end, State#state.signatures, Signatures),
-        Majority = floor(length(State#state.members) / 2) + 1,
+    Majority = floor(length(State#state.members) / 2) + 1,
     case length(GoodSignatures) of
         SigLen when SigLen >= (State#state.f*2) + 1 ->
             done(GoodSignatures, State#state.artifact),
