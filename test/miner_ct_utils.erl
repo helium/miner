@@ -70,9 +70,21 @@
          get_txn_block_details/2, get_txn_block_details/3,
          get_txn/2, get_txns/2,
          get_genesis_block/2,
-         load_genesis_block/3
+         load_genesis_block/3,
+
+         chain_var_lookup_all/2,
+         chain_var_lookup_one/2
         ]).
 
+chain_var_lookup_all(Key, Nodes) ->
+    [chain_var_lookup_one(Key, Node) || Node <- Nodes].
+
+chain_var_lookup_one(Key, Node) ->
+    Chain = ct_rpc:call(Node, blockchain_worker, blockchain, [], 500),
+    Ledger = ct_rpc:call(Node, blockchain, ledger, [Chain]),
+    Result = ct_rpc:call(Node, blockchain, config, [Key, Ledger], 500),
+    ct:pal("Var lookup. Node:~p, Result:~p", [Node, Result]),
+    Result.
 
 stop_miners(Miners) ->
     stop_miners(Miners, 60).
@@ -355,11 +367,7 @@ wait_for_chain_var_update(Miners, Key, Value, Retries)->
            fun() ->
                    lists:all(
                      fun(Miner) ->
-                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
-                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
-                             R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], 500),
-                             ct:pal("var = ~p", [R]),
-                             {ok, Value} == R
+                             {ok, Value} == chain_var_lookup_one(Key, Miner)
                      end, miner_ct_utils:shuffle(Miners))
            end,
            Retries * 2, 500) of
