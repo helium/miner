@@ -755,6 +755,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 get_config("N", 7)
         end,
     SeedNodes = [],
+    JsonRpcBase = 4466,
     Port = get_config("PORT", 0),
     Curve = 'SS512',
     BlockTime = get_config("BT", 100),
@@ -764,7 +765,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {start_node(MinerName), {45000, 0}}
+            {miner_ct_utils:start_node(MinerName), {45000, 0, JsonRpcBase + I}}
         end,
         lists:seq(1, TotalMiners)
     ),
@@ -783,7 +784,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                      make_keys(Miner, Ports)
              end, MinersAndPorts),
 
-    {_Miner, {_TCPPort, _UDPPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
+    {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
     Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
@@ -858,10 +859,10 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
     %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
-    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _}}) ->
+    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
                                               {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
                                               ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
-                                              {Miner, {TCPPort, RandomPort}}
+                                              {Miner, {TCPPort, RandomPort, JsonRpcPort}}
                                       end, MinersAndPorts),
 
     [
@@ -901,7 +902,7 @@ make_keys(Miner, Ports) ->
     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
-config_node({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun},
+config_node({Miner, {TCPPort, UDPPort, JsonRpcPort}, ECDH, PubKey, _Addr, SigFun},
             {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
@@ -936,6 +937,7 @@ config_node({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun},
     %% ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
     ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
     %% set miner configuration
+    ct_rpc:call(Miner, application, set_env, [miner, jsonrpc_port, JsonRpcPort]),
     ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
     ct_rpc:call(Miner, application, set_env, [miner, mode, validator]),
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
