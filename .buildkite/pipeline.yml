@@ -58,7 +58,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
 
-        - if: build.tag =~ /^testval/
+  - if: build.tag =~ /^testval/
     name: "validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
