@@ -789,7 +789,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
-    Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
+    Context = {Mod, LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
     ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
 
     Miners = [M || {M, _} <- MinersAndPorts],
@@ -905,7 +905,7 @@ make_keys(Miner, Ports) ->
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
 config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun},
-            {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
+            {Mod, LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
     ct_rpc:call(Miner, application, load, [lager]),
@@ -946,17 +946,24 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
     ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
-    ct_rpc:call(Miner, application, set_env,
-                [miner, frequency_data,
-                 #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
-                   'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
-                   'EU433' => [433.175, 433.375, 433.575],
-                   'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
-                   'CN779' => [779.5, 779.7, 779.9],
-                   'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
-                   'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
-                   'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
-                   'IN865' => [865.0625, 865.4025, 865.985]}]),
+    case Mod of
+        miner_poc_v11_SUITE ->
+            %% Don't set anything region related with poc-v11
+            ok;
+        _ ->
+            ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
+            ct_rpc:call(Miner, application, set_env,
+                        [miner, frequency_data,
+                         #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
+                           'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
+                           'EU433' => [433.175, 433.375, 433.575],
+                           'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
+                           'CN779' => [779.5, 779.7, 779.9],
+                           'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
+                           'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
+                           'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
+                           'IN865' => [865.0625, 865.4025, 865.985]}])
+    end,
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
     ok.
 
