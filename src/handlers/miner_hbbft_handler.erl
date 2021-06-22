@@ -268,7 +268,7 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
                     %% ask for some time
                     miner:reset_late_block_timer(),
                     SkipGossip = {multicast, t2b({proposed_skip, ProposedRound, CurRound})},
-                    %% skip but don't discard rounds until we get a clean round
+                    %% skip but don't discard votes until we get a clean round
                     {HBBFT1, ToSend1} =
                         case hbbft:next_round(HBBFT, ProposedRound, []) of
                             {H1, ok} ->
@@ -284,6 +284,8 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
                                 {H2, Msgs}
                         end,
                     ToSend = fixup_msgs(ToSend1 ++ ToSend2),
+                    %% we retain the skip votes here because we may not succeed and we want the
+                    %% algorithm to converge more quickly in that case
                     {(state_reset(HBBFT2, S0))#state{skip_votes = Skips1},
                      [ new_epoch , SkipGossip ] ++ ToSend};
                 {wait, Skips1} ->
