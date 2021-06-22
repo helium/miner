@@ -11,7 +11,7 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  - if: build.tag =~ /^val/
+  - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
     commands:
       - "git fetch -t"
@@ -23,7 +23,7 @@ steps:
     agents:
       queue: "erlang"
 
-  - if: build.tag =~ /^val/
+  - if: build.tag =~ /^validator/
     name: ":cloud: upload validator deb to packagecloud"
     commands:
       - "git fetch -t"
@@ -32,7 +32,7 @@ steps:
     agents:
       queue: "erlang"
 
-  - if: build.tag =~ /^val/
+  - if: build.tag =~ /^validator/
     name: "validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -58,7 +58,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
 
-  - if: build.tag =~ /^testval/
+  - if: build.tag =~ /^val\d/
     name: "testnet validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -71,7 +71,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_testval_image.sh"
 
-  - if: build.tag =~ /^testval/
+  - if: build.tag =~ /^val\d/
     name: "testnet validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -84,7 +84,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_testval_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^testval/ && build.tag !~ /^val/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -97,7 +97,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^testval/ && build.tag !~ /^val/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
