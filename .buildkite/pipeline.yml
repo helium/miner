@@ -59,7 +59,7 @@ steps:
       - ".buildkite/scripts/make_val_image.sh"
 
   - if: build.tag =~ /^testval/
-    name: "validator AMD64 docker"
+    name: "testnet validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
@@ -72,7 +72,7 @@ steps:
       - ".buildkite/scripts/make_testval_image.sh"
 
   - if: build.tag =~ /^testval/
-    name: "validator ARM64 docker"
+    name: "testnet validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
