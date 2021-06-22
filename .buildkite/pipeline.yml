@@ -11,7 +11,80 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  - if: build.tag != null
+  - if: build.tag =~ /^validator/
+    name: ":debian: build validator deb"
+    commands:
+      - "git fetch -t"
+      - "./rebar3 as validator release"
+      - ".buildkite/scripts/make_deb.sh"
+    key: "deb"
+    artifact_paths: "*.deb"
+    # depends_on: "tests"  # can't do this right now with the test status as it is.
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^validator/
+    name: ":cloud: upload validator deb to packagecloud"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/packagecloud_upload.sh"
+    depends_on: "deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^validator/
+    name: "validator AMD64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "amd64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_val_image.sh"
+
+  - if: build.tag =~ /^validator/
+    name: "validator ARM64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "arm64"
+    agents:
+      queue: "arm64"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_val_image.sh"
+
+  - if: build.tag =~ /^val\d/
+    name: "testnet validator AMD64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "amd64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_testval_image.sh"
+
+  - if: build.tag =~ /^val\d/
+    name: "testnet validator ARM64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "arm64"
+    agents:
+      queue: "arm64"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_testval_image.sh"
+
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -24,7 +97,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"

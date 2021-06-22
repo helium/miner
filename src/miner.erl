@@ -17,6 +17,10 @@
     create_block/3,
     signed_block/2,
 
+    keys/0,
+
+    reset_late_block_timer/0,
+
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
@@ -80,6 +84,7 @@
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
+    late_block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
     swarm_tid :: ets:tid() | atom(),
@@ -182,8 +187,7 @@ relcast_info(Group) ->
           end,
     case gen_server:call(Mod, Group, 60000) of
         undefined -> #{};
-        Pid ->
-            libp2p_group_relcast:info(Pid)
+        Pid -> libp2p_group_relcast:info(Pid)
     end.
 
 %% TODO: spec
@@ -225,7 +229,7 @@ create_block(Metadata, Txns, HBBFTRound) ->
             {error, no_miner}
     end.
 
-%% TODO: spec
+-spec hbbft_status() -> map() | {error, timeout}.
 hbbft_status() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
@@ -240,20 +244,12 @@ hbbft_status() ->
             end
     end.
 
-%% TODO: spec
+-spec hbbft_skip() -> ok | {error, timeout}.
 hbbft_skip() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
         Pid ->
-            Ref = make_ref(),
-            ok = libp2p_group_relcast:handle_input(Pid, {skip, Ref, self()}),
-            receive
-                {Ref, Result} ->
-                    miner ! block_timeout,
-                    Result
-            after timer:seconds(60) ->
-                      {error, timeout}
-            end
+            ok = libp2p_group_relcast:handle_input(Pid, maybe_skip)
     end.
 
 -spec signed_block([binary()], binary()) -> ok.
@@ -290,6 +286,14 @@ signed_block(Signatures, BinBlock) ->
     end,
     ok.
 
+-spec keys() -> {ok, {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}}.
+keys() ->
+    gen_server:call(?MODULE, keys).
+
+-spec reset_late_block_timer() -> ok.
+reset_late_block_timer() ->
+    gen_server:call(?MODULE, reset_late_block_timer).
+
 start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
 
@@ -301,7 +305,9 @@ remove_consensus() ->
 
 -spec version() -> integer().
 version() ->
-    2.
+    %% format:
+    %% MMMmmmPPPP
+       0000010076.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -334,13 +340,19 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
                                                  blockchain = Chain})};
-handle_call(
-    {create_block, Metadata, Txns, HBBFTRound},
-    _From,
-    #state{blockchain=Chain, swarm_keys=SK}=State
-) ->
+handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
+            #state{blockchain = Chain, swarm_keys = SK} = State) ->
     Result = try_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
     {reply, Result, State};
+handle_call(keys, _From, State) ->
+    {reply, {ok, State#state.swarm_keys}, State};
+handle_call(reset_late_block_timer, _From, State) ->
+    %% we do this when the group thinks that it's agreed on a new round, so set the timer extra long
+    erlang:cancel_timer(State#state.late_block_timer),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout * 2) * 1000, self(), late_block_timeout),
+
+    {reply, ok, State#state{late_block_timer = LateTimer}};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -370,6 +382,12 @@ handle_info(block_timeout, State) ->
     lager:info("block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
+handle_info(late_block_timeout, State) ->
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
+    lager:info("late block timeout"),
+    libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
+    LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
+    {noreply, State#state{late_block_timer = LateTimer}};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          current_height = CurrHeight,
@@ -714,7 +732,13 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
     Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
-    State#state{block_timer=Timer}.
+
+    %% now figure out the late block timer
+    erlang:cancel_timer(State#state.late_block_timer),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
+
+    State#state{block_timer=Timer, late_block_timer = LateTimer}.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
@@ -727,7 +751,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
 %% final 0.04 (twice as much leverage, but 20% of the rate).
 
 %% when drift is small or 0, let it accumulate for a bit
-catchup_time(N) when N < 0.0001 ->
+catchup_time(N) when N < 0.001 ->
     0;
 %% when it's still relatively small, apply gentle adjustments
 catchup_time(N) when N < 0.01 ->

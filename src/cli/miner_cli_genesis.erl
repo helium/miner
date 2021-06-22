@@ -177,7 +177,8 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
     Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 500000000) || Addr <- Addresses],
     %% Give security tokens to 2 members
-    InitialSecurityTransactions = [ blockchain_txn_security_coinbase_v1:new(Addr, 5000000) || Addr <- lists:sublist(Addresses, 2)],
+    InitialSecurityTransactions = [ blockchain_txn_security_coinbase_v1:new(Addr, 5000000)
+                                    || Addr <- lists:sublist(Addresses, 2)],
     %% Give DCs to 2 members
     InitialDCs = [ blockchain_txn_dc_coinbase_v1:new(Addr, 10000000) || Addr <- lists:sublist(Addresses, 2)],
     %% NOTE: This is mostly for locally testing run.sh so we have nodes added as gateways in the genesis block
@@ -192,8 +193,10 @@ forge(PubKeyB58, ProofB58, Addrs, N, Curve) ->
 
 
     LocAddresses = lists:zip(Locations, Addresses),
-    InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
-                                  || {Loc, Addr} <- LocAddresses ],
+    %% InitialGatewayTransactions = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+    %%                               || {Loc, Addr} <- LocAddresses ],
+    InitialGatewayTransactions = [blockchain_txn_gen_validator_v1:new(Addr, Addr, 10000 * 100000000)
+                                  || {_Loc, Addr} <- LocAddresses ],
     miner_consensus_mgr:initial_dkg([VarTxn1] ++
                                         InitialPaymentTransactions ++
                                         InitialGatewayTransactions ++
@@ -330,7 +333,7 @@ make_vars() ->
       ?block_time => BlockTime,
       ?election_interval => Interval,
       ?election_restart_interval => 5,
-      ?election_version => 4,
+      ?election_version => 5,
       ?election_bba_penalty => 0.01,
       ?election_seen_penalty => 0.25,
       ?election_selection_pct => 75,
@@ -390,5 +393,13 @@ make_vars() ->
       ?snapshot_version => 1,
       ?sc_grace_blocks => 20,
       ?snapshot_interval => 5,
-      ?rewards_txn_version => 2
+      ?rewards_txn_version => 2,
+      ?validator_version => 2,
+      ?validator_minimum_stake => 10000 * 100000000,
+      ?validator_liveness_grace_period => 10,
+      ?validator_liveness_interval => 20,
+      ?validator_penalty_filter => 10.0,
+      ?dkg_penalty => 1.0,
+      ?tenure_penalty => 1.0,
+      ?penalty_history_limit => 100
      }.

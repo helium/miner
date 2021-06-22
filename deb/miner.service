@@ -1,0 +1,19 @@
+[Unit]
+Description=miner instance
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/var/helium/miner/bin/miner foreground
+ExecStop=/var/helium/miner/bin/miner stop
+User=ubuntu
+PIDFile=/var/data/miner/miner.pid
+Environment=HOME="/var/data/miner"
+Environment=RUNNER_LOG_DIR="/var/data/log/miner"
+Environment=ERL_CRASH_DUMP="/var/data/log/miner"
+LimitNOFILE=64000
+LimitNPROC=64000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

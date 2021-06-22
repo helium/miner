@@ -71,7 +71,8 @@ init([SigFun, ECDHFun]) ->
                     region_override => RegionOverRide
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts])];
+                 ?WORKER(miner_lora, [OnionOpts]),
+                 ?WORKER(miner_poc_statem, [POCOpts])];
             _ ->
                 []
         end,
@@ -82,9 +83,11 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    SibylServer =
+    ValServers =
         case application:get_env(miner, mode, gateway) of
-            validator -> [?SUP(sibyl_sup, [])];
+            validator ->
+                [?WORKER(miner_val_heartbeat, []),
+                 ?SUP(sibyl_sup, [])];
             _ -> []
         end,
 
@@ -93,11 +96,9 @@ init([SigFun, ECDHFun]) ->
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, [])
          ] ++
+        ValServers ++
         EbusServer ++
-        OnionServer ++
-        [?WORKER(miner_poc_statem, [POCOpts])] ++
-        SibylServer,
-
+        OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
 
 

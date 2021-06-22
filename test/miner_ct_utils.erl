@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -define(BASE_TMP_DIR, "./_build/test/tmp").
@@ -14,7 +15,10 @@
          pmap/2, pmap/3,
          wait_until/1, wait_until/3,
          wait_until_disconnected/2,
+         get_addrs/1,
+         start_miner/2,
          start_node/1,
+         config_node/2,
          partition_cluster/2,
          heal_cluster/2,
          connect/1,
@@ -37,6 +41,7 @@
          start_miners/1, start_miners/2,
          height/1,
          heights/1,
+         unique_heights/1,
          consensus_members/1, consensus_members/2,
          miners_by_consensus_state/1,
          in_consensus_miners/1,
@@ -59,6 +64,13 @@
          confirm_balance/3,
          confirm_balance_both_sides/5,
          wait_for_gte/3, wait_for_gte/5,
+         wait_for_equalized_heights/1,
+         wait_for_chain_stall/1,
+         wait_for_chain_stall/2,
+         assert_chain_halted/1,
+         assert_chain_halted/3,
+         assert_chain_advanced/1,
+         assert_chain_advanced/3,
 
          submit_txn/2,
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
@@ -66,9 +78,123 @@
          get_txn_block_details/2, get_txn_block_details/3,
          get_txn/2, get_txns/2,
          get_genesis_block/2,
-         load_genesis_block/3
+         load_genesis_block/3,
+
+         chain_var_lookup_all/2,
+         chain_var_lookup_one/2
         ]).
 
+chain_var_lookup_all(Key, Nodes) ->
+    [chain_var_lookup_one(Key, Node) || Node <- Nodes].
+
+chain_var_lookup_one(Key, Node) ->
+    Chain = ct_rpc:call(Node, blockchain_worker, blockchain, [], 500),
+    Ledger = ct_rpc:call(Node, blockchain, ledger, [Chain]),
+    Result = ct_rpc:call(Node, blockchain, config, [Key, Ledger], 500),
+    ct:pal("Var lookup. Node:~p, Result:~p", [Node, Result]),
+    Result.
+
+-spec assert_chain_advanced([node()]) -> ok.
+assert_chain_advanced(Miners) ->
+    Height = wait_for_equalized_heights(Miners),
+    ?assertMatch(
+        ok,
+        miner_ct_utils:wait_for_gte(height, Miners, Height + 1),
+        "Chain advanced."
+    ),
+    ok.
+
+assert_chain_advanced(_, _, N) when N =< 0 ->
+    ok;
+assert_chain_advanced(Miners, Interval, N) ->
+    ok = assert_chain_advanced(Miners),
+    timer:sleep(Interval),
+    assert_chain_advanced(Miners, Interval, N - 1).
+
+-spec assert_chain_halted([node()]) -> ok.
+assert_chain_halted(Miners) ->
+    assert_chain_halted(Miners, 5000, 20).
+
+-spec assert_chain_halted([node()], timeout(), pos_integer()) -> ok.
+assert_chain_halted(Miners, Interval, Retries) ->
+    _ = lists:foldl(
+        fun (_, HeightPrev) ->
+            HeightCurr = wait_for_equalized_heights(Miners),
+            ?assertEqual(HeightPrev, HeightCurr, "Chain halted."),
+            timer:sleep(Interval),
+            HeightCurr
+        end,
+        wait_for_equalized_heights(Miners),
+        lists:duplicate(Retries, {})
+    ),
+    ok.
+
+wait_for_chain_stall(Miners) ->
+    wait_for_chain_stall(Miners, #{}).
+
+-spec wait_for_chain_stall([node()], Options) -> ok | error when
+    Options :: #{
+        interval      => timeout(),
+        retries_max   => pos_integer(),
+        streak_target => pos_integer()
+    }.
+wait_for_chain_stall(Miners, Options=#{}) ->
+    State =
+        #{
+            interval      => maps:get(interval, Options, 5000),
+            retries_max   => maps:get(retries_max, Options, 100),
+            streak_target => maps:get(streak_target, Options, 5),
+            streak_prev   => 0,
+            retries_cur   => 0,
+            height_prev   => 0
+         },
+    wait_for_chain_stall_(Miners, State).
+
+wait_for_chain_stall_(_, #{streak_target := Target, streak_prev := Streak}) when Streak >= Target ->
+    ok;
+wait_for_chain_stall_(_, #{retries_cur := Cur, retries_max := Max}) when Cur >= Max ->
+    error;
+wait_for_chain_stall_(
+    Miners,
+    #{
+        interval    := Interval,
+        streak_prev := StreakPrev,
+        height_prev := HeightPrev,
+        retries_cur := RetriesCur
+    }=State0
+) ->
+    {HeightCurr, StreakCurr} =
+        case wait_for_equalized_heights(Miners) of
+            HeightPrev -> {HeightPrev, 1 + StreakPrev};
+            HeightCurr0 -> {HeightCurr0, 0}
+        end,
+    timer:sleep(Interval),
+    State1 = State0#{
+        height_prev := HeightCurr,
+        streak_prev := StreakCurr,
+        retries_cur := RetriesCur + 1
+    },
+    wait_for_chain_stall_(Miners, State1).
+
+-spec wait_for_equalized_heights([node()]) -> non_neg_integer().
+wait_for_equalized_heights(Miners) ->
+    ?assert(
+        miner_ct_utils:wait_until(
+            fun() ->
+                case unique_heights(Miners) of
+                    [_] -> true;
+                    [_|_] -> false
+                end
+            end,
+            50,
+            1000
+        ),
+        "Heights equalized."
+    ),
+    UniqueHeights = unique_heights(Miners),
+    ?assertMatch([_], UniqueHeights, "All heights are equal."),
+    [Height] = UniqueHeights,
+    Height.
 
 stop_miners(Miners) ->
     stop_miners(Miners, 60).
@@ -94,6 +220,12 @@ stop_miners(Miners, Retries) ->
            end
            || Miner <- Miners],
     Res.
+
+start_miner(Name0, Context) ->
+    Name = start_node(Name0),
+    Keys = make_keys(Name, {45000, 0}),
+    config_node(Keys, Context),
+    {Name, Keys}.
 
 start_miners(Miners) ->
     start_miners(Miners, 60).
@@ -126,6 +258,10 @@ heights(Miners) ->
                                   {ok, H} = ct_rpc:call(Miner, blockchain, height, [C]),
                                   [{Miner, H} | Acc]
                           end, [], Miners).
+
+-spec unique_heights([node()]) -> [non_neg_integer()].
+unique_heights(Miners) ->
+    lists:usort([H || {_, H} <- miner_ct_utils:heights(Miners)]).
 
 consensus_members([]) ->
     error(no_members);
@@ -175,7 +311,7 @@ election_check(NotSeen0, Miners, AddrList, Owner) ->
             NotSeen1 = NotSeen0 -- MinerNames,
             Owner ! {not_seen, NotSeen1},
             NotSeen1
-        catch _:_ ->
+        catch _C:_E ->
                 NotSeen0
         end,
     election_check(NotSeen, Miners, AddrList, Owner).
@@ -345,11 +481,7 @@ wait_for_chain_var_update(Miners, Key, Value, Retries)->
            fun() ->
                    lists:all(
                      fun(Miner) ->
-                             C = ct_rpc:call(Miner, blockchain_worker, blockchain, [], 500),
-                             Ledger = ct_rpc:call(Miner, blockchain, ledger, [C]),
-                             R = ct_rpc:call(Miner, blockchain, config, [Key, Ledger], 500),
-                             ct:pal("var = ~p", [R]),
-                             {ok, Value} == R
+                             {ok, Value} == chain_var_lookup_one(Key, Miner)
                      end, miner_ct_utils:shuffle(Miners))
            end,
            Retries * 2, 500) of
@@ -613,6 +745,12 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 4;
             restart_test ->
                 4;
+            validator_transition_test ->
+                4;
+            autoskip_chain_vars_test ->
+                4;
+            autoskip_on_timeout_test ->
+                4;
             _ ->
                 get_config("N", 7)
         end,
@@ -626,7 +764,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {miner_ct_utils:start_node(MinerName), {45000, 0}}
+            {start_node(MinerName), {45000, 0}}
         end,
         lists:seq(1, TotalMiners)
     ),
@@ -642,71 +780,14 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     Keys = miner_ct_utils:pmap(
              fun({Miner, Ports}) ->
-                     #{secret := GPriv, public := GPub} =
-                     libp2p_crypto:generate_keys(ecc_compact),
-                     GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
-                     GAddr = libp2p_crypto:pubkey_to_bin(GPub),
-                     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
-                     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}
+                     make_keys(Miner, Ports)
              end, MinersAndPorts),
 
     {_Miner, {_TCPPort, _UDPPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
-    ConfigResult = miner_ct_utils:pmap(
-        fun({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun}) ->
-                ct:pal("Miner ~p", [Miner]),
-                ct_rpc:call(Miner, cover, start, []),
-                ct_rpc:call(Miner, application, load, [lager]),
-                ct_rpc:call(Miner, application, load, [miner]),
-                ct_rpc:call(Miner, application, load, [blockchain]),
-                ct_rpc:call(Miner, application, load, [libp2p]),
-                %% give each miner its own log directory
-                LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
-                ct:pal("MinerLogRoot: ~p", [LogRoot]),
-                ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
-                ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
-
-                %% set blockchain configuration
-                Key = {PubKey, ECDH, SigFun},
-
-                MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
-                ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
-                %% set blockchain env
-                ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
-                %ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
-                ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
-                %% set miner configuration
-                ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
-                ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
-                ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
-                ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
-                ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
-                ct_rpc:call(Miner, application, set_env, [miner, frequency_data, #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
-                      'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
-                      'EU433' => [433.175, 433.375, 433.575],
-                      'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
-                      'CN779' => [779.5, 779.7, 779.9],
-                      'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
-                      'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
-                      'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
-                      'IN865' => [865.0625, 865.4025, 865.985]}]),
-                {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
-            ok
-        end,
-        Keys
-    ),
+    Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
+    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
 
     Miners = [M || {M, _} <- MinersAndPorts],
     %% check that the config loaded correctly on each miner
@@ -719,15 +800,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         ConfigResult
     ),
 
-    Addrs = miner_ct_utils:pmap(
-              fun(Miner) ->
-                      Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
-                      true = miner_ct_utils:wait_until(fun() ->
-                                                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
-                                                       end),
-                      [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
-                      H
-              end, Miners),
+    Addrs = get_addrs(Miners),
 
     miner_ct_utils:pmap(
       fun(Miner) ->
@@ -737,7 +810,6 @@ init_per_testcase(Mod, TestCase, Config0) ->
                         ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000)
                 end, Addrs)
       end, Miners),
-
 
     %% make sure each node is gossiping with a majority of its peers
     true = miner_ct_utils:wait_until(
@@ -796,6 +868,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {miners, Miners},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
+        {node_context, Context},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
@@ -806,6 +879,82 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {rpc_timeout, timer:seconds(30)}
         | Config
     ].
+
+get_addrs(Miners) ->
+    miner_ct_utils:pmap(
+      fun(Miner) ->
+              Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+              true = miner_ct_utils:wait_until(
+                       fun() ->
+                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
+                       end),
+              ct:pal("swarm ~p ~p", [Miner, Swarm]),
+              [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
+              H
+      end, Miners).
+
+make_keys(Miner, Ports) ->
+    #{secret := GPriv, public := GPub} =
+        libp2p_crypto:generate_keys(ecc_compact),
+    GECDH = libp2p_crypto:mk_ecdh_fun(GPriv),
+    GAddr = libp2p_crypto:pubkey_to_bin(GPub),
+    GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
+    {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
+
+config_node({Miner, {TCPPort, UDPPort}, ECDH, PubKey, _Addr, SigFun},
+            {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
+    ct:pal("Miner ~p", [Miner]),
+    ct_rpc:call(Miner, cover, start, []),
+    ct_rpc:call(Miner, application, load, [lager]),
+    ct_rpc:call(Miner, application, load, [miner]),
+    ct_rpc:call(Miner, application, load, [blockchain]),
+    ct_rpc:call(Miner, application, load, [libp2p]),
+    %% give each miner its own log directory
+    LogRoot = LogDir ++ "_" ++ atom_to_list(Miner),
+    ct:pal("MinerLogRoot: ~p", [LogRoot]),
+    ct_rpc:call(Miner, application, set_env, [lager, log_root, LogRoot]),
+    ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
+
+    %% set blockchain configuration
+    Key = {PubKey, ECDH, SigFun},
+
+    MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
+    ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
+    %% set blockchain env
+    ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
+    %% ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
+    ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
+    %% set miner configuration
+    ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
+    ct_rpc:call(Miner, application, set_env, [miner, mode, validator]),
+    ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
+    ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
+    ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
+    ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
+    ct_rpc:call(Miner, application, set_env,
+                [miner, frequency_data,
+                 #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
+                   'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
+                   'EU433' => [433.175, 433.375, 433.575],
+                   'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
+                   'CN779' => [779.5, 779.7, 779.9],
+                   'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
+                   'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
+                   'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
+                   'IN865' => [865.0625, 865.4025, 865.985]}]),
+    {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+    ok.
 
 end_per_testcase(TestCase, Config) ->
     Miners = ?config(miners, Config),
@@ -970,7 +1119,7 @@ make_vars(Keys, Map, Mode) ->
               ?poc_challengers_percent => 0.09 + 0.06,
               ?poc_witnesses_percent => 0.02 + 0.03,
               ?consensus_percent => 0.10,
-              ?election_version => 4,
+              ?election_version => 5,
               ?election_bba_penalty => 0.01,
               ?election_seen_penalty => 0.05,
               ?election_cluster_res => 8,
@@ -990,7 +1139,16 @@ make_vars(Keys, Map, Mode) ->
               ?poc_version => 3,
               ?poc_path_limit => 7,
               ?poc_typo_fixes => true,
-              ?sc_grace_blocks => 4
+              ?sc_grace_blocks => 4,
+              ?validator_version => 2,
+              ?validator_minimum_stake => ?bones(10000),
+              ?validator_liveness_grace_period => 10,
+              ?validator_liveness_interval => 5,
+              ?stake_withdrawal_cooldown => 55,
+              ?dkg_penalty => 1.0,
+              ?tenure_penalty => 1.0,
+              ?validator_penalty_filter => 5.0,
+              ?penalty_history_limit => 100
              },
 
     #{secret := Priv, public := Pub} = Keys,
@@ -1010,7 +1168,12 @@ make_vars(Keys, Map, Mode) ->
                 LegVars = maps:without([?poc_version, ?poc_path_limit, ?sc_grace_blocks,
                                         ?election_version, ?election_removal_pct, ?election_cluster_res,
                                         ?chain_vars_version, ?block_version, ?election_bba_penalty,
-                                        ?election_seen_penalty],
+                                        ?election_seen_penalty, ?sc_grace_blocks, ?validator_minimum_stake,
+                                        ?validator_liveness_grace_period, ?validator_liveness_interval,
+                                        ?poc_typo_fixes, ?election_bba_penalty, ?election_seen_penalty,
+                                        ?election_cluster_res, ?stake_withdrawal_cooldown,
+                                        ?validator_penalty_filter
+                                       ],
                                        Vars),
                 Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, LegVars),
                 Txn = blockchain_txn_vars_v1:new(LegVars, 1, #{master_key => BinPub,
@@ -1077,7 +1240,8 @@ create_tmp_dir(Path)->
 %% generate a tmp directory based off priv_dir to be used as a scratch by common tests
 %% @end
 %%-------------------------------------------------------------------
--spec init_base_dir_config(atom(), atom(), list()) -> {list(), list()}.
+-spec init_base_dir_config(atom(), atom(), Config) -> Config when
+    Config :: ct_suite:ct_config().
 init_base_dir_config(Mod, TestCase, Config)->
     PrivDir = ?config(priv_dir, Config),
     BaseDir = PrivDir ++ "data/" ++ erlang:atom_to_list(Mod) ++ "_" ++ erlang:atom_to_list(TestCase),
