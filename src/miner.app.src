@@ -7,6 +7,7 @@
    [
     kernel,
     stdlib,
+    sasl,
     syntax_tools,
     compiler,
     crypto,
