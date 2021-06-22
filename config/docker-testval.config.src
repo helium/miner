@@ -15,17 +15,12 @@
    {seed_nodes, "/ip4/3.12.155.25/tcp/2154"},
    {seed_node_dns, ""},
    {ports, [2154]},
-   {honor_quick_sync, true},
-   {quick_sync_mode, blessed_snapshot},
-   {blessed_snapshot_block_height, 15121},
-   {blessed_snapshot_block_hash,
-     <<212,153,235,149,144,169,179,243,176,156,92,202,217,40,119,223,177,191,83,51,215,65,206,217,63,112,27,245,207,218,100,196>>},
+   {honor_quick_sync, false},
+   {quick_sync_mode, assumed_valid},
    {validation_width, 8},
    {key, undefined},
    {relay_limit, 100},
-   {base_dir, "/var/data"},
-   {gw_cache_retention_limit, 76},
-   {gw_context_cache_max_size, 500}
+   {base_dir, "/var/data"}
   ]},
   {libp2p,
    [
