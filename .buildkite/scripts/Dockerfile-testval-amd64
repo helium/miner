@@ -22,7 +22,7 @@ ADD . /usr/src/miner/
 RUN ./rebar3 as docker_testval tar
 
 RUN mkdir -p /opt/docker
-RUN tar -zxvf _build/docker_val/rel/*/*.tar.gz -C /opt/docker
+RUN tar -zxvf _build/docker_testval/rel/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
 
 RUN wget https://snapshots.helium.wtf/genesis.testnet
