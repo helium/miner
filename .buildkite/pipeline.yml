@@ -32,19 +32,6 @@ steps:
     agents:
       queue: "erlang"
 
-  - if: build.tag != null
-    name: ":whale: AMD64 docker"
-    env:
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "miner"
-      IMAGE_FORMAT: "docker"
-      IMAGE_ARCH: "amd64"
-    agents:
-      queue: "erlang"
-    commands:
-      - "git fetch -t"
-      - ".buildkite/scripts/make_image.sh"
-
   - if: build.tag =~ /^val/
     name: "validator AMD64 docker"
     env:
@@ -71,7 +58,46 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_val_image.sh"
 
-  - if: build.tag != null
+        - if: build.tag =~ /^testval/
+    name: "validator AMD64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "amd64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_testval_image.sh"
+
+  - if: build.tag =~ /^testval/
+    name: "validator ARM64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "validator"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "arm64"
+    agents:
+      queue: "arm64"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_testval_image.sh"
+
+  - if: build.tag != null && build.tag !~ /^testval/ && build.tag !~ /^val/
+    name: ":whale: AMD64 docker"
+    env:
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_NAME: "miner"
+      IMAGE_FORMAT: "docker"
+      IMAGE_ARCH: "amd64"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_image.sh"
+
+  - if: build.tag != null && build.tag !~ /^testval/ && build.tag !~ /^val/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
