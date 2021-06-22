@@ -161,17 +161,6 @@ handle_command({status, Ref, Worker}, State) ->
                                 public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)
                                }, maps:remove(sig_sent, Map))},
     {reply, ok, ignore};
-handle_command({skip, Ref, Worker}, #state{chain=Chain}=S) ->
-    Version = md_version(blockchain:ledger(Chain)),
-    HBBFT0 = hbbft:set_stamp_fun(?MODULE, metadata, [Version, #{}, Chain], S#state.hbbft),
-    ?mark(skip),
-    case hbbft:next_round(HBBFT0) of
-        {HBBFT1, ok} ->
-            Worker ! {Ref, ok},
-            {reply, ok, [new_epoch], state_reset(HBBFT1, S)};
-        {HBBFT1, {send, NextMsgs}} ->
-            {reply, ok, [new_epoch | fixup_msgs(NextMsgs)], state_reset(HBBFT1, S)}
-    end;
 handle_command(mark_done, _State) ->
     {reply, ok, ignore};
 %% XXX this is a hack because we don't yet have a way to message this process other ways
@@ -301,7 +290,7 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
                     lager:info("waiting: ~p", [Skips1]),
                     {S0#state{skip_votes = Skips1}, []}
             end;
-        {proposed_skip, ProposedRound, IndexRound} ->
+        {ok, {proposed_skip, ProposedRound, IndexRound}} ->
             Skips1 = Skips#{Index => {ProposedRound, IndexRound}},
             {S0#state{skip_votes = Skips1}, []};
         %% Other
@@ -763,13 +752,19 @@ process_skips(Proposed, SenderRound, F, Sender, Votes) ->
 
 %% the idea here is to take a clean round that's higher than the median, which should be relatively
 %% hard to manipulate by cheating
+-spec median_not_taken(#{pos_integer() => {pos_integer(), pos_integer()}}) ->
+                              pos_integer().
 median_not_taken(Map) ->
     {_Votes, Rounds} = lists:unzip(maps:values(Map)),
     lager:info("rounds ~p", [lists:sort(Rounds)]),
     Median = miner_util:median(Rounds),
     search_lowest(Median, lists:sort(Rounds)).
 
-%% if we haven't found a round in the list, the next highest should work
+%% once we have the median, we look for the lowest "hole" in the sorted list.  we need a fresh round
+%% for everything to skip to or anything that's on the used round will not send any messages and
+%% might have dirty state in its relcast.  this walks up the list until it finds a number that is
+%% higher than the initial try and is not present on the list.
+-spec search_lowest(pos_integer(), [pos_integer()]) -> pos_integer().
 search_lowest(Try, []) ->
     Try;
 %% skip past stuff below the median
@@ -806,5 +801,14 @@ positions_test() ->
     ?assertMatch([1], positions([a], [a, b]), "Position 1 of 2"),
     ?assertMatch([2], positions([b], [a, b, c]), "Position 2 of 3"),
     ?assertMatch([2, 2], positions([b, b], [a, b, c]), "Position 2,2 of 3").
+
+search_lowest_test() ->
+    ?assertMatch(33, search_lowest(33, []), "empty"),
+    ?assertMatch(2, search_lowest(1, [1, 1, 1, 1, 41231231]), "ignore outliers"),
+    ?assertMatch(6, search_lowest(3, [1, 2, 3, 4, 5]), "lowest untaken"),
+    ?assertMatch(8, search_lowest(3, [1, 2, 3, 4, 5, 6, 7, 9]), "lowest untaken 2"),
+    ?assertMatch(8, search_lowest(3, [1, 3, 4, 5, 6, 7, 9]), "lowest untaken 3"),
+    ?assertMatch(2, search_lowest(1, [1, 1, 1, 1, 4]), "basic"),
+    ?assertMatch(3, search_lowest(3, [1, 1, 1, 1, 4]), "don't go lower than try").
 
 -endif.

@@ -249,15 +249,7 @@ hbbft_skip() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
         undefined -> ok;
         Pid ->
-            Ref = make_ref(),
-            ok = libp2p_group_relcast:handle_input(Pid, {skip, Ref, self()}),
-            receive
-                {Ref, Result} ->
-                    miner ! block_timeout,
-                    Result
-            after timer:seconds(60) ->
-                      {error, timeout}
-            end
+            ok = libp2p_group_relcast:handle_input(Pid, maybe_skip)
     end.
 
 -spec signed_block([binary()], binary()) -> ok.

@@ -255,6 +255,8 @@ autoskip_chain_vars_test(Config) ->
         "No node accepted the bogus chain var."
     ),
 
+    {comment, miner_ct_utils:heights(MinersAll)}.
+
 autoskip_on_timeout_test(Config) ->
     %% The idea is to reproduce the following chain stall scenario:
     %% 1. 1/2 of consensus members produce timed blocks;
@@ -295,6 +297,8 @@ autoskip_on_timeout_test(Config) ->
     ||
         Node <- MinersCGBroken
     ],
+
+    %% send some more skips at broken miner 1 so we're not all on the same round
     Node1 = hd(MinersCGBroken),
     ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
     ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
