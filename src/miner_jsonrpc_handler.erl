@@ -203,7 +203,7 @@ to_value(true) -> true;
 to_value(false) -> false;
 to_value(undefined) -> null;
 %% lightly format floats, but pass through integers as-is
-to_value(X) when is_float(X) -> float_to_binary(blockchain_utils:normalize_float(X), 2);
+to_value(X) when is_float(X) -> float_to_binary(blockchain_utils:normalize_float(X), [{decimals, 3}, compact]);
 to_value(X) when is_integer(X) -> X;
 %% make sure we have valid representations of other types which may show up in values
 to_value(X) when is_list(X) -> iolist_to_binary(X);
