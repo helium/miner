@@ -17,7 +17,6 @@
 -export([
          txn_in_sequence_nonce_test/1,
          txn_out_of_sequence_nonce_test/1,
-         txn_out_of_sequence_nonce_max_block_spantest/1,
          txn_invalid_nonce_test/1,
          txn_dependent_test/1
 
@@ -28,7 +27,6 @@
 all() -> [
           txn_in_sequence_nonce_test,
           txn_out_of_sequence_nonce_test,
-          txn_out_of_sequence_nonce_max_block_spantest,
           txn_invalid_nonce_test,
           txn_dependent_test
          ].
