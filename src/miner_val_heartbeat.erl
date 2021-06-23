@@ -70,8 +70,8 @@ handle_info({blockchain_event, {add_block, _Hash, _Sync, _Ledger}},
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             #state{address = Address, sigfun = SigFun} = State) ->
     Ledger = blockchain:ledger(State#state.chain),
-    case blockchain:config(?election_version, Ledger) of
-        {ok, V} when V >= 5 ->
+    case blockchain:config(?validator_version, Ledger) of
+        {ok, V} when V >= 1 ->
             {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
             Now = erlang:system_time(seconds),
             {ok, Block} = blockchain:get_block(Hash, State#state.chain),
