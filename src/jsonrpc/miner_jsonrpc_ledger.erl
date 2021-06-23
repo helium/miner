@@ -40,14 +40,14 @@ handle_rpc(<<"ledger_balance">>, #{<<"htlc">> := true}) ->
         fun(Addr, Htlc, Acc) ->
             [
                 #{
-                    address => ?BIN_TO_B58(Addr),
-                    payer => ?BIN_TO_B58(blockchain_ledger_htlc_v1:payer(Htlc)),
-                    payee => ?BIN_TO_B58(blockchain_ledger_htlc_v1:payee(Htlc)),
-                    hashlock => blockchain_utils:bin_to_hex(
+                    <<"address">> => ?BIN_TO_B58(Addr),
+                    <<"payer">> => ?BIN_TO_B58(blockchain_ledger_htlc_v1:payer(Htlc)),
+                    <<"payee">> => ?BIN_TO_B58(blockchain_ledger_htlc_v1:payee(Htlc)),
+                    <<"hashlock">> => blockchain_utils:bin_to_hex(
                         blockchain_ledger_htlc_v1:hashlock(Htlc)
                     ),
-                    timelock => blockchain_ledger_htlc_v1:timelock(Htlc),
-                    amount => blockchain_ledger_htlc_v1:amount(Htlc)
+                    <<"timelock">> => blockchain_ledger_htlc_v1:timelock(Htlc),
+                    <<"balance">> => blockchain_ledger_htlc_v1:balance(Htlc)
                 }
                 | Acc
             ]
@@ -124,32 +124,32 @@ get_ledger() ->
 
 format_ledger_balance(Addr, Entry) ->
     #{
-        address => ?BIN_TO_B58(Addr),
-        nonce => blockchain_ledger_entry_v1:nonce(Entry),
-        balance => blockchain_ledger_entry_v1:balance(Entry)
+        <<"address">> => ?BIN_TO_B58(Addr),
+        <<"nonce">> => blockchain_ledger_entry_v1:nonce(Entry),
+        <<"balance">> => blockchain_ledger_entry_v1:balance(Entry)
     }.
 
 format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
     GWAddr = ?BIN_TO_B58(Addr),
     O = #{
-        name => iolist_to_binary(blockchain_utils:addr2name(GWAddr)),
-        address => GWAddr,
-        owner_address => ?BIN_TO_B58(blockchain_ledger_gateway_v2:owner_address(GW)),
-        location => ?MAYBE(blockchain_ledger_gateway_v2:location(GW)),
-        last_challenge => last_challenge(
+        <<"name">> => iolist_to_binary(blockchain_utils:addr2name(GWAddr)),
+        <<"address">> => GWAddr,
+        <<"owner_address">> => ?BIN_TO_B58(blockchain_ledger_gateway_v2:owner_address(GW)),
+        <<"location">> => ?MAYBE(blockchain_ledger_gateway_v2:location(GW)),
+        <<"last_challenge">> => last_challenge(
             Height,
             blockchain_ledger_gateway_v2:last_poc_challenge(GW)
         ),
-        nonce => blockchain_ledger_gateway_v2:nonce(GW)
+        <<"nonce">> => blockchain_ledger_gateway_v2:nonce(GW)
     },
     case Verbose of
         false ->
             O;
         true ->
             O#{
-                elevation => ?MAYBE(blockchain_ledger_gateway_v2:elevation(GW)),
-                gain => ?MAYBE(blockchain_ledger_gateway_v2:gain(GW)),
-                mode => ?MAYBE(blockchain_ledger_gateway_v2:mode(GW))
+                <<"elevation">> => ?MAYBE(blockchain_ledger_gateway_v2:elevation(GW)),
+                <<"gain">> => ?MAYBE(blockchain_ledger_gateway_v2:gain(GW)),
+                <<"mode">> => ?MAYBE(blockchain_ledger_gateway_v2:mode(GW))
             }
     end.
 
@@ -158,6 +158,6 @@ last_challenge(Height, LC) -> Height - LC.
 
 format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
     maps:from_list([
-        {name, blockchain_utils:addr2name(Addr)}
+        {<<"name">>, blockchain_utils:addr2name(Addr)}
         | blockchain_ledger_validator_v1:print(Val, Height, Verbose, Ledger)
     ]).

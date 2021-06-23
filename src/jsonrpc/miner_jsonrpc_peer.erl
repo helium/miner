@@ -78,12 +78,12 @@ ping_peer(TID, Addr) when is_list(Addr) ->
         {ok, Session} ->
             case libp2p_session:ping(Session) of
                 {ok, RTT} ->
-                    Addr = ?TO_KEY(Addr),
-                    #{Addr => RTT};
+                    AddrKey = ?TO_KEY(Addr),
+                    #{AddrKey => RTT};
                 {error, _} = Error ->
-                    Addr = ?TO_KEY(Addr),
+                    AddrKey = ?TO_KEY(Addr),
                     #{
-                        Addr => -1,
+                        AddrKey => -1,
                         <<"error">> => ?TO_VALUE(Error)
                     }
             end;
@@ -178,7 +178,7 @@ format_peer_sessions(Swarm) ->
 
 do_peer_refresh(Addr) when is_list(Addr) ->
     TID = blockchain_swarm:tid(),
-    Peerbook = libp2p_swarm:peerkbook(TID),
+    Peerbook = libp2p_swarm:peerbook(TID),
     [ #{ A => do_refresh(Peerbook, A) } ||
       A <- Addr ];
 do_peer_refresh(Addr) ->

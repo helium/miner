@@ -37,7 +37,7 @@ handle_rpc(_, _) ->
 
 get_transaction(TxnHash) ->
     Chain = blockchain_worker:blockchain(),
-    HeadBlock = blockchain:head_block(Chain),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
     HeadHeight = blockchain_block:height(HeadBlock),
     case blockchain:fold_chain(fun(B, Acc) -> find_txn(B, TxnHash, HeadHeight, Acc) end,
                                {HeadHeight, undefined},
