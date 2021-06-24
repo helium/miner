@@ -376,7 +376,7 @@ dkg_restart_test(Config) ->
 validator_transition_test(Config) ->
     %% get all the miners
     Miners = ?config(miners, Config),
-    Context = ?config(node_context, Config),
+    Options = ?config(node_options, Config),
     {Owner, #{secret := AuxPriv}} = ?config(aux_acct, Config),
     AuxSigFun = libp2p_crypto:mk_sig_fun(AuxPriv),
     %% setup makes sure that the cluster is running, so the first thing is to create and connect two
@@ -389,7 +389,7 @@ validator_transition_test(Config) ->
     ValidatorAddrList =
         [begin
              Num = integer_to_list(N),
-             {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Context),
+             {NewVal, Keys} = miner_ct_utils:start_miner(list_to_atom(Num ++ miner_ct_utils:randname(5)), Options),
              {_, _, _, _Pub, Addr, _SigFun} = Keys,
              ct_rpc:call(NewVal, blockchain_worker, integrate_genesis_block, [GenesisBlock]),
              Swarm = ct_rpc:call(NewVal, blockchain_swarm, swarm, [], 2000),

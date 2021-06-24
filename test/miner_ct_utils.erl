@@ -18,7 +18,6 @@
          get_addrs/1,
          start_miner/2,
          start_node/1,
-         config_node/2,
          partition_cluster/2,
          heal_cluster/2,
          connect/1,
@@ -223,10 +222,10 @@ stop_miners(Miners, Retries) ->
            || Miner <- Miners],
     Res.
 
-start_miner(Name0, Context) ->
+start_miner(Name0, Options) ->
     Name = start_node(Name0),
     Keys = make_keys(Name, {45000, 0, 4466}),
-    config_node(Keys, Context),
+    config_node(Keys, Options),
     {Name, Keys}.
 
 start_miners(Miners) ->
@@ -789,8 +788,16 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
-    Context = {Mod, LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
-    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
+    Options = [{mod, Mod},
+               {logdir, LogDir},
+               {basedir, BaseDir},
+               {seed_nodes, SeedNodes},
+               {total_miners, TotalMiners},
+               {curve, Curve},
+               {default_routers, DefaultRouters},
+               {port, Port}],
+
+    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Options) end, Keys),
 
     Miners = [M || {M, _} <- MinersAndPorts],
     %% check that the config loaded correctly on each miner
@@ -871,7 +878,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {miners, Miners},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
-        {node_context, Context},
+        {node_options, Options},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
@@ -904,8 +911,16 @@ make_keys(Miner, Ports) ->
     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
-config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun},
-            {Mod, LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
+config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun}, Options) ->
+    Mod = proplists:get_value(mod, Options),
+    LogDir = proplists:get_value(logdir, Options),
+    BaseDir = proplists:get_value(basedir, Options),
+    SeedNodes = proplists:get_value(seed_nodes, Options),
+    TotalMiners = proplists:get_value(total_miners, Options),
+    Curve = proplists:get_value(curve, Options),
+    DefaultRouters = proplists:get_value(default_routers, Options),
+    Port = proplists:get_value(port, Options),
+
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
     ct_rpc:call(Miner, application, load, [lager]),
