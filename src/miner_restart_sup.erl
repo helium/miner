@@ -91,10 +91,16 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
+    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
+    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+
     ChildSpecs =
         [
          ?WORKER(miner_hbbft_sidecar, []),
-         ?WORKER(miner, [])
+         ?WORKER(miner, []),
+         ?WORKER(elli, [[{callback, miner_jsonrpc_handler},
+                         {ip, JsonRpcIp},
+                         {port, JsonRpcPort}]])
          ] ++
         ValServers ++
         EbusServer ++
