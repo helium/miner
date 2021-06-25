@@ -960,7 +960,6 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
-    ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
     case Mod of
         miner_poc_v11_SUITE ->
             %% Don't set anything region related with poc-v11
