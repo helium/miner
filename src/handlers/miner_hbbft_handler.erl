@@ -156,6 +156,7 @@ handle_command({status, Ref, Worker}, State) ->
     Worker ! {Ref, maps:merge(#{signatures_required =>
                                     max(State#state.signatures_required - length(SigMemIds), 0),
                                 signatures => SigMemIds,
+                                skip_votes => State#state.skip_votes,
                                 sig_phase => State#state.sig_phase,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)

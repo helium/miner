@@ -546,9 +546,16 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     %% if we cannot agree on the BBA results, default to flagging everyone as having completed
-    BBA = common_enough_or_default(VotesNeeded, BBAs,
-                                   blockchain_utils:map_to_bitvector(
-                                     maps:from_list([ {I, true} || I <- lists:seq(1, count_consensus_members(Chain))]))),
+    VoteDefault =
+        case blockchain:config(?election_version, Ledger) of
+            {ok, N} when N >= 5 ->
+                blockchain_utils:map_to_bitvector(
+                  maps:from_list([ {I, true}
+                                   || I <- lists:seq(1, count_consensus_members(Chain))]));
+            _ -> <<>>
+        end,
+
+    BBA = common_enough_or_default(VotesNeeded, BBAs, VoteDefault),
     {ElectionEpoch, EpochStart, TxnsToInsert, InvalidTransactions} =
         select_transactions(Chain, Txns, CurrentBlock, HeightCurr, HeightNext),
     NewBlock =
