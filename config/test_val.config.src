@@ -44,8 +44,6 @@
    {mode, validator},
    {stabilization_period, 8000},
    {network, testnet},
-   {jsonrpc_port, 4467},
-   {stats_file, "/tmp/val-chain-stats"},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
