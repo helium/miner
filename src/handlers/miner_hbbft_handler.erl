@@ -464,7 +464,9 @@ restore(OldState, NewState) ->
     Buf1 = miner_hbbft_sidecar:new_round(Buf, []),
     HBBFT1 = hbbft:buf(Buf1, HBBFT),
     Chain = NewState#state.chain,
-    {ok, OldState#state{hbbft = hbbft:set_stamp_fun(M, F, A, HBBFT1), chain=Chain}}.
+    SwarmKeys = NewState#state.swarm_keys,
+    {ok, OldState#state{hbbft = hbbft:set_stamp_fun(M, F, A, HBBFT1),
+                        chain=Chain, swarm_keys=SwarmKeys}}.
 
 %% helper functions
 -spec fixup_msgs([MsgIn]) -> [MsgOut] when
