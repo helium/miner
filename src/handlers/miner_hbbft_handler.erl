@@ -344,12 +344,6 @@ handle_msg_hbbft(Msg, Index, #state{hbbft=HBBFT0}=S0) ->
                         invalid_txns          := InvalidTxns
                      }
                 } ->
-                    lager:info("self-made artifact: ~p ",
-                        [[
-                            {addr, b58(Address)},
-                            {sig, b58(Signature)},
-                            {art, b58(Artifact)}
-                        ]]),
                     ?mark(block_success),
                     %% call hbbft finalize round
                     Duration = erlang:monotonic_time(millisecond) - Before,
