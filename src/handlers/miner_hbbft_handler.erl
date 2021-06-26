@@ -158,6 +158,7 @@ handle_command({status, Ref, Worker}, State) ->
                                 signatures => SigMemIds,
                                 skip_votes => State#state.skip_votes,
                                 sig_phase => State#state.sig_phase,
+                                last_round_signed => State#state.last_round_signed,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)
                                }, maps:remove(sig_sent, Map))},
@@ -439,6 +440,14 @@ deserialize(#{sk := SKSer,
                           sig;
                       _ when K == seen ->
                           #{};
+                      _ when K == sigs_valid ->
+                          [];
+                      _ when K == sigs_invalid ->
+                          [];
+                      _ when K == sigs_unchecked ->
+                          [];
+                      _ when K == last_round_signed ->
+                          0;
                       _ when K == bba ->
                           <<>>;
                       _ ->
@@ -672,11 +681,9 @@ state_sigs_check_if_enough(
             sig -> F + 1;
             gossip -> Threshold0
         end,
-    SigsValidRand =
-        lists:sublist(blockchain_utils:shuffle(SigsValidAll), Threshold1),
     case
         length(SigsValidAll) =< (3*F)+1 andalso
-        length(SigsValidRand) >= Threshold1
+        length(SigsValidAll) >= Threshold1
     of
         true ->
             %% So, this is a little dicey, if we don't need all N signatures,
@@ -685,16 +692,16 @@ state_sigs_check_if_enough(
             %% though, it should be ok as long as we disregard the signatures
             %% for testing equality but check them for validity
             SigsValidRandSubset =
-                lists:sublist(lists:sort(SigsValidRand), Threshold0),
+                lists:sublist(lists:sort(SigsValidAll), Threshold0),
             case Phase of
                 gossip ->
                     {{enough_for, {done, SigsValidRandSubset}}, S0};
                 sig ->
-                    case length(SigsValidRand) >= Threshold0 of
+                    case length(SigsValidAll) >= Threshold0 of
                         true ->
                             {{enough_for, {done, SigsValidRandSubset}}, S0};
                         false ->
-                            {{enough_for, {gossip, lists:sort(SigsValidRand)}}, S0}
+                            {{enough_for, {gossip, lists:sort(SigsValidAll)}}, S0}
                     end
             end;
         false ->
