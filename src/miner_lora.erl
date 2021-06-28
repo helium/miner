@@ -149,9 +149,9 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
-reg_domain_data_for_addr(Addr)->
-    case blockchain:ledger() of
+-spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin(), state())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
+    case blockchain:ledger(Chain) of
         undefined ->
             {error, no_ledger};
         Ledger ->
@@ -325,16 +325,21 @@ handle_info(chain_check, State) ->
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
     State1 = State#state{chain = NC},
     {noreply, State1};
+handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
+    %% There is no chain, we cannot lookup regulatory domain data yet
+    %% Keep waiting for chain
+    erlang:send_after(500, self(), chain_check),
+    {noreply, State};
 handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr, chain=Chain} = State) ->
     lager:debug("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        case reg_domain_data_for_addr(Addr) of
+        case reg_domain_data_for_addr(Addr, State) of
             {error, Reason}->
                 lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
                 %% the hotspot has not yet asserted its location, transmits will remain disabled
                 %% we will check again after a period
-                erlang:send_after(30000, self(), reg_domain_timeout),
+                erlang:send_after(1000, self(), reg_domain_timeout),
                 {noreply, State};
             {ok, {Region, FrequencyList}} ->
                 lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
@@ -345,7 +350,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     catch
         _Type:Exception ->
             lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
-            erlang:send_after(30000, self(), reg_domain_timeout),
+            erlang:send_after(1000, self(), reg_domain_timeout),
             {noreply, State}
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
