@@ -82,7 +82,8 @@
          chain_var_lookup_one/2,
          build_gateways/2,
          build_asserts/2,
-         add_block/3
+         add_block/3,
+         gen_gateways/2, gen_payments/1
         ]).
 
 chain_var_lookup_all(Key, Nodes) ->
@@ -1526,3 +1527,11 @@ signatures(ConsensusMembers, BinBlock) ->
         ,[]
         ,ConsensusMembers
     ).
+
+gen_gateways(Addresses, Locations) ->
+    [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+     || {Addr, Loc} <- lists:zip(Addresses, Locations)].
+
+gen_payments(Addresses) ->
+    [ blockchain_txn_coinbase_v1:new(Addr, 5000)
+      || Addr <- Addresses].
