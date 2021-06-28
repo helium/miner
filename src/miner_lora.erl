@@ -209,7 +209,6 @@ init(Args) ->
     lager:info("init with args ~p", [Args]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
-    ok = blockchain_event:add_handler(self()),
     {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
     MirrorSocket = case application:get_env(miner, radio_mirror_port, undefined) of
         undefined ->
@@ -256,6 +255,7 @@ init(Args) ->
             erlang:send_after(500, self(), chain_check),
             {ok, S0};
         Chain ->
+            ok = blockchain_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
             Throttle = miner_lora_throttle:new(Ledger, DefaultRegRegion),
             {ok, S0#state{chain = Chain, reg_throttle=Throttle}}
@@ -314,8 +314,14 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(chain_check, State) ->
-    {ok, State1} = init(State),
-    {noreply, State1};
+    case blockchain_worker:blockchain() of
+        undefined ->
+            erlang:send_after(500, self(), chain_check),
+            {noreply, State};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            {noreply, State#state{chain = Chain}}
+    end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
     State1 = State#state{chain = NC},
     {noreply, State1};
@@ -338,7 +344,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
         end
     catch
         _Type:Exception ->
-            lager:warning("error whilst checking regulatory domain: ~p.  Will try again...",[Exception]),
+            lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
             erlang:send_after(30000, self(), reg_domain_timeout),
             {noreply, State}
     end;

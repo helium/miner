@@ -828,6 +828,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                        fun(Miner) ->
                                try
                                    GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 500),
+                                   ct:pal("Miner: ~p, GossipPeers: ~p", [Miner, GossipPeers]),
                                    case length(GossipPeers) >= (length(Miners) / 2) + 1 of
                                        true -> true;
                                        false ->
