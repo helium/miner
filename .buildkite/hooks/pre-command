@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -e
+echo '--- :house_with_garden: Setting up the environment'
+
+. "$HOME/.asdf/asdf.sh"
+asdf local erlang 22.1.8
+asdf local python 3.7.3
+asdf local ruby 2.6.2
+
+export EJSON_KEYDIR="$HOME/.ejson"
+eval "$(ejson2env .buildkite/env/secrets.ejson)"
