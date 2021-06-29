@@ -258,8 +258,9 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
                 {Start1, maps:to_list(Penalties1)};
             _ ->
                 {Start0 + 1,
-                 [{A, S} || {S, _L, A} <- blockchain_election:adjust_old_group(
-                                            [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
+                 [{A, {S, 0.0}}
+                  || {S, _L, A} <- blockchain_election:adjust_old_group(
+                                     [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
         end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
                     || Ht <- lists:seq(Start, End)],
