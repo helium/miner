@@ -388,74 +388,106 @@ make_bba(Sz, Metadata) ->
                      end, M, lists:seq(1, Sz)),
     blockchain_utils:map_to_bitvector(M1).
 
--spec serialize(#state{}) -> #{atom() => binary()}.
-serialize(State) ->
-    {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
-    Fields = record_info(fields, state),
-    StateList0 = tuple_to_list(State),
-    StateList = tl(StateList0),
-    lists:foldl(fun({K = hbbft, _}, M) ->
-                        M#{K => SerializedHBBFT};
-                   ({K = sk, _}, M) ->
-                        M#{K => term_to_binary(SerializedSK,  [compressed])};
-                   ({chain, _}, M) ->
-                        M;
-                   ({skip_votes, _}, M) ->
-                        M;
-                   ({K, V}, M)->
-                        VB = term_to_binary(V, [compressed]),
-                        M#{K => VB}
-                end,
-                #{},
-                lists:zip(Fields, StateList)).
+-spec serialize(#state{}) -> #{atom() => binary() | #{}}.
+serialize(#state{}=S) ->
+    state_to_map(S).
 
--spec deserialize(binary() | #{atom() => binary()}) -> #state{}.
-deserialize(BinState) when is_binary(BinState) ->
-    State = binary_to_term(BinState),
+-spec deserialize(binary() | #{atom() => binary() | #{}}) -> #state{}.
+deserialize(<<BinState/binary>>) ->
+    #state{} = State = binary_to_term(BinState),
     SK = tc_key_share:deserialize(State#state.sk),
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     State#state{hbbft=HBBFT, sk=SK};
-deserialize(#{sk := SKSer,
-              hbbft := HBBFTSer} = StateMap) ->
-    SK = tc_key_share:deserialize(binary_to_term(SKSer)),
-    HBBFT = hbbft:deserialize(HBBFTSer, SK),
-    Fields = record_info(fields, state),
-    Bundef = term_to_binary(undefined, [compressed]),
-    DeserList =
-        lists:map(
-          fun(hbbft) ->
-                  HBBFT;
-             (sk) ->
-                  SK;
-             (chain) ->
-                  undefined;
-             (skip_votes) ->
-                  #{};
-             (K)->
-                  case StateMap of
-                      #{K := V} when V /= undefined andalso
-                                     V /= Bundef ->
-                          binary_to_term(V);
-                      _ when K == sig_phase ->
-                          sig; % TODO Different from default in definition. Why?
-                      _ when K == seen ->
-                          #{};
-                      _ when K == sigs_valid ->
-                          [];
-                      _ when K == sigs_invalid ->
-                          [];
-                      _ when K == sigs_unchecked ->
-                          [];
-                      _ when K == last_round_signed ->
-                          0;
-                      _ when K == bba ->
-                          <<>>;
-                      _ ->
-                          undefined
-                  end
-          end,
-          Fields),
-    list_to_tuple([state | DeserList]).
+deserialize(#{}=StateMap) ->
+    state_from_map(StateMap).
+
+-spec state_to_map(#state{}) -> #{atom() => binary() | #{}}.
+state_to_map(
+    #state{
+        n                   = N,
+        f                   = F,
+        id                  = ID,
+        hbbft               = HBBFT,
+        %sk                 % XXX will be grabbed from hbbft:serialize
+        sigs_valid          = SigsValid,
+        sigs_invalid        = SigsInvalid,
+        sigs_unchecked      = SigsUnchecked,
+        signatures_required = SignaturesRequired,
+        sig_phase           = SigPhase,
+        artifact            = Artifact,
+        members             = Members,
+        %%chain             % XXX not serialized
+        last_round_signed   = LastRoundSigned,
+        seen                = Seen,
+        bba                 = BBA,
+        swarm_keys          = SwarmKeys
+        %%skip_votes        % XXX not serialized
+    }
+) ->
+    T2B = fun(Term) -> term_to_binary(Term,  [compressed]) end,
+    {SerializedHBBFT, SerializedSK} = hbbft:serialize(HBBFT, true),
+    #{
+        n                   => T2B(N),
+        f                   => T2B(F),
+        id                  => T2B(ID),
+        hbbft               => SerializedHBBFT,
+        sk                  => T2B(SerializedSK),
+        sigs_valid          => T2B(SigsValid),
+        sigs_invalid        => T2B(SigsInvalid),
+        sigs_unchecked      => T2B(SigsUnchecked),
+        signatures_required => T2B(SignaturesRequired),
+        sig_phase           => T2B(SigPhase),
+        artifact            => T2B(Artifact),
+        members             => T2B(Members),
+        %chain
+        last_round_signed   => T2B(LastRoundSigned),
+        seen                => T2B(Seen),
+        bba                 => T2B(BBA), % TODO BBA is already binary. Maybe leave as is?
+        swarm_keys          => T2B(SwarmKeys)
+        %skip_votes
+    }.
+
+-spec state_from_map(map()) -> #state{}.
+state_from_map(
+    #{
+        n                   := BinN,
+        f                   := BinF,
+        id                  := BinID,
+        hbbft               := SerializedHBBFT,
+        sk                  := BinSerializedSK,
+        sigs_valid          := BinSigsValid,
+        sigs_invalid        := BinSigsInvalid,
+        sigs_unchecked      := BinSigsUnchecked,
+        signatures_required := BinSignaturesRequired,
+        artifact            := BinArtifact,
+        members             := BinMembers,
+        last_round_signed   := BinLastRoundSigned,
+        swarm_keys          := BinSwarmKeys
+    }
+) ->
+    B2T = fun(Bin) -> binary_to_term(Bin) end,
+    SK = tc_key_share:deserialize(B2T(BinSerializedSK)),
+    HBBFT = hbbft:deserialize(SerializedHBBFT, SK),
+    #state{
+        n                   = B2T(BinN),
+        f                   = B2T(BinF),
+        id                  = B2T(BinID),
+        hbbft               = HBBFT,
+        sk                  = SK,
+        sigs_valid          = B2T(BinSigsValid),
+        sigs_invalid        = B2T(BinSigsInvalid),
+        sigs_unchecked      = B2T(BinSigsUnchecked),
+        signatures_required = B2T(BinSignaturesRequired),
+        %sig_phase          = sig, % TODO Is this correct?
+        artifact            = B2T(BinArtifact),
+        members             = B2T(BinMembers),
+        chain               = undefined,
+        last_round_signed   = B2T(BinLastRoundSigned),
+        seen                = #{},
+        bba                 = <<>>,
+        swarm_keys          = B2T(BinSwarmKeys),
+        skip_votes          = #{}
+    }.
 
 -spec restore(#state{}, #state{}) -> {ok, #state{}}.
 restore(OldState, NewState) ->
