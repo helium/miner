@@ -18,6 +18,10 @@
    {honor_quick_sync, false},
    {quick_sync_mode, assumed_valid},
    {key, undefined},
+   {block_sync_batch_size, 10},
+   {block_sync_batch_limit, 100},
+   {validation_width, 8},
+   {max_inbound_connections, 32},
    {relay_limit, 100},
    {base_dir, "data"}
   ]},

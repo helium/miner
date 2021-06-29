@@ -14,6 +14,9 @@
   [
    {ports, [2154]},
    {validation_width, 8},
+   {block_sync_batch_size, 10},
+   {block_sync_batch_limit, 100},
+   {max_inbound_connections, 32},
    {key, undefined},
    {relay_limit, 100},
    {base_dir, "/var/data"}
