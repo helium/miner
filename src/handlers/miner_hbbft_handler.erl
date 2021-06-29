@@ -840,7 +840,7 @@ state_serialization_test_() ->
                 "State serialization roundtrip, field: ~s",
                 [K]
             )),
-            (fun() ->
+            begin
                 Expected =
                     case K of
                         %sig_phase  -> {some, sig}; % FIXME We get the default 'unsent' instead.
@@ -852,7 +852,7 @@ state_serialization_test_() ->
                     end,
                 Actual = kvl_get(K, S2Pairs),
                 ?_assertEqual(Expected, Actual)
-            end)()
+            end
         }
     ||
         {K, OriginalValue} <- S1Pairs
