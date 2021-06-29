@@ -821,7 +821,17 @@ search_lowest_test() ->
 state_serialization_test_() ->
     S1 = state_new(),
     S2 = deserialize(serialize(S1)),
-    TmpFilter = % TODO Remove when bellow FIXMEs are resolved
+    %% Ostensibly, at this point we just want to ?assertEqual(S1, S2), but the
+    %% failure messages would be difficult to read, so we proceed to expand
+    %% that assertion into a battery of per-field assertions.
+    %%
+    %% Also, some fields are expected to be different from original, so we need
+    %% to handle that too.
+
+    %% This TemporarilyFilterOutFieldsKnownToFail function exists only to
+    %% prevent failure noise from fields I know do not round-trip.
+    %% TODO Remove when these failures are understood/resolved.
+    TemporarilyFilterOutFieldsKnownToFail =
         fun (Pairs) ->
             [
                 P
@@ -831,9 +841,11 @@ state_serialization_test_() ->
                 K =/= hbbft % FIXME roundtrip doesn't work
             ]
         end,
-    S2P = fun(S) -> TmpFilter(state_to_pairs(S)) end,
+
+    S2P = fun(S) -> TemporarilyFilterOutFieldsKnownToFail(state_to_pairs(S)) end,
     S1Pairs = S2P(S1),
     S2Pairs = S2P(S2),
+
     [
         {
             lists:flatten(io_lib:format(
@@ -842,6 +854,8 @@ state_serialization_test_() ->
             )),
             begin
                 Expected =
+                    %% Some fields we expect to be reset to default values,
+                    %% while others should keep the original:
                     case K of
                         %sig_phase  -> {some, sig}; % FIXME We get the default 'unsent' instead.
                         chain      -> {some, undefined};
@@ -858,6 +872,7 @@ state_serialization_test_() ->
         {K, OriginalValue} <- S1Pairs
     ].
 
+%% Create a dummy state which tests can play with.
 state_new() ->
     ID = 0,
     SK = % TODO Is this construction correct? Doesn't round trip serialization?
