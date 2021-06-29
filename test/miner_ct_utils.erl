@@ -1730,8 +1730,6 @@ start_blockchain(Config, GenesisVars) ->
     InitialGws = miner_ct_utils:gen_gateways(Addresses, Locations),
     Txns = InitialVars ++ InitialPayments ++ InitialGws,
 
-    ct:pal("Genesis txns: ~p", [Txns]),
-
     {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(
         Miners,
         Txns,
