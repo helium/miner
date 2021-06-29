@@ -24,21 +24,21 @@
          id :: non_neg_integer(),
          hbbft :: hbbft:hbbft_data(),
          sk :: tc_key_share:tc_key_share() | binary(),
-         sigs_valid     = [] :: [blockchain_block:signature()],
-         sigs_invalid   = [] :: [blockchain_block:signature()],
-         sigs_unchecked = [] :: [blockchain_block:signature()],
-         signatures_required = 0,
-         sig_phase = unsent :: unsent | sig | gossip | done,
+         sigs_valid          :: [blockchain_block:signature()],
+         sigs_invalid        :: [blockchain_block:signature()],
+         sigs_unchecked      :: [blockchain_block:signature()],
+         signatures_required :: non_neg_integer(), % TODO pos_integer()?
+         sig_phase           :: unsent | sig | gossip | done,
          artifact :: undefined | binary(),
          members :: [libp2p_crypto:pubkey_bin()],
          chain :: blockchain:blockchain(),
-         last_round_signed = 0 :: non_neg_integer(),
-         seen = #{} :: #{non_neg_integer() => boolean()},
-         bba = <<>> :: binary(),
+         last_round_signed   :: non_neg_integer(),
+         seen                :: #{non_neg_integer() => boolean()},
+         bba                 :: binary(),
+         skip_votes          :: #{pos_integer() => pos_integer()},
 
          %% For artifact re-signing on var-autoskip:
-         swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()},
-         skip_votes = #{} :: #{pos_integer() => pos_integer()}
+         swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}
         }).
 
 -type hbbft_msg() ::
@@ -111,15 +111,27 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
     {ok, MyPubKey, SignFun, _ECDHFun} = blockchain_swarm:keys(),
 
     lager:info("HBBFT~p started~n", [Id]),
-    {ok, #state{n = N,
-                id = Id - 1,
-                sk = SK,
-                f = F,
-                members = Members,
-                signatures_required = N - F,
-                hbbft = HBBFT,
-                swarm_keys = {MyPubKey, SignFun},  % For re-signing on var-autoskip
-                chain = Chain1}}.
+    State =
+        #state{
+            n                   = N,
+            f                   = F,
+            id                  = Id - 1,
+            hbbft               = HBBFT,
+            sk                  = SK,
+            sigs_valid          = [],
+            sigs_invalid        = [],
+            sigs_unchecked      = [],
+            signatures_required = N - F,
+            sig_phase           = unsent,
+            members             = Members,
+            swarm_keys          = {MyPubKey, SignFun},  % For re-signing on var-autoskip
+            chain               = Chain1,
+            last_round_signed   = 0,
+            seen                = #{},
+            bba                 = <<>>,
+            skip_votes          = #{}
+        },
+    {ok, State}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -478,10 +490,16 @@ state_from_map(
         sigs_invalid        = B2T(BinSigsInvalid),
         sigs_unchecked      = B2T(BinSigsUnchecked),
         signatures_required = B2T(BinSignaturesRequired),
-        %sig_phase          = sig, % TODO Is this correct?
+        sig_phase           = sig, % TODO Which is correct here: sig or unsent?
         artifact            = B2T(BinArtifact),
         members             = B2T(BinMembers),
+
+        % XXX undefined is not a spec'ed value for chain, so this constructs
+        % and invalid instance. The only reason we don't crash on undefined
+        % chain is that relcast calls restore/2 immediately after deserialize/1
+        % FIXME Either: spec the undefined | grab chain from blockchain_worker
         chain               = undefined,
+
         last_round_signed   = B2T(BinLastRoundSigned),
         seen                = #{},
         bba                 = <<>>,
@@ -875,7 +893,7 @@ state_serialization_test_() ->
             (fun() ->
                 Expected =
                     case K of
-                        %sig_phase  -> {some, sig}; % FIXME We get the default 'unsent' instead.
+                        sig_phase  -> {some, sig}; % TODO Which is correct: sig or unsent?
                         chain      -> {some, undefined};
                         seen       -> {some, #{}};
                         skip_votes -> {some, #{}};
@@ -906,15 +924,15 @@ state_new() ->
     BatchSize = 5,
     MaxBuf = 1500,
     #state{
-        n = N,
-        id = ID,
-        sk = SK,
-        f = F,
-        members = [],
+        n                   = N,
+        id                  = ID,
+        sk                  = SK,
+        f                   = F,
+        members             = [],
         signatures_required = N - F,
-        hbbft = hbbft:init(SK, N, F, ID, BatchSize, MaxBuf),
-        swarm_keys = undefined,
-        chain = undefined
+        hbbft               = hbbft:init(SK, N, F, ID, BatchSize, MaxBuf),
+        swarm_keys          = undefined,
+        chain               = undefined
     }.
 
 state_to_pairs(#state{}=S) ->
