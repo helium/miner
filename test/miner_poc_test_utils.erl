@@ -29,6 +29,8 @@ poc_v11_vars() ->
     V0 = maps:put(regulatory_regions, ?regulatory_region_bin_str, maps:from_list(Regions)),
     V1 = #{
            poc_version => 11,
+           %% XXX: 1.0 = no loss? because the mic_rcv_sig calculation multiplies this? unclear...
+           fspl_loss => 1.0,
            region_params_us915 => region_params_us915(),
            region_params_eu868 => region_params_eu868(),
            region_params_au915 => region_params_au915(),

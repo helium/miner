@@ -46,8 +46,13 @@
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 30).
 -define(CHALLENGE_RETRY, 3).
+-ifdef(TEST).
+-define(RECEIVING_TIMEOUT, 10).
+-define(RECEIPTS_TIMEOUT, 10).
+-else.
 -define(RECEIVING_TIMEOUT, 20).
 -define(RECEIPTS_TIMEOUT, 20).
+-endif.
 -define(STATE_FILE, "miner_poc_statem.state").
 -define(POC_RESTARTS, 3).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
