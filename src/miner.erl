@@ -139,8 +139,10 @@ block_age() ->
 -spec p2p_status() -> [{Check::string(), Result::string()}].
 p2p_status() ->
     SwarmTID = blockchain_swarm:tid(),
+    In = application:get_env(blockchain, max_inbound_connections, 2),
+    Out = application:get_env(blockchain, outbound_gossip_connections, 6),
     CheckSessions = fun() ->
-                            case (catch length(libp2p_swarm:sessions(SwarmTID)) > 5) of
+                            case (catch length(libp2p_swarm:sessions(SwarmTID)) > ((In + Out) / 2)) of
                                 true -> "yes";
                                 _  -> "no"
                             end
@@ -172,7 +174,7 @@ p2p_status() ->
                   end,
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
-                end, [], [{CheckSessions, "connected"},
+                end, [], [{CheckSessions, "well-connected"},
                           {CheckPublicAddr, "dialable"},
                           {CheckNatType, "nat_type"},
                           {CheckHeight, "height"}]).
