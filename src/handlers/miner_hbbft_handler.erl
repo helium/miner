@@ -834,11 +834,11 @@ state_serialization_test_() ->
     TemporarilyFilterOutFieldsKnownToFail =
         fun (Pairs) ->
             [
-                P
+                KV
             ||
-                {K, _}=P <- Pairs,
-                K =/= sk,   % FIXME roundtrip doesn't work - is test construction correct?
-                K =/= hbbft % FIXME roundtrip doesn't work
+                {Key, _}=KV <- Pairs,
+                Key =/= sk,   % FIXME roundtrip doesn't work - is test construction correct?
+                Key =/= hbbft % FIXME roundtrip doesn't work
             ]
         end,
 
@@ -850,13 +850,13 @@ state_serialization_test_() ->
         {
             lists:flatten(io_lib:format(
                 "State serialization roundtrip, field: ~s",
-                [K]
+                [Key]
             )),
             begin
                 Expected =
                     %% Some fields we expect to be reset to default values,
                     %% while others should keep the original:
-                    case K of
+                    case Key of
                         %sig_phase  -> {some, sig}; % FIXME We get the default 'unsent' instead.
                         chain      -> {some, undefined};
                         seen       -> {some, #{}};
@@ -864,12 +864,12 @@ state_serialization_test_() ->
                         bba        -> {some, <<>>};
                         _          -> {some, OriginalValue}
                     end,
-                Actual = kvl_get(K, S2Pairs),
+                Actual = kvl_get(Key, S2Pairs),
                 ?_assertEqual(Expected, Actual)
             end
         }
     ||
-        {K, OriginalValue} <- S1Pairs
+        {Key, OriginalValue} <- S1Pairs
     ].
 
 %% Create a dummy state which tests can play with.
