@@ -1722,30 +1722,30 @@ start_blockchain(Config, GenesisVars) ->
     NumConsensusMembers = ?config(num_consensus_members, Config),
 
     #{secret := Priv, public := Pub} =
-        Keys =
-        libp2p_crypto:generate_keys(ecc_compact),
-    InitialVars = miner_ct_utils:make_vars(Keys, GenesisVars),
-    InitialPayments = miner_ct_utils:gen_payments(Addresses),
-    Locations = miner_ct_utils:gen_locations(Addresses),
-    InitialGws = miner_ct_utils:gen_gateways(Addresses, Locations),
+    Keys =
+    libp2p_crypto:generate_keys(ecc_compact),
+    InitialVars = make_vars(Keys, GenesisVars),
+    InitialPayments = gen_payments(Addresses),
+    Locations = gen_locations(Addresses),
+    InitialGws = gen_gateways(Addresses, Locations),
     Txns = InitialVars ++ InitialPayments ++ InitialGws,
 
-    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(
-        Miners,
-        Txns,
-        Addresses,
-        NumConsensusMembers,
-        Curve
-    ),
+    {ok, DKGCompletedNodes} = initial_dkg(
+                                Miners,
+                                Txns,
+                                Addresses,
+                                NumConsensusMembers,
+                                Curve
+                               ),
     %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(
-        hd(DKGCompletedNodes),
-        Miners -- DKGCompletedNodes
-    ),
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+    _GenesisLoadResults = integrate_genesis_block(
+                            hd(DKGCompletedNodes),
+                            Miners -- DKGCompletedNodes
+                           ),
+    {ConsensusMiners, NonConsensusMiners} = miners_by_consensus_state(Miners),
     ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
 
-    MinerHts = miner_ct_utils:pmap(
+    MinerHts = pmap(
                  fun(M) ->
                          Ch = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
                          {ok, Ht} = ct_rpc:call(M, blockchain, height, [Ch], 2000),
@@ -1760,9 +1760,9 @@ start_blockchain(Config, GenesisVars) ->
              MinerHts),
 
     [
-        {master_key, {Priv, Pub}},
-        {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config
+     {master_key, {Priv, Pub}},
+     {consensus_miners, ConsensusMiners},
+     {non_consensus_miners, NonConsensusMiners}
+     | Config
     ].
 

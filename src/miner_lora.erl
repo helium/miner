@@ -320,9 +320,13 @@ handle_info(chain_check, State) ->
             {noreply, State};
         Chain ->
             ok = blockchain_event:add_handler(self()),
+            %% also send reg_domain_timeout
+            erlang:send_after(500, self(), reg_domain_timeout),
             {noreply, State#state{chain = Chain}}
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    %% also send reg_domain_timeout
+    erlang:send_after(500, self(), reg_domain_timeout),
     State1 = State#state{chain = NC},
     {noreply, State1};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->

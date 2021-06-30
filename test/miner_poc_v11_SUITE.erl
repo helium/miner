@@ -1,5 +1,6 @@
 -module(miner_poc_v11_SUITE).
 
+-include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
 -export([
@@ -48,18 +49,24 @@ end_per_testcase(_TestCase, Config) ->
 basic_test(Config) ->
     Miners = ?config(miners, Config),
     RPCTimeout = ?config(rpc_timeout, Config),
-
     Miner1 = hd(Miners),
-    ct:pal("Miner1: ~p", [Miner1]),
-
-    Lora = ct_rpc:call(Miner1, sys, get_state, [miner_lora], RPCTimeout),
-    ct:pal("Lora: ~p", [Lora]),
-
-    Region = ct_rpc:call(Miner1, miner_lora, region, [], RPCTimeout),
-    ct:pal("Region: ~p", [Region]),
 
     Chain = ct_rpc:call(Miner1, blockchain_worker, blockchain, [], RPCTimeout),
-    ct:pal("Chain: ~p", [Chain]),
+
+    %% wait until height has increased from 1 to 3
+    case miner_ct_utils:wait_for_gte(height, Miners, 1 + 2, any, 30) of
+        ok ->
+            ok;
+        _ ->
+            [
+                begin
+                    Status = ct_rpc:call(M, miner, hbbft_status, []),
+                    ct:pal("miner ~p, status: ~p", [M, Status])
+                end
+             || M <- Miners
+            ],
+            error(rescue_group_made_no_progress)
+    end,
 
     %% For tests: GatewayPubkeyBin = Miner1PubkeyBin = OwnerPubkeyBin = PayerPubkeyBin
     Miner1PubkeyBin = ct_rpc:call(Miner1, blockchain_swarm, pubkey_bin, [], RPCTimeout),
@@ -76,7 +83,6 @@ basic_test(Config) ->
         NewLoc,
         1
     ),
-    ct:pal("Txn0: ~p", [Txn0]),
 
     Fee = ct_rpc:call(
         Miner1,
@@ -85,7 +91,6 @@ basic_test(Config) ->
         [Txn0, Chain],
         RPCTimeout
     ),
-    ct:pal("Fee: ~p", [Fee]),
 
     SFee = ct_rpc:call(
         Miner1,
@@ -94,11 +99,9 @@ basic_test(Config) ->
         [Txn0, Chain],
         RPCTimeout
     ),
-    ct:pal("SFee: ~p", [SFee]),
 
     Txn1 = blockchain_txn_assert_location_v2:fee(Txn0, Fee),
     Txn2 = blockchain_txn_assert_location_v2:staking_fee(Txn1, SFee),
-    ct:pal("Txn2: ~p", [Txn2]),
 
     STxn0 = ct_rpc:call(
         Miner1,
@@ -114,8 +117,6 @@ basic_test(Config) ->
         [STxn0, Miner1SigFun],
         RPCTimeout
     ),
-
-    ct:pal("STxn1: ~p", [STxn1]),
 
     %% check txn is valid?
     ok = ct_rpc:call(Miner1, blockchain_txn, is_valid, [STxn1, Chain], RPCTimeout),
@@ -135,16 +136,17 @@ basic_test(Config) ->
                 RPCTimeout
             ),
             Loc = blockchain_ledger_gateway_v2:location(GW),
-            Ht = ct_rpc:call(Miner1, blockchain, height, [Chain], RPCTimeout),
-            ct:pal(
-                "Ht: ~p, GW: ~p, Loc: ~p, NewLoc: ~p",
-                [Ht, GW, Loc, NewLoc]
-            ),
             Loc == NewLoc
         end,
-        120,
-        1000
+        30,
+        2000
     ),
+
+    %% miner_lora should report the correct region
+    Res = ct_rpc:call(Miner1, miner_lora, region, [], RPCTimeout),
+    ct:pal("loc: ~p, miner_lora reported: ~p", [NewLoc, Res]),
+
+    ?assertEqual({ok, region_us915}, Res),
 
     ok.
 
@@ -153,5 +155,6 @@ basic_test(Config) ->
 %%--------------------------------------------------------------------
 extra_vars() ->
     ExistingVars = miner_ct_utils:existing_vars(),
+    OverwriteVars = #{block_time => 1000, num_consensus_members => 7},
     POCV11Vars = miner_poc_test_utils:poc_v11_vars(),
-    maps:merge(ExistingVars, POCV11Vars).
+    maps:merge(maps:merge(ExistingVars, OverwriteVars), POCV11Vars).
