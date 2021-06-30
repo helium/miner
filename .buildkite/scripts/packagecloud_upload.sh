@@ -2,7 +2,9 @@
 
 set -euo pipefail
 
-PKGNAME="validator_$(git describe --long --always)_amd64.deb"
+TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
+
+PKGNAME="validator_${TAG}_amd64.deb"
 
 buildkite-agent artifact download ${PKGNAME} .
 
