@@ -21,20 +21,17 @@ ADD . /usr/src/miner/
 
 RUN ./rebar3 as docker_testval tar
 
-RUN mkdir -p /opt/docker
-RUN tar -zxvf _build/docker_testval/rel/*/*.tar.gz -C /opt/docker
 RUN mkdir -p /opt/docker/update
+RUN tar -zxvf _build/docker_testval/rel/*/*.tar.gz -C /opt/docker
 
-RUN wget https://snapshots.helium.wtf/genesis.testnet
-RUN cp genesis.testnet /opt/docker/update/genesis
-
-# RUN wget https://github.com/helium/blockchain-api/raw/master/priv/prod/genesis
-# RUN cp genesis /opt/docker/update/genesis
+RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.testnet
 
 FROM arm64v8/erlang:22.3.2-alpine as runner
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
+
+EXPOSE 8080 4467
 
 WORKDIR /opt/miner
 
