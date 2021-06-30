@@ -2,8 +2,10 @@
 
 set -euo pipefail
 
+TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
+
 fpm -n validator \
-    -v $(git describe --abbrev=0 --tags | sed -e s/valdator//) \
+    -v "${TAG}" \
     -s dir \
     -t deb \
     --depends libssl1.1 \
