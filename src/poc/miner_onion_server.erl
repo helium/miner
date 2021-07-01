@@ -370,44 +370,57 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
-                    Params = blockchain_region_params_v1:for_region(Region, Ledger),
-                    case blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)) of
-                        {error, Why} ->
-                            lager:error("unable to get spreading, reason: ~p", [Why]),
-                            ok;
-                        {ok, Spreading} ->
-                            case tx_power(Region, State) of
-                                {error, Reason} ->
-                                    %% could not calculate txpower, don't do anything
-                                    lager:error("unable to get tx_power, reason: ~p", [Reason]),
+
+                    case blockchain:config(?poc_version, Ledger) of
+                        {ok, POCVersion} when POCVersion >= 11 ->
+                            %% send receipt with poc_v11 updates
+                            Params = blockchain_region_params_v1:for_region(Region, Ledger),
+                            case blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)) of
+                                {error, Why} ->
+                                    lager:error("unable to get spreading, reason: ~p", [Why]),
                                     ok;
-                                {ok, TxPower} ->
-                                    case blockchain_region_params_v1:get_bandwidth(Params) of
-                                        {error, _R} ->
-                                            lager:error("unable to get bw, reason: ~p", [_R]),
+                                {ok, Spreading} ->
+                                    case tx_power(Region, State) of
+                                        {error, Reason} ->
+                                            %% could not calculate txpower, don't do anything
+                                            lager:error("unable to get tx_power, reason: ~p", [Reason]),
                                             ok;
-                                        {ok, BW} ->
-                                            DR = datarate(Spreading, BW),
-                                            case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
-                                                {ok, _LoraState} ->
-                                                    lager:info("sending receipt at power: ~p", [TxPower]),
-                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
-                                                {warning, {tx_power_corrected, CorrectedPower}} ->
-                                                    lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
-                                                                  [TxPower, CorrectedPower]),
-                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
-                                                {warning, {unknown, Other}} ->
-                                                    %% This should not happen
-                                                    lager:warning("What is this? ~p", [Other]),
+                                        {ok, TxPower} ->
+                                            case blockchain_region_params_v1:get_bandwidth(Params) of
+                                                {error, _R} ->
+                                                    lager:error("unable to get bw, reason: ~p", [_R]),
                                                     ok;
-                                                {error, Reason} ->
-                                                    lager:error("unable to send_poc, reason: ~p", [Reason]),
-                                                    ok
+                                                {ok, BW} ->
+                                                    DR = datarate(Spreading, BW),
+                                                    case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
+                                                        {ok, _LoraState} ->
+                                                            lager:info("sending receipt at power: ~p", [TxPower]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
+                                                        {warning, {tx_power_corrected, CorrectedPower}} ->
+                                                            lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
+                                                                          [TxPower, CorrectedPower]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
+                                                        {warning, {unknown, Other}} ->
+                                                            %% This should not happen
+                                                            lager:warning("What is this? ~p", [Other]),
+                                                            ok;
+                                                        {error, Reason} ->
+                                                            lager:error("unable to send_poc, reason: ~p", [Reason]),
+                                                            ok
+                                                    end
                                             end
                                     end
-                            end
+                            end;
+                        _ ->
+                            %% continue doing the old way
+                            %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
+                            Spreading = spreading(Region, erlang:byte_size(Packet)),
+                            TxPower = tx_power(Region),
+                            erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
+                            erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                       RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end)
                     end;
                 false ->
                     ok
@@ -460,6 +473,31 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
 datarate(Spreading, BW) ->
     BWInKhz = trunc(BW / 1000),
     atom_to_list(Spreading) ++ "BW" ++ integer_to_list(BWInKhz).
+
+-spec tx_power(atom()) -> pos_integer().
+tx_power('EU868') ->
+    14;
+tx_power('US915') ->
+    27;
+tx_power(_) ->
+    27.
+
+-spec spreading(Region :: atom(),
+                Len :: pos_integer()) -> string().
+spreading('EU868', L) when L < 65 ->
+    "SF12BW125";
+spreading('EU868', L) when L < 129 ->
+    "SF9BW125";
+spreading('EU868', L) when L < 238 ->
+    "SF8BW125";
+spreading(_, L) when L < 25 ->
+    "SF10BW125";
+spreading(_, L) when L < 67 ->
+    "SF9BW125";
+spreading(_, L) when L < 139 ->
+    "SF8BW125";
+spreading(_, _) ->
+    "SF7BW125".
 
 -ifdef(EQC).
 -spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
