@@ -71,11 +71,13 @@ keys({file, BaseDir}) ->
 keys({ecc, Props}) when is_list(Props) ->
     KeySlot0 = proplists:get_value(key_slot, Props, 0),
     OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
+    Bus = proplists:get_value(bus, Props, "i2c-1"),
+    Address = proplists:get_value(address, Props, 16#60),
     {ok, ECCPid} = case whereis(miner_ecc_worker) of
                        undefined ->
                            %% Create a temporary ecc link to get the public key and
                            %% onboarding keys for the given slots as well as the
-                           ecc508:start_link();
+                           ecc508:start_link(Bus, Address);
                        _ECCWorker ->
                            %% use the existing ECC pid
                            miner_ecc_worker:get_pid()
@@ -101,6 +103,8 @@ keys({ecc, Props}) when is_list(Props) ->
 
     #{ pubkey => PubKey,
        key_slot => KeySlot,
+       bus => Bus,
+       address => Address,
        %% The signing and ecdh functions will use an actual
        %% worker against a named process.
        ecdh_fun => fun(PublicKey) ->
