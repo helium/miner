@@ -42,7 +42,7 @@
   0},
  {<<"ecc508">>,
   {git,"https://github.com/helium/ecc508.git",
-       {ref,"762d985c759b988d6db7db4e2701649d50ccc7f4"}},
+       {ref,"b4d804b00887ceb75b32b12e46542d15af97a527"}},
   0},
  {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.0.5">>},3},
  {<<"elli">>,{pkg,<<"elli">>,<<"3.3.0">>},0},
