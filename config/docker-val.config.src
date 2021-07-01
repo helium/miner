@@ -40,7 +40,7 @@
   ]},
  {miner,
   [
-   {jsonrpc_ip, {0,0,0,0}}, %% bind to host for docker containers
+   {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
    {mode, validator},
    %% these two now disable all the poc stuff
    {use_ebus, false},
