@@ -8,7 +8,9 @@
                        key_slot => non_neg_integer() | undefined,
                        ecdh_fun => libp2p_crypto:ecdh_fun(),
                        sig_fun => libp2p_crypto:sig_fun(),
-                       onboarding_key => string() | undefined
+                       onboarding_key => string() | undefined,
+                       bus => string(),
+                       address => non_neg_integer()
                      }.
 
 -export_type([key_info/0, key_configuration/0]).
