@@ -348,11 +348,9 @@ handle_call(keys, _From, State) ->
     {reply, {ok, State#state.swarm_keys}, State};
 handle_call(reset_late_block_timer, _From, State) ->
     %% we do this when the group thinks that it's agreed on a new round, so set the timer extra long
-    erlang:cancel_timer(State#state.late_block_timer),
-    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
-    LateTimer = erlang:send_after((LateBlockTimeout * 2) * 1000, self(), late_block_timeout),
-
-    {reply, ok, State#state{late_block_timer = LateTimer}};
+    LateBlockTimeout =
+        2 * application:get_env(miner, late_block_timeout_seconds, 120),
+    {noreply, state_timer_reset_late_block(LateBlockTimeout, State)};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -383,11 +381,10 @@ handle_info(block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
     {noreply, State};
 handle_info(late_block_timeout, State) ->
-    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
     lager:info("late block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
-    LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
-    {noreply, State#state{late_block_timer = LateTimer}};
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    {noreply, state_timer_reset_late_block(LateBlockTimeout, State)};
 handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          current_height = CurrHeight,
@@ -697,8 +694,17 @@ common_enough_or_default(Threshold, Xs, Default) ->
     end.
 
 -spec set_next_block_timer(#state{}) -> #state{}.
-set_next_block_timer(State0=#state{}) ->
-    State = #state{blockchain=Chain} = state_ensure_chain(State0),
+set_next_block_timer(#state{}=S0) ->
+    S1 = #state{blockchain=Chain} = state_ensure_chain(S0),
+    NextBlockTime = next_block_time(Chain),
+    S2 = state_timer_reset_block(NextBlockTime, S1),
+    %% now figure out the late block timer
+    LateBlockTimeout =
+        NextBlockTime + application:get_env(miner, late_block_timeout_seconds, 120),
+    state_timer_reset_late_block(LateBlockTimeout, S2).
+
+-spec next_block_time(blockchain:blockchain()) -> non_neg_integer().
+next_block_time(Chain) ->
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
@@ -743,14 +749,20 @@ set_next_block_timer(State0=#state{}) ->
         end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
+    NextBlockTime.
 
-    %% now figure out the late block timer
-    erlang:cancel_timer(State#state.late_block_timer),
-    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
-    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
+-spec state_timer_reset_late_block(non_neg_integer(), #state{}) -> #state{}.
+state_timer_reset_late_block(Seconds, #state{late_block_timer=Timer}=S) ->
+    S#state{late_block_timer = timer_reset(Timer, Seconds, late_block_timeout)}.
 
-    State#state{block_timer=Timer, late_block_timer = LateTimer}.
+-spec state_timer_reset_block(non_neg_integer(), #state{}) -> #state{}.
+state_timer_reset_block(Seconds, #state{block_timer=Timer}=S) ->
+    S#state{block_timer = timer_reset(Timer, Seconds, block_timeout)}.
+
+-spec timer_reset(reference(), non_neg_integer(), term()) -> reference().
+timer_reset(Timer, Seconds, Msg) ->
+    erlang:cancel_timer(Timer),
+    erlang:send_after(Seconds * 1000, self(), Msg).
 
 -spec state_ensure_chain(#state{}) -> #state{}.
 state_ensure_chain(#state{blockchain=undefined}=S) ->
