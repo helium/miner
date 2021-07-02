@@ -694,14 +694,19 @@ common_enough_or_default(Threshold, Xs, Default) ->
     end.
 
 -spec set_next_block_timer(#state{}) -> #state{}.
-set_next_block_timer(#state{}=S0) ->
-    S1 = #state{blockchain=Chain} = state_ensure_chain(S0),
-    NextBlockTime = next_block_time(Chain),
-    S2 = state_timer_reset_block(NextBlockTime, S1),
+set_next_block_timer(#state{blockchain=Chain}=S0) ->
+    {NextBlockTime, S1} =
+        case Chain of
+            undefined ->
+                {0, S0};
+            _ ->
+                NextBlockTime0 = next_block_time(Chain),
+                {NextBlockTime0, state_timer_reset_block(NextBlockTime0, S0)}
+        end,
     %% now figure out the late block timer
     LateBlockTimeout =
         NextBlockTime + application:get_env(miner, late_block_timeout_seconds, 120),
-    state_timer_reset_late_block(LateBlockTimeout, S2).
+    state_timer_reset_late_block(LateBlockTimeout, S1).
 
 -spec next_block_time(blockchain:blockchain()) -> non_neg_integer().
 next_block_time(Chain) ->
@@ -763,12 +768,6 @@ state_timer_reset_block(Seconds, #state{block_timer=Timer}=S) ->
 timer_reset(Timer, Seconds, Msg) ->
     erlang:cancel_timer(Timer),
     erlang:send_after(Seconds * 1000, self(), Msg).
-
--spec state_ensure_chain(#state{}) -> #state{}.
-state_ensure_chain(#state{blockchain=undefined}=S) ->
-    S#state{blockchain=blockchain_worker:blockchain()};
-state_ensure_chain(#state{}=S) ->
-    S.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
