@@ -1103,6 +1103,7 @@ common_poc_vars(Config) ->
       ?num_consensus_members => N,
       ?batch_size => BatchSize,
       ?dkg_curve => Curve,
+      ?election_version => 4, %% TODO validators
       ?poc_challenge_interval => 15,
       ?poc_v4_exclusion_cells => 10,
       ?poc_v4_parent_res => 11,

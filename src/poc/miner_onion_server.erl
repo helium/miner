@@ -420,7 +420,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                             TxPower = tx_power(Region),
                             erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
                             erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                       RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end)
+                                                                       RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State) end)
                     end;
                 false ->
                     ok
