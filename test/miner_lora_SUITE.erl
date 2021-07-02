@@ -1,4 +1,4 @@
--module(miner_poc_v11_SUITE).
+-module(miner_lora_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
