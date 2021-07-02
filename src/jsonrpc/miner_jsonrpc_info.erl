@@ -78,6 +78,9 @@ handle_rpc(<<"info_summary">>, []) ->
         firmware_version => FirmwareVersion,
         gateway_details => GWInfo
     };
+handle_rpc(<<"info_version">>, []) ->
+    #{version => miner:version()};
+
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
