@@ -33,7 +33,10 @@
     restart_test/1,
     poc_dist_v10_test/1,
     poc_dist_v10_partitioned_test/1,
-    poc_dist_v10_partitioned_lying_test/1
+    poc_dist_v10_partitioned_lying_test/1,
+    poc_dist_v11_test/1,
+    poc_dist_v11_partitioned_test/1,
+    poc_dist_v11_partitioned_lying_test/1
 ]).
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
@@ -75,6 +78,9 @@ all() ->
      poc_dist_v10_test,
      poc_dist_v10_partitioned_test,
      poc_dist_v10_partitioned_lying_test,
+     poc_dist_v11_test,
+     poc_dist_v11_partitioned_test,
+     poc_dist_v11_partitioned_lying_test,
      %% uncomment when poc placement enforcement starts.
      %% no_status_v8_test,
      restart_test].
@@ -209,6 +215,21 @@ poc_dist_v10_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(poc_v10),
     run_dist_with_params(poc_dist_v10_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -709,6 +730,8 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, _VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
@@ -719,6 +742,8 @@ exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
+exec_dist_test(poc_dist_v11_partitioned_test, Config, _VarMap, _Status) ->
+    do_common_partition_checks(poc_dist_v11_partitioned_test, Config);
 exec_dist_test(poc_dist_v10_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v10_partitioned_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap, _Status) ->
@@ -794,6 +819,8 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
     ok.
 
+gen_locations(poc_dist_v11_partitioned_lying_test, _, _) ->
+    {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v10_partitioned_lying_test, _, _) ->
     {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
@@ -804,6 +831,9 @@ gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v11_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
 gen_locations(poc_dist_v10_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
@@ -823,6 +853,9 @@ gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v8_test, _, _) ->
+    %% Actual locations are the same as the claimed locations for the dist test
+    {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
+gen_locations(poc_dist_v11_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
 gen_locations(poc_dist_v10_test, _, _) ->
@@ -1190,6 +1223,8 @@ do_common_partition_lying_checks(TestCase, Config) ->
     ?assert(not check_poc_rewards(Rewards)),
     ok.
 
+extra_vars(poc_v11) ->
+    maps:merge(extra_poc_vars(), miner_poc_test_utils:poc_v11_vars());
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),
                #{?poc_version => 10,
@@ -1205,6 +1240,8 @@ extra_vars(poc_v8) ->
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
 
+location_sets(poc_dist_v11_partitioned_test) ->
+    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
 location_sets(poc_dist_v10_partitioned_test) ->
     {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
 location_sets(poc_dist_v8_partitioned_test) ->
