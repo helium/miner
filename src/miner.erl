@@ -696,7 +696,9 @@ common_enough_or_default(Threshold, Xs, Default) ->
         [{_, _}|_]                     -> Default % Not common-enough.
     end.
 
-set_next_block_timer(State=#state{blockchain=Chain}) ->
+-spec set_next_block_timer(#state{}) -> #state{}.
+set_next_block_timer(State0=#state{}) ->
+    State = #state{blockchain=Chain} = state_ensure_chain(State0),
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, HeadBlock} = blockchain:head_block(Chain),
@@ -749,6 +751,12 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
 
     State#state{block_timer=Timer, late_block_timer = LateTimer}.
+
+-spec state_ensure_chain(#state{}) -> #state{}.
+state_ensure_chain(#state{blockchain=undefined}=S) ->
+    S#state{blockchain=blockchain_worker:blockchain()};
+state_ensure_chain(#state{}=S) ->
+    S.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
