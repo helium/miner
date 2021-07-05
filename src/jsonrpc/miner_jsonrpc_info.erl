@@ -31,7 +31,15 @@ handle_rpc(<<"info_name">>, []) ->
 handle_rpc(<<"info_block_age">>, []) ->
     #{block_age => miner:block_age()};
 handle_rpc(<<"info_p2p_status">>, []) ->
-    maps:from_list(miner:p2p_status());
+    [{"connected", Connected}, {"dialable", Dialable}, {"nat_type", NatType}, {"height", Height}] = miner:p2p_status(),
+    #{p2p_status => 
+        #{
+            connected => ?TO_VALUE(Connected)), 
+            dialable => ?TO_VALUE(Dialable), 
+            nat_type => ?TO_VALUE(NatType), 
+            height => ?TO_VALUE(list_to_integer(Height)) 
+        }
+    };
 handle_rpc(<<"info_region">>, []) ->
     R =
         case miner_lora:region() of
