@@ -34,7 +34,7 @@ handle_rpc(<<"info_p2p_status">>, []) ->
     [{"connected", Connected}, {"dialable", Dialable}, {"nat_type", NatType}, {"height", Height}] = miner:p2p_status(),
     #{p2p_status => 
         #{
-            connected => ?TO_VALUE(Connected)), 
+            connected => ?TO_VALUE(Connected), 
             dialable => ?TO_VALUE(Dialable), 
             nat_type => ?TO_VALUE(NatType), 
             height => ?TO_VALUE(list_to_integer(Height)) 
