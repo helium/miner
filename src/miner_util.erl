@@ -13,12 +13,15 @@
          median/1,
          mark/2,
          metadata_fun/0,
-         has_valid_local_capability/2
+         has_valid_local_capability/2,
+         hbbft_perf/0
         ]).
 
 %% get the firmware release data from a hotspot
 -define(LSB_FILE, "/etc/lsb_release").
 -define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
+
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
@@ -131,3 +134,59 @@ has_valid_local_capability(Capability, Ledger) ->
                     ok
             end
     end.
+
+hbbft_perf() ->
+    %% calculate the current election start height
+    Chain = blockchain_worker:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+    InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
+    #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger),
+    {Start, GroupWithPenalties} =
+        case blockchain:config(?election_version, Ledger) of
+            {ok, N} when N >= 5 ->
+                Penalties = blockchain_election:validator_penalties(ConsensusAddrs, Ledger),
+                Start1 = case End > (Start0 + 2) of
+                             true -> Start0 + 2;
+                             false -> End + 1
+                         end,
+                Penalties1 =
+                    maps:map(
+                      fun(Addr, Pen) ->
+                              {ok, V} = blockchain_ledger_v1:get_validator(Addr, Ledger),
+                              Pens = blockchain_ledger_validator_v1:calculate_penalties(V, Ledger),
+                              {Pen + lists:sum(maps:values(Pens)), maps:get(tenure, Pens, 0.0)}
+                      end, Penalties),
+                {Start1, maps:to_list(Penalties1)};
+            _ ->
+                {Start0 + 1,
+                 [{A, {S, 0.0}}
+                  || {S, _L, A} <- blockchain_election:adjust_old_group(
+                                     [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
+        end,
+    Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
+                    || Ht <- lists:seq(Start, End)],
+    {BBATotals, SeenTotals, TotalCount} =
+        lists:foldl(
+          fun(Blk, {BBAAcc, SeenAcc, Count}) ->
+                  H = blockchain_block:height(Blk),
+                  BBAs = blockchain_utils:bitvector_to_map(
+                           length(ConsensusAddrs),
+                           blockchain_block_v1:bba_completion(Blk)),
+                  SeenVotes = blockchain_block_v1:seen_votes(Blk),
+                  Seen = lists:foldl(
+                           fun({_Idx, Votes0}, Acc) ->
+                                   Votes = blockchain_utils:bitvector_to_map(
+                                             length(ConsensusAddrs), Votes0),
+                                   merge_map(ConsensusAddrs, Votes, H, Acc)
+                           end,SeenAcc, SeenVotes),
+                  {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
+          end, {InitMap, InitMap, 0}, Blocks),
+    {ConsensusAddrs, BBATotals, SeenTotals, TotalCount, GroupWithPenalties, Start0, Start, End}.
+
+merge_map(Addrs, Votes, Height, Acc) ->
+    maps:fold(fun(K, true, A) ->
+                       maps:update_with(lists:nth(K, Addrs), fun({_, V}) -> {Height, V+1} end, {Height, 1}, A);
+                 (_, false, A) ->
+                      A
+              end, Acc, Votes).
