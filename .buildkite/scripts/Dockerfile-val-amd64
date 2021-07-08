@@ -1,4 +1,4 @@
-FROM erlang:22.3.2-alpine as builder
+FROM erlang:23.3.4.4-alpine as builder
 
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
@@ -26,7 +26,7 @@ RUN tar -zxvf _build/docker_val/rel/*/*.tar.gz -C /opt/docker
 
 RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.mainnet
 
-FROM erlang:22.3.2-alpine as runner
+FROM erlang:23.3.4.4-alpine as runner
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
 RUN ulimit -n 64000
