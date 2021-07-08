@@ -10,7 +10,8 @@
 %% jsonrpc_handler
 %%
 
-handle_rpc(<<"account_get">>, #{ <<"address">> := Address }) ->
+handle_rpc(<<"account_get">>, #{ <<"address">> := AddressStr }) ->
+    Address = ?B58_TO_BIN(AddressStr),
     Ledger = blockchain:ledger(blockchain_worker:blockchain()),
     GetBalance = fun() ->
                          case blockchain_ledger_v1:find_entry(Address, Ledger) of
