@@ -28,13 +28,12 @@ start(_StartType, _StartArgs) ->
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
-    BaseDir = application:get_env(blockchain, base_dir, "data"),
-    Filename = filename:join([BaseDir, "follow-mode"]),
-    case file:read_file_info(Filename) of
-        {ok, _} ->
-            application:set_env(blockchain, follow_mode, true);
-        _ ->
-            ok
+    %% validator as the default here because it's a safer failure mode.
+    case application:get_env(miner, mode, validator) of
+        %% follow mode defaults to false
+        validator -> ok;
+        gateway ->
+            application:set_env(blockchain, follow_mode, true)
     end,
 
     case miner_sup:start_link() of
