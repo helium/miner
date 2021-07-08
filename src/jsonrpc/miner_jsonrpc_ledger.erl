@@ -157,7 +157,5 @@ last_challenge(_Height, undefined) -> <<"undefined">>;
 last_challenge(Height, LC) -> Height - LC.
 
 format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
-    maps:from_list([
-        {<<"name">>, blockchain_utils:addr2name(Addr)}
-        | blockchain_ledger_validator_v1:print(Val, Height, Verbose, Ledger)
-    ]).
+    InfoPairs = blockchain_ledger_validator_v1:print(Val, Height, Verbose, Ledger),
+    maps:from_list(InfoPairs ++ [ {name, ?BIN_TO_ANIMAL(Addr)}, {address, ?BIN_TO_B58(Addr)} ]).
