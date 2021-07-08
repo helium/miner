@@ -154,28 +154,6 @@ format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
 last_challenge(_Height, undefined) -> <<"undefined">>;
 last_challenge(Height, LC) -> Height - LC.
 
-format_ledger_validator(Addr, Val, Ledger, Height) ->
-    Penalties = blockchain_ledger_validator_v1:calculate_penalties(Val, Ledger),
-    OwnerAddress = blockchain_ledger_validator_v1:owner_address(Val),
-    LastHeartbeat = blockchain_ledger_validator_v1:last_heartbeat(Val),
-    Stake = blockchain_ledger_validator_v1:stake(Val),
-    Status = blockchain_ledger_validator_v1:status(Val),
-    Version = blockchain_ledger_validator_v1:version(Val),
-    Tenure = maps:get(tenure, Penalties, 0.0),
-    DKG = maps:get(dkg, Penalties, 0.0),
-    Perf = maps:get(performance, Penalties, 0.0),
-    TotalPenalty = Tenure+Perf+DKG,
-    #{
-        <<"nonce">> => blockchain_ledger_validator_v1:nonce(Val),
-        <<"name">> => ?BIN_TO_ANIMAL(Addr),
-        <<"address">> => ?BIN_TO_B58(Addr),
-        <<"owner_address">> => ?BIN_TO_B58(OwnerAddress),
-        <<"last_heartbeat">> => Height - LastHeartbeat,
-        <<"stake">> => Stake,
-        <<"status">> => Status,
-        <<"version">> => Version,
-        <<"tenure_penalty">> => Tenure,
-        <<"dkg_penalty">> => DKG,
-        <<"performance_penalty">> => Perf,
-        <<"total_penalty">> => TotalPenalty
-    }.
+format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
+    InfoPairs = blockchain_ledger_validator_v1:print(Val, Height, Verbose, Ledger),
+    maps:from_list(InfoPairs ++ [ {name, ?BIN_TO_ANIMAL(Addr)}, {address, ?BIN_TO_B58(Addr)} ]).
