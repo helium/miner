@@ -527,7 +527,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         lists:foreach(
                                           fun(Member) ->
                                               spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, State#state.chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
-                                          end, NewConsensusAddrs -- OldConsensusAddrs),
+                                          end, blockchain_utils:shuffle(NewConsensusAddrs -- OldConsensusAddrs)),
                                         Round = blockchain_block:hbbft_round(Block),
                                         activate_hbbft(HBBFTGroup, State#state.active_group, State#state.ag_monitor, Round),
                                         Ref = erlang:monitor(process, HBBFTGroup),
@@ -974,7 +974,7 @@ do_dkg(Addrs, Artifact, Sign, Done, N, _Curve, Create,
             lists:foreach(
               fun(Member) ->
                   spawn(fun() -> blockchain_fastforward_handler:dial( Swarm, Chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
-              end, ConsensusAddrs -- [MyAddress]),
+              end, blockchain_utils:shuffle(ConsensusAddrs -- [MyAddress])),
 
             %% make a simple hash of the consensus members
             DKGHash = base58:binary_to_base58(crypto:hash(sha, term_to_binary(ConsensusAddrs))),
