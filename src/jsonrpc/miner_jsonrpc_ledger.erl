@@ -74,15 +74,13 @@ handle_rpc(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
 handle_rpc(<<"ledger_gateways">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
 handle_rpc(<<"ledger_validators">>, []) ->
-    handle_rpc(<<"ledger_validators">>, #{<<"verbose">> => false});
-handle_rpc(<<"ledger_validators">>, #{<<"verbose">> := Verbose}) ->
     Ledger = get_ledger(),
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
     blockchain_ledger_v1:cf_fold(
         validators,
         fun({Addr, BinVal}, Acc) ->
             Val = blockchain_ledger_validator_v1:deserialize(BinVal),
-            [format_ledger_validator(Addr, Val, Ledger, Height, Verbose) | Acc]
+            [format_ledger_validator(Addr, Val, Ledger, Height) | Acc]
         end,
         [],
         Ledger
@@ -156,7 +154,7 @@ format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
 last_challenge(_Height, undefined) -> <<"undefined">>;
 last_challenge(Height, LC) -> Height - LC.
 
-format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
+format_ledger_validator(Addr, Val, Ledger, Height) ->
     Penalties = blockchain_ledger_validator_v1:calculate_penalties(Val, Ledger),
     OwnerAddress = blockchain_ledger_validator_v1:owner_address(Val),
     LastHeartbeat = blockchain_ledger_validator_v1:last_heartbeat(Val),
@@ -167,14 +165,9 @@ format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
     DKG = maps:get(dkg, Penalties, 0.0),
     Perf = maps:get(performance, Penalties, 0.0),
     TotalPenalty = Tenure+Perf+DKG,
-    VerboseItems = case Verbose of
-        true -> #{
-	        <<"nonce">> => blockchain_ledger_validator_v1:nonce(Val),
-	        <<"name">> => ?BIN_TO_ANIMAL(Addr)
-	    };
-        false -> #{ }
-    end,
-    RegularItems = #{
+    #{
+       <<"nonce">> => blockchain_ledger_validator_v1:nonce(Val),
+        <<"name">> => ?BIN_TO_ANIMAL(Addr),
         <<"address">> => ?BIN_TO_B58(Addr),
         <<"owner_address">> => ?BIN_TO_B58(OwnerAddress),
         <<"last_heartbeat">> => Height - LastHeartbeat,
@@ -185,5 +178,4 @@ format_ledger_validator(Addr, Val, Ledger, Height, Verbose) ->
         <<"dkg_penalty">> => DKG,
         <<"performance_penalty">> => Perf,
         <<"total_penalty">> => TotalPenalty
-    },
-    maps:merge(VerboseItems, RegularItems).
+    }.
