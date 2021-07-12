@@ -388,9 +388,10 @@ handle_info(late_block_timeout, State) ->
     libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
     LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
     {noreply, State#state{late_block_timer = LateTimer}};
-handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
+handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          current_height = CurrHeight,
+                         swarm_keys = {PubKey, _SigFun},
                          blockchain = Chain}) when ConsensusGroup /= undefined andalso
                                                    Chain /= undefined ->
     %% NOTE: only the consensus group member must do this
@@ -413,8 +414,23 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                   ConsensusGroup, {next_round, NextRound,
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
-                                set_next_block_timer(State#state{current_height = Height});
-
+                                {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+                                BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Block)),
+                                BBAAddrs = maps:fold(fun(K, true, Acc) ->
+                                                             [lists:nth(K, ConsensusAddrs) | Acc];
+                                                        (_, _, Acc) ->
+                                                             Acc
+                                                     end, [], BBAs),
+                                case lists:member(PubKey, BBAAddrs) of
+                                    true ->
+                                        %% we got our proposal in last round, so we're ok
+                                        set_next_block_timer(State#state{current_height = Height});
+                                    false ->
+                                        lager:info("jumping"),
+                                        %% didn't get included last round, try to get a jump on things
+                                        Timer = erlang:send_after(0, self(), block_timeout),
+                                        State#state{block_timer=Timer}
+                                end;
                             {true, _, _, _} ->
                                 State#state{block_timer = make_ref(),
                                             current_height = Height}
