@@ -166,7 +166,7 @@ format_ledger_validator(Addr, Val, Ledger, Height) ->
     Perf = maps:get(performance, Penalties, 0.0),
     TotalPenalty = Tenure+Perf+DKG,
     #{
-       <<"nonce">> => blockchain_ledger_validator_v1:nonce(Val),
+        <<"nonce">> => blockchain_ledger_validator_v1:nonce(Val),
         <<"name">> => ?BIN_TO_ANIMAL(Addr),
         <<"address">> => ?BIN_TO_B58(Addr),
         <<"owner_address">> => ?BIN_TO_B58(OwnerAddress),
