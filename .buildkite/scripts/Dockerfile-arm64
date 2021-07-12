@@ -30,8 +30,6 @@ FROM arm64v8/erlang:22.3.2-alpine as runner
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc apk-tools
 RUN ulimit -n 64000
 
-EXPOSE 8080 4467
-
 WORKDIR /opt/miner
 
 ENV COOKIE=miner \

@@ -28,14 +28,32 @@ start(_StartType, _StartArgs) ->
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
-    BaseDir = application:get_env(blockchain, base_dir, "data"),
-    Filename = filename:join([BaseDir, "follow-mode"]),
-    case file:read_file_info(Filename) of
-        {ok, _} ->
-            application:set_env(blockchain, follow_mode, true);
-        _ ->
-            ok
-    end,
+    Follow =
+        %% validator as the default here because it's a safer failure mode.
+        case application:get_env(miner, mode, validator) of
+            %% follow mode defaults to false
+            validator -> false;
+            gateway ->
+                %% check touchfile, since some people are using it
+                BaseDir = application:get_env(blockchain, base_dir, "data"),
+                Filename = filename:join([BaseDir, "follow-mode"]),
+                case file:read_file_info(Filename) of
+                    {ok, _} -> true;
+                    _ ->
+                        case file:read_file("/etc/hardware_version") of
+                            {ok, HwType} ->
+                                case string:trim(HwType) of
+                                    <<"blackspot">> -> true;
+                                    <<"sidetable_v1">> -> true;
+                                    _ -> false
+                                end;
+                            _ ->
+                                false
+                        end
+                end
+        end,
+
+    application:set_env(blockchain, follow_mode, Follow),
 
     case miner_sup:start_link() of
         {ok, Pid} ->
