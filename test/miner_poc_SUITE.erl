@@ -35,6 +35,7 @@
     poc_dist_v10_partitioned_test/1,
     poc_dist_v10_partitioned_lying_test/1,
     poc_dist_v11_test/1,
+    poc_dist_v11_cn_test/1,
     poc_dist_v11_partitioned_test/1,
     poc_dist_v11_partitioned_lying_test/1
 ]).
@@ -44,6 +45,19 @@
 -define(AUSTINLOCS1, [631781084745290239, 631781089167934463, 631781054839691775, 631781050465723903]).
 -define(AUSTINLOCS2, [631781452049762303, 631781453390764543, 631781452924144639, 631781452838965759]).
 -define(LALOCS, [631236297173835263, 631236292179769855, 631236329165333503, 631236328049271807]).
+-define(CNLOCS1, [
+                 631649369216118271, %% spare-tortilla-raccoon
+                 631649369235022335, %% kind-tangerine-octopus
+                 631649369177018879, %% damp-hemp-pangolin
+                 631649369175419391  %% fierce-lipstick-poodle
+                 ]).
+
+-define(CNLOCS2, [
+                 631649369213830655, %% raspy-parchment-pike
+                 631649369205533183, %% fresh-gingham-porpoise
+                 631649369207629311, %% innocent-irish-pheasant
+                 631649368709059071  %% glorious-eggshell-finch
+                ]).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -79,6 +93,7 @@ all() ->
      poc_dist_v10_partitioned_test,
      poc_dist_v10_partitioned_lying_test,
      poc_dist_v11_test,
+     poc_dist_v11_cn_test,
      poc_dist_v11_partitioned_test,
      poc_dist_v11_partitioned_lying_test,
      %% uncomment when poc placement enforcement starts.
@@ -220,6 +235,11 @@ poc_dist_v11_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(poc_v11),
     run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_cn_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_dist_v11_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
@@ -774,6 +794,26 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
             %% the first receipt would have added witnesses and we should be able to make
             %% a next hop.
             case maps:get(?poc_version, VarMap, 1) of
+                V when V > 10 ->
+                    %% poc-v11 checks
+                    true = miner_ct_utils:wait_until(
+                             fun() ->
+                                     %% Check that we have atleast more than one request
+                                     %% If we have only one request, there's no guarantee
+                                     %% that the paths would eventually grow
+                                     C1 = check_multiple_requests(Miners),
+                                     %% XXX: Temporary check for now
+                                     %% Check if we have some receipts
+                                     C2 = maps:size(challenger_receipts_map(find_receipts(Miners))) > 0,
+                                     %% Check there are some poc rewards
+                                     C3 = check_poc_rewards(get_rewards(Config)),
+                                     ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
+                                     C1 andalso C2 andalso C3
+                             end,
+                             120, 1000),
+                    FinalRewards = get_rewards(Config),
+                    ct:pal("FinalRewards: ~p", [FinalRewards]),
+                    ok;
                 V when V > 3 ->
                     true = miner_ct_utils:wait_until(
                              fun() ->
@@ -855,6 +895,9 @@ gen_locations(poc_dist_v4_partitioned_test, _, _) ->
 gen_locations(poc_dist_v8_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
+gen_locations(poc_dist_v11_cn_test, _, _) ->
+    %% Actual locations are the same as the claimed locations for the dist test
+    {?CNLOCS1 ++ ?CNLOCS2, ?CNLOCS1 ++ ?CNLOCS2};
 gen_locations(poc_dist_v11_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
@@ -1048,6 +1091,7 @@ check_partitions(TestCase, Path, ActiveGateways) ->
 
 check_multiple_requests(Miners) ->
     RequestCounter = request_counter(find_requests(Miners)),
+    ct:pal("RequestCounter: ~p", [RequestCounter]),
     lists:sum(maps:values(RequestCounter)) > length(Miners).
 
 check_atleast_k_receipts(Miners, K) ->
