@@ -35,8 +35,8 @@ handle_rpc(<<"dkg_queue">>, []) ->
                                    last_ack := LastAck
                                   } = maps:get(K, Workers),
                                  #{
-                                   address => ?TO_B58(Raw),
-                                   name => ?TO_ANIMAL_NAME(Raw),
+                                   address => ?BIN_TO_B58(Raw),
+                                   name => ?BIN_TO_ANIMAL(Raw),
                                    count => length(V),
                                    connected => Connected,
                                    blocked => not Ready,
@@ -67,8 +67,8 @@ handle_rpc(<<"dkg_running">>, []) ->
             {ok, Block} = blockchain:get_block(Height+Delay, Chain),
             Hash = blockchain_block:hash_block(Block),
             ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
-            [ #{ name => ?TO_ANIMAL_NAME(A),
-                 address => ?TO_B58(A) }
+            [ #{ name => ?BIN_TO_ANIMAL(A),
+                 address => ?BIN_TO_B58(A) }
               || A <- ConsensusAddrs ]
     end;
 handle_rpc(<<"dkg_next">>, []) ->
