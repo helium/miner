@@ -507,6 +507,10 @@ md_version(Ledger) ->
 
 -spec state_reset(hbbft:hbbft_data(), #state{}) -> #state{}.
 state_reset(HBBFT, #state{}=S) ->
+    %% default to the full bit vector, not the empty one
+    DefaultBBAVote = blockchain_utils:map_to_bitvector(
+                       maps:from_list([ {I, true}
+                                        || I <- lists:seq(1, length(S#state.members))])),
     S#state{
         hbbft          = HBBFT,
         sigs_valid     = [],
@@ -514,7 +518,7 @@ state_reset(HBBFT, #state{}=S) ->
         sigs_unchecked = [],
         artifact       = undefined,
         sig_phase      = unsent,
-        bba            = <<>>,
+        bba            = DefaultBBAVote,
         seen           = #{},
         skip_votes     = #{}
     }.
