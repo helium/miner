@@ -415,21 +415,27 @@ handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
                                                    blockchain_block:transactions(Block),
                                                    Sync}),
                                 {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
+                                F = (length(ConsensusAddrs) - 1) div 3,
                                 BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Block)),
                                 BBAAddrs = maps:fold(fun(K, true, Acc) ->
                                                              [lists:nth(K, ConsensusAddrs) | Acc];
                                                         (_, _, Acc) ->
                                                              Acc
                                                      end, [], BBAs),
-                                case lists:member(PubKey, BBAAddrs) of
+                                case lists:member(libp2p_crypto:pubkey_to_bin(PubKey), BBAAddrs) orelse length(BBAAddrs) < (2 * F)+1 of
                                     true ->
-                                        %% we got our proposal in last round, so we're ok
+                                        %% we got our proposal in last round, or we didn't see enough BBA votes
+                                        %% to know if we did
                                         set_next_block_timer(State#state{current_height = Height});
                                     false ->
-                                        lager:info("jumping"),
+                                        lager:info("jumping to next hbbft round ~p early", [Round+1]),
                                         %% didn't get included last round, try to get a jump on things
                                         Timer = erlang:send_after(0, self(), block_timeout),
-                                        State#state{block_timer=Timer}
+                                        %% now figure out the late block timer
+                                        erlang:cancel_timer(State#state.late_block_timer),
+                                        LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+                                        LateTimer = erlang:send_after(LateBlockTimeout * 1000, self(), late_block_timeout),
+                                        State#state{block_timer=Timer, late_block_timer=LateTimer}
                                 end;
                             {true, _, _, _} ->
                                 State#state{block_timer = make_ref(),
