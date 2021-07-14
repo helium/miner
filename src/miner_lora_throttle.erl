@@ -6,11 +6,12 @@
 %% core functionality through `track_sent/4', `can_send/4', and
 %% `time_on_air/6'.
 -module(miner_lora_throttle).
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
     can_send/4,
     dwell_time/3,
-    new/1,
+    new/2,
     time_on_air/6,
     track_sent/4,
     track_sent/9
@@ -28,6 +29,7 @@
 }).
 
 -type region() :: 'AS923' | 'AU915' | 'CN470' | 'CN779' | 'EU433' | 'EU868' | 'IN865' | 'KR920' | 'US915'.
+-type region_v2() :: 'as923_1' | 'as923_2' | 'as923_3' | 'au915' | 'cn470' | 'eu433' | 'eu868' | 'in865' | 'kr920' | 'ru864' | 'us915'.
 
 -type regulatory_model() :: {dwell | duty, Limit :: number(), Period :: number()}.
 
@@ -53,6 +55,32 @@ model(Region) ->
         'US915' -> {'dwell',   400,   20000};
         %% We can't support regions we are not aware of.
         _ -> unsupported
+    end.
+
+-spec model2(region_v2()) -> unsupported | regulatory_model().
+model2(Region) ->
+    case Region of
+        'as923_1' -> {'duty',   0.01, 3600000};
+        'as923_2' -> {'duty',   0.01, 3600000};
+        'as923_3' -> {'duty',   0.01, 3600000};
+        'au915'   -> {'duty',   0.01, 3600000};
+        'cn779'   -> {'duty',   0.01, 3600000};
+        'eu433'   -> {'duty',   0.01, 3600000};
+        'eu868'   -> {'duty',   0.01, 3600000};
+        'in865'   -> {'duty',   0.01, 3600000};
+        'kr920'   -> {'duty',   0.01, 3600000};
+        'us915'   -> {'dwell',   400,   20000};
+        _         -> unsupported
+    end.
+
+-spec model_from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> {ok, regulatory_model()} | {error, any()}.
+model_from_ledger(Ledger) ->
+    case blockchain:config(?regulatory_regions, Ledger) of
+        {ok, R} ->
+            Regions = [list_to_atom(I) || I <- string:split(binary:bin_to_list(R), ",", all)],
+            {ok, model2(Regions)};
+        _ ->
+            {error, not_found}
     end.
 
 %% Updates Handle with time-on-air information.
@@ -229,14 +257,17 @@ symbol_duration(Bandwidth, SpreadingFactor) ->
     math:pow(2, SpreadingFactor) / Bandwidth.
 
 %% @doc Returns a new handle for the given region.
--spec new(region()) -> handle().
-new(Region) ->
+-spec new(Ledger :: undefined | blockchain_ledger_v1:ledger(),
+          Region :: region()) -> handle().
+new(undefined, Region) ->
     case model(Region) of
-        unsupported ->
-            lager:warning('\'~p\' is not a supported regulatory region', [Region]),
-            unsupported;
-        Model ->
-            {Model, []}
+        unsupported -> unsupported;
+        Model -> {Model, []}
+    end;
+new(Ledger, _Region) ->
+    case model_from_ledger(Ledger) of
+        {error, not_found} -> unsupported;
+        {ok, ModelFromLedger} -> {ModelFromLedger, []}
     end.
 
 -spec b2n(boolean()) -> integer().

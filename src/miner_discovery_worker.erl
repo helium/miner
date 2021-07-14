@@ -75,7 +75,8 @@ handle_info(
         lists:nth(rand:uniform(length(FreqList)), FreqList)
     end,
     Spreading = spreading(Region, byte_size(Packet)),
-    ok = miner_lora:send_poc(
+    %% TODO: temporarily ignore send_poc result
+    _ = miner_lora:send_poc(
         Packet,
         immediate,
         ChannelSelectorFun,

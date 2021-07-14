@@ -41,7 +41,7 @@ us915_dwell_time_test() ->
     %% increasing and expressed as milliseconds.
     T0 = -123456789,
 
-    S0 = miner_lora_throttle:new('US915'),
+    S0 = miner_lora_throttle:new(undefined, 'US915'),
     S1 = miner_lora_throttle:track_sent(S0, T0, Ch0, MaxDwell),
     S2 = miner_lora_throttle:track_sent(S1, T0, Ch1, HalfMax),
 
@@ -93,7 +93,7 @@ eu868_duty_cycle_test() ->
     Ch0 = 0,
     Ch1 = 1,
 
-    S0 = miner_lora_throttle:new('EU868'),
+    S0 = miner_lora_throttle:new(undefined, 'EU868'),
 
     ?assertEqual(true, miner_lora_throttle:can_send(S0, 0, Ch0, MaxTimeOnAir)),
     ?assertEqual(false, miner_lora_throttle:can_send(S0, 0, Ch0, MaxTimeOnAir + 1)),
@@ -106,7 +106,7 @@ eu868_duty_cycle_test() ->
             ?assertEqual(true, miner_lora_throttle:can_send(State, Now, Ch0, Ten_ms)),
             {miner_lora_throttle:track_sent(State, Now, Ch0, Ten_ms), Now + 1000}
         end,
-        {miner_lora_throttle:new('EU868'), 0},
+        {miner_lora_throttle:new(undefined, 'EU868'), 0},
         lists:seq(1, 3599)
     ),
 

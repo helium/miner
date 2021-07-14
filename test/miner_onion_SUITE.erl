@@ -94,7 +94,7 @@ basic(Config) ->
     ct:pal("constructed onion ~p", [Onion]),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State) ->
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _Power, _State) ->
         ?assertEqual(radio, Origin),
         ?assertEqual(Data1, Data0),
         ?assertEqual(libp2p_crypto:pubkey_to_bin(OnionCompactKey), OnionCompactKey0)
@@ -137,7 +137,7 @@ basic(Config) ->
     Parent = self(),
 
     meck:new(miner_onion_server, [passthrough]),
-    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State) ->
+    meck:expect(miner_onion_server, send_receipt,  fun(Data0, OnionCompactKey0, Origin, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _Power, _State) ->
         ?assertEqual(radio, Origin),
         Passed = Data2 == Data0 andalso libp2p_crypto:pubkey_to_bin(OnionCompactKey) == OnionCompactKey0,
         Parent ! {passed, Passed},

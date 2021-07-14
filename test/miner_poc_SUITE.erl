@@ -33,7 +33,10 @@
     restart_test/1,
     poc_dist_v10_test/1,
     poc_dist_v10_partitioned_test/1,
-    poc_dist_v10_partitioned_lying_test/1
+    poc_dist_v10_partitioned_lying_test/1,
+    poc_dist_v11_test/1,
+    poc_dist_v11_partitioned_test/1,
+    poc_dist_v11_partitioned_lying_test/1
 ]).
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
@@ -75,6 +78,9 @@ all() ->
      poc_dist_v10_test,
      poc_dist_v10_partitioned_test,
      poc_dist_v10_partitioned_lying_test,
+     poc_dist_v11_test,
+     poc_dist_v11_partitioned_test,
+     poc_dist_v11_partitioned_lying_test,
      %% uncomment when poc placement enforcement starts.
      %% no_status_v8_test,
      restart_test].
@@ -210,6 +216,21 @@ poc_dist_v10_partitioned_lying_test(Config) ->
     ExtraVars = extra_vars(poc_v10),
     run_dist_with_params(poc_dist_v10_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
+poc_dist_v11_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_partitioned_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
+poc_dist_v11_partitioned_lying_test(Config) ->
+    CommonPOCVars = common_poc_vars(Config),
+    ExtraVars = extra_vars(poc_v11),
+    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
 
@@ -270,14 +291,14 @@ basic_test(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
     {ok, Statem} = miner_poc_statem:start_link(#{delay => 5}),
@@ -289,7 +310,7 @@ basic_test(Config) ->
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
@@ -307,7 +328,7 @@ basic_test(Config) ->
     ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem)))),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
@@ -332,7 +353,7 @@ basic_test(Config) ->
     % Passing receiving_timeout
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 20)
@@ -340,7 +361,7 @@ basic_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem))),
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem)))), % Get receiving_timeout
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     true = miner_ct_utils:wait_until(fun() ->
                                              case sys:get_state(Statem) of
@@ -431,14 +452,14 @@ basic_test_light_gateway(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
@@ -464,11 +485,11 @@ basic_test_light_gateway(Config) ->
     % Mock submit_txn to  add blocks
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process ( no POC req txn will have been submitted by the statem )
     true = miner_ct_utils:wait_until(fun() -> ct:pal("height: ~p", [blockchain:height(Chain)]), {ok, 4} =:= blockchain:height(Chain) end),
@@ -485,7 +506,7 @@ basic_test_light_gateway(Config) ->
     % Passing poc interval
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 25)
@@ -557,14 +578,14 @@ restart_test(Config) ->
     ],
 
     % Add a Gateway
-    AddGatewayTxs = build_gateways(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AddGatewayTxs),
+    AddGatewayTxs = miner_ct_utils:build_gateways(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AddGatewayTxs),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 2} =:= blockchain:height(Chain) end),
 
     % Assert the Gateways location
-    AssertLocaltionTxns = build_asserts(LatLongs, {PrivKey, PubKey}),
-    ok = add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
+    AssertLocaltionTxns = miner_ct_utils:build_asserts(LatLongs, {PrivKey, PubKey}),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, AssertLocaltionTxns),
 
     true = miner_ct_utils:wait_until(fun() -> {ok, 3} =:= blockchain:height(Chain) end),
 
@@ -578,7 +599,7 @@ restart_test(Config) ->
     % Mock submit_txn to actually add the block
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, submit_txn, fun(Txn, _) ->
-        add_block(Chain, ConsensusMembers, [Txn])
+        miner_ct_utils:add_block(Chain, ConsensusMembers, [Txn])
     end),
     meck:new(miner_onion, [passthrough]),
     meck:expect(miner_onion, dial_framed_stream, fun(_, _, _) ->
@@ -596,7 +617,7 @@ restart_test(Config) ->
     ?assertEqual(30, erlang:element(15, erlang:element(2, sys:get_state(Statem0)))),
 
     % Add some block to start process
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     % 3 previous blocks + 1 block to start process + 1 block with poc req txn
     true = miner_ct_utils:wait_until(fun() -> {ok, 5} =:= blockchain:height(Chain) end),
@@ -633,7 +654,7 @@ restart_test(Config) ->
     % Passing receiving_timeout
     lists:foreach(
         fun(_) ->
-            ok = add_block(Chain, ConsensusMembers, []),
+            ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
             timer:sleep(100)
         end,
         lists:seq(1, 10)
@@ -641,7 +662,7 @@ restart_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem1))),
     ?assertEqual(0, erlang:element(12, erlang:element(2, sys:get_state(Statem1)))), % Get receiving_timeout
-    ok = add_block(Chain, ConsensusMembers, []),
+    ok = miner_ct_utils:add_block(Chain, ConsensusMembers, []),
 
     true = miner_ct_utils:wait_until(
            fun() ->
@@ -671,12 +692,6 @@ restart_test(Config) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
-add_block(Chain, ConsensusMembers, Txns) ->
-    SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
-    B = create_block(ConsensusMembers, SortedTxns),
-    ok = blockchain:add_block(B, Chain).
-
 send_receipts(LatLongs, Challengees) ->
     lists:foreach(
         fun({_LatLong, {PrivKey, PubKey}}) ->
@@ -694,72 +709,6 @@ send_receipts(LatLongs, Challengees) ->
             end
         end,
         LatLongs
-    ).
-
-build_asserts(LatLongs, {PrivKey, PubKey}) ->
-    lists:foldl(
-        fun({LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
-            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
-            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-            Index = h3:from_geo(LatLong, 12),
-            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
-            PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
-            SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
-            [SignedAssertLocationTx|Acc]
-        end,
-        [],
-        LatLongs
-    ).
-
-build_gateways(LatLongs, {PrivKey, PubKey}) ->
-    lists:foldl(
-        fun({_LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
-            % Create a Gateway
-            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
-            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
-
-            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
-            SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
-            SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
-            [SignedGatewayAddGatewayTx|Acc]
-
-        end,
-        [],
-        LatLongs
-    ).
-
-create_block(ConsensusMembers, Txs) ->
-    Blockchain = blockchain_worker:blockchain(),
-    {ok, PrevHash} = blockchain:head_hash(Blockchain),
-    {ok, HeadBlock} = blockchain:head_block(Blockchain),
-    Height = blockchain_block:height(HeadBlock) + 1,
-    Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
-                                       height => Height,
-                                       transactions => Txs,
-                                       signatures => [],
-                                       time => 0,
-                                       hbbft_round => 0,
-                                       election_epoch => 1,
-                                       epoch_start => 1,
-                                       seen_votes => [],
-                                       bba_completion => <<>>}),
-    BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
-    Signatures = signatures(ConsensusMembers, BinBlock),
-    Block1 = blockchain_block:set_signatures(Block0, Signatures),
-    Block1.
-
-signatures(ConsensusMembers, BinBlock) ->
-    lists:foldl(
-        fun({A, {_, _, F}}, Acc) ->
-            Sig = F(BinBlock),
-            [{A, Sig}|Acc]
-        end
-        ,[]
-        ,ConsensusMembers
     ).
 
 new_random_key(Curve) ->
@@ -781,6 +730,8 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
+exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, _VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
@@ -791,6 +742,8 @@ exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
 exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
+exec_dist_test(poc_dist_v11_partitioned_test, Config, _VarMap, _Status) ->
+    do_common_partition_checks(poc_dist_v11_partitioned_test, Config);
 exec_dist_test(poc_dist_v10_partitioned_test, Config, _VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v10_partitioned_test, Config);
 exec_dist_test(poc_dist_v8_partitioned_test, Config, _VarMap, _Status) ->
@@ -857,7 +810,7 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
-    RadioPorts = [ P || {_Miner, {_TP, P}} <- MinersAndPorts ],
+    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
     {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
                                                                 lists:zip(RadioPorts, Locations), Status),
     ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
@@ -866,6 +819,8 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
     ok.
 
+gen_locations(poc_dist_v11_partitioned_lying_test, _, _) ->
+    {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v10_partitioned_lying_test, _, _) ->
     {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
 gen_locations(poc_dist_v8_partitioned_lying_test, _, _) ->
@@ -876,6 +831,9 @@ gen_locations(poc_dist_v6_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
 gen_locations(poc_dist_v5_partitioned_lying_test, _, _) ->
     {?SFLOCS ++ ?NYLOCS, lists:duplicate(4, hd(?SFLOCS)) ++ lists:duplicate(4, hd(?NYLOCS))};
+gen_locations(poc_dist_v11_partitioned_test, _, _) ->
+    %% These are taken from the ledger
+    {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
 gen_locations(poc_dist_v10_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
@@ -895,6 +853,9 @@ gen_locations(poc_dist_v4_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?SFLOCS ++ ?NYLOCS, ?SFLOCS ++ ?NYLOCS};
 gen_locations(poc_dist_v8_test, _, _) ->
+    %% Actual locations are the same as the claimed locations for the dist test
+    {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
+gen_locations(poc_dist_v11_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
 gen_locations(poc_dist_v10_test, _, _) ->
@@ -1142,6 +1103,7 @@ common_poc_vars(Config) ->
       ?num_consensus_members => N,
       ?batch_size => BatchSize,
       ?dkg_curve => Curve,
+      ?election_version => 4, %% TODO validators
       ?poc_challenge_interval => 15,
       ?poc_v4_exclusion_cells => 10,
       ?poc_v4_parent_res => 11,
@@ -1262,6 +1224,8 @@ do_common_partition_lying_checks(TestCase, Config) ->
     ?assert(not check_poc_rewards(Rewards)),
     ok.
 
+extra_vars(poc_v11) ->
+    maps:merge(extra_poc_vars(), miner_poc_test_utils:poc_v11_vars());
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),
                #{?poc_version => 10,
@@ -1277,6 +1241,8 @@ extra_vars(poc_v8) ->
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
 
+location_sets(poc_dist_v11_partitioned_test) ->
+    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
 location_sets(poc_dist_v10_partitioned_test) ->
     {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
 location_sets(poc_dist_v8_partitioned_test) ->
