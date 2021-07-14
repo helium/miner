@@ -576,8 +576,8 @@ multi_oui_test(Config) ->
     true = check_ledger_state_channel(SC2, RouterPubkeyBin2, ID2, Config),
     true = miner_ct_utils:wait_until(
              fun() ->
-                     undefined /= ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []) andalso
-                         undefined /= ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_id, [])
+                     [] /= ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_ids, []) andalso
+                         [] /= ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_ids, [])
              end),
     ct:pal("SC1: ~p", [SC1]),
     ct:pal("SC2: ~p", [SC2]),
@@ -606,13 +606,13 @@ multi_oui_test(Config) ->
     %% Wait till client has an active sc
     true = miner_ct_utils:wait_until(
              fun() ->
-                     TempID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+                     TempID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_ids, []),
                      ct:pal("TempID: ~p", [TempID]),
-                     TempID /= undefined
+                     TempID /= []
              end,
              60, 500),
 
-    ActiveSCID = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID] = ct_rpc:call(RouterNode1, blockchain_state_channels_server, active_sc_ids, []),
     ct:pal("ActiveSCID: ~p", [ActiveSCID]),
 
     %% Sent two packets
@@ -636,13 +636,13 @@ multi_oui_test(Config) ->
     %% get this new active sc id
     true = miner_ct_utils:wait_until(
              fun() ->
-                     TempID2 = ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_id, []),
+                     TempID2 = ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_ids, []),
                      ct:pal("TempID2: ~p", [TempID2]),
-                     TempID2 /= undefined
+                     TempID2 /= []
              end,
              60, 500),
 
-    ActiveSCID2 = ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID2] = ct_rpc:call(RouterNode2, blockchain_state_channels_server, active_sc_ids, []),
     ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
 
     %% we know whatever sc was active has closed now
@@ -704,7 +704,7 @@ conflict_test(Config) ->
     Amount = 10,
     ID = open_state_channel(Config, ExpireWithin, Amount),
 
-    InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    [InitialSC] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
 
     %% At this point, we're certain that sc is open
     %% Use client node to send some packets
@@ -943,13 +943,13 @@ server_overspend_slash_test(Config) ->
     Amount = 1, %% needs to be small to avoid proportional payout
     ID = open_state_channel(Config, ExpireWithin, Amount),
 
-    InitialSC = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    [InitialSC] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
 
     %% find the block that this SC opened in, we need the hash
     [{OpenHash, _}] = miner_ct_utils:get_txn_block_details(RouterNode, fun check_type_sc_open/1),
 
     NewSummary = blockchain_state_channel_summary_v1:new(ClientPubkeyBin, Amount * 2, Amount * 2),
-    {OverSpentSC, true} = blockchain_state_channel_v1:update_summary_for(ClientPubkeyBin, NewSummary, InitialSC, true),
+    {OverSpentSC, true} = blockchain_state_channel_v1:update_summary_for(ClientPubkeyBin, NewSummary, InitialSC, true, 2000),
     SignedOverSpentSC = blockchain_state_channel_v1:sign(OverSpentSC, RouterSigFun),
     ok = blockchain_state_channel_v1:validate(SignedOverSpentSC),
 
@@ -1088,7 +1088,7 @@ open_state_channel(Config, ExpireWithin, Amount, OUI) ->
     %% wait for the state channel server to init
     true = miner_ct_utils:wait_until(
              fun() ->
-                     undefined /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, [])
+                     [] /= ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, [])
              end),
     HeightPrint2 = miner_ct_utils:height(RouterNode),
     ct:pal("State channel active at ~p", [HeightPrint2]),
