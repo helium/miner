@@ -131,8 +131,6 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
-handle_command(have_key, State) ->
-    {reply, hbbft:have_key(State#state.hbbft), [], State};
 handle_command(get_buf, State) ->
     {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
 handle_command({set_buf, Buf}, State) ->
@@ -235,7 +233,8 @@ handle_command(maybe_skip, State = #state{hbbft = HBBFT,
     ProposedRound = median_not_taken(maps:merge(#{MyIndex => {0, MyRound}}, Skips)),
     lager:info("voting for round ~p", [ProposedRound]),
     {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound, MyRound})}], State};
-handle_command(_, _State) ->
+handle_command(UnknownCommand, _State) ->
+    lager:warning("Unknown command: ~p", [UnknownCommand]),
     {reply, ignored, ignore}.
 
 -spec handle_message(binary(), pos_integer(), #state{}) ->
