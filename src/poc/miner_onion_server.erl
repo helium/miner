@@ -375,6 +375,10 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                         {ok, POCVersion} when POCVersion >= 11 ->
                             %% send receipt with poc_v11 updates
                             case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                {error, Reason} ->
+                                    lager:error("Could not get params for region: ~p, reason: ~p",
+                                                [Region, Reason]),
+                                    ok;
                                 {ok, Params} ->
                                     lager:info("Params: ~p", [Params]),
                                     case blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)) of
@@ -388,36 +392,28 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                     lager:error("unable to get tx_power, reason: ~p", [Reason]),
                                                     ok;
                                                 {ok, TxPower} ->
-                                                    case blockchain_region_params_v1:get_bandwidth(Params) of
-                                                        {error, _R} ->
-                                                            lager:error("unable to get bw, reason: ~p", [_R]),
+                                                    BW = blockchain_region_params_v1:get_bandwidth(Params),
+                                                    DR = datarate(Spreading, BW),
+                                                    case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
+                                                        {ok, _LoraState} ->
+                                                            lager:info("sending receipt at power: ~p", [TxPower]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
+                                                        {warning, {tx_power_corrected, CorrectedPower}} ->
+                                                            lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
+                                                                          [TxPower, CorrectedPower]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
+                                                        {warning, {unknown, Other}} ->
+                                                            %% This should not happen
+                                                            lager:warning("What is this? ~p", [Other]),
                                                             ok;
-                                                        {ok, BW} ->
-                                                            DR = datarate(Spreading, BW),
-                                                            case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
-                                                                {ok, _LoraState} ->
-                                                                    lager:info("sending receipt at power: ~p", [TxPower]),
-                                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
-                                                                {warning, {tx_power_corrected, CorrectedPower}} ->
-                                                                    lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
-                                                                                  [TxPower, CorrectedPower]),
-                                                                    ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                         RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
-                                                                {warning, {unknown, Other}} ->
-                                                                    %% This should not happen
-                                                                    lager:warning("What is this? ~p", [Other]),
-                                                                    ok;
-                                                                {error, Reason} ->
-                                                                    lager:error("unable to send_poc, reason: ~p", [Reason]),
-                                                                    ok
-                                                            end
+                                                        {error, Reason} ->
+                                                            lager:error("unable to send_poc, reason: ~p", [Reason]),
+                                                            ok
                                                     end
                                             end
-                                    end;
-                                {error, Reason} ->
-                                    lager:error("Could not get params, reason: ~p", [Reason]),
-                                    ok
+                                    end
                             end;
                         _ ->
                             %% continue doing the old way
