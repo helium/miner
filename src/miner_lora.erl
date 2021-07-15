@@ -113,7 +113,7 @@ send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true, Packet}, 11000).
 
--spec send_poc(binary(), any(), function(), iolist(), any()) -> {ok, state()} | {error, any()} | {warning, any()}.
+-spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()} | {warning, any()}.
 send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
 
@@ -248,7 +248,9 @@ init(Args) ->
                 pubkey_bin = blockchain_swarm:pubkey_bin(),
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
-                reg_freq_list = DefaultRegFreqList},
+                reg_freq_list = DefaultRegFreqList,
+                reg_throttle=miner_lora_throttle:new(undefined, DefaultRegRegion)
+               },
 
     case blockchain_worker:blockchain() of
         undefined ->
@@ -335,12 +337,12 @@ handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
     erlang:send_after(500, self(), chain_check),
     {noreply, State};
 handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr, chain=Chain} = State) ->
-    lager:debug("checking regulatory domain for address ~p", [Addr]),
+    lager:info("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
         case reg_domain_data_for_addr(Addr, State) of
             {error, Reason}->
-                lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
+                lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
                 %% the hotspot has not yet asserted its location, transmits will remain disabled
                 %% we will check again after a period
                 erlang:send_after(1000, self(), reg_domain_timeout),

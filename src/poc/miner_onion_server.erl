@@ -395,7 +395,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                     BW = blockchain_region_params_v1:get_bandwidth(Params),
                                                     DR = datarate(Spreading, BW),
                                                     case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
-                                                        {ok, _LoraState} ->
+                                                        ok ->
                                                             lager:info("sending receipt at power: ~p", [TxPower]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                                  RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);

@@ -977,17 +977,22 @@ find_receipts(Miners) ->
                               maps:to_list(Blocks))).
 
 challenger_receipts_map(Receipts) ->
-    lists:foldl(fun({_Height, Receipt}=R, Acc) ->
-                        {ok, Challenger} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_txn_poc_receipts_v1:challenger(Receipt))),
-                        case maps:get(Challenger, Acc, undefined) of
-                            undefined ->
-                                maps:put(Challenger, [R], Acc);
-                            List ->
-                                maps:put(Challenger, lists:keysort(1, [R | List]), Acc)
-                        end
-                end,
-                #{},
-                Receipts).
+    ReceiptMap = lists:foldl(
+                   fun({_Height, Receipt}=R, Acc) ->
+                           {ok, Challenger} = erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(blockchain_txn_poc_receipts_v1:challenger(Receipt))),
+                           case maps:get(Challenger, Acc, undefined) of
+                               undefined ->
+                                   maps:put(Challenger, [R], Acc);
+                               List ->
+                                   maps:put(Challenger, lists:keysort(1, [R | List]), Acc)
+                           end
+                   end,
+                   #{},
+                   Receipts),
+
+    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
+
+    ReceiptMap.
 
 request_counter(TotalRequests) ->
     lists:foldl(fun(Req, Acc) ->
