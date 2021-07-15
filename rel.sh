@@ -30,8 +30,10 @@ fi
 
 if [ $all = false ]; then
     git_merges="--merges"
+    git_format=""
 else
     git_merges=""
+    git_format="%H "
 fi
 
 start=$1
@@ -77,8 +79,8 @@ echo done
 echo
 
 ## grab commit hashes and headlines
-echo "nextgate changes:"
-git log $git_merges --pretty=format:"%H %s" ${start}...${end}
+echo "miner changes:"
+git log $git_merges --pretty=format:"${git_format}%s" ${start}...${end}
 echo
 
 from=$(git rev-list -n 1 ${start})
@@ -98,7 +100,7 @@ for subdep in blockchain libp2p ecc508 relcast dkg hbbft; do
         echo $subdep from $subfrom to $subto
         subhere=$(pwd)
         cd $base/.repos/$subdep/;
-        git log $git_merges --pretty=format:"%H %s" ${subfrom}...${subto};
+        git log $git_merges --pretty=format:"${git_format}%s" ${subfrom}...${subto};
         echo
         cd $subhere
     fi
