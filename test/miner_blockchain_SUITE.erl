@@ -2,10 +2,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
--include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -13,10 +11,20 @@
          init_per_testcase/2,
          end_per_testcase/2,
          all/0
-
         ]).
 
--compile([export_all]).
+-export([
+    restart_test/1,
+    dkg_restart_test/1,
+    validator_transition_test/1,
+    election_test/1,
+    election_multi_test/1,
+    group_change_test/1,
+    master_key_test/1,
+    version_change_test/1,
+    election_v3_test/1,
+    high_snapshot_test/1
+]).
 
 %% common test callbacks
 
