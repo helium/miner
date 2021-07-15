@@ -27,6 +27,8 @@ RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.main
 
 FROM erlang:22.3.2-alpine as runner
 
+EXPOSE 8080 4467
+
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc apk-tools
 RUN ulimit -n 64000
 

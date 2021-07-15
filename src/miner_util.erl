@@ -13,7 +13,6 @@
          median/1,
          mark/2,
          metadata_fun/0,
-         random_peer_predicate/1,
          has_valid_local_capability/2,
          hbbft_perf/0
         ]).
@@ -116,10 +115,6 @@ metadata_fun() ->
     catch _:_ ->
               #{}
     end.
-
-random_peer_predicate(Peer) ->
-    not libp2p_peer:is_stale(Peer, timer:minutes(360)) andalso
-        maps:get(<<"release_version">>, libp2p_peer:signed_metadata(Peer), undefined) /= undefined.
 
 -spec has_valid_local_capability(Capability :: non_neg_integer(),
                                  Ledger :: blockchain_ledger_v1:ledger())->
