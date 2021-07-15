@@ -331,6 +331,8 @@ handle_info({blockchain_event, {new_chain, NC}}, State) ->
     erlang:send_after(500, self(), reg_domain_timeout),
     State1 = State#state{chain = NC},
     {noreply, State1};
+handle_info({blockchain_event, _}, State) ->
+    {noreply, State};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
     %% There is no chain, we cannot lookup regulatory domain data yet
     %% Keep waiting for chain
