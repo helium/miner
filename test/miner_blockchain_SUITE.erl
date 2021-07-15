@@ -26,23 +26,43 @@
     high_snapshot_test/1
 ]).
 
-%% common test callbacks
-
 all() -> [
-          restart_test,
-          dkg_restart_test,
-          validator_transition_test,
-          election_test,
-          election_multi_test,
-          group_change_test,
-          master_key_test,
-          version_change_test,
-          election_v3_test,
-          %% this is an OK smoke test but doesn't hit every time, the
-          %% high test is more reliable
-          %% snapshot_test,
-          high_snapshot_test
-         ].
+    % RELOC NOTE Test only DKG and election
+    % RELOC NOTE Anything that tets essentially variable changes can go to core
+
+    restart_test,
+    %% RELOC TODO
+
+    dkg_restart_test,
+    %% RELOC TODO
+
+    validator_transition_test,
+    %% RELOC TODO
+
+    election_test,
+    %% RELOC TODO
+
+    election_multi_test,
+    %% RELOC TODO
+
+    group_change_test,
+    % RELOC keep
+
+    master_key_test,
+    % RELOC move
+
+    version_change_test,
+    % RELOC move
+
+    election_v3_test,
+    %% RELOC TODO
+
+    %% this is an OK smoke test but doesn't hit every time, the
+    %% high test is more reliable
+    %% snapshot_test,
+    high_snapshot_test
+    % RELOC keep
+].
 
 init_per_suite(Config) ->
     Config.
