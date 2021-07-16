@@ -20,6 +20,7 @@
 -define(MINER_MEMBER_ADD_GW, "AddGateway").
 -define(MINER_MEMBER_ASSERT_LOC, "AssertLocation").
 -define(MINER_MEMBER_P2P_STATUS, "P2PStatus").
+-define(MINER_MEMBER_BLOCK_AGE, "BlockAge").
 
 -define(MINER_ERROR_BADARGS, "com.helium.Miner.Error.BadArgs").
 -define(MINER_ERROR_INTERNAL, "com.helium.Miner.Error.Internal").
@@ -83,6 +84,9 @@ handle_message(?MINER_OBJECT(?MINER_MEMBER_ASSERT_LOC)=Member, Msg, State=#state
 handle_message(?MINER_OBJECT(?MINER_MEMBER_P2P_STATUS), _, State=#state{}) ->
     Status = miner:p2p_status(),
     {reply, [{array, {struct, [string, string]}}], [Status], State};
+handle_message(?MINER_OBJECT(?MINER_MEMBER_BLOCK_AGE), _, State=#state{}) ->
+    Age = miner:block_age(),
+    {reply, [int32], [Age], State};
 handle_message(Member, _Msg, State) ->
     lager:warning("Unhandled dbus message ~p", [Member]),
     {reply_error, ?DBUS_ERROR_NOT_SUPPORTED, Member, State}.
