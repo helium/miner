@@ -1274,7 +1274,7 @@ do_common_partition_lying_checks(TestCase, Config) ->
     ok.
 
 extra_vars(poc_v11) ->
-    maps:merge(extra_poc_vars(), miner_poc_test_utils:poc_v11_vars());
+    maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars());
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),
                #{?poc_version => 10,
