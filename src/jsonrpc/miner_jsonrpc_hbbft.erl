@@ -53,5 +53,21 @@ handle_rpc(<<"hbbft_queue">>, []) ->
         inbound => length(Inbound),
         outbound => Outbound1
     };
+handle_rpc(<<"hbbft_perf">>, []) ->
+    {ConsensusAddrs, BBATotals, SeenTotals, TotalCount, GroupWithPenalties, Start0, Start, End} =
+        miner_util:hbbft_perf(),
+    [
+     #{
+	name => ?TO_VALUE(?TO_ANIMAL_NAME(A)),
+        address => ?TO_VALUE(?TO_B58(A)),
+        bba_completions => [element(2, maps:get(A, BBATotals)), End+1 - Start],
+        seen_votes => [element(2, maps:get(A, SeenTotals)), TotalCount],
+        last_bba => End - max(Start0 + 1, element(1, maps:get(A, BBATotals))),
+        last_seen => End - max(Start0 + 1, element(1, maps:get(A, SeenTotals))),
+        tenure => [element(2, element(2, lists:keyfind(A, 1, GroupWithPenalties)))],
+        penalty => [element(1, element(2, lists:keyfind(A, 1, GroupWithPenalties)))]
+      }
+      || A <- ConsensusAddrs
+    ];
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
