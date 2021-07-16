@@ -802,17 +802,13 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      %% If we have only one request, there's no guarantee
                                      %% that the paths would eventually grow
                                      C1 = check_multiple_requests(Miners),
-                                     %% XXX: Temporary check for now
                                      %% Check if we have some receipts
                                      C2 = maps:size(challenger_receipts_map(find_receipts(Miners))) > 0,
                                      %% Check there are some poc rewards
-
-                                     %% TODO: Check that the rewards_md have some poc_challengees and
-                                     %% poc_witnesses rewards
                                      RewardsMD = get_rewards_md(Config),
-                                     ct:pal("RewardsMD: ~p", [RewardsMD]),
-                                     C3 = false,
-
+                                     POCRewards = acc_poc_challengees_and_witness_rewards(RewardsMD),
+                                     ct:pal("POCRewards: ~p", [POCRewards]),
+                                     C3 = length(POCRewards) > 0,
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
@@ -1210,6 +1206,22 @@ balances(Config) ->
     [Miner | _] = ?config(miners, Config),
     Addresses = ?config(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
+
+acc_poc_challengees_and_witness_rewards(RewardsMD) ->
+    lists:foldl(
+        fun({Ht, MD}, Acc) ->
+            case maps:get(poc_challengee, MD) of
+                V when map_size(V) /= 0 -> [{Ht, V} | Acc];
+                _ -> Acc
+            end,
+            case maps:get(poc_witness, MD) of
+                V2 when map_size(V2) /= 0 -> [{Ht, V2} | Acc];
+                _ -> Acc
+            end
+        end,
+        [],
+        RewardsMD
+    ).
 
 get_rewards_md(Config) ->
     %% NOTE: It's possible that the calculations below may blow up
