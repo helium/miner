@@ -26,8 +26,7 @@
   ]},
  {libp2p,
   [
-   {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}},
-   {random_peer_pred, fun(X) -> X end}
+   {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}}
   ]
  },
  {relcast,
