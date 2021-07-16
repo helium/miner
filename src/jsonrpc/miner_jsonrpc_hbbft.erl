@@ -36,8 +36,8 @@ handle_rpc(<<"hbbft_queue">>, []) ->
                 last_ack := LastAck
             } = maps:get(K, Workers),
             #{
-                address => ?TO_B58(Raw),
-                name => ?TO_ANIMAL_NAME(Raw),
+                address => ?BIN_TO_B58(Raw),
+                name => ?BIN_TO_ANIMAL(Raw),
                 count => length(V),
                 connected => Connected,
                 blocked => not Ready,
