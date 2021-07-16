@@ -806,7 +806,13 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      %% Check if we have some receipts
                                      C2 = maps:size(challenger_receipts_map(find_receipts(Miners))) > 0,
                                      %% Check there are some poc rewards
-                                     C3 = check_poc_rewards(get_rewards(Config)),
+
+                                     %% TODO: Check that the rewards_md have some poc_challengees and
+                                     %% poc_witnesses rewards
+                                     RewardsMD = get_rewards_md(Config),
+                                     ct:pal("RewardsMD: ~p", [RewardsMD]),
+                                     C3 = false,
+
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
@@ -1205,7 +1211,45 @@ balances(Config) ->
     Addresses = ?config(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
 
+get_rewards_md(Config) ->
+    %% NOTE: It's possible that the calculations below may blow up
+    %% since we are folding the entire chain here and some subsequent
+    %% ledger_at call in rewards_metadata blows up. Investigate
+
+    [Miner | _] = ?config(miners, Config),
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    {ok, Head} = ct_rpc:call(Miner, blockchain, head_block, [Chain]),
+
+    Filter = fun(T) -> blockchain_txn:type(T) == blockchain_txn_rewards_v2 end,
+    Fun = fun(Block, Acc) ->
+        case blockchain_utils:find_txn(Block, Filter) of
+            [T] ->
+                Start = blockchain_txn_rewards_v2:start_epoch(T),
+                End = blockchain_txn_rewards_v2:end_epoch(T),
+                MDRes = ct_rpc:call(Miner, blockchain_txn_rewards_v2, calculate_rewards_metadata, [
+                    Start,
+                    End,
+                    Chain
+                ]),
+                case MDRes of
+                    {ok, MD} ->
+                        [{blockchain_block:height(Block), MD} | Acc];
+                    _ ->
+                        Acc
+                end;
+            _ ->
+                Acc
+        end
+    end,
+    Res = ct_rpc:call(Miner, blockchain, fold_chain, [Fun, [], Head, Chain]),
+    Res.
+
+
 get_rewards(Config) ->
+    %% default to rewards_v1
+    get_rewards(Config, blockchain_txn_rewards_v1).
+
+get_rewards(Config, RewardType) ->
     [Miner | _] = ?config(miners, Config),
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Blocks = ct_rpc:call(Miner, blockchain, blocks, [Chain]),
@@ -1215,7 +1259,7 @@ get_rewards(Config) ->
                               Acc;
                           Ts ->
                               Rewards = lists:filter(fun(T) ->
-                                                             blockchain_txn:type(T) == blockchain_txn_rewards_v1
+                                                             blockchain_txn:type(T) == RewardType
                                                      end,
                                                      Ts),
                               lists:flatten([Rewards | Acc])
@@ -1274,7 +1318,9 @@ do_common_partition_lying_checks(TestCase, Config) ->
     ok.
 
 extra_vars(poc_v11) ->
-    maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars());
+    POCVars = maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars()),
+    RewardVars = #{reward_version => 5, rewards_txn_version => 2},
+    maps:merge(POCVars, RewardVars);
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),
                #{?poc_version => 10,
