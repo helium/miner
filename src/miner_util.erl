@@ -172,7 +172,7 @@ hbbft_perf() ->
         end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
                     || Ht <- lists:seq(EpochStart, CurrentHeight)],
-    {BBATotals, SeenTotals, TotalCount} =
+    {BBATotals, SeenTotals, MaxSeen} =
         lists:foldl(
           fun(Blk, {BBAAcc, SeenAcc, Count}) ->
                   H = blockchain_block:height(Blk),
@@ -192,7 +192,7 @@ hbbft_perf() ->
          consensus_members => ConsensusAddrs,
          bba_totals => BBATotals,
          seen_totals => SeenTotals,
-         total_count => TotalCount,
+         max_seen => MaxSeen,
          group_with_penalties => GroupWithPenalties,
          election_start_height => ElectionStart,
          epoch_start_height => EpochStart,

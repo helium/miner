@@ -236,7 +236,7 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
         consensus_members := ConsensusMembers,
         bba_totals := BBATotals,
         seen_totals := SeenTotals,
-        total_count := TotalCount,
+        max_seen := MaxSeen,
         group_with_penalties := GroupWithPenalties,
         election_start_height := ElectionStart,
         epoch_start_height := EpochStart,
@@ -249,7 +249,7 @@ hbbft_perf(["hbbft", "perf"], [], Flags) ->
             [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
             [
              {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), BlocksSince])},
-             {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
+             {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), MaxSeen])},
              {last_bba, CurrentHeight - max(PostElectionHeight, element(1, maps:get(A, BBATotals)))},
              {last_seen, CurrentHeight - max(PostElectionHeight, element(1, maps:get(A, SeenTotals)))},
              {tenure, io_lib:format("~.2f", [element(2, element(2, lists:keyfind(A, 1, GroupWithPenalties)))])},

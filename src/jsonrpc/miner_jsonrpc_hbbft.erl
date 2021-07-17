@@ -58,7 +58,7 @@ handle_rpc(<<"hbbft_perf">>, []) ->
         consensus_members := ConsensusMembers,
         bba_totals := BBATotals,
         seen_totals := SeenTotals,
-        total_count := TotalCount,
+        max_seen := MaxSeen,
         group_with_penalties := GroupWithPenalties,
         election_start_height := ElectionStart,
         epoch_start_height := EpochStart,
@@ -66,15 +66,20 @@ handle_rpc(<<"hbbft_perf">>, []) ->
     } = miner_util:hbbft_perf(),
     PostElectionHeight = ElectionStart + 1,
     BlocksSince = CurrentHeight + 1 - EpochStart,
-    [
-      format_hbbft_entry(Member, CurrentHeight, PostElectionHeight, BlocksSince, TotalCount, BBATotals, SeenTotals, GroupWithPenalties)
-      || Member <- ConsensusMembers
-    ];
+    #{
+        current_height => CurrentHeight,
+        blocks_since_epoch => BlocksSince,
+        max_seen => MaxSeen,
+        consensus_members => [
+            format_hbbft_entry(Member, CurrentHeight, PostElectionHeight, BBATotals, SeenTotals, GroupWithPenalties)
+            || Member <- ConsensusMembers
+        ]
+    };
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
--spec format_hbbft_entry(<<>>, integer(), integer(), integer(), integer(), map(), map(), list()) -> map().
-format_hbbft_entry(CGMemberAddress, CurrentHeight, PostElectionHeight, BlocksSince, TotalCount, BBATotals, SeenTotals, GroupWithPenalties) ->
+-spec format_hbbft_entry(<<>>, integer(), integer(), map(), map(), list()) -> map().
+format_hbbft_entry(CGMemberAddress, CurrentHeight, PostElectionHeight, BBATotals, SeenTotals, GroupWithPenalties) ->
     {LastBBAHeight, Completions} = maps:get(CGMemberAddress, BBATotals),
     {LastSeenHeight, SeenVotes} = maps:get(CGMemberAddress, SeenTotals),
     {_Address, {Penalty, Tenure}} = lists:keyfind(CGMemberAddress, 1, GroupWithPenalties),
@@ -82,8 +87,8 @@ format_hbbft_entry(CGMemberAddress, CurrentHeight, PostElectionHeight, BlocksSin
     #{
         name => ?B58_TO_ANIMAL(B58Address),
         address => B58Address,
-        bba_completions => [Completions, BlocksSince],
-        seen_votes => [SeenVotes, TotalCount],
+        bba_completions => Completions,
+        seen_votes => SeenVotes,
         last_bba => CurrentHeight - max(PostElectionHeight, LastBBAHeight),
         last_seen => CurrentHeight - max(PostElectionHeight, LastSeenHeight),
         tenure => Tenure,
