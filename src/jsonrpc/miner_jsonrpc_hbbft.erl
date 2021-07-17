@@ -78,9 +78,10 @@ format_hbbft_entry(CGMemberAddress, CurrentHeight, PostElectionHeight, BlocksSin
     {LastBBAHeight, Completions} = maps:get(CGMemberAddress, BBATotals),
     {LastSeenHeight, SeenVotes} = maps:get(CGMemberAddress, SeenTotals),
     {_Address, {Penalty, Tenure}} = lists:keyfind(CGMemberAddress, 1, GroupWithPenalties),
+    B58Address = ?BIN_TO_B58(CGMemberAddress),
     #{
-        name => ?BIN_TO_B58(CGMemberAddress),
-        address => ?BIN_TO_ANIMAL(CGMemberAddress),
+        name => ?B58_TO_ANIMAL(B58Address),
+        address => B58Address,
         bba_completions => [Completions, BlocksSince],
         seen_votes => [SeenVotes, TotalCount],
         last_bba => CurrentHeight - max(PostElectionHeight, LastBBAHeight),
