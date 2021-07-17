@@ -46,7 +46,7 @@ handle_rpc(<<"info_p2p_status">>, []) ->
 handle_rpc(<<"info_region">>, []) ->
     R =
         case miner_lora:region() of
-            {ok, undefined} -> <<"undefined">>;
+            {ok, undefined} -> null;
             {ok, Region} -> atom_to_binary(Region, utf8)
         end,
     #{region => R};

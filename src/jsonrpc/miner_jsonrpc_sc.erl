@@ -9,7 +9,7 @@
 handle_rpc(<<"sc_active">>, []) ->
     case (catch blockchain_state_channels_server:active_sc_ids()) of
         {'EXIT', _} -> ?jsonrpc_error(timeout);
-        undefined -> #{<<"active">> => <<"none">>};
+        undefined -> #{<<"active">> => null};
         BinIds -> #{<<"active">> => [ ?TO_VALUE(base64:encode(I)) || I <- BinIds ]}
     end;
 handle_rpc(<<"sc_active">>, Params) ->
@@ -17,7 +17,7 @@ handle_rpc(<<"sc_active">>, Params) ->
 handle_rpc(<<"sc_list">>, []) ->
     case (catch blockchain_state_channels_server:state_channels()) of
         {'EXIT', _} -> ?jsonrpc_error(timeout);
-        undefined -> #{<<"channels">> => <<"none">>};
+        undefined -> #{<<"channels">> => null};
         SCs -> format_sc_list(SCs)
     end;
 handle_rpc(<<"sc_list">>, Params) ->

@@ -58,7 +58,7 @@ handle_rpc(<<"hbbft_perf">>, []) ->
         miner_util:hbbft_perf(),
     [
      #{
-	name => ?TO_VALUE(?TO_ANIMAL_NAME(A)),
+        name => ?TO_VALUE(?TO_ANIMAL_NAME(A)),
         address => ?TO_VALUE(?TO_B58(A)),
         bba_completions => [element(2, maps:get(A, BBATotals)), End+1 - Start],
         seen_votes => [element(2, maps:get(A, SeenTotals)), TotalCount],
