@@ -85,6 +85,18 @@ handle_rpc(<<"ledger_validators">>, []) ->
         [],
         Ledger
     );
+handle_rpc(<<"ledger_validators">>, #{ <<"address">> := Address }) ->
+    Ledger = get_ledger(),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    try
+        BinAddr = ?B58_TO_BIN(Address),
+        case blockchain_ledger_v1:get_validator(BinAddr, Ledger) of
+            {error, not_found} -> #{ error => not_found };
+            {ok, Val} -> format_ledger_validator(BinAddr, Val, Ledger, Height)
+        end
+    catch
+        _:_ -> ?jsonrpc_error({invalid_params, Address})
+    end;
 handle_rpc(<<"ledger_validators">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
 handle_rpc(<<"ledger_variables">>, []) ->
