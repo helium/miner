@@ -232,18 +232,28 @@ hbbft_perf_usage() ->
     ].
 
 hbbft_perf(["hbbft", "perf"], [], Flags) ->
-    {ConsensusAddrs, BBATotals, SeenTotals, TotalCount, GroupWithPenalties, Start0, Start, End} =
-        miner_util:hbbft_perf(),
+    #{
+        consensus_members := ConsensusMembers,
+        bba_totals := BBATotals,
+        seen_totals := SeenTotals,
+        total_count := TotalCount,
+        group_with_penalties := GroupWithPenalties,
+        election_start_height := ElectionStart,
+        epoch_start_height := EpochStart,
+        current_height := CurrentHeight
+    } = miner_util:hbbft_perf(),
+    PostElectionHeight = ElectionStart + 1,
+    BlocksSince = CurrentHeight + 1 - EpochStart,
     [clique_status:table(
        [[{name, element(2, erl_angry_purple_tiger:animal_name(libp2p_crypto:bin_to_b58(A)))} ] ++
             [ {address, libp2p_crypto:pubkey_bin_to_p2p(A)} || lists:keymember(verbose, 1, Flags)] ++
             [
-             {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), End+1 - Start])},
+             {bba_completions, io_lib:format("~b/~b", [element(2, maps:get(A, BBATotals)), BlocksSince])},
              {seen_votes, io_lib:format("~b/~b", [element(2, maps:get(A, SeenTotals)), TotalCount])},
-             {last_bba, End - max(Start0 + 1, element(1, maps:get(A, BBATotals)))},
-             {last_seen, End - max(Start0 + 1, element(1, maps:get(A, SeenTotals)))},
+             {last_bba, CurrentHeight - max(PostElectionHeight, element(1, maps:get(A, BBATotals)))},
+             {last_seen, CurrentHeight - max(PostElectionHeight, element(1, maps:get(A, SeenTotals)))},
              {tenure, io_lib:format("~.2f", [element(2, element(2, lists:keyfind(A, 1, GroupWithPenalties)))])},
              {penalty, io_lib:format("~.2f", [element(1, element(2, lists:keyfind(A, 1, GroupWithPenalties)))])}
-            ] || A <- ConsensusAddrs])];
+            ] || A <- ConsensusMembers])];
 hbbft_perf([], [], []) ->
     usage.

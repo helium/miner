@@ -140,20 +140,21 @@ has_valid_local_capability(Capability, Ledger) ->
             end
     end.
 
+-spec hbbft_perf() -> map().
 hbbft_perf() ->
     %% calculate the current election start height
     Chain = blockchain_worker:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     InitMap = maps:from_list([ {Addr, {0, 0}} || Addr <- ConsensusAddrs]),
-    #{start_height := Start0, curr_height := End} = blockchain_election:election_info(Ledger),
-    {Start, GroupWithPenalties} =
+    #{start_height := ElectionStart, curr_height := CurrentHeight } = blockchain_election:election_info(Ledger),
+    {EpochStart, GroupWithPenalties} =
         case blockchain:config(?election_version, Ledger) of
             {ok, N} when N >= 5 ->
                 Penalties = blockchain_election:validator_penalties(ConsensusAddrs, Ledger),
-                Start1 = case End > (Start0 + 2) of
-                             true -> Start0 + 2;
-                             false -> End + 1
+                Start1 = case CurrentHeight > (ElectionStart + 2) of
+                             true -> ElectionStart + 2;
+                             false -> CurrentHeight + 1
                          end,
                 Penalties1 =
                     maps:map(
@@ -164,13 +165,13 @@ hbbft_perf() ->
                       end, Penalties),
                 {Start1, maps:to_list(Penalties1)};
             _ ->
-                {Start0 + 1,
+                {ElectionStart + 1,
                  [{A, {S, 0.0}}
                   || {S, _L, A} <- blockchain_election:adjust_old_group(
                                      [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
         end,
     Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
-                    || Ht <- lists:seq(Start, End)],
+                    || Ht <- lists:seq(EpochStart, CurrentHeight)],
     {BBATotals, SeenTotals, TotalCount} =
         lists:foldl(
           fun(Blk, {BBAAcc, SeenAcc, Count}) ->
@@ -187,7 +188,16 @@ hbbft_perf() ->
                            end,SeenAcc, SeenVotes),
                   {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
           end, {InitMap, InitMap, 0}, Blocks),
-    {ConsensusAddrs, BBATotals, SeenTotals, TotalCount, GroupWithPenalties, Start0, Start, End}.
+     #{
+         consensus_members => ConsensusAddrs,
+	 bba_totals => BBATotals,
+         seen_totals => SeenTotals,
+	 total_count => TotalCount,
+         group_with_penalties => GroupWithPenalties,
+         election_start_height => ElectionStart,
+	 epoch_start_height => EpochStart,
+         current_height => CurrentHeight
+     }.
 
 merge_map(Addrs, Votes, Height, Acc) ->
     maps:fold(fun(K, true, A) ->

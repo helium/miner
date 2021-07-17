@@ -54,20 +54,37 @@ handle_rpc(<<"hbbft_queue">>, []) ->
         outbound => Outbound1
     };
 handle_rpc(<<"hbbft_perf">>, []) ->
-    {ConsensusAddrs, BBATotals, SeenTotals, TotalCount, GroupWithPenalties, Start0, Start, End} =
-        miner_util:hbbft_perf(),
+    #{
+        consensus_members := ConsensusMembers,
+        bba_totals := BBATotals,
+        seen_totals := SeenTotals,
+        total_count := TotalCount,
+        group_with_penalties := GroupWithPenalties,
+        election_start_height := ElectionStart,
+        epoch_start_height := EpochStart,
+        current_height := CurrentHeight
+    } = miner_util:hbbft_perf(),
+    PostElectionHeight = ElectionStart + 1,
+    BlocksSince = CurrentHeight + 1 - EpochStart,
     [
-     #{
-	name => ?TO_VALUE(?TO_ANIMAL_NAME(A)),
-        address => ?TO_VALUE(?TO_B58(A)),
-        bba_completions => [element(2, maps:get(A, BBATotals)), End+1 - Start],
-        seen_votes => [element(2, maps:get(A, SeenTotals)), TotalCount],
-        last_bba => End - max(Start0 + 1, element(1, maps:get(A, BBATotals))),
-        last_seen => End - max(Start0 + 1, element(1, maps:get(A, SeenTotals))),
-        tenure => [element(2, element(2, lists:keyfind(A, 1, GroupWithPenalties)))],
-        penalty => [element(1, element(2, lists:keyfind(A, 1, GroupWithPenalties)))]
-      }
-      || A <- ConsensusAddrs
+      format_hbbft_entry(Member, CurrentHeight, PostElectionHeight, BlocksSince, TotalCount, BBATotals, SeenTotals, GroupWithPenalties)
+      || Member <- ConsensusMembers
     ];
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
+
+-spec format_hbbft_entry(<<>>, integer(), integer(), integer(), integer(), map(), map(), list()) -> map().
+format_hbbft_entry(CGMemberAddress, CurrentHeight, PostElectionHeight, BlocksSince, TotalCount, BBATotals, SeenTotals, GroupWithPenalties) ->
+    {LastBBAHeight, Completions} = maps:get(CGMemberAddress, BBATotals),
+    {LastSeenHeight, SeenVotes} = maps:get(CGMemberAddress, SeenTotals),
+    {_Address, {Penalty, Tenure}} = lists:keyfind(CGMemberAddress, 1, GroupWithPenalties),
+    #{
+        name => ?BIN_TO_B58(CGMemberAddress),
+        address => ?BIN_TO_ANIMAL(CGMemberAddress),
+        bba_completions => [Completions, BlocksSince],
+        seen_votes => [SeenVotes, TotalCount],
+        last_bba => CurrentHeight - max(PostElectionHeight, LastBBAHeight),
+        last_seen => CurrentHeight - max(PostElectionHeight, LastSeenHeight),
+        tenure => Tenure,
+        penalty => Penalty
+    }.
