@@ -190,12 +190,12 @@ hbbft_perf() ->
           end, {InitMap, InitMap, 0}, Blocks),
      #{
          consensus_members => ConsensusAddrs,
-	 bba_totals => BBATotals,
+         bba_totals => BBATotals,
          seen_totals => SeenTotals,
-	 total_count => TotalCount,
+         total_count => TotalCount,
          group_with_penalties => GroupWithPenalties,
          election_start_height => ElectionStart,
-	 epoch_start_height => EpochStart,
+         epoch_start_height => EpochStart,
          current_height => CurrentHeight
      }.
 
