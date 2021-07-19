@@ -12,7 +12,7 @@
 
 handle_rpc(<<"txn_queue">>, []) ->
     case (catch blockchain_txn_mgr:txn_list()) of
-        {'EXIT', _} -> #{ error => <<"timeout">> };
+        {'EXIT', _} -> ?jsonrpc_error(timeout);
         [] -> [];
         Txns ->
             maps:fold(fun(T, D, Acc) ->
@@ -42,7 +42,7 @@ handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
             lager:error("Couldn't do add gateway via JSONRPC because: ~p ~p: ~p",
                         [T, E, St]),
             Error = io_lib:format("~p", [E]),
-            #{ <<"error">> => Error }
+            ?jsonrpc_error({error, Error})
     end;
 handle_rpc(<<"txn_assert_location">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     try
@@ -64,7 +64,7 @@ handle_rpc(<<"txn_assert_location">>, #{ <<"owner">> := OwnerB58 } = Params) ->
             lager:error("Couldn't complete assert location JSONRPC because ~p ~p: ~p",
                         [T, E, St]),
             Error = io_lib:format("~p", [E]),
-            #{ <<"error">> => Error }
+            ?jsonrpc_error({error, Error})
     end;
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).

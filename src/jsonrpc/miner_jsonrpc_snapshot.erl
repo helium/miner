@@ -14,7 +14,7 @@
 handle_rpc(<<"snapshot_list">>, []) ->
     Chain = blockchain_worker:blockchain(),
     case blockchain:find_last_snapshots(Chain, 5) of
-        undefined -> #{ error => <<"no snapshots found">> };
+        undefined -> ?jsonrpc_error(no_snapshots_found);
         Snapshots ->
             [ #{ height => Height,
                  hash => ?BIN_TO_B64(Hash),
