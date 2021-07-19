@@ -87,8 +87,10 @@ handle_rpc(<<"info_summary">>, []) ->
         uptime => Uptime,
         peer_book_entry_count => PeerBookEntryCount,
         firmware_version => FirmwareVersion,
-        gateway_details => GWInfo
+        gateway_details => GWInfo,
+        version => miner:version()
     };
+
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
