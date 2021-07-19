@@ -1,5 +1,6 @@
 [Unit]
 Description=seed instance
+Requires=seed.socket
 After=network.target
 
 [Service]
@@ -8,10 +9,14 @@ ExecStart=/home/ubuntu/miner/_build/seed/rel/miner/bin/miner foreground
 ExecStop=/home/ubuntu/miner/_build/seed/rel/miner/bin/miner stop
 User=ubuntu
 PIDFile=/var/run/miner/seed.pid
-Environment=HOME="/home/ubuntu/miner"
+WorkingDirectory=/home/ubuntu/miner/_build/seed/rel/miner
+Environment=HOME="/home/ubuntu/miner/_build/seed/rel/miner"
 Environment=RUNNER_LOG_DIR="/home/ubuntu/miner/_build/seed/rel/miner/log"
 Environment=ERL_CRASH_DUMP="/home/ubuntu/miner/_build/seed/rel/miner"
+Environment=ERL_FULLSWEEP_AFTER=10
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
+NonBlocking=true
 
 [Install]
 WantedBy=multi-user.target
