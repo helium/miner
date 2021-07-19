@@ -14,6 +14,8 @@
         ]).
 
 -export([
+    autoskip_chain_vars_test/1,
+    autoskip_on_timeout_test/1,
     restart_test/1,
     dkg_restart_test/1,
     validator_transition_test/1,
@@ -23,45 +25,67 @@
     master_key_test/1,
     version_change_test/1,
     election_v3_test/1,
+
+    snapshot_test/1,
     high_snapshot_test/1
 ]).
 
+%% TODO Relocate all helper functions bellow tests.
+
 all() -> [
-    % RELOC NOTE Test only DKG and election
-    % RELOC NOTE Anything that tets essentially variable changes can go to core
+    % RELOC NOTE def KEEP testing of DKG
+    % RELOC NOTE def KEEP testing of election
+    % RELOC NOTE def MOVE testing of variable changes
+    % RELOC NOTE may MOVE if raw transactions are being submitted
+
+    autoskip_chain_vars_test,
+    %% RELOC KEEP - tests miner-unique feature
+
+    autoskip_on_timeout_test,
+    %% RELOC KEEP - tests miner-unique feature
 
     restart_test,
-    %% RELOC TODO
+    %% RELOC KEEP - tests whole miner
 
     dkg_restart_test,
-    %% RELOC TODO
+    %% RELOC KEEP - tests DKG
 
     validator_transition_test,
-    %% RELOC TODO
+    %% RELOC TBD:
+    %%   FOR:
+    %%     - submits txns
+    %%     - submits vars
+    %%   AGAINST:
+    %%     - seems to intend to test miner-specific functionality - validators
 
     election_test,
-    %% RELOC TODO
+    %% RELOC KEEP - tests election
 
     election_multi_test,
-    %% RELOC TODO
+    %% RELOC KEEP - tests election
 
     group_change_test,
-    % RELOC keep
+    %% RELOC TBD:
+    %%   FOR:
+    %%     - seems to be mostly calling a single miner
+    %%     - submits txns
+    %%   AGAINST:
+    %%     - seems to expect different outcomes in multiple miners
 
     master_key_test,
-    % RELOC move
+    %% RELOC MOVE - does things with vars and txns
 
     version_change_test,
-    % RELOC move
+    %% RELOC MOVE - does things with vars and txns
 
     election_v3_test,
-    %% RELOC TODO
+    %% RELOC KEEP - tests election
 
-    %% this is an OK smoke test but doesn't hit every time, the
-    %% high test is more reliable
-    %% snapshot_test,
+    %% snapshot_test is an OK smoke test but doesn't hit every time, the
+    %% high_snapshot_test test is more reliable:
+    %%snapshot_test,
     high_snapshot_test
-    % RELOC keep
+    %% RELOC KEEP - why?
 ].
 
 init_per_suite(Config) ->
@@ -71,6 +95,9 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(TestCase, Config0) ->
+    %% TODO Describe what global state we intend to setup, besides vals added to config.
+    %% TODO Redefine as a parameterized helper, because some cased need different params.
+
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
     try
     Miners = ?config(miners, Config),
@@ -316,6 +343,7 @@ autoskip_on_timeout_test(Config) ->
         Node <- MinersCGBroken
     ],
 
+    %% TODO The following needs better explanation and/or better methods.
     %% send some more skips at broken miner 1 so we're not all on the same round
     Node1 = hd(MinersCGBroken),
     ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
@@ -331,6 +359,7 @@ autoskip_on_timeout_test(Config) ->
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
+    %% TODO Describe main idea and method.
     BaseDir = ?config(base_dir, Config),
     Miners = ?config(miners, Config),
 
@@ -355,6 +384,7 @@ restart_test(Config) ->
 
 
 dkg_restart_test(Config) ->
+    %% TODO Describe main idea and method.
     Miners = ?config(miners, Config),
     Interval = ?config(election_interval, Config),
     AddrList = ?config(tagged_miner_addresses, Config),
@@ -402,6 +432,8 @@ dkg_restart_test(Config) ->
     ?assert(EndHeight < (Height + Interval + 99)).
 
 validator_transition_test(Config) ->
+    %% TODO Describe main idea and method.
+
     %% get all the miners
     Miners = ?config(miners, Config),
     Context = ?config(node_context, Config),
@@ -453,6 +485,9 @@ validator_transition_test(Config) ->
 check_loop(0, _Miners) ->
     error(seen_timeout);
 check_loop(N, Miners) ->
+    %% TODO Describe main idea and method. What will send the mesgs? What is its API?
+    %% TODO Need more transparent API, since the above isn't clear.
+    %% TODO See if this function can be re-used in election_test
     receive
         seen_all ->
             ok;
@@ -476,6 +511,8 @@ check_loop(N, Miners) ->
 
 
 election_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
     BaseDir = ?config(base_dir, Config),
     %% get all the miners
     Miners = ?config(miners, Config),
@@ -484,6 +521,7 @@ election_test(Config) ->
     Me = self(),
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
+    %% TODO Looks like copy-pasta - see if check_loop/2 can be used instead.
     fun Loop(0) ->
             error(seen_timeout);
         Loop(N) ->
@@ -615,6 +653,8 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1).
 
 election_multi_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
     BaseDir = ?config(base_dir, Config),
     %% get all the miners
     Miners = ?config(miners, Config),
@@ -627,6 +667,14 @@ election_multi_test(Config) ->
 
     ct:pal("starting multisig attempt"),
 
+    %% TODO Looks automatable - 5 unique things that aren't used uniquely:
+    %{Privs, BinPubs} = (fun(N) ->
+    %    Keys = [libp2p_crypto:generate_keys(ecc_compact) || {} <- lists:duplicate(N, {})],
+    %    Privs = [Priv || #{secret := Priv} <- Keys],
+    %    Pubs = [Pub || #{public := Pub} <- Keys],
+    %    BinPubs = lists:map(fun libp2p_crypto:pubkey_to_bin/1, Pubs),
+    %    {Privs, BinPubs}
+    %)(5)
     #{secret := Priv1, public := Pub1} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := Priv2, public := Pub2} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := Priv3, public := Pub3} = libp2p_crypto:generate_keys(ecc_compact),
@@ -754,6 +802,9 @@ election_multi_test(Config) ->
     end.
 
 group_change_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
+
     %% get all the miners
     Miners = ?config(miners, Config),
     BaseDir = ?config(base_dir, Config),
@@ -902,6 +953,9 @@ group_change_test(Config) ->
     ok.
 
 master_key_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
+
     %% get all the miners
     Miners = ?config(miners, Config),
 
@@ -1074,6 +1128,7 @@ vars(Map, Nonce, Priv) ->
     blockchain_txn_vars_v1:proof(Txn0, Proof).
 
 version_change_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
@@ -1146,6 +1201,7 @@ version_change_test(Config) ->
 
 
 election_v3_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
@@ -1262,6 +1318,7 @@ election_v3_test(Config) ->
     ok.
 
 snapshot_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners0 = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
@@ -1313,6 +1370,7 @@ snapshot_test(Config) ->
 
 
 high_snapshot_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners0 = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
