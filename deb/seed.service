@@ -1,0 +1,17 @@
+[Unit]
+Description=seed instance
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/ubuntu/miner/_build/seed/rel/miner/bin/miner foreground
+ExecStop=/home/ubuntu/miner/_build/seed/rel/miner/bin/miner stop
+User=ubuntu
+PIDFile=/var/run/miner/seed.pid
+Environment=HOME="/home/ubuntu/miner"
+Environment=RUNNER_LOG_DIR="/home/ubuntu/miner/_build/seed/rel/miner/log"
+Environment=ERL_CRASH_DUMP="/home/ubuntu/miner/_build/seed/rel/miner"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
