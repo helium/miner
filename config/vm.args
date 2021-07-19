@@ -7,3 +7,8 @@
 ## we are time warp safe
 +c true
 +C multi_time_warp
++sbwt very_short
++stbt db
++sub true
++swt very_low
++P 1024000
