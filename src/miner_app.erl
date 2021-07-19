@@ -36,20 +36,10 @@ start(_StartType, _StartArgs) ->
             gateway ->
                 %% check touchfile, since some people are using it
                 BaseDir = application:get_env(blockchain, base_dir, "data"),
-                Filename = filename:join([BaseDir, "follow-mode"]),
+                Filename = filename:join([BaseDir, "validate-mode"]),
                 case file:read_file_info(Filename) of
-                    {ok, _} -> true;
-                    _ ->
-                        case file:read_file("/etc/hardware_version") of
-                            {ok, HwType} ->
-                                case string:trim(HwType) of
-                                    <<"blackspot">> -> true;
-                                    <<"sidetable_v1">> -> true;
-                                    _ -> false
-                                end;
-                            _ ->
-                                false
-                        end
+                    {ok, _} -> false;
+                    _ -> true
                 end
         end,
 

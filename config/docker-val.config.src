@@ -12,9 +12,6 @@
   ]},
  {blockchain,
   [
-   {blessed_snapshot_block_height, 910531},
-   {blessed_snapshot_block_hash,
-     <<95,253,152,33,253,132,175,201,16,213,118,213,1,87,113,203,209,242,143,230,104,213,232,83,61,173,201,176,206,176,178,42>>},
    {ports, [2154]},
    {validation_width, 8},
    {block_sync_batch_size, 10},
