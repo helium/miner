@@ -60,4 +60,4 @@ None
 
 ## Acceptance block time
 
-Wed Feb 26 09:24:12 PM UTC 1975
+Tue Jul 20 10:02:00 PM UTC 2021
