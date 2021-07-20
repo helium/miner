@@ -1,3 +1,4 @@
+%%% RELOC MOVE? - looks like not miner-specific functionality
 -module(miner_router_SUITE).
 
 -export([

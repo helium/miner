@@ -1,3 +1,4 @@
+%%% RELOC MOVE? - looks like not miner-specific functionality
 -module(miner_reward_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
