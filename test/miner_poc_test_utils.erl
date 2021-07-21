@@ -31,6 +31,8 @@ poc_v11_vars() ->
            poc_version => 11,
            %% XXX: 1.0 = no loss? because the mic_rcv_sig calculation multiplies this? unclear...
            fspl_loss => 1.0,
+           %% NOTE: Set to 3 to attach tx_power to poc receipt
+           data_aggregation_version => 3,
            region_params_us915 => region_params_us915(),
            region_params_eu868 => region_params_eu868(),
            region_params_au915 => region_params_au915(),

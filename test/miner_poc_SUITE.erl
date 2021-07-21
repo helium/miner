@@ -750,18 +750,18 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
-exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
+exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config, VarMap);
 exec_dist_test(poc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v11_partitioned_test, Config, VarMap);
 exec_dist_test(poc_dist_v10_partitioned_test, Config, VarMap, _Status) ->
@@ -1311,7 +1311,7 @@ check_poc_rewards(RewardsTxns) ->
               end,
               RewardTypes).
 
-do_common_partition_lying_checks(TestCase, Config) ->
+do_common_partition_lying_checks(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -1322,16 +1322,29 @@ do_common_partition_lying_checks(TestCase, Config) ->
 
     true = miner_ct_utils:wait_until(
              fun() ->
-                     %% Check that every miner has issued a challenge
-                     check_all_miners_can_challenge(Miners) andalso
-                     %% Check that we have atleast more than one request
-                     %% If we have only one request, there's no guarantee
-                     %% that the paths would eventually grow
-                     check_multiple_requests(Miners) andalso
-                     %% Since we have two static location partitioned networks, where
-                     %% both are lying about their distances, the paths should
-                     %% never get longer than 1
-                     check_partitioned_lying_path_growth(TestCase, Miners)
+                     case maps:get(poc_version, VarMap, 1) of
+                         V when V > 10 ->
+                             %% Check that every miner has issued a challenge
+                             C1 = check_all_miners_can_challenge(Miners),
+                             %% Check that we have atleast more than one request
+                             %% If we have only one request, there's no guarantee
+                             %% that the paths would eventually grow
+                             C2 = check_multiple_requests(Miners),
+                             %% TODO: What to check when the partitioned nodes are lying about their locations
+                             C1 andalso C2;
+                         _ ->
+                             %% Check that every miner has issued a challenge
+                             C1 = check_all_miners_can_challenge(Miners),
+                             %% Check that we have atleast more than one request
+                             %% If we have only one request, there's no guarantee
+                             %% that the paths would eventually grow
+                             C2 = check_multiple_requests(Miners),
+                             %% Since we have two static location partitioned networks, where
+                             %% both are lying about their distances, the paths should
+                             %% never get longer than 1
+                             C3 = check_partitioned_lying_path_growth(TestCase, Miners),
+                             C1 andalso C2 andalso C3
+                     end
              end,
              40, 5000),
     %% Print scores after execution
