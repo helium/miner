@@ -750,18 +750,18 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
-exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config);
-exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, _VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config);
+exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config, VarMap);
 exec_dist_test(poc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v11_partitioned_test, Config, VarMap);
 exec_dist_test(poc_dist_v10_partitioned_test, Config, VarMap, _Status) ->
@@ -794,8 +794,9 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
             %% the first receipt would have added witnesses and we should be able to make
             %% a next hop.
             case maps:get(?poc_version, VarMap, 1) of
-                V when V > 10 ->
-                    %% poc-v11 checks
+                V when V >= 10 ->
+                    %% There are no paths in v11 or v10 for that matter, so we'll consolidate
+                    %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
                                      %% Check that we have atleast more than one request
@@ -806,13 +807,12 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      C2 = maps:size(challenger_receipts_map(find_receipts(Miners))) > 0,
                                      %% Check there are some poc rewards
                                      RewardsMD = get_rewards_md(Config),
-                                     POCRewards = acc_poc_challengees_and_witness_rewards(RewardsMD),
-                                     ct:pal("POCRewards: ~p", [POCRewards]),
-                                     C3 = length(POCRewards) > 0,
+                                     ct:pal("RewardsMD: ~p", [RewardsMD]),
+                                     C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
-                             120, 1000),
+                             300, 1000),
                     FinalRewards = get_rewards(Config),
                     ct:pal("FinalRewards: ~p", [FinalRewards]),
                     ok;
@@ -1181,8 +1181,8 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
     true = miner_ct_utils:wait_until(
              fun() ->
                      case maps:get(poc_version, VarMap, 1) of
-                         V when V > 10 ->
-                             %% poc-v11 checks
+                         V when V >= 10 ->
+                             %% There is no path to check, so do both poc-v10 and poc-v11 checks here
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
                              %% Check that we have atleast more than one request
@@ -1191,9 +1191,8 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                              C2 = check_multiple_requests(Miners),
                              %% Check there are some poc rewards
                              RewardsMD = get_rewards_md(Config),
-                             POCRewards = acc_poc_challengees_and_witness_rewards(RewardsMD),
-                             ct:pal("POCRewards: ~p", [POCRewards]),
-                             C3 = length(POCRewards) > 0,
+                             ct:pal("RewardsMD: ~p", [RewardsMD]),
+                             C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
                              ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                              C1 andalso C2 andalso C3;
                          _ ->
@@ -1225,21 +1224,24 @@ balances(Config) ->
     Addresses = ?config(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
 
-acc_poc_challengees_and_witness_rewards(RewardsMD) ->
-    lists:foldl(
-        fun({Ht, MD}, Acc) ->
-            case maps:get(poc_challengee, MD) of
-                V when map_size(V) /= 0 -> [{Ht, V} | Acc];
-                _ -> Acc
-            end,
-            case maps:get(poc_witness, MD) of
-                V2 when map_size(V2) /= 0 -> [{Ht, V2} | Acc];
-                _ -> Acc
-            end
-        end,
-        [],
-        RewardsMD
-    ).
+take_poc_challengee_and_witness_rewards(RewardsMD) ->
+    %% only take poc_challengee and poc_witness rewards
+    POCRewards = lists:foldl(
+                   fun({Ht, MDMap}, Acc) ->
+                           [{Ht, maps:with([poc_challengee, poc_witness], MDMap)} | Acc]
+                   end,
+                   [],
+                   RewardsMD),
+    ct:pal("POCRewards: ~p", [POCRewards]),
+    POCRewards.
+
+check_non_empty_poc_rewards(POCRewards) ->
+    lists:any(
+      fun({_Ht, #{poc_challengee := R1, poc_witness := R2}}) ->
+              maps:size(R1) > 0 andalso maps:size(R2) > 0
+      end,
+      POCRewards).
+
 
 get_rewards_md(Config) ->
     %% NOTE: It's possible that the calculations below may blow up
@@ -1311,7 +1313,7 @@ check_poc_rewards(RewardsTxns) ->
               end,
               RewardTypes).
 
-do_common_partition_lying_checks(TestCase, Config) ->
+do_common_partition_lying_checks(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -1322,16 +1324,29 @@ do_common_partition_lying_checks(TestCase, Config) ->
 
     true = miner_ct_utils:wait_until(
              fun() ->
-                     %% Check that every miner has issued a challenge
-                     check_all_miners_can_challenge(Miners) andalso
-                     %% Check that we have atleast more than one request
-                     %% If we have only one request, there's no guarantee
-                     %% that the paths would eventually grow
-                     check_multiple_requests(Miners) andalso
-                     %% Since we have two static location partitioned networks, where
-                     %% both are lying about their distances, the paths should
-                     %% never get longer than 1
-                     check_partitioned_lying_path_growth(TestCase, Miners)
+                     case maps:get(poc_version, VarMap, 1) of
+                         V when V > 10 ->
+                             %% Check that every miner has issued a challenge
+                             C1 = check_all_miners_can_challenge(Miners),
+                             %% Check that we have atleast more than one request
+                             %% If we have only one request, there's no guarantee
+                             %% that the paths would eventually grow
+                             C2 = check_multiple_requests(Miners),
+                             %% TODO: What to check when the partitioned nodes are lying about their locations
+                             C1 andalso C2;
+                         _ ->
+                             %% Check that every miner has issued a challenge
+                             C1 = check_all_miners_can_challenge(Miners),
+                             %% Check that we have atleast more than one request
+                             %% If we have only one request, there's no guarantee
+                             %% that the paths would eventually grow
+                             C2 = check_multiple_requests(Miners),
+                             %% Since we have two static location partitioned networks, where
+                             %% both are lying about their distances, the paths should
+                             %% never get longer than 1
+                             C3 = check_partitioned_lying_path_growth(TestCase, Miners),
+                             C1 andalso C2 andalso C3
+                     end
              end,
              40, 5000),
     %% Print scores after execution
@@ -1360,7 +1375,10 @@ extra_vars(poc_v10) ->
                  ?poc_challengees_percent => 0.18,
                  ?poc_challengers_percent => 0.0095,
                  ?poc_witnesses_percent => 0.0855,
-                 ?securities_percent => 0.34});
+                 ?securities_percent => 0.34,
+                 ?reward_version => 5,
+                 ?rewards_txn_version => 2
+                });
 extra_vars(poc_v8) ->
     maps:merge(extra_poc_vars(), #{?poc_version => 8});
 extra_vars(_) ->

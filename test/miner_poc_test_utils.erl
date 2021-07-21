@@ -31,12 +31,15 @@ poc_v11_vars() ->
            poc_version => 11,
            %% XXX: 1.0 = no loss? because the mic_rcv_sig calculation multiplies this? unclear...
            fspl_loss => 1.0,
+           %% NOTE: Set to 3 to attach tx_power to poc receipt
+           data_aggregation_version => 3,
            region_params_us915 => region_params_us915(),
            region_params_eu868 => region_params_eu868(),
            region_params_au915 => region_params_au915(),
            region_params_as923_1 => region_params_as923_1(),
            region_params_as923_2 => region_params_as923_2(),
            region_params_as923_3 => region_params_as923_3(),
+           region_params_as923_4 => region_params_as923_4(),
            region_params_ru864 => region_params_ru864(),
            region_params_cn470 => region_params_cn470(),
            region_params_in865 => region_params_in865(),
@@ -50,6 +53,7 @@ region_urls() ->
         {region_as923_1, ?region_as923_1_url},
         {region_as923_2, ?region_as923_2_url},
         {region_as923_3, ?region_as923_3_url},
+        {region_as923_4, ?region_as923_4_url},
         {region_au915, ?region_au915_url},
         {region_cn470, ?region_cn470_url},
         {region_eu433, ?region_eu433_url},
@@ -166,6 +170,13 @@ region_params_as923_3() ->
     <<10, 53, 8, 128, 132, 149, 181, 3, 16, 200, 208, 7, 24, 160, 1, 34, 38, 10, 4, 8, 6, 16, 25,
         10, 4, 8, 5, 16, 25, 10, 4, 8, 4, 16, 25, 10, 4, 8, 3, 16, 67, 10, 5, 8, 2, 16, 139, 1, 10,
         5, 8, 1, 16, 128, 2, 10, 53, 8, 192, 233, 136, 181, 3, 16, 200, 208, 7, 24, 160, 1, 34, 38,
+        10, 4, 8, 6, 16, 25, 10, 4, 8, 5, 16, 25, 10, 4, 8, 4, 16, 25, 10, 4, 8, 3, 16, 67, 10, 5,
+        8, 2, 16, 139, 1, 10, 5, 8, 1, 16, 128, 2>>.
+
+region_params_as923_4() ->
+    <<10, 53, 8, 224, 224, 191, 181, 3, 16, 200, 208, 7, 24, 160, 1, 34, 38, 10, 4, 8, 6, 16, 25,
+        10, 4, 8, 5, 16, 25, 10, 4, 8, 4, 16, 25, 10, 4, 8, 3, 16, 67, 10, 5, 8, 2, 16, 139, 1, 10,
+        5, 8, 1, 16, 128, 2, 10, 53, 8, 160, 198, 179, 181, 3, 16, 200, 208, 7, 24, 160, 1, 34, 38,
         10, 4, 8, 6, 16, 25, 10, 4, 8, 5, 16, 25, 10, 4, 8, 4, 16, 25, 10, 4, 8, 3, 16, 67, 10, 5,
         8, 2, 16, 139, 1, 10, 5, 8, 1, 16, 128, 2>>.
 

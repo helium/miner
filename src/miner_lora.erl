@@ -24,6 +24,7 @@
 
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("lora.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 -record(gateway, {
     mac,
@@ -162,7 +163,7 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
                         {ok, Region} ->
                             case blockchain_region_params_v1:for_region(Region, Ledger) of
                                 {ok, RegionParams} ->
-                                    {ok, {Region, [ blockchain_region_param_v1:channel_frequency(RP) || RP <- RegionParams ]}};
+                                    {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
                                 {error, Reason} ->
                                     {error, Reason}
                             end;
@@ -249,7 +250,7 @@ init(Args) ->
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
                 reg_freq_list = DefaultRegFreqList,
-                reg_throttle=miner_lora_throttle:new(undefined, DefaultRegRegion)
+                reg_throttle=miner_lora_throttle:new(DefaultRegRegion)
                },
 
     case blockchain_worker:blockchain() of
@@ -258,10 +259,15 @@ init(Args) ->
             {ok, S0};
         Chain ->
             ok = blockchain_event:add_handler(self()),
-            Ledger = blockchain:ledger(Chain),
-            Throttle = miner_lora_throttle:new(Ledger, DefaultRegRegion),
-            {ok, S0#state{chain = Chain, reg_throttle=Throttle}}
+            {ok, update_state_using_chain(Chain, S0)}
     end.
+
+-spec update_state_using_chain(Chain :: blockchain_worker:blockchain(),
+                               InputState :: state()) -> state().
+update_state_using_chain(Chain, InputState) ->
+    TempState = maybe_update_reg_data(InputState#state{chain = Chain}),
+    Throttle = miner_lora_throttle:new(reg_region(TempState)),
+    TempState#state{reg_throttle=Throttle}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -322,15 +328,10 @@ handle_info(chain_check, State) ->
             {noreply, State};
         Chain ->
             ok = blockchain_event:add_handler(self()),
-            %% also send reg_domain_timeout
-            erlang:send_after(500, self(), reg_domain_timeout),
-            {noreply, State#state{chain = Chain}}
+            {noreply, update_state_using_chain(Chain, State)}
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
-    %% also send reg_domain_timeout
-    erlang:send_after(500, self(), reg_domain_timeout),
-    State1 = State#state{chain = NC},
-    {noreply, State1};
+    {noreply, update_state_using_chain(NC, State)};
 handle_info({blockchain_event, _}, State) ->
     {noreply, State};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
@@ -342,19 +343,10 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     lager:info("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        case reg_domain_data_for_addr(Addr, State) of
-            {error, Reason}->
-                lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
-                %% the hotspot has not yet asserted its location, transmits will remain disabled
-                %% we will check again after a period
-                erlang:send_after(1000, self(), reg_domain_timeout),
-                {noreply, State};
-            {ok, {Region, FrequencyList}} ->
-                lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
-                    [Addr, Region, FrequencyList]),
-                {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
-                        reg_freq_list = FrequencyList, reg_throttle = miner_lora_throttle:new(blockchain:ledger(Chain), Region)}}
-        end
+        TempState = maybe_update_reg_data(State),
+        Throttle = miner_lora_throttle:new(reg_region(TempState)),
+        NewState = TempState#state{reg_throttle=Throttle},
+        {noreply, NewState}
     catch
         _Type:Exception ->
             lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
@@ -889,3 +881,31 @@ retry_with_rx2(HlmPacket0, From, State) ->
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     HlmPacket1 = HlmPacket0#packet_pb{rx2_window=undefined},
     send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
+
+-spec maybe_update_reg_data(State :: state()) -> state().
+maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
+    case reg_domain_data_for_addr(Addr, State) of
+        {error, Reason} ->
+            %% Despite having a new chain, we cannot get regulatory domain data for this Hotspot,
+            %% just retry after a second
+            lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [
+                libp2p_crypto:bin_to_b58(Addr), Reason
+            ]),
+            erlang:send_after(1000, self(), reg_domain_timeout),
+            State;
+        {ok, {Region, FrequencyList}} ->
+            lager:info(
+                "confirmed regulatory domain for miner ~p. region: ~p, freqlist: ~p",
+                [libp2p_crypto:bin_to_b58(Addr), Region, FrequencyList]
+            ),
+            State#state{
+                reg_domain_confirmed = true,
+                reg_region = Region,
+                reg_freq_list = FrequencyList
+            }
+    end.
+
+
+-spec reg_region(State :: state()) -> atom().
+reg_region(State) ->
+    State#state.reg_region.
