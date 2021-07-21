@@ -57,20 +57,20 @@ model(Region) ->
         _ -> unsupported
     end.
 
--spec model2(region_v2()) -> unsupported | regulatory_model().
-model2(Region) ->
+-spec model_from_regulatory_regions(region_v2()) -> unsupported | regulatory_model().
+model_from_regulatory_regions(Region) ->
     case Region of
-        'as923_1' -> {'duty',   0.01, 3600000};
-        'as923_2' -> {'duty',   0.01, 3600000};
-        'as923_3' -> {'duty',   0.01, 3600000};
-        'au915'   -> {'duty',   0.01, 3600000};
-        'cn779'   -> {'duty',   0.01, 3600000};
-        'eu433'   -> {'duty',   0.01, 3600000};
-        'eu868'   -> {'duty',   0.01, 3600000};
-        'in865'   -> {'duty',   0.01, 3600000};
-        'kr920'   -> {'duty',   0.01, 3600000};
-        'us915'   -> {'dwell',   400,   20000};
-        _         -> unsupported
+        'region_as923_1' -> {'duty',   0.01, 3600000};
+        'region_as923_2' -> {'duty',   0.01, 3600000};
+        'region_as923_3' -> {'duty',   0.01, 3600000};
+        'region_au915'   -> {'duty',   0.01, 3600000};
+        'region_cn779'   -> {'duty',   0.01, 3600000};
+        'region_eu433'   -> {'duty',   0.01, 3600000};
+        'region_eu868'   -> {'duty',   0.01, 3600000};
+        'region_in865'   -> {'duty',   0.01, 3600000};
+        'region_kr920'   -> {'duty',   0.01, 3600000};
+        'region_us915'   -> {'dwell',   400,   20000};
+        _                -> unsupported
     end.
 
 -spec model_from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> {ok, regulatory_model()} | {error, any()}.
@@ -78,9 +78,8 @@ model_from_ledger(Ledger) ->
     case blockchain:config(?regulatory_regions, Ledger) of
         {ok, R} ->
             Regions = [list_to_atom(I) || I <- string:split(binary:bin_to_list(R), ",", all)],
-            {ok, model2(Regions)};
-        _ ->
-            {error, not_found}
+            {ok, model_from_regulatory_regions(Regions)};
+        Error -> Error
     end.
 
 %% Updates Handle with time-on-air information.
@@ -266,7 +265,7 @@ new(undefined, Region) ->
     end;
 new(Ledger, _Region) ->
     case model_from_ledger(Ledger) of
-        {error, not_found} -> unsupported;
+        {error, _} -> unsupported;
         {ok, ModelFromLedger} -> {ModelFromLedger, []}
     end.
 
