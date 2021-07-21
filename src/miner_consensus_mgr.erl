@@ -391,9 +391,8 @@ handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
                                          libp2p_group_relcast, GroupArg),
 
     %% not sure what the correct error behavior here is?
-    started = wait_for_group(Group),
     lager:info("checking that the hbbft group has successfully started"),
-    true = libp2p_group_relcast:handle_command(Group, have_key),
+    started = wait_for_group(Group),
 
     lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
     case maps:find({Height, Delay}, DKGs) of
@@ -921,7 +920,6 @@ restore_dkg(Height, Delay, Round, State) ->
                     %% not sure what the correct error behavior here is?
                     lager:info("checking that the hbbft group has successfully started"),
                     started = wait_for_group(Group),
-                    true = libp2p_group_relcast:handle_command(Group, have_key),
                     lager:info("restore start group ~p ~p in pos ~p", [Name, Group, Pos]),
                     activate_hbbft(Group, undefined, make_ref(), Round),
                     #state{current_dkgs = DKGs} = State1,
@@ -1038,7 +1036,6 @@ start_hbbft(DKG, Height, Delay, Chain, Retries) ->
             %% not sure what the correct error behavior here is?
             lager:info("checking that the hbbft group has successfully started"),
             started = wait_for_group(Group),
-            true = libp2p_group_relcast:handle_command(Group, have_key),
             ok = libp2p_group_relcast:handle_command(DKG, mark_done),
 
             lager:info("post-election start group ~p ~p in pos ~p", [Name, Group, Pos]),
