@@ -11,7 +11,7 @@
 -export([
     can_send/4,
     dwell_time/3,
-    new/2,
+    new/1, maybe_from_ledger/2,
     time_on_air/6,
     track_sent/4,
     track_sent/9
@@ -38,47 +38,55 @@
 %% Maximum time allowable time on air.
 -define(MAX_TIME_ON_AIR_MS, 400).
 
+%%                            Limit, Period
+-define(COMMON_DUTY, {'duty', 0.01, 3600000}).
+
+%%                               ms,  Period
+-define(US_DWELL_TIME, {'dwell', 400, 20000}).
+
 -spec model(region()) -> unsupported | regulatory_model().
 model(Region) ->
     case Region of
-        %%                   Limit  Period
-        %%                     (%)
-        'AS923' -> {'duty',   0.01, 3600000};
-        'AU915' -> {'duty',   0.01, 3600000};
-        'CN470' -> {'duty',   0.01, 3600000};
-        'CN779' -> {'duty',   0.01, 3600000};
-        'EU433' -> {'duty',   0.01, 3600000};
-        'EU868' -> {'duty',   0.01, 3600000};
-        'IN865' -> {'duty',   0.01, 3600000};
-        'KR920' -> {'duty',   0.01, 3600000};
-        %%                      ms  Period
-        'US915' -> {'dwell',   400,   20000};
+        'AS923' -> ?COMMON_DUTY;
+        'AU915' -> ?COMMON_DUTY;
+        'CN470' -> ?COMMON_DUTY;
+        'CN779' -> ?COMMON_DUTY;
+        'EU433' -> ?COMMON_DUTY;
+        'EU868' -> ?COMMON_DUTY;
+        'IN865' -> ?COMMON_DUTY;
+        'KR920' -> ?COMMON_DUTY;
+        'US915' -> ?US_DWELL_TIME;
         %% We can't support regions we are not aware of.
         _ -> unsupported
     end.
 
 -spec model_from_regulatory_regions(region_v2()) -> unsupported | regulatory_model().
 model_from_regulatory_regions(Region) ->
+    %% NOTE: This is the exact same as model/1 except poc-v11 regions are region_ tagged.
+    %% Also, this does not need to be a chain var as this is pretty much static information afaik.
     case Region of
-        'region_as923_1' -> {'duty',   0.01, 3600000};
-        'region_as923_2' -> {'duty',   0.01, 3600000};
-        'region_as923_3' -> {'duty',   0.01, 3600000};
-        'region_au915'   -> {'duty',   0.01, 3600000};
-        'region_cn779'   -> {'duty',   0.01, 3600000};
-        'region_eu433'   -> {'duty',   0.01, 3600000};
-        'region_eu868'   -> {'duty',   0.01, 3600000};
-        'region_in865'   -> {'duty',   0.01, 3600000};
-        'region_kr920'   -> {'duty',   0.01, 3600000};
-        'region_us915'   -> {'dwell',   400,   20000};
+        'region_as923_1' -> ?COMMON_DUTY;
+        'region_as923_2' -> ?COMMON_DUTY;
+        'region_as923_3' -> ?COMMON_DUTY;
+        'region_au915'   -> ?COMMON_DUTY;
+        'region_cn470'   -> ?COMMON_DUTY;
+        'region_cn779'   -> ?COMMON_DUTY;
+        'region_eu433'   -> ?COMMON_DUTY;
+        'region_eu868'   -> ?COMMON_DUTY;
+        'region_in865'   -> ?COMMON_DUTY;
+        'region_kr920'   -> ?COMMON_DUTY;
+        'region_us915'   -> ?US_DWELL_TIME;
+        %% We can't support regions we are not aware of.
         _                -> unsupported
     end.
 
--spec model_from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> {ok, regulatory_model()} | {error, any()}.
+%% This fun is really just a compatibility check since we already had region data in the src.
+-spec model_from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> unsupported | regulatory_model() | {error, any()}.
 model_from_ledger(Ledger) ->
     case blockchain:config(?regulatory_regions, Ledger) of
         {ok, R} ->
             Regions = [list_to_atom(I) || I <- string:split(binary:bin_to_list(R), ",", all)],
-            {ok, model_from_regulatory_regions(Regions)};
+            model_from_regulatory_regions(Regions);
         Error -> Error
     end.
 
@@ -255,18 +263,36 @@ payload_symbols(
 symbol_duration(Bandwidth, SpreadingFactor) ->
     math:pow(2, SpreadingFactor) / Bandwidth.
 
+
+-spec maybe_from_ledger(Region :: region(),
+                        Ledger :: blockchain_ledger_v1:ledger()) -> handle().
+maybe_from_ledger(Region, Ledger) ->
+    %% try from_ledger first otherwise do old behavior
+    case from_ledger(Ledger) of
+        unsupported ->
+            %% try the old way
+            new(Region);
+        Model -> Model
+    end.
+
 %% @doc Returns a new handle for the given region.
--spec new(Ledger :: undefined | blockchain_ledger_v1:ledger(),
-          Region :: region()) -> handle().
-new(undefined, Region) ->
+-spec new(region()) -> handle().
+new(Region) ->
     case model(Region) of
-        unsupported -> unsupported;
-        Model -> {Model, []}
-    end;
-new(Ledger, _Region) ->
+        unsupported ->
+            lager:warning('\'~p\' is not a supported regulatory region', [Region]),
+            unsupported;
+        Model ->
+            {Model, []}
+    end.
+
+%% @doc Returns a new handle from the ledger
+-spec from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> handle().
+from_ledger(Ledger) ->
     case model_from_ledger(Ledger) of
-        {error, _} -> unsupported;
-        {ok, ModelFromLedger} -> {ModelFromLedger, []}
+        unsupported -> unsupported;
+        {ok, ModelFromLedger} -> {ModelFromLedger, []};
+        {error, _} -> unsupported
     end.
 
 -spec b2n(boolean()) -> integer().

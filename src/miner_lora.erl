@@ -249,7 +249,7 @@ init(Args) ->
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
                 reg_freq_list = DefaultRegFreqList,
-                reg_throttle=miner_lora_throttle:new(undefined, DefaultRegRegion)
+                reg_throttle=miner_lora_throttle:new(DefaultRegRegion)
                },
 
     case blockchain_worker:blockchain() of
@@ -259,7 +259,7 @@ init(Args) ->
         Chain ->
             ok = blockchain_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
-            Throttle = miner_lora_throttle:new(Ledger, DefaultRegRegion),
+            Throttle = miner_lora_throttle:maybe_from_ledger(DefaultRegRegion, Ledger),
             TempState = S0#state{chain = Chain, reg_throttle=Throttle},
             NewState = maybe_update_reg_data(TempState),
             {ok, NewState}
@@ -899,6 +899,6 @@ maybe_update_reg_data(#state{pubkey_bin=Addr, chain = Chain} = State) ->
                 reg_domain_confirmed = true,
                 reg_region = Region,
                 reg_freq_list = FrequencyList,
-                reg_throttle = miner_lora_throttle:new(blockchain:ledger(Chain), Region)
+                reg_throttle = miner_lora_throttle:maybe_from_ledger(Region, blockchain:ledger(Chain))
             }
     end.
