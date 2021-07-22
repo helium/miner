@@ -465,13 +465,17 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
             MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
             case blockchain_ledger_gateway_v2:gain(GwInfo) of
                 undefined ->
-                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p",
-                               [Region, undefined, MaxEIRP]),
-                    {ok, MaxEIRP};
+                    %% No gain on chain, EIRP = max allowed in region
+                    EIRP = trunc(MaxEIRP/10),
+                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                               [Region, undefined, MaxEIRP, EIRP]),
+                    {ok, EIRP};
                 AssertGain ->
-                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p",
-                               [Region, AssertGain, MaxEIRP]),
-                {ok, MaxEIRP - AssertGain}
+                    %% AssertGain + TxPower cannot be higher than MaxEIRP
+                    EIRP = trunc((MaxEIRP - AssertGain)/10),
+                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                               [Region, AssertGain, MaxEIRP, EIRP]),
+                    {ok, EIRP}
             end;
         _ ->
             {error, no_gw}
