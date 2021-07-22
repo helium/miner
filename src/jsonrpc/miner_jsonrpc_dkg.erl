@@ -13,13 +13,13 @@
 %%
 
 handle_rpc(<<"dkg_status">>, []) ->
-    Status = try
-                 miner_consensus_mgr:dkg_status() of
-                 Stat -> Stat
-             catch _:_ ->
-                       <<"not_running">>
-             end,
-    #{ status => Status };
+    try
+        miner_consensus_mgr:dkg_status() of
+            not_running -> #{ running => false };
+            Status -> #{ running => true, status => Status }
+    catch _:_ ->
+        #{ running => false }
+    end;
 handle_rpc(<<"dkg_queue">>, []) ->
     #{ inbound := Inbound,
        outbound := Outbound } = miner:relcast_queue(dkg_queue),
@@ -62,14 +62,20 @@ handle_rpc(<<"dkg_running">>, []) ->
     Delay = max(0, (Diff div RestartInterval) * RestartInterval),
     case Curr >= Height of
         false ->
-            #{ error => <<"not running">> };
+            #{ running => false };
         _ ->
             {ok, Block} = blockchain:get_block(Height+Delay, Chain),
             Hash = blockchain_block:hash_block(Block),
             ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
-            [ #{ name => ?BIN_TO_ANIMAL(A),
-                 address => ?BIN_TO_B58(A) }
-              || A <- ConsensusAddrs ]
+            #{
+                running => true,
+                consensus_members => [
+                    #{
+                        name => ?BIN_TO_ANIMAL(A),
+                        address => ?BIN_TO_B58(A)
+                   } || A <- ConsensusAddrs
+                ]
+            }
     end;
 handle_rpc(<<"dkg_next">>, []) ->
     Chain = blockchain_worker:blockchain(),
