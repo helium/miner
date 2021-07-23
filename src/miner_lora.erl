@@ -259,12 +259,15 @@ init(Args) ->
             {ok, S0};
         Chain ->
             ok = blockchain_event:add_handler(self()),
-            Ledger = blockchain:ledger(Chain),
-            Throttle = miner_lora_throttle:maybe_from_ledger(DefaultRegRegion, Ledger),
-            TempState = S0#state{chain = Chain, reg_throttle=Throttle},
-            NewState = maybe_update_reg_data(TempState),
-            {ok, NewState}
+            {ok, update_state_using_chain(Chain, S0)}
     end.
+
+-spec update_state_using_chain(Chain :: blockchain_worker:blockchain(),
+                               InputState :: state()) -> state().
+update_state_using_chain(Chain, InputState) ->
+    TempState = maybe_update_reg_data(InputState#state{chain = Chain}),
+    Throttle = miner_lora_throttle:new(reg_region(TempState)),
+    TempState#state{reg_throttle=Throttle}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -325,13 +328,10 @@ handle_info(chain_check, State) ->
             {noreply, State};
         Chain ->
             ok = blockchain_event:add_handler(self()),
-            NewState = maybe_update_reg_data(State#state{chain=Chain}),
-            {noreply, NewState}
+            {noreply, update_state_using_chain(Chain, State)}
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
-    %% We have a new chain, get regulatory data if possible
-    NewState = maybe_update_reg_data(State#state{chain = NC}),
-    {noreply, NewState};
+    {noreply, update_state_using_chain(NC, State)};
 handle_info({blockchain_event, _}, State) ->
     {noreply, State};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
@@ -343,7 +343,9 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     lager:info("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        NewState = maybe_update_reg_data(State),
+        TempState = maybe_update_reg_data(State),
+        Throttle = miner_lora_throttle:new(reg_region(TempState)),
+        NewState = TempState#state{reg_throttle=Throttle},
         {noreply, NewState}
     catch
         _Type:Exception ->
@@ -881,7 +883,7 @@ retry_with_rx2(HlmPacket0, From, State) ->
     send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
 
 -spec maybe_update_reg_data(State :: state()) -> state().
-maybe_update_reg_data(#state{pubkey_bin=Addr, chain = Chain} = State) ->
+maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
     case reg_domain_data_for_addr(Addr, State) of
         {error, Reason} ->
             %% Despite having a new chain, we cannot get regulatory domain data for this Hotspot,
@@ -899,7 +901,11 @@ maybe_update_reg_data(#state{pubkey_bin=Addr, chain = Chain} = State) ->
             State#state{
                 reg_domain_confirmed = true,
                 reg_region = Region,
-                reg_freq_list = FrequencyList,
-                reg_throttle = miner_lora_throttle:maybe_from_ledger(Region, blockchain:ledger(Chain))
+                reg_freq_list = FrequencyList
             }
     end.
+
+
+-spec reg_region(State :: state()) -> atom().
+reg_region(State) ->
+    State#state.reg_region.

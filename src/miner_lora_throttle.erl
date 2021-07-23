@@ -1,17 +1,16 @@
 %% @doc This module provides time-on-air regulatory compliance for the
-%% EU868 and US915 ISM bands.
+%% LoraWAN ISM bands.
 %%
 %% This module does not interface with hardware or provide any
 %% transmission capabilities itself. Instead, the API provides its
 %% core functionality through `track_sent/4', `can_send/4', and
 %% `time_on_air/6'.
 -module(miner_lora_throttle).
--include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
     can_send/4,
     dwell_time/3,
-    new/1, maybe_from_ledger/2,
+    new/1,
     time_on_air/6,
     track_sent/4,
     track_sent/9
@@ -28,21 +27,40 @@
     frequency :: number()
 }).
 
--type region() :: 'AS923' | 'AU915' | 'CN470' | 'CN779' | 'EU433' | 'EU868' | 'IN865' | 'KR920' | 'US915'.
--type region_v2() :: 'as923_1' | 'as923_2' | 'as923_3' | 'au915' | 'cn470' | 'eu433' | 'eu868' | 'in865' | 'kr920' | 'ru864' | 'us915'.
+-type region() ::
+    'AS923'
+    | 'AU915'
+    | 'CN470'
+    | 'CN779'
+    | 'EU433'
+    | 'EU868'
+    | 'IN865'
+    | 'KR920'
+    | 'US915'
+    | 'region_as923_1'
+    | 'region_as923_2'
+    | 'region_as923_3'
+    | 'region_au915'
+    | 'region_cn470'
+    | 'region_eu433'
+    | 'region_eu868'
+    | 'region_in865'
+    | 'region_kr920'
+    | 'region_ru864'
+    | 'region_us915'.
 
 -type regulatory_model() :: {dwell | duty, Limit :: number(), Period :: number()}.
 
 -opaque handle() :: unsupported | {regulatory_model(), list(#sent_packet{})}.
-
-%% Maximum time allowable time on air.
--define(MAX_TIME_ON_AIR_MS, 400).
 
 %%                            Limit, Period
 -define(COMMON_DUTY, {'duty', 0.01, 3600000}).
 
 %%                               ms,  Period
 -define(US_DWELL_TIME, {'dwell', 400, 20000}).
+
+%% Maximum time allowable time on air.
+-define(MAX_TIME_ON_AIR_MS, 400).
 
 -spec model(region()) -> unsupported | regulatory_model().
 model(Region) ->
@@ -56,38 +74,22 @@ model(Region) ->
         'IN865' -> ?COMMON_DUTY;
         'KR920' -> ?COMMON_DUTY;
         'US915' -> ?US_DWELL_TIME;
-        %% We can't support regions we are not aware of.
-        _ -> unsupported
-    end.
 
--spec model_from_regulatory_regions(region_v2()) -> unsupported | regulatory_model().
-model_from_regulatory_regions(Region) ->
-    %% NOTE: This is the exact same as model/1 except poc-v11 regions are region_ tagged.
-    %% Also, this does not need to be a chain var as this is pretty much static information afaik.
-    case Region of
+        %% NOTE: Starting with poc-v11 the Regions are tagged
+        %% And we don't support region_cn779
         'region_as923_1' -> ?COMMON_DUTY;
         'region_as923_2' -> ?COMMON_DUTY;
         'region_as923_3' -> ?COMMON_DUTY;
         'region_au915'   -> ?COMMON_DUTY;
         'region_cn470'   -> ?COMMON_DUTY;
-        'region_cn779'   -> ?COMMON_DUTY;
         'region_eu433'   -> ?COMMON_DUTY;
         'region_eu868'   -> ?COMMON_DUTY;
         'region_in865'   -> ?COMMON_DUTY;
         'region_kr920'   -> ?COMMON_DUTY;
         'region_us915'   -> ?US_DWELL_TIME;
-        %% We can't support regions we are not aware of.
-        _                -> unsupported
-    end.
 
-%% This fun is really just a compatibility check since we already had region data in the src.
--spec model_from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> unsupported | regulatory_model() | {error, any()}.
-model_from_ledger(Ledger) ->
-    case blockchain:config(?regulatory_regions, Ledger) of
-        {ok, R} ->
-            Regions = [list_to_atom(I) || I <- string:split(binary:bin_to_list(R), ",", all)],
-            model_from_regulatory_regions(Regions);
-        Error -> Error
+        %% We can't support regions we are not aware of.
+        _ -> unsupported
     end.
 
 %% Updates Handle with time-on-air information.
@@ -263,18 +265,6 @@ payload_symbols(
 symbol_duration(Bandwidth, SpreadingFactor) ->
     math:pow(2, SpreadingFactor) / Bandwidth.
 
-
--spec maybe_from_ledger(Region :: region(),
-                        Ledger :: blockchain_ledger_v1:ledger()) -> handle().
-maybe_from_ledger(Region, Ledger) ->
-    %% try from_ledger first otherwise do old behavior
-    case from_ledger(Ledger) of
-        unsupported ->
-            %% try the old way
-            new(Region);
-        Model -> Model
-    end.
-
 %% @doc Returns a new handle for the given region.
 -spec new(region()) -> handle().
 new(Region) ->
@@ -284,15 +274,6 @@ new(Region) ->
             unsupported;
         Model ->
             {Model, []}
-    end.
-
-%% @doc Returns a new handle from the ledger
--spec from_ledger(Ledger :: blockchain_ledger_v1:ledger()) -> handle().
-from_ledger(Ledger) ->
-    case model_from_ledger(Ledger) of
-        unsupported -> unsupported;
-        {ok, ModelFromLedger} -> {ModelFromLedger, []};
-        {error, _} -> unsupported
     end.
 
 -spec b2n(boolean()) -> integer().
