@@ -184,7 +184,10 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
 send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State) ->
     case miner_lora:location_ok() of
         true ->
-            lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
+            POCID = blockchain_utils:poc_id(OnionCompactKey),
+            lager:info([{poc_id, POCID}],
+                       "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                       [RSSI, Frequency, SNR]),
             send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
@@ -217,10 +220,11 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                 fun(PoC) ->
                     Challenger = blockchain_ledger_poc_v2:challenger(PoC),
                     Witness0 = case blockchain:config(?data_aggregation_version, Ledger) of
+                                   {ok, V} when V >= 2 ->
+                                       %% Send channel + datarate with data_aggregation_version >= 2
+                                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
                                    {ok, 1} ->
                                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
-                                   {ok, 2} ->
-                                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
                                    _ ->
                                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
                                end,
@@ -238,6 +242,10 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                                 {error, _Reason} ->
                                     lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
                                     timer:sleep(timer:seconds(30)),
+                                    POCID = blockchain_utils:poc_id(OnionCompactKey),
+                                    lager:info([{poc_id, POCID}],
+                                               "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                                               [RSSI, Frequency, SNR]),
                                     send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
                                 {ok, Stream} ->
                                     _ = miner_poc_handler:send(Stream, EncodedWitness)
@@ -349,6 +357,9 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             end),
             State;
         {error, fail_decrypt} ->
+            lager:info([{poc_id, POCID}],
+                       "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                       [RSSI, Frequency, SNR]),
             _ = erlang:spawn(
                 ?MODULE,
                 send_witness,
@@ -468,13 +479,13 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
                     %% No gain on chain, EIRP = max allowed in region
                     EIRP = trunc(MaxEIRP/10),
                     lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
-                               [Region, undefined, MaxEIRP, EIRP]),
+                               [Region, undefined, MaxEIRP/10, EIRP]),
                     {ok, EIRP};
                 AssertGain ->
                     %% AssertGain + TxPower cannot be higher than MaxEIRP
                     EIRP = trunc((MaxEIRP - AssertGain)/10),
                     lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
-                               [Region, AssertGain, MaxEIRP, EIRP]),
+                               [Region, AssertGain/10, MaxEIRP/10, EIRP]),
                     {ok, EIRP}
             end;
         _ ->

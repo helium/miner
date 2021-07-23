@@ -24,6 +24,7 @@
 
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("lora.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 -record(gateway, {
     mac,
@@ -162,7 +163,7 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
                         {ok, Region} ->
                             case blockchain_region_params_v1:for_region(Region, Ledger) of
                                 {ok, RegionParams} ->
-                                    {ok, {Region, [ blockchain_region_param_v1:channel_frequency(RP) || RP <- RegionParams ]}};
+                                    {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
                                 {error, Reason} ->
                                     {error, Reason}
                             end;
