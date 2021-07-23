@@ -806,9 +806,8 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      C2 = maps:size(challenger_receipts_map(find_receipts(Miners))) > 0,
                                      %% Check there are some poc rewards
                                      RewardsMD = get_rewards_md(Config),
-                                     POCRewards = acc_poc_challengees_and_witness_rewards(RewardsMD),
-                                     ct:pal("POCRewards: ~p", [POCRewards]),
-                                     C3 = length(POCRewards) > 0,
+                                     ct:pal("RewardsMD: ~p", [RewardsMD]),
+                                     C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
@@ -1191,9 +1190,8 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                              C2 = check_multiple_requests(Miners),
                              %% Check there are some poc rewards
                              RewardsMD = get_rewards_md(Config),
-                             POCRewards = acc_poc_challengees_and_witness_rewards(RewardsMD),
-                             ct:pal("POCRewards: ~p", [POCRewards]),
-                             C3 = length(POCRewards) > 0,
+                             ct:pal("RewardsMD: ~p", [RewardsMD]),
+                             C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
                              ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                              C1 andalso C2 andalso C3;
                          _ ->
@@ -1225,21 +1223,24 @@ balances(Config) ->
     Addresses = ?config(addresses, Config),
     [miner_ct_utils:get_balance(Miner, Addr) || Addr <- Addresses].
 
-acc_poc_challengees_and_witness_rewards(RewardsMD) ->
-    lists:foldl(
-        fun({Ht, MD}, Acc) ->
-            case maps:get(poc_challengee, MD) of
-                V when map_size(V) /= 0 -> [{Ht, V} | Acc];
-                _ -> Acc
-            end,
-            case maps:get(poc_witness, MD) of
-                V2 when map_size(V2) /= 0 -> [{Ht, V2} | Acc];
-                _ -> Acc
-            end
-        end,
-        [],
-        RewardsMD
-    ).
+take_poc_challengee_and_witness_rewards(RewardsMD) ->
+    %% only take poc_challengee and poc_witness rewards
+    POCRewards = lists:foldl(
+                   fun({Ht, MDMap}, Acc) ->
+                           [{Ht, maps:with([poc_challengee, poc_witness], MDMap)} | Acc]
+                   end,
+                   [],
+                   RewardsMD),
+    ct:pal("POCRewards: ~p", [POCRewards]),
+    POCRewards.
+
+check_non_empty_poc_rewards(POCRewards) ->
+    lists:any(
+      fun({_Ht, #{poc_challengee := R1, poc_witness := R2}}) ->
+              maps:size(R1) > 0 andalso maps:size(R2) > 0
+      end,
+      POCRewards).
+
 
 get_rewards_md(Config) ->
     %% NOTE: It's possible that the calculations below may blow up
