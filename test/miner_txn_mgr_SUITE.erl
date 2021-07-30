@@ -25,7 +25,6 @@
          txn_dependent_test/1,
          txn_from_future_via_protocol_v1_test/1,
          txn_from_future_via_protocol_v2_test/1
-
         ]).
 
 all() -> [
@@ -33,7 +32,6 @@ all() -> [
           txn_out_of_sequence_nonce_test,
           txn_invalid_nonce_test,
           txn_dependent_test,
-
           %% XXX v1 test is inconsistent. TODO Check if it can be fixed.
           {testcase, txn_from_future_via_protocol_v1_test, [{repeat_until_ok, 5}]},
           txn_from_future_via_protocol_v2_test
@@ -51,6 +49,7 @@ init_per_testcase(_TestCase, Config0) ->
     Miners = ?config(miners, Config),
     Addresses = ?config(addresses, Config),
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+    CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, 50000000) || Addr <- Addresses],
     AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
@@ -73,7 +72,7 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?dkg_curve => Curve}),
 
-    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
     ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
@@ -84,6 +83,8 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% confirm we have a height of 1
     ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
+
+
 
     [   {consensus_miners, ConsensusMiners},
         {non_consensus_miners, NonConsensusMiners}
@@ -563,6 +564,8 @@ txn_from_future_test(
     AssertDeferredRejections2(A, TxnHash),
 
     ok.
+
+
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
