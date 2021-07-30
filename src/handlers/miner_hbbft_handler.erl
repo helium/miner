@@ -61,6 +61,17 @@
 %% TODO No need to pass Meta when tuple. Use sum type: {map, Meta} | tuple
 metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
+    Ledger = blockchain:ledger(Chain),
+    SelfAddr = blockchain_swarm:swarm(),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
+    lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
+%%    %% TODO TEMP HACK - REMOVE WHEN DONE
+%%    ChallengeRate = case ChallengeRate0 < 15 of
+%%        true -> 15;
+%%        _ -> ChallengeRate0
+%%    end,
+
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     case Version of
         tuple ->
@@ -93,7 +104,17 @@ metadata(Version, Meta, Chain) ->
                                 lager:info("no snapshot interval configured"),
                                 ChainMeta0
                         end,
-            t2b(maps:merge(Meta, ChainMeta))
+            %% generate a set of empheral keys for POC usage
+            %% the hashes of the public keys are added to metadata
+            %% the key sets are passed to bc core poc mgr
+            {EmpKeys, EmpKeyHashes} = generate_empheral_keys(N, ChallengeRate),
+            lager:info("poc empheral keys ~p", [EmpKeys]),
+            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+            lager:info("node ~p generating poc empheral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
+            ok = blockchain_poc_mgr:save_poc_keys(Height, EmpKeys),
+            ChainMeta1 = maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta),
+            lager:info("ChainMeta1 ~p", [ChainMeta1]),
+            t2b(maps:merge(Meta, ChainMeta1))
     end.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
@@ -119,7 +140,8 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 signatures_required = N - F,
                 hbbft = HBBFT,
                 swarm_keys = {MyPubKey, SignFun},  % For re-signing on var-autoskip
-                chain = Chain1}}.
+                chain = Chain1
+                }}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -802,6 +824,22 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
+
+generate_empheral_keys(N, ChallengeRate)->
+    NumKeys = normalize_epheral_key_count(trunc(ChallengeRate / (((N-1)/3) * 2 ))),
+    lists:foldl(
+        fun(_N, {AccKeys, AccHashes})->
+            Keys = libp2p_crypto:generate_keys(ecc_compact),
+            #{public := OnionCompactKey} = Keys,
+            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+            {[Keys | AccKeys], [OnionHash | AccHashes]}
+        end,
+    {[], []}, lists:seq(1, NumKeys)).
+
+normalize_epheral_key_count(Count) when Count < 1 ->
+    1;
+normalize_epheral_key_count(Count)->
+    Count.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
