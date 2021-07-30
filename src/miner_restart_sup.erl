@@ -71,8 +71,7 @@ init([SigFun, ECDHFun]) ->
                     region_override => RegionOverRide
                 },
                 [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts]),
-                 ?WORKER(miner_poc_statem, [POCOpts])];
+                 ?WORKER(miner_lora, [OnionOpts])];
             _ ->
                 []
         end,

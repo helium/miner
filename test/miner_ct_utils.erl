@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
+-include_lib("blockchain/include/blockchain_txn_fees.hrl").
 -include("miner_ct_macros.hrl").
 
 -define(BASE_TMP_DIR, "./_build/test/tmp").
@@ -15,6 +16,7 @@
          pmap/2, pmap/3,
          wait_until/1, wait_until/3,
          wait_until_disconnected/2,
+         wait_until_local_height/1,
          get_addrs/1,
          start_miner/2,
          start_node/1,
@@ -36,6 +38,7 @@
          init_base_dir_config/3,
          generate_keys/1,
          new_random_key/1,
+         new_random_key_with_sig_fun/1,
          stop_miners/1, stop_miners/2,
          start_miners/1, start_miners/2,
          height/1,
@@ -50,6 +53,8 @@
          shuffle/1,
          partition_miners/2,
          node2addr/2,
+         node2sigfun/2,
+         node2pubkeybin/2,
          addr2node/2,
          addr_list/1,
          blockchain_worker_check/1,
@@ -84,7 +89,8 @@
          build_asserts/2,
          add_block/3,
          gen_gateways/2, gen_payments/1, gen_locations/1,
-         existing_vars/0, start_blockchain/2
+         existing_vars/0, start_blockchain/2,
+         create_block/2
         ]).
 
 chain_var_lookup_all(Key, Nodes) ->
@@ -198,6 +204,18 @@ wait_for_equalized_heights(Miners) ->
     ?assertMatch([_], UniqueHeights, "All heights are equal."),
     [Height] = UniqueHeights,
     Height.
+
+wait_until_local_height(TargetHeight) ->
+    miner_ct_utils:wait_until(
+        fun() ->
+            C = blockchain_worker:blockchain(),
+            {ok, CurHeight} = blockchain:height(C),
+            ct:pal("local height ~p", [CurHeight]),
+            CurHeight == TargetHeight
+        end,
+        30,
+        timer:seconds(1)
+    ).
 
 stop_miners(Miners) ->
     stop_miners(Miners, 60).
@@ -696,6 +714,13 @@ shuffle(List) ->
     S.
 
 
+node2sigfun(Node, KeyList) ->
+    {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, _Addr, SigFun} = lists:keyfind(Node, 1, KeyList),
+    SigFun.
+
+node2pubkeybin(Node, KeyList) ->
+    {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = lists:keyfind(Node, 1, KeyList),
+    Addr.
 
 node2addr(Node, AddrList) ->
     {_, Addr} = lists:keyfind(Node, 1, AddrList),
@@ -811,6 +836,16 @@ init_per_testcase(Mod, TestCase, Config0) ->
         end,
         ConfigResult
     ),
+%%    {"/p2p/112qB3YaH5bZkCnKA5uRH7tBtGNv2Y5B4smv1jsmvGUzgKT71QpE", "/ip4/52.8.80.146/tcp/2154"}
+%%    Aliases = application:get_env(libp2p, node_aliases, [])
+
+    MinerAliases = lists:foldl(
+        fun({_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+            [{P2PAddr, "/ip4/52.8.80.146/tcp/2154" } | Acc]
+        end, [], Keys),
+    ct:pal("miner aliases ~p", [MinerAliases]),
+    lists:foreach(fun(Miner)-> ct_rpc:call(Miner, application, set_env, [libp2p, node_aliases, MinerAliases]) end, Miners),
 
     Addrs = get_addrs(Miners),
 
@@ -849,15 +884,62 @@ init_per_testcase(Mod, TestCase, Config0) ->
                        end, Miners)
              end, 200, 150),
 
+    %% to enable the tests to run over grpc we need to deterministically set the grpc listen addr
+    %% with libp2p all the port data is in the peer entries
+    %% in the real world we would run grpc over a known port
+    %% but for the sake of the tests which run multiple nodes on a single instance
+    %% we need to choose a random port for each node
+    %% and the client needs to know which port was choosen
+    %% so for the sake of the tests what we do here is get the libp2p port
+    %% and run grpc on that value + 1000
+    %% the client then just has to pull the libp2p peer data
+    %% retrieve the libp2p port and derive the grpc port from that
+
+    GRPCServerConfigFun = fun(PeerPort)->
+         [#{grpc_opts => #{service_protos => [gateway_pb],
+                           services => #{'helium.gateway' => helium_gateway_service}
+                            },
+
+            transport_opts => #{ssl => false},
+
+            listen_opts => #{port => PeerPort,
+                             ip => {0,0,0,0}},
+
+            pool_opts => #{size => 2},
+
+            server_opts => #{header_table_size => 4096,
+                             enable_push => 1,
+                             max_concurrent_streams => unlimited,
+                             initial_window_size => 65535,
+                             max_frame_size => 16384,
+                             max_header_list_size => unlimited}}]
+             end,
+
+    ok = lists:foreach(fun(Node) ->
+            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, []),
+            TID = ct_rpc:call(Node, blockchain_swarm, tid, []),
+            ListenAddrs = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [Swarm]),
+            [H | _ ] = _SortedAddrs = ct_rpc:call(Node, libp2p_transport, sort_addrs, [TID, ListenAddrs]),
+            [_, _, _IP,_, Libp2pPort] = _Full = re:split(H, "/"),
+             ThisPort = list_to_integer(binary_to_list(Libp2pPort)),
+            Res1 = ct_rpc:call(Node, application, set_env, [grpcbox, servers, GRPCServerConfigFun(ThisPort + 1000)]),
+            Res2 = ct_rpc:call(Node, application, ensure_all_started, [grpcbox]),
+            ct:pal("Res1: ~p", [Res1]),
+            ct:pal("Res2: ~p", [Res2]),
+            ok
+
+    end, Miners),
+
     %% accumulate the address of each miner
     MinerTaggedAddresses = lists:foldl(
         fun(Miner, Acc) ->
-            Address = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
-            [{Miner, Address} | Acc]
+            PubKeyBin = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
+            [{Miner, PubKeyBin} | Acc]
         end,
         [],
         Miners
     ),
+
     %% save a version of the address list with the miner and address tuple
     %% and then a version with just a list of addresses
     {_Keys, Addresses} = lists:unzip(MinerTaggedAddresses),
@@ -879,6 +961,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     [
         {miners, Miners},
+        {addrs, Addrs},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
         {node_options, Options},
@@ -990,7 +1073,8 @@ end_per_testcase(TestCase, Config) ->
     case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            cleanup_per_testcase(TestCase, Config);
+%%            cleanup_per_testcase(TestCase, Config);
+            ok;
         _ ->
             %% leave results alone for analysis
             ok
@@ -1128,7 +1212,6 @@ make_vars(Keys, Map) ->
 
 make_vars(Keys, Map, Mode) ->
     Vars1 = #{?chain_vars_version => 2,
-              ?block_time => 2,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
@@ -1176,7 +1259,23 @@ make_vars(Keys, Map, Mode) ->
               ?dkg_penalty => 1.0,
               ?tenure_penalty => 1.0,
               ?validator_penalty_filter => 5.0,
-              ?penalty_history_limit => 100
+              ?penalty_history_limit => 100,
+              ?dc_payload_size => 24,
+              ?assert_loc_txn_version => 2,
+              ?min_antenna_gain => 10,
+              ?max_antenna_gain => 150,
+%%              ?price_oracle_refresh_interval => 25,
+%%              ?price_oracle_height_delta => 10,
+%%              ?price_oracle_price_scan_delay => 0,
+%%              ?price_oracle_price_scan_max => 50,
+              ?txn_fees => true,
+              ?staking_fee_txn_oui_v1 => 100 * ?USD_TO_DC, %% $100?
+              ?staking_fee_txn_oui_v1_per_address => 100 * ?USD_TO_DC, %% $100
+              ?staking_fee_txn_add_gateway_v1 => 40 * ?USD_TO_DC, %% $40?
+              ?staking_fee_txn_assert_location_v1 => 10 * ?USD_TO_DC, %% $10?
+              ?txn_fee_multiplier => 5000,
+              ?max_payments => 10,
+              ?poc_challenge_rate => 5
              },
 
     #{secret := Priv, public := Pub} = Keys,
@@ -1230,6 +1329,10 @@ new_random_key(Curve) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
     {PrivKey, PubKey}.
 
+new_random_key_with_sig_fun(Curve) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(Curve),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    {PrivKey, PubKey, SigFun}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -1513,7 +1616,8 @@ create_block(ConsensusMembers, Txs) ->
                                        election_epoch => 1,
                                        epoch_start => 1,
                                        seen_votes => [],
-                                       bba_completion => <<>>}),
+                                       bba_completion => <<>>,
+                                       poc_keys => []}),
     BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
     Signatures = signatures(ConsensusMembers, BinBlock),
     Block1 = blockchain_block:set_signatures(Block0, Signatures),
@@ -1521,9 +1625,13 @@ create_block(ConsensusMembers, Txs) ->
 
 signatures(ConsensusMembers, BinBlock) ->
     lists:foldl(
-        fun({A, {_, _, F}}, Acc) ->
-            Sig = F(BinBlock),
-            [{A, Sig}|Acc]
+%%        fun({A, {_, _, F}}, Acc) ->
+%%            Sig = F(BinBlock),
+%%            [{A, Sig}|Acc]
+        fun(M, Acc) ->
+            {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(M, blockchain_swarm, keys, []),
+            Sig = SigFun(BinBlock),
+            [{M, Sig}|Acc]
         end
         ,[]
         ,ConsensusMembers

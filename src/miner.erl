@@ -24,7 +24,8 @@
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
-    version/0
+    version/0,
+    poc_keys/2
 ]).
 
 -export_type([
@@ -52,7 +53,8 @@
         seen           => binary(),
         bba_completion => binary(),
         head_hash      => blockchain_block:hash(),
-        snapshot_hash  => binary()
+        snapshot_hash  => binary(),
+        poc_onion_keys => list()
      }.
 
 -type metadata() ::
@@ -575,6 +577,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
+    POCKeys = poc_keys(Ledger, Metadata),
     SeenBBAs =
         [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
@@ -603,7 +606,8 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
             epoch_start     =>  EpochStart,
             seen_votes      =>  SeenVectors,
             bba_completion  =>  BBA,
-            snapshot_hash   =>  SnapshotHash
+            snapshot_hash   =>  SnapshotHash,
+            poc_keys        =>  POCKeys
         }),
     BinNewBlock = blockchain_block:serialize(NewBlock),
     Signature = SignFun(BinNewBlock),
@@ -739,6 +743,33 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
         _ ->
             <<>>
     end.
+
+-spec poc_keys(L, M) -> []
+    when L :: blockchain_ledger_v1:ledger(),
+         M :: metadata().
+poc_keys(Ledger, Metadata) ->
+    %% Construct a set of poc keys. Each node will define its own set within the metadata
+    %% We want to take a random subset of these up to a max of poc challenge rate
+    {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
+    lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
+%%    %% TODO TEMP HACK - REMOVE WHEN DONE
+%%    ChallengeRate = case ChallengeRate0 < 15 of
+%%        true -> 15;
+%%        _ -> ChallengeRate0
+%%    end,
+    PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
+    PocKeys1 = lists:foldl(
+        fun({MinerAddr, PocKeys}, Acc)->
+            NormalisedKeys = lists:map(fun(PocKey) -> {MinerAddr, PocKey} end, PocKeys),
+            [NormalisedKeys | Acc]
+        end, [], PocKeys0),
+    sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate).
+
+sort_and_truncate_poc_keys(L, MaxKeys) ->
+    lager:info("*** sorting poc keys ~p", [L]),
+    S = lists:sublist(lists:sort(fun({_, C1}, {_, C2}) -> C1 > C2 end, L), MaxKeys),
+    lager:info("*** sorted poc keys ~p", [S]),
+    S.
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
 common_enough_or_default(_, [], Default) ->
