@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction updates staking_keys and staking_keys_to_mode_mappings to allow Pisces, ClodPi and LinxDot according to HIP-19.
+This transaction updates `staking_keys` and `staking_keys_to_mode_mappings` chain variables to allow Pisces, ClodPi and LinxDot according to HIP-19.
 
 ## Version threshold
 
