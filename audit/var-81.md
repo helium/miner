@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction reduces `poc_challenge_inteval` from 360 to 300.
+This transaction reduces `poc_challenge_interval` from 360 to 300.
 
 ## Version threshold
 
