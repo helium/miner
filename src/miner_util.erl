@@ -250,7 +250,7 @@ mk_rescue_block(Vars, Addrs, KeyStr) ->
     RescueBlock = blockchain_block_v1:rescue(
                     #{prev_hash => Hash,
                       height => NewHeight,
-                      transactions => [VarsTxn, GrpTxn, RewardsTxn],
+                      transactions => lists:sort(fun blockchain_txn:sort/2, [VarsTxn, GrpTxn, RewardsTxn]),
                       hbbft_round => NewRound,
                       time => erlang:system_time(seconds),
                       election_epoch => ElectionEpoch + 1,
