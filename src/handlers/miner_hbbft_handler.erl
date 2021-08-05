@@ -154,9 +154,9 @@ handle_command({status, Ref, Worker}, State) ->
     Worker ! {Ref, maps:merge(#{signatures_required =>
                                     max(State#state.signatures_required - length(SigMemIds), 0),
                                 signatures => SigMemIds,
-                                skip_votes => State#state.skip_votes,
                                 sig_phase => State#state.sig_phase,
                                 last_round_signed => State#state.last_round_signed,
+                                skip_votes => State#state.skip_votes,
                                 artifact_hash => ArtifactHash,
                                 public_key_hash => blockchain_utils:bin_to_hex(PubKeyHash)
                                }, maps:remove(sig_sent, Map))},
@@ -288,7 +288,7 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
                     %% we retain the skip votes here because we may not succeed and we want the
                     %% algorithm to converge more quickly in that case
                     {(state_reset(HBBFT2, S0))#state{skip_votes = Skips1},
-                     [ new_epoch , SkipGossip ] ++ ToSend};
+                     [ new_epoch, SkipGossip ] ++ ToSend};
                 {wait, Skips1} ->
                     lager:info("waiting: ~p", [Skips1]),
                     {S0#state{skip_votes = Skips1}, []}

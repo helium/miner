@@ -17,14 +17,15 @@
          random_miner_predicate/1,
          true_predicate/1,
          has_valid_local_capability/2,
-         hbbft_perf/0
+         hbbft_perf/0,
+         mk_rescue_block/3
         ]).
+
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% get the firmware release data from a hotspot
 -define(LSB_FILE, "/etc/lsb_release").
 -define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
-
--include_lib("blockchain/include/blockchain_vars.hrl").
 
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
@@ -204,3 +205,62 @@ merge_map(Addrs, Votes, Height, Acc) ->
                  (_, false, A) ->
                       A
               end, Acc, Votes).
+
+-spec mk_rescue_block(Vars :: #{atom() => term()},
+                      Addrs :: [libp2p_crypto:pubkey_bin()],
+                      KeyStr :: string()) ->
+          blockchain_block:block().
+mk_rescue_block(Vars, Addrs, KeyStr) ->
+    Chain = blockchain_worker:blockchain(),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+
+    Height = blockchain_block:height(HeadBlock),
+    NewHeight = Height + 1,
+    lager:info("new height is ~p", [NewHeight]),
+    Hash = blockchain_block:hash_block(HeadBlock),
+    NewRound = blockchain_block:hbbft_round(HeadBlock) + 1,
+
+    #{secret := Priv} =
+        libp2p_crypto:keys_from_bin(
+          base58:base58_to_binary(KeyStr)),
+
+    Ledger = blockchain:ledger(Chain),
+    {ok, Nonce} = blockchain_ledger_v1:vars_nonce(Ledger),
+
+    Txn = blockchain_txn_vars_v1:new(Vars, Nonce + 1),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
+    VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
+
+    {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(HeadBlock),
+    io:format("current election epoch: ~p new height: ~p~n", [ElectionEpoch, NewHeight]),
+
+    GrpTxn = blockchain_txn_consensus_group_v1:new(Addrs, <<>>, NewHeight, 0),
+
+    RewardsMod =
+        case blockchain:config(?rewards_txn_version, Ledger) of
+            {ok, 2} -> blockchain_txn_rewards_v2;
+            _       -> blockchain_txn_rewards_v1
+        end,
+    Start = EpochStart + 1,
+    End = Height,
+    {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
+    lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
+    RewardsTxn = RewardsMod:new(Start, End, Rewards),
+
+    RescueBlock = blockchain_block_v1:rescue(
+                    #{prev_hash => Hash,
+                      height => NewHeight,
+                      transactions => [VarsTxn, GrpTxn, RewardsTxn],
+                      hbbft_round => NewRound,
+                      time => erlang:system_time(seconds),
+                      election_epoch => ElectionEpoch + 1,
+                      epoch_start => NewHeight}),
+
+    EncodedBlock = blockchain_block:serialize(
+                     blockchain_block_v1:set_signatures(RescueBlock, [])),
+
+    RescueSigFun = libp2p_crypto:mk_sig_fun(Priv),
+
+    RescueSig = RescueSigFun(EncodedBlock),
+
+    blockchain_block_v1:set_signatures(RescueBlock, [], RescueSig).
