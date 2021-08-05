@@ -839,6 +839,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
 %%    {"/p2p/112qB3YaH5bZkCnKA5uRH7tBtGNv2Y5B4smv1jsmvGUzgKT71QpE", "/ip4/52.8.80.146/tcp/2154"}
 %%    Aliases = application:get_env(libp2p, node_aliases, [])
 
+    %% hardcode some alias for our localhost miners
+    %% sibyl will not return routing data unless a miner/validator has a public address
+    %% so force an alias for each of our miners to a public IP
     MinerAliases = lists:foldl(
         fun({_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
             P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
@@ -929,6 +932,25 @@ init_per_testcase(Mod, TestCase, Config0) ->
             ok
 
     end, Miners),
+
+    %% setup a bunch of aliases for the running miner grpc posts
+    %% as part above, each such port will be the equivilent libp2p port + 1000
+    %% these grpc aliases are added purely for testing purposes
+    %% no current need to support in the wild
+    MinerGRPCPortAliases = lists:foldl(
+        fun({Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+            Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+            TID = ct_rpc:call(Miner, blockchain_swarm, tid, []),
+            ListenAddrs = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm]),
+            [H | _ ] = _SortedAddrs = ct_rpc:call(Miner, libp2p_transport, sort_addrs, [TID, ListenAddrs]),
+            [_, _, _IP,_, Libp2pPort] = _Full = re:split(H, "/"),
+            GrpcPort = list_to_integer(binary_to_list(Libp2pPort)) + 1000,
+            [{P2PAddr, {GrpcPort, false}} | Acc]
+        end, [], Keys),
+    ct:pal("miner grpc port aliases ~p", [MinerGRPCPortAliases]),
+    lists:foreach(fun(Miner)-> ct_rpc:call(Miner, application, set_env, [sibyl, node_grpc_port_aliases, MinerGRPCPortAliases]) end, Miners),
+
 
     %% accumulate the address of each miner
     MinerTaggedAddresses = lists:foldl(
