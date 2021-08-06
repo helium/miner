@@ -51,20 +51,6 @@ init_per_testcase(_TestCase, Config0) ->
         {num_consensus_members, 7},
         {base_dir, BaseDir}
     ],
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, enable_nat, false]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, base_dir, MinerBaseDir]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, port, Port]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, seed_nodes, SeedNodes]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, key, Key]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, peer_cache_timeout, 30000]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_update_interval, 200]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, disable_poc_v4_target_challenge_age, true]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
-%%    %% ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
-%%    ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
 
     application:set_env(blockchain, base_dir, BaseDir),
     application:set_env(blockchain, peer_cache_timeout, 30000),
@@ -74,7 +60,6 @@ init_per_testcase(_TestCase, Config0) ->
     application:set_env(blockchain, max_inbound_connections, length(Miners) * 2),
     application:set_env(blockchain, outbound_gossip_connections, length(Miners) * 2),
     application:set_env(blockchain, sync_cooldown_time, 5),
-%%    application:set_env(miner, mode, validator),
 
     {ok, Sup} = blockchain_sup:start_link(Opts),
 
@@ -128,16 +113,11 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, 50000000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
-                 || Addr <- Addresses],
+%%    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({40.741296, -73.989752}, 13), 0)
+%%                 || Addr <- Addresses],
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
     BlockTime = 20000,
-%%        case _TestCase of
-%%            txn_dependent_test -> 5000;
-%%            txn_assert_loc_v2_test -> 5000;
-%%            _ -> ?config(block_time, Config)
-%%        end,
 
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
@@ -150,6 +130,8 @@ init_per_testcase(_TestCase, Config0) ->
                                                    ?batch_size => BatchSize,
                                                    ?txn_fees => false,  %% disable fees
                                                    ?dkg_curve => Curve,
+                                                   ?poc_version => 10,
+                                                  ?securities_percent => 0.34,
                                                   ?poc_challenge_interval => 15,
                                                   ?poc_v4_exclusion_cells => 10,
                                                   ?poc_v4_parent_res => 11,
@@ -171,7 +153,7 @@ init_per_testcase(_TestCase, Config0) ->
                                                   ?data_aggregation_version =>2
     }),
 
-    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns ++ AddGwTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns,
                                              Addresses, NumConsensusMembers, Curve),
     ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
@@ -314,16 +296,24 @@ poc_grpc_test(Config) ->
     %%
 
     %% submit a receipt from the challengee/s to the challenger
-    %% a light GW wont have the challengers grpc routing data
-    %% all it will have is the challengers pub key bin
-    %% so we need to reach out to our validator and have them return
-    %% the public routing data for our challenger
+    %% the challengee will have the challengers grpc routing data
+    %% as it is contained in the target notification
+    %% potential witnesses in the target zone will also have this data
+    %% but actual witnesses ie those who hear the packet may extend outside of this zone
+    %% and as such we cannot guarantee that a witness has the challengers routing data
+    %% so we need a means for them to firstly know who the challenger is and
+    %% secondly to be able to retrive that challenges grpc routing data
 
     %% NOTE: no need to call miner_lora:send_poc here
     %%       we will just pretend our witnesses heard the packet
 
     LocalChain = blockchain_worker:blockchain(),
     ok = send_receipts(FilteredTargetResults, LocalChain),
+
+    %% wait for the receipts txn to be absorbed, which will be after the poc expires ( poc expiry set to 4 blocks )
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 12, all, 180),
+    {ok, Block} =  ct_rpc:call(Miner, blockchain, get_block, [11, Chain]),
+    %% TODO confirm the receipts txn is in the block
 
 
     ok.
@@ -351,7 +341,7 @@ build_asserts(LatLongs, Owner, OwnerSigFun) ->
     lists:foldl(
         fun({LatLong, {_GatewayPrivKey, GatewayPubKey, GatewaySigFun}}, Acc) ->
             Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-            Index = h3:from_geo(LatLong, 12),
+            Index = h3:from_geo(LatLong, 13),
             AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
             PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
             SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
@@ -482,7 +472,6 @@ send_receipts(Targets, Chain) ->
             #{challenger := ChallengerRoute} = ChallengeMsg,
             <<IV:2/binary,
               OnionCompactKey:33/binary,
-              ChallengerKey:33/binary,
               Tag:4/binary,
               CipherText/binary>> = Onion,
             ECDHFun = libp2p_crypto:mk_ecdh_fun(GatewayPrivKey),
