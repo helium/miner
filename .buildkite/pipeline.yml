@@ -9,14 +9,32 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
+  - if: build.tag =~ /^seed/
+    name: ":debian: build seed deb"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_deb.sh seed"
+    key: "seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_deb.sh"
-    key: "deb"
+      - ".buildkite/scripts/make_deb.sh validator"
+    key: "val-deb"
     artifact_paths: "*.deb"
-    # depends_on: "tests"  # can't do this right now with the test status as it is.
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^seed/
+    name: ":cloud: upload seed deb to packagecloud"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/packagecloud_upload.sh seed"
+    depends_on: "seed-deb"
     agents:
       queue: "erlang"
 
@@ -24,8 +42,8 @@ steps:
     name: ":cloud: upload validator deb to packagecloud"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/packagecloud_upload.sh"
-    depends_on: "deb"
+      - ".buildkite/scripts/packagecloud_upload.sh validator"
+    depends_on: "val-deb"
     agents:
       queue: "erlang"
 
@@ -81,7 +99,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -94,7 +112,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
