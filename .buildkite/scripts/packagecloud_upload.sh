@@ -8,12 +8,8 @@ PKGNAME="$1_${TAG}_amd64.deb"
 
 buildkite-agent artifact download ${PKGNAME} .
 
-if [[ "$1" == "validator" ]]; then
-    # it's _validatorS_ in packagecloud
-    REPO="$1s"
-else
-    REPO="$1"
-fi
+# packagecloud name is seedS or validatorS
+REPO="$1s"
 
 curl -u "${PACKAGECLOUD_API_KEY}:" \
      -F "package[distro_version_id]=190" \

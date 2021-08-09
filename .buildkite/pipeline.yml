@@ -13,7 +13,6 @@ steps:
     name: ":debian: build seed deb"
     commands:
       - "git fetch -t"
-      - "git checkout seed-maint"
       - "./rebar3 as seed release"
       - ".buildkite/scripts/make_deb.sh seed"
     key: "deb"
@@ -29,7 +28,6 @@ steps:
       - ".buildkite/scripts/make_deb.sh validator"
     key: "deb"
     artifact_paths: "*.deb"
-    # depends_on: "tests"  # can't do this right now with the test status as it is.
     agents:
       queue: "erlang"
 
