@@ -15,7 +15,7 @@ steps:
       - "git fetch -t"
       - "./rebar3 as seed release"
       - ".buildkite/scripts/make_deb.sh seed"
-    key: "deb"
+    key: "seed-deb"
     artifact_paths: "*.deb"
     agents:
       queue: "erlang"
@@ -26,7 +26,7 @@ steps:
       - "git fetch -t"
       - "./rebar3 as validator release"
       - ".buildkite/scripts/make_deb.sh validator"
-    key: "deb"
+    key: "val-deb"
     artifact_paths: "*.deb"
     agents:
       queue: "erlang"
@@ -36,7 +36,7 @@ steps:
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/packagecloud_upload.sh seed"
-    depends_on: "deb"
+    depends_on: "seed-deb"
     agents:
       queue: "erlang"
 
@@ -45,7 +45,7 @@ steps:
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/packagecloud_upload.sh validator"
-    depends_on: "deb"
+    depends_on: "val-deb"
     agents:
       queue: "erlang"
 
