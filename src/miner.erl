@@ -768,7 +768,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     BlockTimeDeviation =
         case BlockTimeDeviation0 of
             N when N > 0 ->
-                max(1, catchup_time(abs(N)));
+                min(1, catchup_time(abs(N)));
             N ->
                 -1 * catchup_time(abs(N))
         end,
