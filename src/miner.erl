@@ -183,7 +183,7 @@ p2p_status() ->
     lists:foldr(fun({Fun, Name}, Acc) ->
                         [{Name, Fun()} | Acc]
                 end, [], [{CheckSessions, "well-connected"},
-                          {integer_to_list(SessionCt), "sessions"},
+                          {fun() -> integer_to_list(SessionCt) end, "sessions"},
                           {CheckPublicAddr, "dialable"},
                           {CheckNatType, "nat_type"},
                           {CheckHeight, "height"}]).
