@@ -889,14 +889,14 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
             %% Despite having a new chain, we cannot get regulatory domain data for this Hotspot,
             %% just retry after a second
             lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [
-                Reason
+                libp2p_crypto:bin_to_b58(Addr), Reason
             ]),
             erlang:send_after(1000, self(), reg_domain_timeout),
             State;
         {ok, {Region, FrequencyList}} ->
             lager:info(
                 "confirmed regulatory domain for miner ~p. region: ~p, freqlist: ~p",
-                [Addr, Region, FrequencyList]
+                [libp2p_crypto:bin_to_b58(Addr), Region, FrequencyList]
             ),
             State#state{
                 reg_domain_confirmed = true,
