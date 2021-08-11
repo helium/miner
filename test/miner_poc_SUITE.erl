@@ -794,8 +794,9 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
             %% the first receipt would have added witnesses and we should be able to make
             %% a next hop.
             case maps:get(?poc_version, VarMap, 1) of
-                V when V > 10 ->
-                    %% poc-v11 checks
+                V when V >= 10 ->
+                    %% There are no paths in v11 or v10 for that matter, so we'll consolidate
+                    %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
                                      %% Check that we have atleast more than one request
@@ -811,7 +812,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                                      ct:pal("C1: ~p, C2: ~p, C3: ~p", [C1, C2, C3]),
                                      C1 andalso C2 andalso C3
                              end,
-                             120, 1000),
+                             300, 1000),
                     FinalRewards = get_rewards(Config),
                     ct:pal("FinalRewards: ~p", [FinalRewards]),
                     ok;
@@ -1180,8 +1181,8 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
     true = miner_ct_utils:wait_until(
              fun() ->
                      case maps:get(poc_version, VarMap, 1) of
-                         V when V > 10 ->
-                             %% poc-v11 checks
+                         V when V >= 10 ->
+                             %% There is no path to check, so do both poc-v10 and poc-v11 checks here
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
                              %% Check that we have atleast more than one request
@@ -1374,7 +1375,10 @@ extra_vars(poc_v10) ->
                  ?poc_challengees_percent => 0.18,
                  ?poc_challengers_percent => 0.0095,
                  ?poc_witnesses_percent => 0.0855,
-                 ?securities_percent => 0.34});
+                 ?securities_percent => 0.34,
+                 ?reward_version => 5,
+                 ?rewards_txn_version => 2
+                });
 extra_vars(poc_v8) ->
     maps:merge(extra_poc_vars(), #{?poc_version => 8});
 extra_vars(_) ->
