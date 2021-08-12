@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
+TAG=$( git describe --abbrev=0 --tags | sed -e s/$1// )
 
-fpm -n validator \
+fpm -n $1 \
     -v "${TAG}" \
     -s dir \
     -t deb \
@@ -12,4 +12,4 @@ fpm -n validator \
     --depends libsodium23 \
     --deb-systemd deb/miner.service \
     --deb-no-default-config-files \
-    _build/validator/rel/=/var/helium
+    _build/$1/rel/=/var/helium
