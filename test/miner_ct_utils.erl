@@ -758,7 +758,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 get_config("N", 7)
         end,
     SeedNodes = [],
-    JsonRpcBase = 4466,
+    JsonRpcBase = 4486,
     Port = get_config("PORT", 0),
     Curve = 'SS512',
     BlockTime = get_config("BT", 100),

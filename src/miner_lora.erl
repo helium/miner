@@ -25,6 +25,7 @@
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("lora.hrl").
 -include_lib("blockchain/include/blockchain_utils.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -record(gateway, {
     mac,
@@ -565,7 +566,7 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, chain = Chain} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -573,9 +574,13 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
         {onion, Payload} ->
             Freq = maps:get(<<"freq">>, Packet),
             %% onion server
+            UseRSSIS = case Chain /= undefined andalso blockchain:config(?poc_version, blockchain:ledger(Chain)) of
+                {ok, X} when X > 10 -> true;
+                _ -> false
+            end,
             miner_onion_server:decrypt_radio(
                 Payload,
-                erlang:trunc(packet_rssi(Packet)),
+                erlang:trunc(packet_rssi(Packet, UseRSSIS)),
                 packet_snr(Packet),
                 %% TODO we might want to send GPS time here, if available
                 maps:get(<<"tmst">>, Packet),
@@ -639,7 +644,8 @@ maybe_mirror({Sock, Destination}, Packet) ->
 -spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
 send_to_router(Type, RoutingInfo, Packet, Region) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    RSSI = packet_rssi(Packet),
+    %% always ok to use rssis here
+    RSSI = packet_rssi(Packet, true),
     SNR = packet_snr(Packet),
     %% TODO we might want to send GPS time here, if available
     Time = maps:get(<<"tmst">>, Packet),
@@ -750,8 +756,8 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
 
 %% Extracts a packet's RSSI, abstracting away the differences between
 %% GWMP JSON V1/V2.
--spec packet_rssi(map()) -> number().
-packet_rssi(Packet) ->
+-spec packet_rssi(map(), boolean()) -> number().
+packet_rssi(Packet, UseRSSIS) ->
     case maps:get(<<"rssi">>, Packet, undefined) of
         %% GWMP V2
         undefined ->
@@ -759,11 +765,17 @@ packet_rssi(Packet) ->
             %% quality object if the packet was received on multiple
             %% antennas/receivers. So let's pick the one with the
             %% highest RSSI[Channel]
+            Key = case UseRSSIS of
+                true ->
+                    <<"rssis">>;
+                _ ->
+                    <<"rssic">>
+            end,
             [H|T] = maps:get(<<"rsig">>, Packet),
             Selector = fun(Obj, Best) ->
-                               erlang:max(Best, maps:get(<<"rssic">>, Obj))
+                               erlang:max(Best, maps:get(Key, Obj))
                        end,
-            lists:foldl(Selector, maps:get(<<"rssic">>, H), T);
+            lists:foldl(Selector, maps:get(Key, H), T);
         %% GWMP V1
         RSSI ->
             RSSI
