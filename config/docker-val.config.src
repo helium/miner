@@ -13,6 +13,7 @@
  {blockchain,
   [
    {ports, [2154]},
+   {seed_nodes, "/ip4/35.166.211.46/tcp/2154,/ip4/44.236.95.167/tcp/2154,/ip4/3.34.61.168/tcp/2154"},
    {validation_width, 8},
    {block_sync_batch_size, 10},
    {block_sync_batch_limit, 100},
@@ -24,7 +25,10 @@
   ]},
  {libp2p,
   [
-   {random_peer_pred, fun miner_util:true_predicate/1},
+   {use_dns_for_seeds, true},
+   {seed_dns_cname, "seed.helium.io"},
+   {similarity_time_diff_mins, 30},
+   {random_peer_pred, fun miner_util:random_val_predicate/1},
    {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}}
   ]},
  {relcast,
