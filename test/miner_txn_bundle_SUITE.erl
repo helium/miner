@@ -1,3 +1,4 @@
+%%% RELOC MOVE to core
 -module(miner_txn_bundle_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
