@@ -1208,7 +1208,7 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                              C3 = check_partitioned_path_growth(TestCase, Miners),
                              %% Check there are some poc rewards
                              C4 = check_poc_rewards(get_rewards(Config)),
-                             ct:pal("C1: ~p, C2: ~p, C3: ~p, C4: ~p", [C1, C2, C3, C4]),
+                             ct:pal("all can challenge: ~p, multiple requests: ~p, paths grow: ~p, rewards given: ~p", [C1, C2, C3, C4]),
                              C1 andalso C2 andalso C3 andalso C4
                      end
              end, 60, 5000),

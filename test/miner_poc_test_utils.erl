@@ -33,18 +33,18 @@ poc_v11_vars() ->
            fspl_loss => 1.0,
            %% NOTE: Set to 3 to attach tx_power to poc receipt
            data_aggregation_version => 3,
-           region_params_us915 => region_params_us915(),
-           region_params_eu868 => region_params_eu868(),
-           region_params_au915 => region_params_au915(),
-           region_params_as923_1 => region_params_as923_1(),
-           region_params_as923_2 => region_params_as923_2(),
-           region_params_as923_3 => region_params_as923_3(),
-           region_params_as923_4 => region_params_as923_4(),
-           region_params_ru864 => region_params_ru864(),
-           region_params_cn470 => region_params_cn470(),
-           region_params_in865 => region_params_in865(),
-           region_params_kr920 => region_params_kr920(),
-           region_params_eu433 => region_params_eu433()
+           region_us915_params => region_params_us915(),
+           region_eu868_params => region_params_eu868(),
+           region_au915_params => region_params_au915(),
+           region_as923_1_params => region_params_as923_1(),
+           region_as923_2_params => region_params_as923_2(),
+           region_as923_3_params => region_params_as923_3(),
+           region_as923_4_params => region_params_as923_4(),
+           region_ru864_params => region_params_ru864(),
+           region_cn470_params => region_params_cn470(),
+           region_in865_params => region_params_in865(),
+           region_kr920_params => region_params_kr920(),
+           region_eu433_params => region_params_eu433()
           },
     maps:merge(V0, V1).
 
