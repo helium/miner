@@ -344,7 +344,18 @@ autoskip_on_timeout_test(Config) ->
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
-    %% TODO Describe main idea and method.
+    %% NOTES:
+    %% restart_test is hitting coinsensus restore pathway
+    %% consesus group is lost but dkg is retained
+    %% 
+    %% finish the dkg,
+    %% crash,
+    %% restart
+    %%
+    %% trying to check restore after crash
+    %%
+    %% the main is to test that group information is not lost after a crash
+    %%
     BaseDir = ?config(base_dir, Config),
     Miners = ?config(miners, Config),
 
