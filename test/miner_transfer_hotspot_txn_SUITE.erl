@@ -1,3 +1,4 @@
+%%% RELOC MOVE to core
 -module(miner_transfer_hotspot_txn_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
