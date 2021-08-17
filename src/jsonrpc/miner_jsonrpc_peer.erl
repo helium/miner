@@ -109,14 +109,14 @@ peer_book_response(Target) ->
                        ) ];
         Addrs when is_list(Addrs) ->
             [begin
-                 {ok, P} = libp2p_peerbook:get(Peerbook, A),
+                 {ok, P} = libp2p_peerbook:get(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(binary_to_list(A))),
                  lists:foldl(fun(M, Acc) -> maps:merge(Acc, M) end,
                              format_peer(P),
                              [format_listen_addrs(TID, libp2p_peer:listen_addrs(P)),
                               format_peer_connections(P)])
              end || A <- Addrs ];
         Addr ->
-            {ok, P} = libp2p_peerbook:get(Peerbook, Addr),
+            {ok, P} = libp2p_peerbook:get(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(binary_to_list(Addr))),
             [ lists:foldl(fun(M, Acc) -> maps:merge(Acc, M) end,
                           format_peer(P),
                           [format_listen_addrs(TID, libp2p_peer:listen_addrs(P)),
