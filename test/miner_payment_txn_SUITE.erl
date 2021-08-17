@@ -1,4 +1,4 @@
-%%% RELOC MOVE - not miner-specific functionality
+%%% RELOC REMOVE after ensuring core coverage
 -module(miner_payment_txn_SUITE).
 
 -include_lib("common_test/include/ct.hrl").

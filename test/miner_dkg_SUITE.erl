@@ -1,3 +1,4 @@
+%%% RELOC REMOVE - duplicates what is already done in miner_blockchain_SUITE
 -module(miner_dkg_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
