@@ -1,4 +1,4 @@
-%%% RELOC REMOVE after ensuring core coverage
+%%% RELOC REMOVE after ensuring core coverage TODO re-review, because this looks unique on first check
 -module(miner_payment_txn_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
