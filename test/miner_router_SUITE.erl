@@ -1,4 +1,4 @@
-%%% RELOC MOVE? - looks like not miner-specific functionality
+%%% RELOC KEEP - net layer
 -module(miner_router_SUITE).
 
 -export([
