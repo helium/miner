@@ -91,6 +91,13 @@
 %% Equivalent `(2^32)-1`
 -define(MAX_TMST_VAL, 4294967295).
 
+-ifdef(TEST).
+-define(REG_DOMAIN_TIMEOUT, 1000).
+-else.
+-define(REG_DOMAIN_TIMEOUT, 30000).
+-endif.
+
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -152,6 +159,8 @@ location_ok() ->
     application:get_env(miner, loc_ok_default, true).
 
 -spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin(), state())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(_Addr, #state{chain=undefined}) ->
+    {error, no_chain};
 reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
     case blockchain:ledger(Chain) of
         undefined ->
@@ -199,7 +208,6 @@ reg_domain_data_for_countrycode(CC)->
 -spec region() -> {ok, atom()}.
 region()->
     %% TODO: recalc region if hotspot re-asserts
-    %% region_us915, region_au915
     gen_server:call(?MODULE, region, 5000).
 
 
@@ -351,7 +359,7 @@ handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Ad
     catch
         _Type:Exception ->
             lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
-            erlang:send_after(1000, self(), reg_domain_timeout),
+            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
             {noreply, State}
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
@@ -903,7 +911,7 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
             lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [
                 libp2p_crypto:bin_to_b58(Addr), Reason
             ]),
-            erlang:send_after(1000, self(), reg_domain_timeout),
+            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
             State;
         {ok, {Region, FrequencyList}} ->
             lager:info(
