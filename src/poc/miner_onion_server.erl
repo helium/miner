@@ -402,19 +402,24 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                     %% could not calculate txpower, don't do anything
                                                     lager:error("unable to get tx_power, reason: ~p", [Reason]),
                                                     ok;
-                                                {ok, TxPower} ->
+                                                {ok, TxPower, EffectiveTxPower, AssertedGain} ->
+                                                    %% TxPower is the power we tell the radio to transmit at
+                                                    %% and EffectiveTxPower is the power we expect to radiate at the
+                                                    %% antenna.
                                                     BW = blockchain_region_params_v1:get_bandwidth(Params),
                                                     DR = datarate(Spreading, BW),
                                                     case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
                                                         ok ->
-                                                            lager:info("sending receipt at power: ~p", [TxPower]),
+                                                            lager:info("sending receipt with observed power: ~p with radio power ~p", [EffectiveTxPower, TxPower]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, EffectiveTxPower, State);
                                                         {warning, {tx_power_corrected, CorrectedPower}} ->
-                                                            lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, sending receipt",
-                                                                          [TxPower, CorrectedPower]),
+                                                            %% Corrected power never takes into account antenna gain config in pkt forwarder so we
+                                                            %% always add it back here
+                                                            lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, with gain ~p; sending receipt with power ~p",
+                                                                          [TxPower, CorrectedPower, AssertedGain, CorrectedPower + AssertedGain]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower + AssertedGain, State);
                                                         {warning, {unknown, Other}} ->
                                                             %% This should not happen
                                                             lager:warning("What is this? ~p", [Other]),
@@ -466,7 +471,7 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             {error, too_many_pocs}
     end.
 
--spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer()} | {error, any()}.
+-spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
 tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
     Ledger = blockchain:ledger(Chain),
 
@@ -474,19 +479,27 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
         {ok, GwInfo} ->
             {ok, Params} = blockchain_region_params_v1:for_region(Region, Ledger),
             MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
+            %% if the antenna gain is accounted for in the packet forwarder config file
+            %% set this to false
+            ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
             case blockchain_ledger_gateway_v2:gain(GwInfo) of
-                undefined ->
-                    %% No gain on chain, EIRP = max allowed in region
+                AssertGain when AssertGain == undefined orelse ConsiderTxGain == false ->
+                    %% No gain on chain or the gain is accounted for in pkt forwarder,
+                    %% EIRP = max allowed in region
                     EIRP = trunc(MaxEIRP/10),
                     lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
                                [Region, undefined, MaxEIRP/10, EIRP]),
-                    {ok, EIRP};
+                    Gain = case AssertGain of
+                               undefined -> 0;
+                               _ -> AssertGain
+                           end,
+                    {ok, EIRP, EIRP, Gain};
                 AssertGain ->
                     %% AssertGain + TxPower cannot be higher than MaxEIRP
                     EIRP = trunc((MaxEIRP - AssertGain)/10),
                     lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
                                [Region, AssertGain/10, MaxEIRP/10, EIRP]),
-                    {ok, EIRP}
+                    {ok, EIRP, trunc(MaxEIRP/10), trunc(AssertGain/10)}
             end;
         _ ->
             {error, no_gw}
