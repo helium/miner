@@ -34,60 +34,60 @@ steps:
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "amd64"
+      BUILD_TYPE: "validator"
     agents:
       queue: "erlang"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_val_image.sh"
+      - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^validator/
     name: "validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "arm64"
+      BUILD_TYPE: "validator"
     agents:
       queue: "arm64"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_val_image.sh"
+      - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
     name: "testnet validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "amd64"
+      BUILD_TYPE: "val"
     agents:
       queue: "erlang"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_testval_image.sh"
+      - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
     name: "testnet validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "arm64"
+      BUILD_TYPE: "val"
     agents:
       queue: "arm64"
     commands:
       - "git fetch -t"
-      - ".buildkite/scripts/make_testval_image.sh"
+      - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "amd64"
+      BUILD_TYPE: "miner"
     agents:
       queue: "erlang"
     commands:
@@ -101,8 +101,8 @@ steps:
     env:
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
-      IMAGE_FORMAT: "docker"
       IMAGE_ARCH: "arm64"
+      BUILD_TYPE: "miner"
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
