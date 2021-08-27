@@ -1,11 +1,18 @@
-FROM erlang:23.3.4.4-alpine as builder
+ARG BUILDER_IMAGE=erlang:23.3.4.6-alpine
+ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
+FROM ${BUILDER_IMAGE} as builder
 
-ARG version
+ARG REBAR_BUILD_TARGET
+ARG VERSION
+ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
+
+ARG EXTRA_BUILD_APK_PACKAGES
 
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
     dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
-    sed wget curl
+    sed wget curl \
+    ${EXTRA_BUILD_APK_PACKAGES}
 
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -21,18 +28,20 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 # Add our code
 ADD . /usr/src/miner/
 
-RUN ./rebar3 as docker_testval tar -n miner -v ${version}
+RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 
 RUN mkdir -p /opt/docker/update
-RUN tar -zxvf _build/docker_testval/rel/*/*.tar.gz -C /opt/docker
-RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.testnet
+RUN tar -zxvf ${TAR_PATH} -C /opt/docker
+RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.mainnet
 
-FROM erlang:23.3.4.4-alpine as runner
+FROM ${RUNNER_IMAGE} as runner
 
-RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc
+ARG EXTRA_RUNNER_APK_PACKAGES
+
+RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc \
+                                ${EXTRA_RUNNER_APK_PACKAGES}
+
 RUN ulimit -n 64000
-
-EXPOSE 8080 4467
 
 WORKDIR /opt/miner
 
