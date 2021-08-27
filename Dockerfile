@@ -9,6 +9,8 @@ ARG REBAR_BUILD_TARGET
 ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
 ARG EXTRA_BUILD_APK_PACKAGES
 
+ARG NETWORK=mainnet
+
 RUN apk add --no-cache --update \
     git tar build-base linux-headers autoconf automake libtool pkgconfig \
     dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
@@ -50,7 +52,7 @@ RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 
 RUN mkdir -p /opt/docker/update
 RUN tar -zxvf ${TAR_PATH} -C /opt/docker
-RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
+RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.$NETWORK
 
 FROM ${RUNNER_IMAGE} as runner
 
