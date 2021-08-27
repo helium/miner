@@ -97,6 +97,7 @@ if [[ "$BUILD_TYPE" == "miner" ]]; then
         exit $?
     fi
 fi
+echo "build args ${DOCKER_BUILD_ARGS}"
 
 docker build $DOCKER_BUILD_ARGS -t "helium:${DOCKER_NAME}" .
 docker tag "helium:$DOCKER_NAME" "$FULL_REGISTRY_NAME:$DOCKER_NAME"
