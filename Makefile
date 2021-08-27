@@ -1,6 +1,7 @@
 .PHONY: deps compile test typecheck cover
 
 REBAR=./rebar3
+VAL_VERSION=$(shell git describe --abbrev=0 | sed -e 's,validator,,')
 ifeq ($(BUILDKITE), true)
   # get branch name and replace any forward slashes it may contain
   CIBRANCH=$(subst /,-,$(BUILDKITE_BRANCH))
@@ -30,6 +31,9 @@ ci: compile
 
 release:
 	$(REBAR) as prod release -n miner
+
+validator:
+	$(REBAR) as validator release -n miner -v $(VAL_VERSION)
 
 cover:
 	$(REBAR) cover
