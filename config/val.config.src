@@ -15,7 +15,7 @@
    {listen_addresses, ["/ip4/0.0.0.0/tcp/2154"]},
    {block_sync_batch_size, 10},
    {block_sync_batch_limit, 100},
-   {validation_width, 8},
+   {validation_width, "${VALIDATION_WIDTH}"},
    {max_inbound_connections, 32},
    {snapshot_memory_limit, 2048},
    {key, undefined},
