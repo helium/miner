@@ -8,6 +8,8 @@ set -euo pipefail
 # BUILD_TYPE
 # all come from pipeline.yml
 
+TEST_BUILD=${TEST_BUILD:-0}
+
 ERLANG_IMAGE="23.3.4.5-alpine"
 ERLANG_IMAGE_SOURCE="erlang"
 
