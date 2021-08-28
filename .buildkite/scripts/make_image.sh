@@ -11,16 +11,16 @@ set -euo pipefail
 ERLANG_IMAGE="23.3.4.5-alpine"
 ERLANG_IMAGE_SOURCE="erlang"
 
+BASE_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
 if [[ "$IMAGE_ARCH" == "arm64" ]]; then
-    ERLANG_IMAGE_SOURCE="arm64v8"
+    BASE_IMAGE="arm64v8/$BASE_IMAGE"
 fi
 
-BASE_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
 MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
-DOCKER_NAME=$(basename $(pwd))
+BASE_DOCKER_NAME=$(basename $(pwd))
 
-VERSION=$(git describe --abbrev=0 | sed -e "s/${BUILD_TYPE}//" | sed -e '_GA$//' )
-DOCKER_NAME="${DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
+VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' )
+DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
 DOCKER_BUILD_ARGS="--build-arg VERSION=${VERSION}"
 
 LATEST_TAG="$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
@@ -29,7 +29,7 @@ case "$BUILD_TYPE" in
     "val")
         echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker_testval ${DOCKER_BUILD_ARGS}"
-        DOCKER_NAME="${DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
+        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
         LATEST_TAG="$MINER_REGISTRY_NAME:latest-val-${IMAGE_ARCH}"
         ;;
     "validator")
