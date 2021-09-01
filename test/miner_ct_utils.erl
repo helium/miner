@@ -18,7 +18,6 @@
          get_addrs/1,
          start_miner/2,
          start_node/1,
-         config_node/2,
          partition_cluster/2,
          heal_cluster/2,
          connect/1,
@@ -79,9 +78,13 @@
          get_txn/2, get_txns/2,
          get_genesis_block/2,
          load_genesis_block/3,
-
          chain_var_lookup_all/2,
-         chain_var_lookup_one/2
+         chain_var_lookup_one/2,
+         build_gateways/2,
+         build_asserts/2,
+         add_block/3,
+         gen_gateways/2, gen_payments/1, gen_locations/1,
+         existing_vars/0, start_blockchain/2
         ]).
 
 chain_var_lookup_all(Key, Nodes) ->
@@ -221,10 +224,10 @@ stop_miners(Miners, Retries) ->
            || Miner <- Miners],
     Res.
 
-start_miner(Name0, Context) ->
+start_miner(Name0, Options) ->
     Name = start_node(Name0),
     Keys = make_keys(Name, {45000, 0, 4466}),
-    config_node(Keys, Context),
+    config_node(Keys, Options),
     {Name, Keys}.
 
 start_miners(Miners) ->
@@ -755,7 +758,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 get_config("N", 7)
         end,
     SeedNodes = [],
-    JsonRpcBase = 4466,
+    JsonRpcBase = 4486,
     Port = get_config("PORT", 0),
     Curve = 'SS512',
     BlockTime = get_config("BT", 100),
@@ -787,8 +790,16 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
-    Context = {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port},
-    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Context) end, Keys),
+    Options = [{mod, Mod},
+               {logdir, LogDir},
+               {basedir, BaseDir},
+               {seed_nodes, SeedNodes},
+               {total_miners, TotalMiners},
+               {curve, Curve},
+               {default_routers, DefaultRouters},
+               {port, Port}],
+
+    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Options) end, Keys),
 
     Miners = [M || {M, _} <- MinersAndPorts],
     %% check that the config loaded correctly on each miner
@@ -819,6 +830,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                        fun(Miner) ->
                                try
                                    GossipPeers = ct_rpc:call(Miner, blockchain_swarm, gossip_peers, [], 500),
+                                   ct:pal("Miner: ~p, GossipPeers: ~p", [Miner, GossipPeers]),
                                    case length(GossipPeers) >= (length(Miners) / 2) + 1 of
                                        true -> true;
                                        false ->
@@ -869,7 +881,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {miners, Miners},
         {keys, Keys},
         {ports, UpdatedMinersAndPorts},
-        {node_context, Context},
+        {node_options, Options},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
         {block_time, BlockTime},
@@ -902,8 +914,16 @@ make_keys(Miner, Ports) ->
     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
-config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun},
-            {LogDir, BaseDir, SeedNodes, TotalMiners, Curve, DefaultRouters, Port}) ->
+config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun}, Options) ->
+    Mod = proplists:get_value(mod, Options),
+    LogDir = proplists:get_value(logdir, Options),
+    BaseDir = proplists:get_value(basedir, Options),
+    SeedNodes = proplists:get_value(seed_nodes, Options),
+    TotalMiners = proplists:get_value(total_miners, Options),
+    Curve = proplists:get_value(curve, Options),
+    DefaultRouters = proplists:get_value(default_routers, Options),
+    Port = proplists:get_value(port, Options),
+
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
     ct_rpc:call(Miner, application, load, [lager]),
@@ -943,18 +963,24 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
-    ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
-    ct_rpc:call(Miner, application, set_env,
-                [miner, frequency_data,
-                 #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
-                   'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
-                   'EU433' => [433.175, 433.375, 433.575],
-                   'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
-                   'CN779' => [779.5, 779.7, 779.9],
-                   'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
-                   'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
-                   'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
-                   'IN865' => [865.0625, 865.4025, 865.985]}]),
+    case Mod of
+        miner_poc_v11_SUITE ->
+            %% Don't set anything region related with poc-v11
+            ok;
+        _ ->
+            ct_rpc:call(Miner, application, set_env, [miner, region_override, 'US915']),
+            ct_rpc:call(Miner, application, set_env,
+                        [miner, frequency_data,
+                         #{'US915' => [903.9, 904.1, 904.3, 904.5, 904.7, 904.9, 905.1, 905.3],
+                           'EU868' => [867.1, 867.3, 867.5, 867.7, 867.9, 868.1, 868.3, 868.5],
+                           'EU433' => [433.175, 433.375, 433.575],
+                           'CN470' => [486.3, 486.5, 486.7, 486.9, 487.1, 487.3, 487.5, 487.7 ],
+                           'CN779' => [779.5, 779.7, 779.9],
+                           'AU915' => [916.8, 917.0, 917.2, 917.4, 917.5, 917.6, 917.8, 918.0, 918.2],
+                           'AS923' => [923.2, 923.4, 923.6, 923.8, 924.0, 924.2, 924.4, 924.5, 924.6, 924.8],
+                           'KR920' => [922.1, 922.3, 922.5, 922.7, 922.9, 923.1, 923.3],
+                           'IN865' => [865.0625, 865.4025, 865.985]}])
+    end,
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
     ok.
 
@@ -1431,3 +1457,312 @@ load_genesis_block(GenesisBlock, Miners, Config) ->
     ),
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 1, all, 30).
+
+build_gateways(LatLongs, {PrivKey, PubKey}) ->
+    lists:foldl(
+        fun({_LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
+            % Create a Gateway
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
+            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
+
+            AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway),
+            SignedOwnerAddGatewayTx = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
+            SignedGatewayAddGatewayTx = blockchain_txn_add_gateway_v1:sign_request(SignedOwnerAddGatewayTx, GatewaySigFun),
+            [SignedGatewayAddGatewayTx|Acc]
+
+        end,
+        [],
+        LatLongs
+    ).
+
+build_asserts(LatLongs, {PrivKey, PubKey}) ->
+    lists:foldl(
+        fun({LatLong, {GatewayPrivKey, GatewayPubKey}}, Acc) ->
+            Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+            GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
+            OwnerSigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Owner = libp2p_crypto:pubkey_to_bin(PubKey),
+            Index = h3:from_geo(LatLong, 12),
+            AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(Gateway, Owner, Index, 1),
+            PartialAssertLocationTxn = blockchain_txn_assert_location_v1:sign_request(AssertLocationRequestTx, GatewaySigFun),
+            SignedAssertLocationTx = blockchain_txn_assert_location_v1:sign(PartialAssertLocationTxn, OwnerSigFun),
+            [SignedAssertLocationTx|Acc]
+        end,
+        [],
+        LatLongs
+    ).
+
+add_block(Chain, ConsensusMembers, Txns) ->
+    SortedTxns = lists:sort(fun blockchain_txn:sort/2, Txns),
+    B = create_block(ConsensusMembers, SortedTxns),
+    ok = blockchain:add_block(B, Chain).
+
+create_block(ConsensusMembers, Txs) ->
+    Blockchain = blockchain_worker:blockchain(),
+    {ok, PrevHash} = blockchain:head_hash(Blockchain),
+    {ok, HeadBlock} = blockchain:head_block(Blockchain),
+    Height = blockchain_block:height(HeadBlock) + 1,
+    Block0 = blockchain_block_v1:new(#{prev_hash => PrevHash,
+                                       height => Height,
+                                       transactions => Txs,
+                                       signatures => [],
+                                       time => 0,
+                                       hbbft_round => 0,
+                                       election_epoch => 1,
+                                       epoch_start => 1,
+                                       seen_votes => [],
+                                       bba_completion => <<>>}),
+    BinBlock = blockchain_block:serialize(blockchain_block:set_signatures(Block0, [])),
+    Signatures = signatures(ConsensusMembers, BinBlock),
+    Block1 = blockchain_block:set_signatures(Block0, Signatures),
+    Block1.
+
+signatures(ConsensusMembers, BinBlock) ->
+    lists:foldl(
+        fun({A, {_, _, F}}, Acc) ->
+            Sig = F(BinBlock),
+            [{A, Sig}|Acc]
+        end
+        ,[]
+        ,ConsensusMembers
+    ).
+
+gen_gateways(Addresses, Locations) ->
+    [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0)
+     || {Addr, Loc} <- lists:zip(Addresses, Locations)].
+
+gen_payments(Addresses) ->
+    [ blockchain_txn_coinbase_v1:new(Addr, 5000)
+      || Addr <- Addresses].
+
+%% ideally keep these synced with mainnet
+existing_vars() ->
+    #{
+        ?allow_payment_v2_memos => true,
+        ?allow_zero_amount => false,
+        ?alpha_decay => 0.0035,
+        ?assert_loc_txn_version => 2,
+        ?batch_size => 400,
+        ?beta_decay => 0.002,
+        ?block_time => 60000,
+        ?block_version => v1,
+        ?chain_vars_version => 2,
+        ?consensus_percent => 0.06,
+        ?data_aggregation_version => 2,
+        ?dc_payload_size => 24,
+        ?dc_percent => 0.325,
+        ?density_tgt_res => 4,
+        ?dkg_curve => 'SS512',
+        ?election_bba_penalty => 0.001,
+        ?election_cluster_res => 4,
+        ?election_interval => 30,
+        ?election_removal_pct => 40,
+        ?election_replacement_factor => 4,
+        ?election_replacement_slope => 20,
+        ?election_restart_interval => 5,
+        ?election_seen_penalty => 0.0033333,
+        ?election_selection_pct => 1,
+        ?election_version => 4,
+        ?h3_exclusion_ring_dist => 6,
+        ?h3_max_grid_distance => 120,
+        ?h3_neighbor_res => 12,
+        ?hip17_interactivity_blocks => 3600,
+        ?hip17_res_0 => <<"2,100000,100000">>,
+        ?hip17_res_1 => <<"2,100000,100000">>,
+        ?hip17_res_10 => <<"2,1,1">>,
+        ?hip17_res_11 => <<"2,100000,100000">>,
+        ?hip17_res_12 => <<"2,100000,100000">>,
+        ?hip17_res_2 => <<"2,100000,100000">>,
+        ?hip17_res_3 => <<"2,100000,100000">>,
+        ?hip17_res_4 => <<"1,250,800">>,
+        ?hip17_res_5 => <<"1,100,400">>,
+        ?hip17_res_6 => <<"1,25,100">>,
+        ?hip17_res_7 => <<"2,5,20">>,
+        ?hip17_res_8 => <<"2,1,4">>,
+        ?hip17_res_9 => <<"2,1,2">>,
+        ?max_antenna_gain => 150,
+        ?max_open_sc => 5,
+        ?max_payments => 50,
+        ?max_staleness => 100000,
+        ?max_subnet_num => 5,
+        ?max_subnet_size => 65536,
+        ?max_xor_filter_num => 5,
+        ?max_xor_filter_size => 102400,
+        ?min_antenna_gain => 10,
+        ?min_assert_h3_res => 12,
+        ?min_expire_within => 15,
+        ?min_score => 0.15,
+        ?min_subnet_size => 8,
+        ?monthly_reward => 500000000000000,
+        ?num_consensus_members => 16,
+        ?poc_addr_hash_byte_count => 8,
+        ?poc_centrality_wt => 0.5,
+        ?poc_challenge_interval => 480,
+        ?poc_challenge_sync_interval => 90,
+        ?poc_challengees_percent => 0.0531,
+        ?poc_challengers_percent => 0.0095,
+        ?poc_good_bucket_high => -70,
+        ?poc_good_bucket_low => -130,
+        ?poc_max_hop_cells => 2000,
+        ?poc_path_limit => 1,
+        ?poc_per_hop_max_witnesses => 25,
+        ?poc_reward_decay_rate => 0.8,
+        ?poc_target_hex_parent_res => 5,
+        ?poc_typo_fixes => true,
+        ?poc_v4_exclusion_cells => 8,
+        ?poc_v4_parent_res => 11,
+        ?poc_v4_prob_bad_rssi => 0.01,
+        ?poc_v4_prob_count_wt => 0.0,
+        ?poc_v4_prob_good_rssi => 1.0,
+        ?poc_v4_prob_no_rssi => 0.5,
+        ?poc_v4_prob_rssi_wt => 0.0,
+        ?poc_v4_prob_time_wt => 0.0,
+        ?poc_v4_randomness_wt => 0.5,
+        ?poc_v4_target_challenge_age => 1000,
+        ?poc_v4_target_exclusion_cells => 6000,
+        ?poc_v4_target_prob_edge_wt => 0.0,
+        ?poc_v4_target_prob_score_wt => 0.0,
+        ?poc_v4_target_score_curve => 5,
+        ?poc_v5_target_prob_randomness_wt => 1.0,
+        ?poc_version => 10,
+        ?poc_witness_consideration_limit => 20,
+        ?poc_witnesses_percent => 0.2124,
+        ?predicate_callback_fun => version,
+        ?predicate_callback_mod => miner,
+        ?predicate_threshold => 0.95,
+        ?price_oracle_height_delta => 10,
+        ?price_oracle_price_scan_delay => 3600,
+        ?price_oracle_price_scan_max => 90000,
+        ?price_oracle_public_keys =>
+            <<33, 1, 32, 30, 226, 70, 15, 7, 0, 161, 150, 108, 195, 90, 205, 113, 146, 41, 110, 194,
+                43, 86, 168, 161, 93, 241, 68, 41, 125, 160, 229, 130, 205, 140, 33, 1, 32, 237, 78,
+                201, 132, 45, 19, 192, 62, 81, 209, 208, 156, 103, 224, 137, 51, 193, 160, 15, 96,
+                238, 160, 42, 235, 174, 99, 128, 199, 20, 154, 222, 33, 1, 143, 166, 65, 105, 75,
+                56, 206, 157, 86, 46, 225, 174, 232, 27, 183, 145, 248, 50, 141, 210, 144, 155, 254,
+                80, 225, 240, 164, 164, 213, 12, 146, 100, 33, 1, 20, 131, 51, 235, 13, 175, 124,
+                98, 154, 135, 90, 196, 83, 14, 118, 223, 189, 221, 154, 181, 62, 105, 183, 135, 121,
+                105, 101, 51, 163, 119, 206, 132, 33, 1, 254, 129, 70, 123, 51, 101, 208, 224, 99,
+                172, 62, 126, 252, 59, 130, 84, 93, 231, 214, 248, 207, 139, 84, 158, 120, 232, 6,
+                8, 121, 243, 25, 205, 33, 1, 148, 214, 252, 181, 1, 33, 200, 69, 148, 146, 34, 29,
+                22, 91, 108, 16, 18, 33, 45, 0, 210, 100, 253, 211, 177, 78, 82, 113, 122, 149, 47,
+                240, 33, 1, 170, 219, 208, 73, 156, 141, 219, 148, 7, 148, 253, 209, 66, 48, 218,
+                91, 71, 232, 244, 198, 253, 236, 40, 201, 90, 112, 61, 236, 156, 69, 235, 109, 33,
+                1, 154, 235, 195, 88, 165, 97, 21, 203, 1, 161, 96, 71, 236, 193, 188, 50, 185, 214,
+                15, 14, 86, 61, 245, 131, 110, 22, 150, 8, 48, 174, 104, 66, 33, 1, 254, 248, 78,
+                138, 218, 174, 201, 86, 100, 210, 209, 229, 149, 130, 203, 83, 149, 204, 154, 58,
+                32, 192, 118, 144, 129, 178, 83, 253, 8, 199, 161, 128>>,
+        ?price_oracle_refresh_interval => 10,
+        ?reward_version => 5,
+        ?rewards_txn_version => 2,
+        ?sc_causality_fix => 1,
+        ?sc_gc_interval => 10,
+        ?sc_grace_blocks => 10,
+        ?sc_open_validation_bugfix => 1,
+        ?sc_overcommit => 2,
+        ?sc_version => 2,
+        ?securities_percent => 0.34,
+        ?snapshot_interval => 720,
+        ?snapshot_version => 1,
+        ?stake_withdrawal_cooldown => 250000,
+        ?stake_withdrawal_max => 60,
+        ?staking_fee_txn_add_gateway_v1 => 4000000,
+        ?staking_fee_txn_assert_location_v1 => 1000000,
+        ?staking_fee_txn_oui_v1 => 10000000,
+        ?staking_fee_txn_oui_v1_per_address => 10000000,
+        ?staking_keys =>
+            <<33, 1, 37, 193, 104, 249, 129, 155, 16, 116, 103, 223, 160, 89, 196, 199, 11, 94, 109,
+                49, 204, 84, 242, 3, 141, 250, 172, 153, 4, 226, 99, 215, 122, 202, 33, 1, 90, 111,
+                210, 126, 196, 168, 67, 148, 63, 188, 231, 78, 255, 150, 151, 91, 237, 189, 148, 99,
+                248, 41, 4, 103, 140, 225, 49, 117, 68, 212, 132, 113, 33, 1, 81, 215, 107, 13, 100,
+                54, 92, 182, 84, 235, 120, 236, 201, 115, 77, 249, 2, 33, 68, 206, 129, 109, 248,
+                58, 188, 53, 45, 34, 109, 251, 217, 130, 33, 1, 251, 174, 74, 242, 43, 25, 156, 188,
+                167, 30, 41, 145, 14, 91, 0, 202, 115, 173, 26, 162, 174, 205, 45, 244, 46, 171,
+                200, 191, 85, 222, 98, 120, 33, 1, 253, 88, 22, 88, 46, 94, 130, 1, 58, 115, 46,
+                153, 194, 91, 1, 57, 194, 165, 181, 225, 251, 12, 13, 104, 171, 131, 151, 164, 83,
+                113, 147, 216, 33, 1, 6, 76, 109, 192, 213, 45, 64, 27, 225, 251, 102, 247, 132, 42,
+                154, 145, 70, 61, 127, 106, 188, 70, 87, 23, 13, 91, 43, 28, 70, 197, 41, 91, 33, 1,
+                53, 200, 215, 84, 164, 84, 136, 102, 97, 157, 211, 75, 206, 229, 73, 177, 83, 153,
+                199, 255, 43, 180, 114, 30, 253, 206, 245, 194, 79, 156, 218, 193, 33, 1, 229, 253,
+                194, 42, 80, 229, 8, 183, 20, 35, 52, 137, 60, 18, 191, 28, 127, 218, 234, 118, 173,
+                23, 91, 129, 251, 16, 39, 223, 252, 71, 165, 120, 33, 1, 54, 171, 198, 219, 118,
+                150, 6, 150, 227, 80, 208, 92, 252, 28, 183, 217, 134, 4, 217, 2, 166, 9, 57, 106,
+                38, 182, 158, 255, 19, 16, 239, 147, 33, 1, 51, 170, 177, 11, 57, 0, 18, 245, 73,
+                13, 235, 147, 51, 37, 187, 248, 125, 197, 173, 25, 11, 36, 187, 66, 9, 240, 61, 104,
+                28, 102, 194, 66, 33, 1, 187, 46, 236, 46, 25, 214, 204, 51, 20, 191, 86, 116, 0,
+                174, 4, 247, 132, 145, 22, 83, 66, 159, 78, 13, 54, 52, 251, 8, 143, 59, 191, 196>>,
+        ?transfer_hotspot_stale_poc_blocks => 1200,
+        ?txn_fee_multiplier => 5000,
+        ?txn_fees => true,
+        ?validator_liveness_grace_period => 50,
+        ?validator_liveness_interval => 100,
+        ?validator_minimum_stake => 1000000000000,
+        ?validator_version => 1,
+        ?var_gw_inactivity_threshold => 600,
+        ?vars_commit_delay => 1,
+        ?witness_redundancy => 4,
+        ?witness_refresh_interval => 200,
+        ?witness_refresh_rand_n => 1000
+    }.
+
+gen_locations(Addresses) ->
+    lists:foldl(
+        fun(I, Acc) ->
+            [h3:from_geo({37.780586, -122.469470 + I / 50}, 13) | Acc]
+        end,
+        [],
+        lists:seq(1, length(Addresses))
+    ).
+
+start_blockchain(Config, GenesisVars) ->
+    Miners = ?config(miners, Config),
+    Addresses = ?config(addresses, Config),
+    Curve = ?config(dkg_curve, Config),
+    NumConsensusMembers = ?config(num_consensus_members, Config),
+
+    #{secret := Priv, public := Pub} =
+    Keys =
+    libp2p_crypto:generate_keys(ecc_compact),
+    InitialVars = make_vars(Keys, GenesisVars),
+    InitialPayments = gen_payments(Addresses),
+    Locations = gen_locations(Addresses),
+    InitialGws = gen_gateways(Addresses, Locations),
+    Txns = InitialVars ++ InitialPayments ++ InitialGws,
+
+    {ok, DKGCompletedNodes} = initial_dkg(
+                                Miners,
+                                Txns,
+                                Addresses,
+                                NumConsensusMembers,
+                                Curve
+                               ),
+    %% integrate genesis block
+    _GenesisLoadResults = integrate_genesis_block(
+                            hd(DKGCompletedNodes),
+                            Miners -- DKGCompletedNodes
+                           ),
+    {ConsensusMiners, NonConsensusMiners} = miners_by_consensus_state(Miners),
+    ct:pal("ConsensusMiners: ~p, NonConsensusMiners: ~p", [ConsensusMiners, NonConsensusMiners]),
+
+    MinerHts = pmap(
+                 fun(M) ->
+                         Ch = ct_rpc:call(M, blockchain_worker, blockchain, [], 2000),
+                         {ok, Ht} = ct_rpc:call(M, blockchain, height, [Ch], 2000),
+                         {M, Ht}
+                 end, Miners),
+
+    %% check that all miners are booted and have genesis block
+    true = lists:all(
+             fun({_, Ht}) ->
+                     Ht == 1
+             end,
+             MinerHts),
+
+    [
+     {master_key, {Priv, Pub}},
+     {consensus_miners, ConsensusMiners},
+     {non_consensus_miners, NonConsensusMiners}
+     | Config
+    ].
+

@@ -1,5 +1,5 @@
 %% @doc This module provides time-on-air regulatory compliance for the
-%% EU868 and US915 ISM bands.
+%% LoraWAN ISM bands.
 %%
 %% This module does not interface with hardware or provide any
 %% transmission capabilities itself. Instead, the API provides its
@@ -27,11 +27,37 @@
     frequency :: number()
 }).
 
--type region() :: 'AS923' | 'AU915' | 'CN470' | 'CN779' | 'EU433' | 'EU868' | 'IN865' | 'KR920' | 'US915'.
+-type region() ::
+    'AS923'
+    | 'AU915'
+    | 'CN470'
+    | 'CN779'
+    | 'EU433'
+    | 'EU868'
+    | 'IN865'
+    | 'KR920'
+    | 'US915'
+    | 'region_as923_1'
+    | 'region_as923_2'
+    | 'region_as923_3'
+    | 'region_au915'
+    | 'region_cn470'
+    | 'region_eu433'
+    | 'region_eu868'
+    | 'region_in865'
+    | 'region_kr920'
+    | 'region_ru864'
+    | 'region_us915'.
 
 -type regulatory_model() :: {dwell | duty, Limit :: number(), Period :: number()}.
 
 -opaque handle() :: unsupported | {regulatory_model(), list(#sent_packet{})}.
+
+%%                            Limit, Period
+-define(COMMON_DUTY, {'duty', 0.01, 3600000}).
+
+%%                               ms,  Period
+-define(US_DWELL_TIME, {'dwell', 400, 20000}).
 
 %% Maximum time allowable time on air.
 -define(MAX_TIME_ON_AIR_MS, 400).
@@ -39,18 +65,29 @@
 -spec model(region()) -> unsupported | regulatory_model().
 model(Region) ->
     case Region of
-        %%                   Limit  Period
-        %%                     (%)
-        'AS923' -> {'duty',   0.01, 3600000};
-        'AU915' -> {'duty',   0.01, 3600000};
-        'CN470' -> {'duty',   0.01, 3600000};
-        'CN779' -> {'duty',   0.01, 3600000};
-        'EU433' -> {'duty',   0.01, 3600000};
-        'EU868' -> {'duty',   0.01, 3600000};
-        'IN865' -> {'duty',   0.01, 3600000};
-        'KR920' -> {'duty',   0.01, 3600000};
-        %%                      ms  Period
-        'US915' -> {'dwell',   400,   20000};
+        'AS923' -> ?COMMON_DUTY;
+        'AU915' -> ?COMMON_DUTY;
+        'CN470' -> ?COMMON_DUTY;
+        'CN779' -> ?COMMON_DUTY;
+        'EU433' -> ?COMMON_DUTY;
+        'EU868' -> ?COMMON_DUTY;
+        'IN865' -> ?COMMON_DUTY;
+        'KR920' -> ?COMMON_DUTY;
+        'US915' -> ?US_DWELL_TIME;
+
+        %% NOTE: Starting with poc-v11 the Regions are tagged
+        %% And we don't support region_cn779
+        'region_as923_1' -> ?COMMON_DUTY;
+        'region_as923_2' -> ?COMMON_DUTY;
+        'region_as923_3' -> ?COMMON_DUTY;
+        'region_au915'   -> ?COMMON_DUTY;
+        'region_cn470'   -> ?COMMON_DUTY;
+        'region_eu433'   -> ?COMMON_DUTY;
+        'region_eu868'   -> ?COMMON_DUTY;
+        'region_in865'   -> ?COMMON_DUTY;
+        'region_kr920'   -> ?COMMON_DUTY;
+        'region_us915'   -> ?US_DWELL_TIME;
+
         %% We can't support regions we are not aware of.
         _ -> unsupported
     end.

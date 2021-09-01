@@ -18,7 +18,7 @@
     decrypt_p2p/2,
     decrypt_radio/7,
     retry_decrypt/11,
-    send_receipt/11,
+    send_receipt/12,
     send_witness/9
 ]).
 
@@ -87,12 +87,13 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, 
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
                    Stream :: undefined | pid(),
+                   Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
-send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State) ->
+send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State) ->
     case miner_lora:location_ok() of
         true ->
             lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
-            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State, ?BLOCK_RETRY_COUNT);
+            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
     end.
@@ -107,12 +108,13 @@ send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, 
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
                    Stream :: undefined | pid(),
+                   Power :: non_neg_integer(),
                    State :: state(),
                    Retry :: non_neg_integer()) -> ok | {error, any()}.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _State, 0) ->
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _Power, _State, 0) ->
     lager:error("failed to send receipts, max retry"),
     {error, too_many_retries};
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, #state{chain=Chain}=State, Retry) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
@@ -132,6 +134,9 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
                                        {ok, 2} ->
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate);
+                                       {ok, 3} ->
+                                           R0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate),
+                                           blockchain_poc_receipt_v1:tx_power(R0, Power);
                                        _ ->
                                            blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
                                    end,
@@ -163,7 +168,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                     ok;
                 false ->
                     timer:sleep(timer:seconds(30)),
-                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, State, Retry-1)
+                    send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State, Retry-1)
             end
     end.
 
@@ -179,7 +184,10 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
 send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State) ->
     case miner_lora:location_ok() of
         true ->
-            lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
+            POCID = blockchain_utils:poc_id(OnionCompactKey),
+            lager:info([{poc_id, POCID}],
+                       "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                       [RSSI, Frequency, SNR]),
             send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
@@ -212,10 +220,11 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                 fun(PoC) ->
                     Challenger = blockchain_ledger_poc_v2:challenger(PoC),
                     Witness0 = case blockchain:config(?data_aggregation_version, Ledger) of
+                                   {ok, V} when V >= 2 ->
+                                       %% Send channel + datarate with data_aggregation_version >= 2
+                                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
                                    {ok, 1} ->
                                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
-                                   {ok, 2} ->
-                                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
                                    _ ->
                                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
                                end,
@@ -233,6 +242,10 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                                 {error, _Reason} ->
                                     lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
                                     timer:sleep(timer:seconds(30)),
+                                    POCID = blockchain_utils:poc_id(OnionCompactKey),
+                                    lager:info([{poc_id, POCID}],
+                                               "re-sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                                               [RSSI, Frequency, SNR]),
                                     send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
                                 {ok, Stream} ->
                                     _ = miner_poc_handler:send(Stream, EncodedWitness)
@@ -323,9 +336,9 @@ wait_for_block_(Fun, Count) ->
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    Ledger = blockchain:ledger(Chain),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
         poc_not_found ->
-            Ledger = blockchain:ledger(Chain),
             _ = erlang:spawn(fun() ->
                 case wait_for_block(fun() ->
                     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
@@ -344,6 +357,9 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             end),
             State;
         {error, fail_decrypt} ->
+            lager:info([{poc_id, POCID}],
+                       "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                       [RSSI, Frequency, SNR]),
             _ = erlang:spawn(
                 ?MODULE,
                 send_witness,
@@ -365,11 +381,65 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
-                    Spreading = spreading(Region, erlang:byte_size(Packet)),
-                    TxPower = tx_power(Region),
-                    erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
-                    erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                               RSSI, SNR, Frequency, Channel, DataRate, Stream, State) end);
+
+                    case blockchain:config(?poc_version, Ledger) of
+                        {ok, POCVersion} when POCVersion >= 11 ->
+                            %% send receipt with poc_v11 updates
+                            case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                {error, Reason} ->
+                                    lager:error("Could not get params for region: ~p, reason: ~p",
+                                                [Region, Reason]),
+                                    ok;
+                                {ok, Params} ->
+                                    lager:info("Params: ~p", [Params]),
+                                    case blockchain_region_params_v1:get_spreading(Params, erlang:byte_size(Packet)) of
+                                        {error, Why} ->
+                                            lager:error("unable to get spreading, reason: ~p", [Why]),
+                                            ok;
+                                        {ok, Spreading} ->
+                                            case tx_power(Region, State) of
+                                                {error, Reason} ->
+                                                    %% could not calculate txpower, don't do anything
+                                                    lager:error("unable to get tx_power, reason: ~p", [Reason]),
+                                                    ok;
+                                                {ok, TxPower, EffectiveTxPower, AssertedGain} ->
+                                                    %% TxPower is the power we tell the radio to transmit at
+                                                    %% and EffectiveTxPower is the power we expect to radiate at the
+                                                    %% antenna.
+                                                    BW = blockchain_region_params_v1:get_bandwidth(Params),
+                                                    DR = datarate(Spreading, BW),
+                                                    case miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, DR, TxPower) of
+                                                        ok ->
+                                                            lager:info("sending receipt with observed power: ~p with radio power ~p", [EffectiveTxPower, TxPower]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, EffectiveTxPower, State);
+                                                        {warning, {tx_power_corrected, CorrectedPower}} ->
+                                                            %% Corrected power never takes into account antenna gain config in pkt forwarder so we
+                                                            %% always add it back here
+                                                            lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, with gain ~p; sending receipt with power ~p",
+                                                                          [TxPower, CorrectedPower, AssertedGain, CorrectedPower + AssertedGain]),
+                                                            ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower + AssertedGain, State);
+                                                        {warning, {unknown, Other}} ->
+                                                            %% This should not happen
+                                                            lager:warning("What is this? ~p", [Other]),
+                                                            ok;
+                                                        {error, Reason} ->
+                                                            lager:error("unable to send_poc, reason: ~p", [Reason]),
+                                                            ok
+                                                    end
+                                            end
+                                    end
+                            end;
+                        _ ->
+                            %% continue doing the old way
+                            %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
+                            Spreading = spreading(Region, erlang:byte_size(Packet)),
+                            TxPower = tx_power(Region),
+                            erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
+                            erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
+                                                                       RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State) end)
+                    end;
                 false ->
                     ok
             end,
@@ -379,18 +449,6 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             State
     end,
     NewState.
-
--ifdef(EQC).
--spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
-try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
-    case blockchain_worker:blockchain() of
-        undefined->
-            {error, chain_not_ready};
-        Chain ->
-            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-            try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain)
-    end.
--endif.
 
 -spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
@@ -412,6 +470,45 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             %% TODO we might want to try all the PoCs here
             {error, too_many_pocs}
     end.
+
+-spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
+tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
+    Ledger = blockchain:ledger(Chain),
+
+    case blockchain_ledger_v1:find_gateway_info(CK, Ledger) of
+        {ok, GwInfo} ->
+            {ok, Params} = blockchain_region_params_v1:for_region(Region, Ledger),
+            MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- Params]),
+            %% if the antenna gain is accounted for in the packet forwarder config file
+            %% set this to false
+            ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
+            case blockchain_ledger_gateway_v2:gain(GwInfo) of
+                AssertGain when AssertGain == undefined orelse ConsiderTxGain == false ->
+                    %% No gain on chain or the gain is accounted for in pkt forwarder,
+                    %% EIRP = max allowed in region
+                    EIRP = trunc(MaxEIRP/10),
+                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                               [Region, undefined, MaxEIRP/10, EIRP]),
+                    Gain = case AssertGain of
+                               undefined -> 0;
+                               _ -> AssertGain
+                           end,
+                    {ok, EIRP, EIRP, Gain};
+                AssertGain ->
+                    %% AssertGain + TxPower cannot be higher than MaxEIRP
+                    EIRP = trunc((MaxEIRP - AssertGain)/10),
+                    lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                               [Region, AssertGain/10, MaxEIRP/10, EIRP]),
+                    {ok, EIRP, trunc(MaxEIRP/10), trunc(AssertGain/10)}
+            end;
+        _ ->
+            {error, no_gw}
+    end.
+
+-spec datarate(Spreading :: atom(), BW :: pos_integer()) -> string().
+datarate(Spreading, BW) ->
+    BWInKhz = trunc(BW / 1000),
+    atom_to_list(Spreading) ++ "BW" ++ integer_to_list(BWInKhz).
 
 -spec tx_power(atom()) -> pos_integer().
 tx_power('EU868') ->
@@ -438,23 +535,14 @@ spreading(_, L) when L < 139 ->
 spreading(_, _) ->
     "SF7BW125".
 
--ifdef(TEST).
-
-spreading_test() ->
-    ?assertEqual("SF12BW125", spreading('EU868', 10)),
-    ?assertEqual("SF12BW125", spreading('EU868', 14)),
-    ?assertEqual("SF12BW125", spreading('EU868', 54)),
-    ?assertEqual("SF9BW125", spreading('EU868', 117)),
-    ?assertEqual("SF8BW125", spreading('EU868', 200)),
-    ?assertEqual("SF7BW125", spreading('EU868', 252)),
-    ?assertEqual("SF10BW125", spreading('US915', 10)),
-    ?assertEqual("SF9BW125", spreading('US915', 50)),
-    ?assertEqual("SF9BW125", spreading('US915', 55)),
-    ?assertEqual("SF8BW125", spreading('US915', 120)),
-    ?assertEqual("SF8BW125", spreading('US915', 127)),
-    ?assertEqual("SF7BW125", spreading('US915', 200)),
-    ?assertEqual("SF7BW125", spreading('US915', 242)),
-    ?assertEqual("SF7BW125", spreading('US915', 255)),
-    ok.
-
+-ifdef(EQC).
+-spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
+try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun) ->
+    case blockchain_worker:blockchain() of
+        undefined->
+            {error, chain_not_ready};
+        Chain ->
+            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+            try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain)
+    end.
 -endif.

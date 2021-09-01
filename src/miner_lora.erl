@@ -10,8 +10,6 @@
     port/0,
     position/0,
     location_ok/0,
-    reg_domain_data_for_addr/1,
-    reg_domain_data_for_countrycode/1,
     region/0
 ]).
 
@@ -26,6 +24,8 @@
 
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include("lora.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -record(gateway, {
     mac,
@@ -50,9 +50,10 @@
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
     reg_freq_list :: [float()],
-    reg_throttle :: miner_lora_throttle:handle(),
-    last_tmst_us = undefined :: undefined | integer(), % last concentrator tmst reported by the packet forwarder
-    last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    reg_throttle = undefined :: undefined | miner_lora_throttle:handle(),
+    last_tmst_us = undefined :: undefined | integer(),  % last concentrator tmst reported by the packet forwarder
+    last_mono_us = undefined :: undefined | integer(),  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    chain = undefined :: undefined | blockchain:blockchain()
 }).
 
 -record(country, {
@@ -90,6 +91,13 @@
 %% Equivalent `(2^32)-1`
 -define(MAX_TMST_VAL, 4294967295).
 
+-ifdef(TEST).
+-define(REG_DOMAIN_TIMEOUT, 1000).
+-else.
+-define(REG_DOMAIN_TIMEOUT, 30000).
+-endif.
+
+
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -114,7 +122,7 @@ send(#packet_pb{payload=Payload, frequency=Freq, timestamp=When, signal_strength
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, true, Packet}, 11000).
 
--spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()}.
+-spec send_poc(binary(), any(), function(), iolist(), any()) -> ok | {error, any()} | {warning, any()}.
 send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
     gen_server:call(?MODULE, {send, Payload, When, ChannelSelectorFun, DataRate, Power, false, undefined}, 11000).
 
@@ -150,14 +158,39 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin())-> {error, any()} | {ok, freq_data()}.
-reg_domain_data_for_addr(Addr)->
-    case country_code_for_addr(Addr) of
-        {ok, CC} ->
-            %% use country code to get regulatory domain data
-            ?MODULE:reg_domain_data_for_countrycode(CC);
-        {error, Reason} ->
-            {error, Reason}
+-spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin(), state())-> {error, any()} | {ok, freq_data()}.
+reg_domain_data_for_addr(_Addr, #state{chain=undefined}) ->
+    {error, no_chain};
+reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
+    case blockchain:ledger(Chain) of
+        undefined ->
+            {error, no_ledger};
+        Ledger ->
+            %% check if the poc 11 vars are active yet
+            case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                {ok, Location} ->
+                    case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                        {ok, Region} ->
+                            case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                {ok, RegionParams} ->
+                                    {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
+                                {error, Reason} ->
+                                    {error, Reason}
+                            end;
+                        {error, regulatory_regions_not_set} ->
+                            case country_code_for_addr(Addr) of
+                                {ok, CC} ->
+                                    %% use country code to get regulatory domain data
+                                    reg_domain_data_for_countrycode(CC);
+                                {error, Reason} ->
+                                    {error, Reason}
+                            end;
+                        {error, Reason} ->
+                            {error, Reason}
+                    end;
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 -spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
@@ -174,6 +207,7 @@ reg_domain_data_for_countrycode(CC)->
 
 -spec region() -> {ok, atom()}.
 region()->
+    %% TODO: recalc region if hotspot re-asserts
     gen_server:call(?MODULE, region, 5000).
 
 
@@ -217,14 +251,32 @@ init(Args) ->
                         {true, Region, FreqList}
                 end
         end,
-    {ok, #state{socket=Socket,
+
+    S0 = #state{socket=Socket,
                 sig_fun = maps:get(sig_fun, Args),
                 mirror_socket = {MirrorSocket, undefined},
                 pubkey_bin = blockchain_swarm:pubkey_bin(),
                 reg_domain_confirmed = RegDomainConfirmed,
                 reg_region = DefaultRegRegion,
                 reg_freq_list = DefaultRegFreqList,
-                reg_throttle = miner_lora_throttle:new(DefaultRegRegion)}}.
+                reg_throttle=miner_lora_throttle:new(DefaultRegRegion)
+               },
+
+    case blockchain_worker:blockchain() of
+        undefined ->
+            erlang:send_after(500, self(), chain_check),
+            {ok, S0};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            {ok, update_state_using_chain(Chain, S0)}
+    end.
+
+-spec update_state_using_chain(Chain :: blockchain_worker:blockchain(),
+                               InputState :: state()) -> state().
+update_state_using_chain(Chain, InputState) ->
+    TempState = maybe_update_reg_data(InputState#state{chain = Chain}),
+    Throttle = miner_lora_throttle:new(reg_region(TempState)),
+    TempState#state{reg_throttle=Throttle}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -278,27 +330,36 @@ handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr} = State) ->
-    lager:debug("checking regulatory domain for address ~p", [Addr]),
+handle_info(chain_check, State) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            erlang:send_after(500, self(), chain_check),
+            {noreply, State};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            {noreply, update_state_using_chain(Chain, State)}
+    end;
+handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    {noreply, update_state_using_chain(NC, State)};
+handle_info({blockchain_event, _}, State) ->
+    {noreply, State};
+handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
+    %% There is no chain, we cannot lookup regulatory domain data yet
+    %% Keep waiting for chain
+    erlang:send_after(500, self(), chain_check),
+    {noreply, State};
+handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr, chain=Chain} = State) ->
+    lager:info("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
-        case ?MODULE:reg_domain_data_for_addr(Addr) of
-            {error, Reason}->
-                lager:debug("cannot confirm regulatory domain for miner ~p, reason: ~p", [Reason]),
-                %% the hotspot has not yet asserted its location, transmits will remain disabled
-                %% we will check again after a period
-                erlang:send_after(30000, self(), reg_domain_timeout),
-                {noreply, State};
-            {ok, {Region, FrequencyList}} ->
-                lager:info("confirmed regulatory domain for miner ~p.  region: ~p, freqlist: ~p",
-                    [Addr, Region, FrequencyList]),
-                {noreply, State#state{ reg_domain_confirmed = true, reg_region = Region,
-                        reg_freq_list = FrequencyList, reg_throttle = miner_lora_throttle:new(Region)}}
-        end
+        TempState = maybe_update_reg_data(State),
+        Throttle = miner_lora_throttle:new(reg_region(TempState)),
+        NewState = TempState#state{reg_throttle=Throttle},
+        {noreply, NewState}
     catch
         _Type:Exception ->
-            lager:warning("error whilst checking regulatory domain: ~p.  Will try again...",[Exception]),
-            erlang:send_after(30000, self(), reg_domain_timeout),
+            lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
+            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
             {noreply, State}
     end;
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
@@ -412,7 +473,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             %% likely some kind of error here
             _ = erlang:cancel_timer(Ref),
             State1 = State0#state{packet_timers=maps:remove(Token, Timers)},
-            Reply = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
+            {Reply, NewState} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
                     lager:info("packet sent ok"),
                     Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
@@ -420,43 +481,49 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                 <<"COLLISION_", _/binary>> ->
                     %% colliding with a beacon or another packet, check if join2/rx2 is OK
                     lager:info("collision"),
-                    {error, collision};
+                    {{error, collision}, State1};
                 <<"TOO_LATE">> ->
                     lager:info("too late"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
-                                     {error, too_late};
+                                     {{error, too_late}, State1};
                         _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TOO_EARLY">> ->
                     lager:info("too early"),
                     case blockchain_helium_packet_v1:rx2_window(HlmPacket) of
                         undefined -> lager:warning("No RX2 available"),
-                                     {error, too_early};
+                                     {{error, too_early}, State1};
                         _ -> retry_with_rx2(HlmPacket, From, State1)
                     end;
                 <<"TX_FREQ">> ->
+                    %% unmodified 1301 will send this
                     lager:info("tx frequency not supported"),
-                    {error, bad_tx_frequency};
+                    {{error, bad_tx_frequency}, State1};
                 <<"TX_POWER">> ->
                     lager:info("tx power not supported"),
-                    {error, bad_tx_power};
-                <<"GPL_UNLOCKED">> ->
+                    {{error, bad_tx_power}, State1};
+                <<"GPS_UNLOCKED">> ->
                     lager:info("transmitting on GPS time not supported because no GPS lock"),
-                    {error, no_gps_lock};
+                    {{error, no_gps_lock}, State1};
+                [] ->
+                    %% there was no error, see if there was a warning, which implies we sent the packet
+                    %% but some correction had to be done.
+                    Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
+                    case kvc:path([<<"txpk_ack">>, <<"warn">>], jsx:decode(MaybeJSON)) of
+                        <<"TX_POWER">> ->
+                            %% modified 1301 and unmodified 1302 will send this
+                            {{warning, {tx_power_corrected, kvc:path([<<"txpk_ack">>, <<"value">>], jsx:decode(MaybeJSON))}}, State1#state{reg_throttle=Throttle1}};
+                        Other ->
+                            {{warning, {unknown, Other}}, State1#state{reg_throttle=Throttle1}}
+                    end;
                 Error ->
                     %% any other errors are pretty severe
                     lager:error("Failure enqueing packet for gateway ~p", [Error]),
-                    {error, {unknown, Error}}
+                    {{error, {unknown, Error}}, State1}
             end,
-            case Reply of
-                {ok, State2} ->
-                    gen_server:reply(From, ok),
-                    State2;
-                {error, _} ->
-                    gen_server:reply(From, Reply),
-                    State1
-            end;
+            gen_server:reply(From, Reply),
+            NewState;
         error ->
             State0
     end;
@@ -507,7 +574,7 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, chain = Chain} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
         error ->
@@ -515,9 +582,13 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
         {onion, Payload} ->
             Freq = maps:get(<<"freq">>, Packet),
             %% onion server
+            UseRSSIS = case Chain /= undefined andalso blockchain:config(?poc_version, blockchain:ledger(Chain)) of
+                {ok, X} when X > 10 -> true;
+                _ -> false
+            end,
             miner_onion_server:decrypt_radio(
                 Payload,
-                erlang:trunc(packet_rssi(Packet)),
+                erlang:trunc(packet_rssi(Packet, UseRSSIS)),
                 packet_snr(Packet),
                 %% TODO we might want to send GPS time here, if available
                 maps:get(<<"tmst">>, Packet),
@@ -581,7 +652,8 @@ maybe_mirror({Sock, Destination}, Packet) ->
 -spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
 send_to_router(Type, RoutingInfo, Packet, Region) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    RSSI = packet_rssi(Packet),
+    %% always ok to use rssis here
+    RSSI = packet_rssi(Packet, true),
     SNR = packet_snr(Packet),
     %% TODO we might want to send GPS time here, if available
     Time = maps:get(<<"tmst">>, Packet),
@@ -692,8 +764,8 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
 
 %% Extracts a packet's RSSI, abstracting away the differences between
 %% GWMP JSON V1/V2.
--spec packet_rssi(map()) -> number().
-packet_rssi(Packet) ->
+-spec packet_rssi(map(), boolean()) -> number().
+packet_rssi(Packet, UseRSSIS) ->
     case maps:get(<<"rssi">>, Packet, undefined) of
         %% GWMP V2
         undefined ->
@@ -701,11 +773,17 @@ packet_rssi(Packet) ->
             %% quality object if the packet was received on multiple
             %% antennas/receivers. So let's pick the one with the
             %% highest RSSI[Channel]
+            Key = case UseRSSIS of
+                true ->
+                    <<"rssis">>;
+                _ ->
+                    <<"rssic">>
+            end,
             [H|T] = maps:get(<<"rsig">>, Packet),
             Selector = fun(Obj, Best) ->
-                               erlang:max(Best, maps:get(<<"rssic">>, Obj))
+                               erlang:max(Best, maps:get(Key, Obj))
                        end,
-            lists:foldl(Selector, maps:get(<<"rssic">>, H), T);
+            lists:foldl(Selector, maps:get(Key, H), T);
         %% GWMP V1
         RSSI ->
             RSSI
@@ -823,3 +901,31 @@ retry_with_rx2(HlmPacket0, From, State) ->
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     HlmPacket1 = HlmPacket0#packet_pb{rx2_window=undefined},
     send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
+
+-spec maybe_update_reg_data(State :: state()) -> state().
+maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
+    case reg_domain_data_for_addr(Addr, State) of
+        {error, Reason} ->
+            %% Despite having a new chain, we cannot get regulatory domain data for this Hotspot,
+            %% just retry after a second
+            lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [
+                libp2p_crypto:bin_to_b58(Addr), Reason
+            ]),
+            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
+            State;
+        {ok, {Region, FrequencyList}} ->
+            lager:info(
+                "confirmed regulatory domain for miner ~p. region: ~p, freqlist: ~p",
+                [libp2p_crypto:bin_to_b58(Addr), Region, FrequencyList]
+            ),
+            State#state{
+                reg_domain_confirmed = true,
+                reg_region = Region,
+                reg_freq_list = FrequencyList
+            }
+    end.
+
+
+-spec reg_region(State :: state()) -> atom().
+reg_region(State) ->
+    State#state.reg_region.
