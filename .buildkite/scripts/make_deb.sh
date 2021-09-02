@@ -2,10 +2,11 @@
 
 set -euo pipefail
 
-TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
+VERSION=$(git describe --abbrev=0 | sed -e 's,validator,,')
+./rebar3 as validator release -v ${VERSION}
 
 fpm -n validator \
-    -v "${TAG}" \
+    -v "${VERSION}" \
     -s dir \
     -t deb \
     --depends libssl1.1 \
