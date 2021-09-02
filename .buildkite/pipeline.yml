@@ -13,7 +13,6 @@ steps:
     name: ":debian: build validator deb"
     commands:
       - "git fetch -t"
-      - "./rebar3 as validator release"
       - ".buildkite/scripts/make_deb.sh"
     key: "deb"
     artifact_paths: "*.deb"
