@@ -31,14 +31,15 @@
          monitor :: reference(),
          pid :: pid(),
          txn :: blockchain_txn:txn(),
-         from :: {pid(), term()} % gen server doesn't export this?!?!
+         from :: {pid(), term()}, % gen server doesn't export this?!?!
+         height :: non_neg_integer()
         }).
 
 -record(state,
         {
          chain :: undefined | blockchain:blockchain(),
          group :: undefined | pid(),
-         queue = [] :: [blockchain_txn:txn()],
+         queue = [] :: [{pid(), blockchain_txn:txn(), non_neg_integer()}],
          validations = #{} :: #{reference() => #validation{}}
         }).
 
@@ -49,6 +50,11 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], [{hibernate_after, 5000}]).
 
+-spec submit(Txn :: term()) ->
+    {
+        Result :: ok | {error, _},
+        Height :: non_neg_integer()
+    }.
 submit(Txn) ->
     lager:debug("submitting txn"),
     gen_server:call(?SERVER, {submit, Txn}, infinity).
@@ -91,20 +97,26 @@ handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
         {P1, P2} when is_pid(P1) andalso is_pid(P2)  ->
             ok;
         {undefined, P} when is_pid(P) ->
-            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL,
+            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2,
                                                  {libp2p_framed_stream, server,
-                                                  [blockchain_txn_handler, self(),
-                                                   fun(T) -> miner_hbbft_sidecar:submit(T) end]});
+                                                  [blockchain_txn_handler, ?TX_PROTOCOL_V2, self(),
+                                                   fun(T) -> ?MODULE:submit(T) end]}),
+            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V1,
+                                                 {libp2p_framed_stream, server,
+                                                  [blockchain_txn_handler, ?TX_PROTOCOL_V1, self(),
+                                                   fun(T) -> ?MODULE:submit(T) end]});
         {P, undefined} when is_pid(P) ->
-            libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL)
+            libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2),
+            libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V1)
     end,
     {reply, ok, State#state{group = Group}};
 handle_call({submit, _}, _From, #state{chain = undefined} = State) ->
     lager:debug("submission with no chain set"),
-    {reply, {error, no_chain}, State};
-handle_call({submit, _}, _From, #state{group = undefined} = State) ->
+    {reply, {{error, no_chain}, 0}, State};
+handle_call({submit, _}, _From, #state{group = undefined, chain = Chain} = State) ->
     lager:debug("submission with no group set"),
-    {reply, {error, no_group}, State};
+    {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
+    {reply, {{error, no_group}, Height}, State};
 handle_call({submit, Txn}, From,
             #state{chain = Chain,
                    group = Group,
@@ -115,17 +127,17 @@ handle_call({submit, Txn}, From,
     {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
     case lists:member(Type, ?InvalidTxns) of
         true ->
-            {reply, {error, invalid_txn}, State};
+            {reply, {{error, invalid_txn}, Height}, State};
         false ->
             case maps:find(Type, ?SlowTxns) of
                 {ok, Timeout} ->
                     Limit = application:get_env(miner, sidecar_parallelism_limit, 3),
                     case maps:size(Validations) of
                         N when N >= Limit ->
-                            Queue1 = Queue ++ [{From, Txn}],
+                            Queue1 = Queue ++ [{From, Txn, Height}],
                             {noreply, State#state{queue = Queue1}};
                         _ ->
-                            {Attempt, V} = start_validation(Txn, From, Timeout, Chain),
+                            {Attempt, V} = start_validation(Txn, Height, From, Timeout, Chain),
                             {noreply, State#state{validations = Validations#{Attempt => V}}}
                     end;
                 error ->
@@ -136,15 +148,15 @@ handle_call({submit, Txn}, From,
                                     spawn(fun() ->
                                                 catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                         end),
-                                    {reply, ok, State};
+                                    {reply, {ok, Height}, State};
                                 Error ->
                                     lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                                    {reply, Error, State}
+                                    {reply, {Error, Height}, State}
                             end;
                         Error ->
                             write_txn("failed", Height, Txn),
                             lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                            {reply, Error, State}
+                            {reply, {Error, Height}, State}
                     end
             end
     end;
@@ -182,7 +194,7 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group = Group} = State)
+handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chain, group = Group} = State)
   when is_reference(Ref) ->
     {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
     case maps:get(Ref, Validations, undefined) of
@@ -190,7 +202,7 @@ handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group =
             lager:warning("response for unknown ref"),
             {noreply, State};
         #validation{from = From, pid = Pid, txn = Txn, monitor = MRef} ->
-            Reply =
+            Result =
                 case Res of
                     ok ->
                         case blockchain_txn:absorb(Txn, Chain) of
@@ -215,7 +227,7 @@ handle_info({Ref, Res}, #state{validations = Validations, chain = Chain, group =
                         Error
                 end,
             erlang:demonitor(MRef, [flush]),
-            gen_server:reply(From, Reply),
+            gen_server:reply(From, {Result, Height}),
             Validations1 = maps:remove(Ref, Validations),
             {noreply, maybe_start_validation(State#state{validations = Validations1})}
     end;
@@ -291,27 +303,29 @@ maybe_start_validation(#state{queue = Queue, chain = Chain,
     case Queue of
         [] ->
             State;
-        [{From, Txn} | Queue1] ->
+        [{From, Txn, Height} | Queue1] ->
             Type = blockchain_txn:type(Txn),
             Timeout = maps:get(Type, ?SlowTxns, application:get_env(miner, txn_validation_budget_ms, 10000)),
-            {Attempt, V} = start_validation(Txn, From, Timeout, Chain),
+            {Attempt, V} = start_validation(Txn, Height, From, Timeout, Chain),
             Validations1 = Validations#{Attempt => V},
             State#state{validations = Validations1, queue = Queue1}
     end.
 
-start_validation(Txn, From, Timeout, Chain) ->
+start_validation(Txn, Height, From, Timeout, Chain) ->
     Owner = self(),
     Attempt = make_ref(),
     {Pid, Ref} =
         spawn_monitor(
           fun() ->
-                  case blockchain_txn:is_valid(Txn, Chain) of
-                      ok ->
-                          Owner ! {Attempt, ok};
-                      Error ->
-                          lager:debug("hbbft_handler is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                          Owner ! {Attempt, {error, Error}}
-                  end
+                  Result =
+                      case blockchain_txn:is_valid(Txn, Chain) of
+                          ok ->
+                              ok;
+                          Error ->
+                              lager:debug("hbbft_handler is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
+                              {error, Error}
+                      end,
+                    Owner ! {Attempt, {Result, Height}}
           end),
     TRef = erlang:send_after(Timeout, self(), {Attempt, deadline}),
     {Attempt,
