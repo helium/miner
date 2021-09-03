@@ -4,6 +4,8 @@ set -euo pipefail
 
 TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
 
+./rebar3 as validator release -n miner -v ${TAG}
+
 fpm -n validator \
     -v "${TAG}" \
     -s dir \
