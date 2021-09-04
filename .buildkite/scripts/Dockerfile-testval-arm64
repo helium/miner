@@ -23,7 +23,7 @@ RUN ./rebar3 as docker_testval tar
 
 RUN mkdir -p /opt/docker/update
 RUN tar -zxvf _build/docker_testval/rel/*/*.tar.gz -C /opt/docker
-
+RUN cd /opt/docker/releases && set -- $( cat start_erl.data ) && ln -s $2 current
 RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.testnet
 
 FROM arm64v8/erlang:23.3.4.4-alpine as runner
