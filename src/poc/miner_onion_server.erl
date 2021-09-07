@@ -379,7 +379,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             case miner_lora:location_ok() of
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
-                    ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
+                    ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem length(FreqList)) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
 
                     case blockchain:config(?poc_version, Ledger) of
