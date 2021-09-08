@@ -1,4 +1,5 @@
 ARG BUILDER_IMAGE=erlang:23.3.4.6-alpine
+ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
 FROM ${BUILDER_IMAGE} as builder
 
 ARG REBAR_BUILD_TARGET
@@ -33,7 +34,6 @@ RUN mkdir -p /opt/docker/update
 RUN tar -zxvf ${TAR_PATH} -C /opt/docker
 RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.mainnet
 
-ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
 FROM ${RUNNER_IMAGE} as runner
 
 ARG EXTRA_RUNNER_APK_PACKAGES
