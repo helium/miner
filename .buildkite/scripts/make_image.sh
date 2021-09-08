@@ -21,7 +21,7 @@ fi
 MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
 BASE_DOCKER_NAME=$(basename $(pwd))
 
-VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' )
+VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' -e 's/+/-/')
 DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
