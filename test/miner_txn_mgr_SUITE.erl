@@ -3,7 +3,10 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
+
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
+
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -18,7 +21,9 @@
          txn_in_sequence_nonce_test/1,
          txn_out_of_sequence_nonce_test/1,
          txn_invalid_nonce_test/1,
-         txn_dependent_test/1
+         txn_dependent_test/1,
+         txn_from_future_via_protocol_v1_test/1,
+         txn_from_future_via_protocol_v2_test/1
 
         ]).
 
@@ -28,7 +33,9 @@ all() -> [
           txn_in_sequence_nonce_test,
           txn_out_of_sequence_nonce_test,
           txn_invalid_nonce_test,
-          txn_dependent_test
+          txn_dependent_test,
+          txn_from_future_via_protocol_v1_test,
+          txn_from_future_via_protocol_v2_test
          ].
 
 init_per_suite(Config) ->
@@ -350,10 +357,252 @@ txn_dependent_test(Config) ->
 
     ok.
 
+txn_from_future_via_protocol_v2_test(Cfg) ->
+    txn_from_future_test(
+        fun() -> ok end,
+        fun(A, TxnHash) ->
+            %% In V2 mode, with temporal data available, we expect for the
+            %% rejection from the future to be identified as such, and
+            %% deferred:
+            ?assertMatch([_|_], fetch_deferred_rejections(A, TxnHash))
+        end,
+        fun(A, TxnHash) ->
+            %% Finally, we expect the deferred transaction to have been
+            %% dequeued:
+            ?assertMatch([], fetch_deferred_rejections(A, TxnHash))
+        end,
+        fun(A_SubmissionResult) ->
+            %% Expecting ok, not error,
+            %% BECAUSE the reason for B's rejection of T was that
+            %% T is already in B's chain,
+            %% so A is expected to have fired its T submission callback
+            %% during the sync with B,
+            %% after being unlocked, and
+            %% upon receiving a block containing T.
+            %% See calls to purge_block_txns_from_cache/1 within blockchain_txn_mgr.
+            ?assertMatch(ok, A_SubmissionResult)
+        end,
+        Cfg
+    ).
+
+txn_from_future_via_protocol_v1_test(Cfg) ->
+    Miners = ?config(consensus_miners, Cfg),
+    DoInit =
+        fun() ->
+            %% Remove V2 handlers so only V1 is available:
+            lists:foreach(
+                fun(M) ->
+                    Swarm = ct_rpc:call(M, blockchain_swarm, tid, [], 2000),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V2]
+                    )
+                end,
+                Miners
+            )
+        end,
+    AssertDeferredRejections1 =
+        fun(LaggingNode, TxnHash) ->
+            %% V1 loses temporal data, so a lagging node cannot tell that the
+            %% rejection came from the future, so it assumes it came from the
+            %% present, thus a deferral never occurs:
+            ?assertMatch([], fetch_deferred_rejections(LaggingNode, TxnHash))
+        end,
+    AssertDeferredRejections2 =
+        fun(LaggingNode, TxnHash) ->
+            %% We expect deferrals to remain empty:
+            ?assertMatch([], fetch_deferred_rejections(LaggingNode, TxnHash))
+        end,
+    AssertSubmissionCallbackResult =
+        fun(LaggingNodeSubmissionResult) ->
+            ct:pal(
+                ">>> LaggingNodeSubmissionResult: ~p",
+                [LaggingNodeSubmissionResult]
+            ),
+            ?assertMatch({error, _}, LaggingNodeSubmissionResult)
+        end,
+    txn_from_future_test(
+        DoInit,
+        AssertDeferredRejections1,
+        AssertDeferredRejections2,
+        AssertSubmissionCallbackResult,
+        Cfg
+    ).
+
+txn_from_future_test(
+    DoInit,
+    AssertDeferredRejections1,
+    AssertDeferredRejections2,
+    AssertSubmissionCallbackResult,
+    Cfg
+) ->
+    %% Premise:
+    %%   A node A at height H
+    %%   should not count a rejection from a peer B at height H+K,
+    %%   until A itself reaches height H+K.
+    %% Scenario:
+    %%   Given:
+    %%     2 nodes: A and B
+    %%     1 transaction: T
+    %%     A and B begin at the same height
+    %%   Test:
+    %%     A is locked (approximated netsplit?)
+    %%     T is submitted to B
+    %%     B accepts and commits T to chain (along with peers other than A)
+    %%     A is now behind B (because B added a block while A was locked)
+    %%     T is submitted to A
+    %%     A accepts T (because it does not have it in its (locked) chain)
+    %%     B rejects T (because it sees it as a duplicate)
+    %%     A receives B's rejection,
+    %%       but considers it to have come from the future
+    %%       (since B's height is higher than A's)
+    %%     A defers processing B's rejection of T
+    %%       until A's height catches up to that of the rejection
+    %%     A is unlocked
+    %%     A syncs with B
+    %%     A processes:
+    %%       - cached T
+    %%       - deferred rejection of T
+
+    [A, B | _] = Miners = ?config(consensus_miners, Cfg),
+    AddrList = ?config(tagged_miner_addresses, Cfg),
+    {ok, _Pubkey, A_SigFun, _ECDHFun} = ct_rpc:call(A, blockchain_swarm, keys, []),
+    A_Addr = miner_ct_utils:node2addr(A, AddrList),
+    B_Addr = miner_ct_utils:node2addr(B, AddrList),
+    A_Nonce0 = miner_ct_utils:get_nonce(A, A_Addr),
+    AmountStart = 5000,
+    AmountDelta = 1000,
+
+    %% A tweakable guess of how many blocks are long-enough to wait on for all
+    %% the expected things to take place:
+    HeightDelta = 2,
+
+    Txn =
+        (fun() ->
+            Nonce = A_Nonce0 + 1,
+            Txn = blockchain_txn_payment_v1:new(A_Addr, B_Addr, AmountDelta, Nonce),
+            blockchain_txn_payment_v1:sign(Txn, A_SigFun)
+        end)(),
+    TxnHash = blockchain_txn:hash(Txn),
+
+    %% Custom conditions
+    ok = DoInit(),
+
+    %% Begin at the same height:
+    _ = miner_ct_utils:wait_for_equalized_heights(Miners),
+
+    %% Begin with the same balance:
+    ok = miner_ct_utils:confirm_balance(Miners, A_Addr, AmountStart),
+    ok = miner_ct_utils:confirm_balance(Miners, B_Addr, AmountStart),
+
+    %% Prevent A from syncing chain with peers:
+    A_LockRef = node_lock(A),
+
+    %% Submit T to B, ensuring it has been committed to chain:
+    true =
+        wait_until(
+            fun() ->
+                AmountStart == miner_ct_utils:get_balance(B, A_Addr)
+                andalso
+                AmountStart == miner_ct_utils:get_balance(B, B_Addr)
+            end
+        ),
+    ok = ct_rpc:call(B, blockchain_worker, submit_txn, [Txn]),
+    true =
+        wait_until(
+            fun() ->
+                A_Balance = miner_ct_utils:get_balance(B, A_Addr),
+                B_Balance = miner_ct_utils:get_balance(B, B_Addr),
+                (AmountStart - AmountDelta) == A_Balance
+                andalso
+                (AmountStart + AmountDelta) == B_Balance
+            end
+        ),
+
+    %% The most important condition for the whole test case: A falls behind B:
+    true =
+        wait_until(
+            fun() -> miner_ct_utils:height(A) < miner_ct_utils:height(B) end
+        ),
+
+    %% Submit dup txn
+    HeightAtB = miner_ct_utils:height(B),
+    A_SubmissionRef = txn_submit(A, Txn),
+
+    %% If not forced, this queue processing would only be triggered by a new
+    %% block creation:
+    ok = ct_rpc:call(A, blockchain_txn_mgr, force_process_cached_txns, []),
+
+    %% B advanced, but balance didn't change since last acceptance,
+    %% implying dup txn was not accepted:
+    ok = miner_ct_utils:wait_for_gte(height, [B], HeightAtB + HeightDelta),
+    ?assert(
+        (AmountStart - AmountDelta) == miner_ct_utils:get_balance(B, A_Addr)
+        andalso
+        (AmountStart + AmountDelta) == miner_ct_utils:get_balance(B, B_Addr)
+    ),
+
+    %% Since B advanced already, A should have received B's rejection already:
+    AssertDeferredRejections1(A, TxnHash),
+
+    %% A did not yet process T
+    receive {A_SubmissionRef, _} -> ?assert(false) after 0 -> ok end,
+
+    %% Let A catch-up and advance:
+    ok = node_unlock(A, A_LockRef),
+    HeightAtAllPeers = miner_ct_utils:wait_for_equalized_heights(Miners),
+    ok = miner_ct_utils:wait_for_gte(height, [A], HeightAtAllPeers + HeightDelta),
+
+    %% Assert A processed T
+    receive
+        {A_SubmissionRef, A_SubmissionResult} ->
+            AssertSubmissionCallbackResult(A_SubmissionResult)
+    after 0 ->
+        ?assert(false)
+    end,
+
+    AssertDeferredRejections2(A, TxnHash),
+
+    ok.
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
+
+%% Just a shortcut for elevated defaults:
+wait_until(F) ->
+    miner_ct_utils:wait_until(
+        F,
+        60,   % retries
+        1000  % inter-retry backoff in milliseconds
+    ).
+
+txn_submit(Node, Txn) ->
+    SubmissionRef = make_ref(),
+    TestPid = self(),
+    SubmissionCallback =
+        fun (Result) -> TestPid ! {SubmissionRef, Result} end,
+    ok = ct_rpc:call(Node, blockchain_txn_mgr, submit, [Txn, SubmissionCallback]),
+    SubmissionRef.
+
+fetch_deferred_rejections(Node, TxnHash) ->
+    IsMatch = fun({_, _, T, _, _}) -> TxnHash =:= blockchain_txn:hash(T) end,
+    Deferred = ct_rpc:call(Node, blockchain_txn_mgr, get_rejections_deferred, []),
+    [T || T <- Deferred, IsMatch(T)].
+
+-spec node_lock(atom()) -> reference().
+node_lock(Node) ->
+    LockRef = make_ref(),
+    ok = gen_server:call({blockchain_lock, Node}, {acquire, LockRef}),
+    LockRef.
+
+-spec node_unlock(atom(), reference()) -> ok.
+node_unlock(Node, LockRef) ->
+    {blockchain_lock, Node} ! {LockRef, release},
+    ok.
+
 handle_get_cached_txn_result(Result, Miner, IgnoredTxns, Chain)->
     case Result of
         true ->

@@ -146,6 +146,7 @@ handle_call({submit, Txn}, From,
                             case blockchain_txn:absorb(Txn, Chain) of
                                 ok ->
                                     spawn(fun() ->
+                                        lager:warning("absorbed ok. spawning relcast handle_command txn: ~p", [blockchain_txn:print(Txn)]),
                                                 catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                         end),
                                     {reply, {ok, Height}, State};
@@ -209,6 +210,7 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                             ok ->
                                 %% avoid deadlock by not waiting for this.
                                 spawn(fun() ->
+                                    lager:warning("absorbed ok. spawning relcast handle_command txn: ~p", [blockchain_txn:print(Txn)]),
                                               catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                       end),
                                 ok;
