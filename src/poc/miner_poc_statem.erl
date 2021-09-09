@@ -781,9 +781,8 @@ check_addr_hash(PeerAddr, #data{addr_hash_filter=#addr_hash_filter{byte_size=Siz
     case multiaddr:protocols(PeerAddr) of
         [{"ip4",Address},{_,_}] ->
             {ok, Addr} = inet:parse_ipv4_address(Address),
-            Val = binary:part(enacl:pwhash(list_to_binary(lists:sublist(tuple_to_list(Addr), 3)), binary:part(Hash, {0, enacl:pwhash_SALTBYTES()})), {0, Size}),
-            Val2 = binary:part(enacl:pwhash(list_to_binary(tuple_to_list(Addr)), binary:part(Hash, {0, enacl:pwhash_SALTBYTES()})), {0, Size}),
-            case bloom:check_and_set(Bloom, Val) orelse bloom:check_and_set(Bloom, Val2) of
+            Val = binary:part(enacl:pwhash(list_to_binary(tuple_to_list(Addr)), binary:part(Hash, {0, enacl:pwhash_SALTBYTES()})), {0, Size}),
+            case bloom:check_and_set(Bloom, Val) of
                 true ->
                     true;
                 false ->
