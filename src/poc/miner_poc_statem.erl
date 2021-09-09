@@ -320,22 +320,16 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                     {keep_state, Data};
                 _ ->
                     Witnesses = maps:get(PacketHash, Responses0, []),
-                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                    case erlang:length(Witnesses) >= PerHopMaxWitnesses of
-                        true ->
-                            {keep_state, Data};
-                        false ->
-                            %% Don't allow putting duplicate response in the witness list resp
-                            Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
-                            Responses1 =
-                                case lists:any(Predicate, Witnesses) of
-                                    false ->
-                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
-                                    true ->
-                                        Responses0
-                                end,
-                            {keep_state, save_data(Data#data{responses=Responses1})}
-                    end
+                    %% Don't allow putting duplicate response in the witness list resp
+                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                    Responses1 =
+                        case lists:any(Predicate, Witnesses) of
+                            false ->
+                                maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
+                            true ->
+                                Responses0
+                        end,
+                    {keep_state, save_data(Data#data{responses=Responses1})}
             end
     end;
 receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
@@ -925,7 +919,12 @@ submit_receipts(#data{address=Challenger,
             {Address, Receipt} = maps:get(Challengee, Responses0, {make_ref(), undefined}),
             %% get any witnesses not from the same p2p address and also ignore challengee as a witness (self-witness)
             Witnesses = [W || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee],
-            E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
+            PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(blockchain:ledger(Chain)),
+            %% randomize the ordering of the witness list
+            Witnesses1 = blockchain_utils:shuffle(Witnesses),
+            %% take only the limit
+            Witnesses2 = lists:sublist(Witnesses1, PerHopMaxWitnesses),
+            E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses2),
             [E|Acc]
         end,
         [],
