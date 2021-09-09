@@ -90,7 +90,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             UnsignedTxn =
                                 blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback()),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
-                            lager:debug("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
+                            lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
                             Self = self(),
                             blockchain_worker:submit_txn(Txn, fun(Res) -> Self ! {sub, Res} end),
                             {noreply, State#state{txn_status = waiting}};
@@ -105,7 +105,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
     end;
 %% logically it doesn't matter what the result is, we either need to start actively waiting or
 %% trying again
-handle_info({sub, _Res}, State) ->
+handle_info({sub, Res}, State) ->
+    lager:info("txn result ~p", [Res]),
     {noreply, State#state{txn_status = ready, txn_wait = 10}};
 handle_info({blockchain_event, _}, State) ->
     {noreply, State};
