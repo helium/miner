@@ -825,7 +825,8 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
     try
         case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
             {ok, GwInfo} ->
-                case blockchain_ledger_gateway_v2:is_valid_capability(GwInfo, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                GwMode = blockchain_ledger_gateway_v2:mode(GwInfo),
+                case blockchain_ledger_gateway_v2:is_valid_capability(GwMode, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
                     true ->
                         {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
                         Height = blockchain_block:height(Block),

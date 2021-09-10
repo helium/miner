@@ -138,13 +138,13 @@ true_predicate(_Peer) ->
     {error, {invalid_capability, blockchain_ledger_gateway_v2:mode()}}.
 has_valid_local_capability(Capability, Ledger) ->
     SelfAddr = blockchain_swarm:pubkey_bin(),
-    case blockchain_ledger_v1:find_gateway_info(SelfAddr, Ledger) of
+    case blockchain_ledger_v1:find_gateway_mode(SelfAddr, Ledger) of
         {error, _Reason} ->
             {error, gateway_not_found};
-        {ok, GWAddrInfo} ->
-            case blockchain_ledger_gateway_v2:is_valid_capability(GWAddrInfo, Capability, Ledger) of
+        {ok, GWMode} ->
+            case blockchain_ledger_gateway_v2:is_valid_capability(GWMode, Capability, Ledger) of
                 false ->
-                    {error, {invalid_capability, blockchain_ledger_gateway_v2:mode(GWAddrInfo)}};
+                    {error, {invalid_capability, GWMode}};
                 true ->
                     ok
             end
