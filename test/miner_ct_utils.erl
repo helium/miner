@@ -854,9 +854,12 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     miner_ct_utils:pmap(
       fun(Miner) ->
+              TID = ct_rpc:call(Miner, blockchain_swarm, tid, [], 2000),
+              ct_rpc:call(Miner, miner_poc, add_stream_handler, [TID], 2000),
               Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
               lists:foreach(
                 fun(A) ->
+
                         ct_rpc:call(Miner, libp2p_swarm, connect, [Swarm, A], 2000)
                 end, Addrs)
       end, Miners),
