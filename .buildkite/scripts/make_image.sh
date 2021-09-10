@@ -41,7 +41,6 @@ case "$BUILD_TYPE" in
     "miner")
         echo "Doing a miner image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
-        DOCKER_NAME="${DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     *)
         echo "I don't know how to do a build for ${BUILD_TYPE}"
