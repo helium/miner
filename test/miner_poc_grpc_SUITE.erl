@@ -333,7 +333,8 @@ poc_grpc_test(Config) ->
 
     %% TODO confirm the receipts txn is in the block
 
-
+    ReceiptsTxns = find_txns_in_block(FinalBlock, blockchain_txn_poc_receipts_v1),
+    ?assertEqual(1, length(ReceiptsTxns)),
     ok.
 
 %% ------------------------------------------------------------------
@@ -485,7 +486,7 @@ send_receipts(Targets, Chain) ->
         fun({OnionKeyHash, GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, BlockHash}, Acc) ->
             %% for each target, decrypt the onion and lets get the packet and send a receipt
             %% receipts can be sent to our default validator, it will relay it to the required challenger if different
-            %% we will also accumulate the Data payload here and use this later for the witnesses, fake that they seen it
+            %% we will also accumulate the next packet here and use this later for the witnesses, fake that they seen it
             #{onion := Onion} = ChallengeResp,
             #{challenger := ChallengerRoute} = ChallengeMsg,
             <<IV:2/binary,
@@ -508,7 +509,7 @@ send_receipts(Targets, Chain) ->
         end, [], Targets).
 
 send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKey, Timestamp, RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection) ->
-    ct:pal("sending receipt to challenger on route ~p", [ChallengerRoute]),
+    ct:pal("sending receipt to gateway ~p", [GatewayPubKey]),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     Receipt0 = case blockchain:config(?data_aggregation_version, Ledger) of
                    {ok, 1} ->
@@ -523,14 +524,6 @@ send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKe
     Receipt1 = Receipt0#{signature => GatewaySigFun(EncodedReceipt)},
     Req = #{onion_key_hash => OnionKeyHash,  msg => {receipt, Receipt1}},
 
-    %% grpc connect to the challenger using the received routing info
-    %% NOTE: the provided routing data is hardcoded due to an alias
-    %%       as our the test validators are running on localhost
-    %%       the provided port is correct tho so we can use that
-%%    #{uri := ChallengerURI} = ChallengerRoute,
-%%    #{port := ChallengerPort} = uri_string:parse(ChallengerURI),
-
-%%    {ok, ChallengerConnection} = grpc_client:connect(tcp, "localhost", ChallengerPort),
     {ok, #{
             headers := Headers,
             result := #{
@@ -550,7 +543,8 @@ send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKe
 
 
 send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
-    %% submit a witnes report from each gateway which received a target notification but was not the actual target
+    %% submit a witness report from each gateway which received a target notification but was not the actual target
+    %% we pretent they heard the broadcast, whereas really we just get the packet passed here
     Ledger = blockchain:ledger(Chain),
 
     TS = os:system_time(nanosecond),
@@ -562,13 +556,10 @@ send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
 
     lists:foreach(
         fun({OnionKeyHash, GatewayPubKey, _GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, _BlockHash}) ->
-            %% pull the onion from the list of targets
-            %% only those have the onion
-            {_,_,_,_,_,TargetChallengeResp, _, _} = lists:keyfind(OnionKeyHash, 1, Targets),
+            %% get the packet we pretend we heard and will witness
             {_, BroadcastPacket} = lists:keyfind(OnionKeyHash, 1, BroadcastPackets),
-%%            #{onion := Onion} = TargetChallengeResp,
             #{challenger := ChallengerRoute} = ChallengeMsg,
-            <<IV:2/binary,
+            <<_IV:2/binary,
               OnionCompactKey:33/binary,
               Tag:4/binary,
               CipherText/binary>> = BroadcastPacket,
@@ -579,39 +570,21 @@ send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
 
 
 send_witness_report(Data, GatewayPubKey, GatewaySigFun, OnionCompactKey, Timestamp, RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection) ->
-    %% Ask our validator to provide routing info on the challenger
-    %% we provide the onion hash to the validator and it will use that
-    %% to identify the challenger and return its routing info
-    %% we then send the witness report to that challenger over grpc
+    %% witness reports can be sent to our default validator, it will relay it to the required challenger if different
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
 
     %%
     %% construct the witness report
     %%
 
-%%new(Gateway, Timestamp, Signal, PacketHash, SNR, Frequency, Channel, DataRate) ->
-%%    #blockchain_poc_witness_v1_pb{
-%%        gateway=Gateway,
-%%        timestamp=Timestamp,
-%%        signal=Signal,
-%%        packet_hash=PacketHash,
-%%        snr=SNR,
-%%        frequency=Frequency,
-%%        channel=Channel,
-%%        datarate=DataRate,
-%%        signature = <<>>
-%%    }.
     GatewayPubKeyBin = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
     Witness0 = case blockchain:config(?data_aggregation_version, Ledger) of
                    {ok, 1} ->
                        #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency};
-%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data, SNR, Frequency);
                    {ok, 2} ->
                        #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency, channel => Channel, datarate => DataRate};
-%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data, SNR, Frequency, Channel, DataRate);
                    _ ->
                        #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data}
-%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data)
                end,
 
     ct:pal("Witness0: ~p", [Witness0]),
@@ -639,3 +612,6 @@ send_witness_report(Data, GatewayPubKey, GatewaySigFun, OnionCompactKey, Timesta
         ),
     ok.
 
+find_txns_in_block(Block, TxnType)->
+     Ts = blockchain_block:transactions(Block),
+     lists:filter(fun(T) -> blockchain_txn:type(T) == TxnType end, Ts).
