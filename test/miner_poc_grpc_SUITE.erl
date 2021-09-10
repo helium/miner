@@ -4,6 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include("miner_ct_macros.hrl").
 
 -export([
@@ -113,8 +114,13 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     CoinbaseDCTxns = [blockchain_txn_dc_coinbase_v1:new(Addr, 50000000) || Addr <- Addresses],
-%%    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({40.741296, -73.989752}, 13), 0)
-%%                 || Addr <- Addresses],
+
+    %% create a new account to own validators for staking
+    #{public := AuxPub} = AuxKeys = libp2p_crypto:generate_keys(ecc_compact),
+    AuxAddr = libp2p_crypto:pubkey_to_bin(AuxPub),
+
+    AddGwTxns = [blockchain_txn_gen_validator_v1:new(Addr, Addr, ?bones(10000))
+     || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))],
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
     BlockTime = 20000,
@@ -125,7 +131,10 @@ init_per_testcase(_TestCase, Config0) ->
 
     InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
                                                    %% rule out rewards
+                                                   ?election_version => 5,
                                                    ?election_interval => infinity,
+                                                   ?monthly_reward => ?bones(1000),
+                                                   ?election_restart_interval => 5,
                                                    ?num_consensus_members => NumConsensusMembers,
                                                    ?batch_size => BatchSize,
                                                    ?txn_fees => false,  %% disable fees
@@ -153,7 +162,7 @@ init_per_testcase(_TestCase, Config0) ->
                                                   ?data_aggregation_version =>2
     }),
 
-    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
     ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
@@ -184,6 +193,7 @@ init_per_testcase(_TestCase, Config0) ->
 %%    {ok, Connection} = grpc_client:connect(tcp, "localhost", 8080),
 
     [   {sup, Sup},
+        {aux_acct, {AuxAddr, AuxKeys}},
         {payer, PayerAddr},
         {payer_sig_fun, PayerSigFun},
         {owner, OwnerAddr},
@@ -287,9 +297,14 @@ poc_grpc_test(Config) ->
 
     %% filter out all those check target responses where the requesting gateway was not the target
     %% we should be left with the same number of rows as the number of active POCs ( one target per active poc )
-    FilteredTargetResults = lists:filter(fun({_Gateway, _GatewayPrivKey, _GatewaySigFun, _ChallengeMsg, #{target := IsTarget}, _Connection, _BlockHash}) -> IsTarget == true end, TargetResults),
+    FilteredTargetResults = lists:filter(fun({_OnionKeyHash, _Gateway, _GatewayPrivKey, _GatewaySigFun, _ChallengeMsg, #{target := IsTarget}, _Connection, _BlockHash}) -> IsTarget == true end, TargetResults),
     ct:pal("Filtered Target Results: ~p", [FilteredTargetResults]),
     ?assertEqual(length(TotalActivePOCs), length(FilteredTargetResults)),
+
+    %% filter out all those check target responses where the requesting gateway WAS the target
+    %% we will use these as a list of witnesses
+    FilteredWitnessResults = lists:filter(fun({_OnionKeyHash, _Gateway, _GatewayPrivKey, _GatewaySigFun, _ChallengeMsg, #{target := IsTarget}, _Connection, _BlockHash}) -> IsTarget == false end, TargetResults),
+    ct:pal("Filtered Witness Results: ~p", [FilteredWitnessResults]),
 
     %%
     %% exercise the grpc receipt and witness reports APIs
@@ -308,11 +323,14 @@ poc_grpc_test(Config) ->
     %%       we will just pretend our witnesses heard the packet
 
     LocalChain = blockchain_worker:blockchain(),
-    ok = send_receipts(FilteredTargetResults, LocalChain),
+    BroadcastPackets = send_receipts(FilteredTargetResults, LocalChain),
+    ok = send_witness_reports(BroadcastPackets, FilteredWitnessResults, FilteredTargetResults, LocalChain),
 
     %% wait for the receipts txn to be absorbed, which will be after the poc expires ( poc expiry set to 4 blocks )
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 12, all, 180),
-    {ok, Block} =  ct_rpc:call(Miner, blockchain, get_block, [11, Chain]),
+    ok = miner_ct_utils:wait_for_gte(height, ConsensusMembers, 12, all, 180),
+    {ok, FinalBlock} =  ct_rpc:call(Miner, blockchain, get_block, [12, Chain]),
+    ct:pal("FinalBlock: ~p", [FinalBlock]),
+
     %% TODO confirm the receipts txn is in the block
 
 
@@ -457,14 +475,14 @@ collect_target_results(TargetNotifications, PubKeyBinList) ->
                     []
                 ),
             %% collect the results into a list
-            [{GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, BlockHash} | Acc ]
+            [{OnionKeyHash, GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, BlockHash} | Acc ]
         end, [], TargetNotifications).
 
 
 send_receipts(Targets, Chain) ->
     Ledger = blockchain:ledger(Chain),
-    lists:foreach(
-        fun({GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, BlockHash}) ->
+    lists:foldl(
+        fun({OnionKeyHash, GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, BlockHash}, Acc) ->
             %% for each target, decrypt the onion and lets get the packet and send a receipt
             %% receipts can be sent to our default validator, it will relay it to the required challenger if different
             %% we will also accumulate the Data payload here and use this later for the witnesses, fake that they seen it
@@ -478,17 +496,16 @@ send_receipts(Targets, Chain) ->
             case miner_poc_test_utils:decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, BlockHash, Chain) of
                 {error, _Reason} ->
                     ct:pal("failed to decrypt for ~p. Reason ~p", [GatewayPubKey, _Reason]),
-                    noop;
-                {ok, Data, _NextPacket} ->
+                    Acc;
+                {ok, Data, NextPacket} ->
                     ct:pal("successful decrypt for ~p", [GatewayPubKey]),
                     ct:pal("decrypted data: ~p", [Data]),
-                    ct:pal("decrypted next packet: ~p", [_NextPacket]),
+                    ct:pal("decrypted next packet: ~p", [NextPacket]),
                     GatewayPubKeyBin = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
-                    send_receipt(GatewayPubKeyBin, ChallengerRoute, GatewaySigFun, Data, OnionCompactKey, os:system_time(nanosecond), 0, 0.0, 0.0, 0, [12], Ledger, Connection)
+                    send_receipt(GatewayPubKeyBin, ChallengerRoute, GatewaySigFun, Data, OnionCompactKey, os:system_time(nanosecond), 0, 0.0, 0.0, 0, [12], Ledger, Connection),
+                    [{OnionKeyHash, NextPacket} | Acc]
             end
-        end,
-        Targets
-    ).
+        end, [], Targets).
 
 send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKey, Timestamp, RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection) ->
     ct:pal("sending receipt to challenger on route ~p", [ChallengerRoute]),
@@ -510,10 +527,10 @@ send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKe
     %% NOTE: the provided routing data is hardcoded due to an alias
     %%       as our the test validators are running on localhost
     %%       the provided port is correct tho so we can use that
-    #{uri := ChallengerURI} = ChallengerRoute,
-    #{port := ChallengerPort} = uri_string:parse(ChallengerURI),
+%%    #{uri := ChallengerURI} = ChallengerRoute,
+%%    #{port := ChallengerPort} = uri_string:parse(ChallengerURI),
 
-    {ok, ChallengerConnection} = grpc_client:connect(tcp, "localhost", ChallengerPort),
+%%    {ok, ChallengerConnection} = grpc_client:connect(tcp, "localhost", ChallengerPort),
     {ok, #{
             headers := Headers,
             result := #{
@@ -522,7 +539,7 @@ send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKe
                 signature := _ResponseSig
             } = Result
         }} = grpc_client:unary(
-            ChallengerConnection,
+            Connection,
             Req,
             'helium.gateway',
             'send_report',
@@ -530,3 +547,95 @@ send_receipt(GatewayPubKey, ChallengerRoute, GatewaySigFun, Data, OnionCompactKe
             []
         ),
     ok.
+
+
+send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
+    %% submit a witnes report from each gateway which received a target notification but was not the actual target
+    Ledger = blockchain:ledger(Chain),
+
+    TS = os:system_time(nanosecond),
+    RSSI = 0,
+    SNR = 0.0,
+    Frequency = 0.0,
+    Channel = 0,
+    DataRate = [12],
+
+    lists:foreach(
+        fun({OnionKeyHash, GatewayPubKey, _GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, _BlockHash}) ->
+            %% pull the onion from the list of targets
+            %% only those have the onion
+            {_,_,_,_,_,TargetChallengeResp, _, _} = lists:keyfind(OnionKeyHash, 1, Targets),
+            {_, BroadcastPacket} = lists:keyfind(OnionKeyHash, 1, BroadcastPackets),
+%%            #{onion := Onion} = TargetChallengeResp,
+            #{challenger := ChallengerRoute} = ChallengeMsg,
+            <<IV:2/binary,
+              OnionCompactKey:33/binary,
+              Tag:4/binary,
+              CipherText/binary>> = BroadcastPacket,
+            send_witness_report(crypto:hash(sha256, <<Tag/binary, CipherText/binary>>), GatewayPubKey, GatewaySigFun, OnionCompactKey, os:system_time(nanosecond), RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection)
+        end,
+        Witnesses
+    ).
+
+
+send_witness_report(Data, GatewayPubKey, GatewaySigFun, OnionCompactKey, Timestamp, RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection) ->
+    %% Ask our validator to provide routing info on the challenger
+    %% we provide the onion hash to the validator and it will use that
+    %% to identify the challenger and return its routing info
+    %% we then send the witness report to that challenger over grpc
+    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+
+    %%
+    %% construct the witness report
+    %%
+
+%%new(Gateway, Timestamp, Signal, PacketHash, SNR, Frequency, Channel, DataRate) ->
+%%    #blockchain_poc_witness_v1_pb{
+%%        gateway=Gateway,
+%%        timestamp=Timestamp,
+%%        signal=Signal,
+%%        packet_hash=PacketHash,
+%%        snr=SNR,
+%%        frequency=Frequency,
+%%        channel=Channel,
+%%        datarate=DataRate,
+%%        signature = <<>>
+%%    }.
+    GatewayPubKeyBin = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+    Witness0 = case blockchain:config(?data_aggregation_version, Ledger) of
+                   {ok, 1} ->
+                       #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency};
+%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data, SNR, Frequency);
+                   {ok, 2} ->
+                       #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency, channel => Channel, datarate => DataRate};
+%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data, SNR, Frequency, Channel, DataRate);
+                   _ ->
+                       #{gateway => GatewayPubKeyBin, timestamp => Timestamp, signal => RSSI, packet_hash => Data}
+%%                       blockchain_poc_witness_v1:new(GatewayPubKey, Timestamp, RSSI, Data)
+               end,
+
+    ct:pal("Witness0: ~p", [Witness0]),
+    EncodedWitness = gateway_client_pb:encode_msg(Witness0, blockchain_poc_witness_v1_pb),
+    Witness1 = Witness0#{signature => GatewaySigFun(EncodedWitness)},
+    Req = #{onion_key_hash => OnionKeyHash,  msg => {witness, Witness1}},
+
+    %%
+    %% send the report to our validator
+    %%
+    {ok, #{
+            headers := Headers,
+            result := #{
+                msg := {success_resp, Resp},
+                height := _ResponseHeight,
+                signature := _ResponseSig
+            } = Result
+        }} = grpc_client:unary(
+            Connection,
+            Req,
+            'helium.gateway',
+            'send_report',
+            gateway_client_pb,
+            []
+        ),
+    ok.
+
