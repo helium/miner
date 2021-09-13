@@ -47,8 +47,11 @@ fi
 cd .repos
 
 echo -n "updating repos... "
-for repo in blockchain libp2p sibyl ecc508 relcast dkg hbbft; do
+for repo in blockchain libp2p sibyl ecc508 relcast dkg hbbft helium_proto; do
     case $repo in
+        "helium_proto")
+            realname="proto"
+            ;;
         "blockchain")
             realname="blockchain-core"
             ;;
@@ -89,7 +92,7 @@ to=$(git rev-list -n 1 ${end})
 ## if a commit just bumps a dep like miner or gateway config, ignore
 ## the actual message and replace it with the same sort of thing from
 ## the dep
-for subdep in blockchain libp2p sibyl ecc508 relcast dkg hbbft; do
+for subdep in blockchain libp2p sibyl ecc508 relcast dkg hbbft helium_proto; do
     subfrom=$(git diff ${from} ${to} rebar.lock | grep -A4 "\"$subdep\"" | grep "^\- " | \
                   grep "{ref," | sed -e "s/.*\"\(.*\)\".*/\1/" )
     subto=$(git diff ${from} ${to} rebar.lock | grep -A4 "\"$subdep\"" | grep "^\+ " | \
