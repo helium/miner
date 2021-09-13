@@ -19,10 +19,8 @@ if [[ "$IMAGE_ARCH" == "arm64" ]]; then
 fi
 
 MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
-BASE_DOCKER_NAME=$(basename $(pwd))
 
 VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' -e 's/+/-/')
-DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
 LATEST_TAG="$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
@@ -31,22 +29,28 @@ case "$BUILD_TYPE" in
     "val")
         echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BASE_IMAGE --build-arg RUNNER_IMAGE=$BASE_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
+        BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
         LATEST_TAG="$MINER_REGISTRY_NAME:latest-val-${IMAGE_ARCH}"
         ;;
     "validator")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker_val ${DOCKER_BUILD_ARGS}"
+        BASE_DOCKER_NAME="validator"
+        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     "miner")
         echo "Doing a miner image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
+        BASE_DOCKER_NAME=$(basename $(pwd))
+        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     *)
         echo "I don't know how to do a build for ${BUILD_TYPE}"
         exit 1
         ;;
 esac
+
 
 if [[ ! $TEST_BUILD ]]; then
     docker login -u="team-helium+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
