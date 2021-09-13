@@ -33,6 +33,7 @@ steps:
     name: "validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator"
       IMAGE_ARCH: "amd64"
       BUILD_TYPE: "validator"
@@ -46,6 +47,7 @@ steps:
     name: "validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator"
       IMAGE_ARCH: "arm64"
       BUILD_TYPE: "validator"
@@ -59,6 +61,7 @@ steps:
     name: "testnet validator AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator"
       IMAGE_ARCH: "amd64"
       BUILD_TYPE: "val"
@@ -72,6 +75,7 @@ steps:
     name: "testnet validator ARM64 docker"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator"
       IMAGE_ARCH: "arm64"
       BUILD_TYPE: "val"
@@ -85,6 +89,7 @@ steps:
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "miner"
       IMAGE_ARCH: "amd64"
       BUILD_TYPE: "miner"
@@ -100,6 +105,7 @@ steps:
       queue: "arm64"
     env:
       REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "miner"
       IMAGE_ARCH: "arm64"
       BUILD_TYPE: "miner"

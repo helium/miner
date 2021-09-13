@@ -3,6 +3,7 @@
 set -euo pipefail
 
 # REGISTRY_HOST
+# REGISTRY_ORG
 # REGISTRY_NAME
 # IMAGE_ARCH
 # BUILD_TYPE
@@ -25,7 +26,7 @@ if [[ ! $TEST_BUILD -eq "0" ]]; then
     REGISTRY_NAME="test-builds"
     DOCKER_BUILD_ARGS="--build-arg REBAR_DIAGNOSTIC=1 $DOCKER_BUILD_ARGS"
 fi
-MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
+MINER_REGISTRY_NAME="$REGISTRY_HOST/$REGISTRY_ORG/$REGISTRY_NAME"
 
 LATEST_TAG="latest-${IMAGE_ARCH}"
 
@@ -57,7 +58,7 @@ esac
 
 
 if [[ ! $TEST_BUILD ]]; then
-    docker login -u="team-helium+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
+    docker login -u="${REGISTRY_ORG}+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
 fi
 
 # update latest tag if github tag ends in `_GA` and don't do the rest of a build
