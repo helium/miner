@@ -23,7 +23,7 @@ MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
 VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' -e 's/+/-/')
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
-LATEST_TAG="$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
+LATEST_TAG="latest-${IMAGE_ARCH}"
 
 case "$BUILD_TYPE" in
     "val")
@@ -31,7 +31,7 @@ case "$BUILD_TYPE" in
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BASE_IMAGE --build-arg RUNNER_IMAGE=$BASE_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
-        LATEST_TAG="$MINER_REGISTRY_NAME:latest-val-${IMAGE_ARCH}"
+        LATEST_TAG="latest-val-${IMAGE_ARCH}"
         ;;
     "validator")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
