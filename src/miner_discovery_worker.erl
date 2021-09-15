@@ -75,13 +75,22 @@ handle_info(
         lists:nth(rand:uniform(length(FreqList)), FreqList)
     end,
     Spreading = spreading(Region, byte_size(Packet)),
-    ok = miner_lora:send_poc(
+    case miner_lora:send_poc(
         Packet,
         immediate,
         ChannelSelectorFun,
         Spreading,
         TxPower
-    ),
+    ) of
+        ok ->
+            ok;
+        {warning, _} ->
+            %% Most warnings should be ok.
+            ok;
+        {error, timeout} ->
+            %% This transmission timed out, but others may work. Keep going.
+            lager:warning("transmission timed out.")
+    end,
     timer:send_after(?DEFAULT_TRANSMIT_DELAY_MS, self(), tick),
     {noreply, State#state{packets = Packets}};
 handle_info(_Info, State) ->
