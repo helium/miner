@@ -903,6 +903,33 @@ retry_with_rx2(HlmPacket0, From, State) ->
     send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
 
 -spec maybe_update_reg_data(State :: state()) -> state().
+maybe_update_reg_data(#state{reg_domain_confirmed=true, chain=undefined} = State) ->
+    %% don't have chain, do nothing
+    State;
+maybe_update_reg_data(#state{reg_domain_confirmed=true, chain=Chain} = State) when Chain /= undefined ->
+    case application:get_env(miner, region_override, undefined) of
+        undefined ->
+            %% region is confirmed without region_override
+            %% do nothing
+            State;
+        Region ->
+            %% region was overridden but we have a chain, pull region params from chain if possible
+            case blockchain_region_params_v1:for_region(Region, blockchain:ledger(Chain)) of
+                {ok, RegionParams} ->
+                    FrequencyList = [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ],
+                    State#state{ reg_freq_list = FrequencyList };
+                {error, {not_set, _}} ->
+                    %% NOTE: region param vars are not set, default frequency data from app env
+                    FreqMap = application:get_env(miner, frequency_data, #{}),
+                    State#state{reg_freq_list=maps:get(Region, FreqMap, undefined)};
+                {error, Reason} ->
+                    lager:error("unable to find params for region: ~p using chain, error: ~p", [
+                        Region, Reason
+                    ]),
+                    %% Some other failure, do nothing
+                    State
+            end
+    end;
 maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
     case reg_domain_data_for_addr(Addr, State) of
         {error, Reason} ->
