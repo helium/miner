@@ -752,11 +752,6 @@ poc_keys(Ledger, Metadata) ->
     %% We want to take a random subset of these up to a max of poc challenge rate
     {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
     lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
-%%    %% TODO TEMP HACK - REMOVE WHEN DONE
-%%    ChallengeRate = case ChallengeRate0 < 15 of
-%%        true -> 15;
-%%        _ -> ChallengeRate0
-%%    end,
     PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
     PocKeys1 = lists:foldl(
         fun({MinerAddr, PocKeys}, Acc)->
@@ -766,10 +761,7 @@ poc_keys(Ledger, Metadata) ->
     sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate).
 
 sort_and_truncate_poc_keys(L, MaxKeys) ->
-    lager:info("*** sorting poc keys ~p", [L]),
-    S = lists:sublist(lists:sort(fun({_, C1}, {_, C2}) -> C1 > C2 end, L), MaxKeys),
-    lager:info("*** sorted poc keys ~p", [S]),
-    S.
+    lists:sublist(lists:sort(fun({_, C1}, {_, C2}) -> C1 > C2 end, L), MaxKeys).
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
 common_enough_or_default(_, [], Default) ->
