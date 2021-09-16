@@ -919,13 +919,14 @@ maybe_update_reg_data(#state{reg_domain_confirmed=true, chain=Chain} = State) wh
                     FrequencyList = [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ],
                     State#state{ reg_freq_list = FrequencyList };
                 {error, {not_set, _}} ->
-                    %% TODO: region param vars are not set, default frequency data?
-                    State;
+                    %% NOTE: region param vars are not set, default frequency data from app env
+                    FreqMap = application:get_env(miner, frequency_data, #{}),
+                    State#state{reg_freq_list=maps:get(Region, FreqMap, undefined)};
                 {error, Reason} ->
                     lager:error("unable to find params for region: ~p using chain, error: ~p", [
                         Region, Reason
                     ]),
-                    %% TODO: other failure, default frequency data?
+                    %% Some other failure, do nothing
                     State
             end
     end;
