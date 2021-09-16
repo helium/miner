@@ -568,7 +568,6 @@ send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
         Witnesses
     ).
 
-
 send_witness_report(Data, GatewayPubKey, GatewaySigFun, OnionCompactKey, Timestamp, RSSI, SNR, Frequency, Channel, DataRate, Ledger, Connection) ->
     %% witness reports can be sent to our default validator, it will relay it to the required challenger if different
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
