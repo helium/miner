@@ -23,7 +23,7 @@ MINER_REGISTRY_NAME="$REGISTRY_HOST/team-helium/$REGISTRY_NAME"
 VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//" -e 's/_GA$//' -e 's/+/-/')
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
-LATEST_TAG="$MINER_REGISTRY_NAME:latest-${IMAGE_ARCH}"
+LATEST_TAG="latest-${IMAGE_ARCH}"
 
 case "$BUILD_TYPE" in
     "val")
@@ -31,7 +31,7 @@ case "$BUILD_TYPE" in
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BASE_IMAGE --build-arg RUNNER_IMAGE=$BASE_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
-        LATEST_TAG="$MINER_REGISTRY_NAME:latest-val-${IMAGE_ARCH}"
+        LATEST_TAG="latest-val-${IMAGE_ARCH}"
         ;;
     "validator")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
@@ -43,7 +43,12 @@ case "$BUILD_TYPE" in
         echo "Doing a miner image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
         BASE_DOCKER_NAME=$(basename $(pwd))
-        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
+        if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
+            DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}_GA"
+        else
+            DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
+        fi
+
         ;;
     *)
         echo "I don't know how to do a build for ${BUILD_TYPE}"
@@ -56,10 +61,11 @@ if [[ ! $TEST_BUILD ]]; then
     docker login -u="team-helium+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
 fi
 
-# update latest tag if github tag ends in `_GA` and don't do the rest of a build
-if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
+# update latest tag if github tag ends in `_GA`
+# and don't do the rest of a build if non-miner build type
+if [[ "$BUILD_TYPE" != "miner" && "$BUILDKITE_TAG" =~ _GA$ ]]; then
 
-    echo "GA release detected: Updating latest tag on ${REGISTRY_HOST} for ${BUILD_TYPE}"
+    echo "non-miner GA release detected: Updating latest tag on ${REGISTRY_HOST} for ${BUILD_TYPE}"
 
     docker tag helium:$DOCKER_NAME "$MINER_REGISTRY_NAME:$LATEST_TAG"
     docker push "$MINER_REGISTRY_NAME:$LATEST_TAG"
@@ -70,3 +76,13 @@ fi
 docker build $DOCKER_BUILD_ARGS -t "helium:${DOCKER_NAME}" .
 docker tag "helium:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$DOCKER_NAME"
 docker push "$MINER_REGISTRY_NAME:$DOCKER_NAME"
+
+# if we're building miner and on a GA tag, push "latest" image tag too.
+if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
+
+    echo "GA release detected: Pushing latest on ${REGISTRY_HOST} for $IMAGE_ARCH"
+
+    docker tag helium:$DOCKER_NAME "$MINER_REGISTRY_NAME:$LATEST_TAG"
+    docker push "$MINER_REGISTRY_NAME:$LATEST_TAG"
+
+fi
