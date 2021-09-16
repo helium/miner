@@ -62,16 +62,9 @@
 metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     Ledger = blockchain:ledger(Chain),
-    SelfAddr = blockchain_swarm:swarm(),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
     lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
-%%    %% TODO TEMP HACK - REMOVE WHEN DONE
-%%    ChallengeRate = case ChallengeRate0 < 15 of
-%%        true -> 15;
-%%        _ -> ChallengeRate0
-%%    end,
-
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     case Version of
         tuple ->
