@@ -66,7 +66,6 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% connect the local node to the slaves
     LocalSwarm = blockchain_swarm:swarm(),
-    ct:pal("point0a", []),
     ok = lists:foreach(
         fun(Node) ->
             ct:pal("connecting local node to ~p", [Node]),
@@ -79,24 +78,18 @@ init_per_testcase(_TestCase, Config0) ->
 
     %% make sure each node is gossiping with a majority of its peers
     Addrs = ?config(addrs, Config),
-        ct:pal("point0b", []),
     true = miner_ct_utils:wait_until(
              fun() ->
                                try
-                                   ct:pal("pointA", []),
                                    GossipPeers = blockchain_swarm:gossip_peers(),
-                                   ct:pal("pointB", []),
                                    case length(GossipPeers) >= (length(Miners) / 2) + 1 of
                                        true ->
-                                           ct:pal("pointC", []),
                                            true;
                                        false ->
-                                           ct:pal("pointD", []),
                                            ct:pal("localnode is not connected to enough peers ~p", [GossipPeers]),
 %%                                           Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 500),
                                            lists:foreach(
                                              fun(A) ->
-                                                 ct:pal("pointE", []),
                                                  ct:pal("Connecting localnode to ~p", [A]),
                                                  CRes = libp2p_swarm:connect(LocalSwarm, A),
                                                  ct:pal("Connecting result ~p", [CRes])
@@ -104,7 +97,6 @@ init_per_testcase(_TestCase, Config0) ->
                                            false
                                    end
                                catch _C:_E ->
-                                       ct:pal("pointF", []),
                                        false
                                end
              end, 200, 150),
@@ -123,7 +115,7 @@ init_per_testcase(_TestCase, Config0) ->
      || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))],
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = 20000,
+    BlockTime = 8000,
 
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
@@ -219,9 +211,7 @@ poc_grpc_test(Config) ->
     Connection = ?config(connection, Config),
     Miners = ?config(miners, Config),
     Miner = hd(?config(non_consensus_miners, Config)),
-    ListenAddrList = ?config(addrs, Config),
     PubKeyBinAddrList = ?config(tagged_miner_addresses, Config),
-    P2PAddrList = ?config(miner_p2p_addresses, Config),
 
     ct:pal("miner node ~p", [Miner]),
 
@@ -327,7 +317,7 @@ poc_grpc_test(Config) ->
     ok = send_witness_reports(BroadcastPackets, FilteredWitnessResults, FilteredTargetResults, LocalChain),
 
     %% wait for the receipts txn to be absorbed, which will be after the poc expires ( poc expiry set to 4 blocks )
-    ok = miner_ct_utils:wait_for_gte(height, ConsensusMembers, 12, all, 180),
+    ok = miner_ct_utils:wait_for_gte(height, ConsensusMembers, 12, all, 120),
     {ok, FinalBlock} =  ct_rpc:call(Miner, blockchain, get_block, [12, Chain]),
     ct:pal("FinalBlock: ~p", [FinalBlock]),
 
