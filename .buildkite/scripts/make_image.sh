@@ -27,11 +27,11 @@ LATEST_TAG="latest-${IMAGE_ARCH}"
 
 case "$BUILD_TYPE" in
     "val")
-        echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BASE_IMAGE --build-arg RUNNER_IMAGE=$BASE_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
         LATEST_TAG="latest-val-${IMAGE_ARCH}"
+        echo "Doing a testnet validator image build for ${IMAGE_ARCH} with name ${DOCKER_NAME}"
         ;;
     "validator")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
@@ -72,6 +72,7 @@ if [[ "$BUILD_TYPE" != "miner" && "$BUILDKITE_TAG" =~ _GA$ ]]; then
 
     exit $?
 fi
+echo "build args ${DOCKER_BUILD_ARGS}"
 
 docker build $DOCKER_BUILD_ARGS -t "helium:${DOCKER_NAME}" .
 docker tag "helium:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$DOCKER_NAME"
