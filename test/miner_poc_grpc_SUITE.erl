@@ -120,41 +120,43 @@ init_per_testcase(_TestCase, Config0) ->
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
     Keys = libp2p_crypto:generate_keys(ecc_compact),
+    InitialVars = #{?block_time => BlockTime,
+                   %% rule out rewards
+                   ?election_version => 5,
+                   ?election_interval => infinity,
+                   ?monthly_reward => ?bones(1000),
+                   ?election_restart_interval => 5,
+                   ?num_consensus_members => NumConsensusMembers,
+                   ?batch_size => BatchSize,
+                   ?txn_fees => false,  %% disable fees
+                   ?dkg_curve => Curve,
+                   ?poc_version => 11,
+                  ?securities_percent => 0.34,
+                  ?poc_challenge_interval => 15,
+                  ?poc_v4_exclusion_cells => 10,
+                  ?poc_v4_parent_res => 11,
+                  ?poc_v4_prob_bad_rssi => 0.01,
+                  ?poc_v4_prob_count_wt => 0.3,
+                  ?poc_v4_prob_good_rssi => 1.0,
+                  ?poc_v4_prob_no_rssi => 0.5,
+                  ?poc_v4_prob_rssi_wt => 0.3,
+                  ?poc_v4_prob_time_wt => 0.3,
+                  ?poc_v4_randomness_wt => 0.1,
+                  ?poc_v4_target_challenge_age => 300,
+                  ?poc_v4_target_exclusion_cells => 6000,
+                  ?poc_v4_target_prob_edge_wt => 0.2,
+                  ?poc_v4_target_prob_score_wt => 0.8,
+                  ?poc_v4_target_score_curve => 5,
+                  ?poc_target_hex_parent_res => 5,
+                  ?poc_v5_target_prob_randomness_wt => 1.0,
+                  ?poc_challenge_rate => 1,
+                  ?poc_challenger_type => validator,
+                  ?data_aggregation_version =>2
+    },
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   %% rule out rewards
-                                                   ?election_version => 5,
-                                                   ?election_interval => infinity,
-                                                   ?monthly_reward => ?bones(1000),
-                                                   ?election_restart_interval => 5,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?txn_fees => false,  %% disable fees
-                                                   ?dkg_curve => Curve,
-                                                   ?poc_version => 10,
-                                                  ?securities_percent => 0.34,
-                                                  ?poc_challenge_interval => 15,
-                                                  ?poc_v4_exclusion_cells => 10,
-                                                  ?poc_v4_parent_res => 11,
-                                                  ?poc_v4_prob_bad_rssi => 0.01,
-                                                  ?poc_v4_prob_count_wt => 0.3,
-                                                  ?poc_v4_prob_good_rssi => 1.0,
-                                                  ?poc_v4_prob_no_rssi => 0.5,
-                                                  ?poc_v4_prob_rssi_wt => 0.3,
-                                                  ?poc_v4_prob_time_wt => 0.3,
-                                                  ?poc_v4_randomness_wt => 0.1,
-                                                  ?poc_v4_target_challenge_age => 300,
-                                                  ?poc_v4_target_exclusion_cells => 6000,
-                                                  ?poc_v4_target_prob_edge_wt => 0.2,
-                                                  ?poc_v4_target_prob_score_wt => 0.8,
-                                                  ?poc_v4_target_score_curve => 5,
-                                                  ?poc_target_hex_parent_res => 5,
-                                                  ?poc_v5_target_prob_randomness_wt => 1.0,
-                                                  ?poc_challenge_rate => 1,
-                                                  ?data_aggregation_version =>2
-    }),
+    InitialVarsTxn = miner_ct_utils:make_vars(Keys, maps:merge(InitialVars, miner_poc_test_utils:poc_v11_vars())),
 
-    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ CoinbaseDCTxns ++ AddGwTxns,
+    {ok, DKGCompletionNodes} = miner_ct_utils:initial_dkg(Miners, InitialVarsTxn ++ InitialPaymentTransactions ++ CoinbaseDCTxns ++ AddGwTxns,
                                              Addresses, NumConsensusMembers, Curve),
     ct:pal("Nodes which completed the DKG: ~p", [DKGCompletionNodes]),
     %% Get both consensus and non consensus miners
@@ -242,10 +244,12 @@ poc_grpc_test(Config) ->
     AddGatewayTxs = build_gateways(LatLongs, OwnerPubKey, OwnerSigFun),
     _ = [ct_rpc:call(Miner, blockchain_worker, submit_txn, [AddTxn]) || AddTxn <- AddGatewayTxs],
     ok = miner_ct_utils:wait_for_gte(height, Miners, 3),
+    true = miner_ct_utils:wait_until_local_height(3),
 
     AssertLocaltionTxns = build_asserts(LatLongs, OwnerPubKey, OwnerSigFun),
     _ = [ct_rpc:call(Miner, blockchain_worker, submit_txn, [LocTxn]) || LocTxn <- AssertLocaltionTxns],
     ok = miner_ct_utils:wait_for_gte(height, Miners, 4),
+    true = miner_ct_utils:wait_until_local_height(4),
 
     %% establish streaming grpc connections for each of our fake gateways
     %% we want these connections up before the POCs kick off
@@ -255,6 +259,7 @@ poc_grpc_test(Config) ->
     %% wait until the next block after we asserted our miners
     %% POCs will not kick off until there are asserted GWs
     ok = miner_ct_utils:wait_for_gte(height, Miners, 5),
+    true = miner_ct_utils:wait_until_local_height(5),
 
     %% get the current block
     %% confirm the poc keys are present and in expected quantity
@@ -314,6 +319,7 @@ poc_grpc_test(Config) ->
 
     LocalChain = blockchain_worker:blockchain(),
     BroadcastPackets = send_receipts(FilteredTargetResults, LocalChain),
+    ct:pal("BroadcastPackets: ~p", [BroadcastPackets]),
     ok = send_witness_reports(BroadcastPackets, FilteredWitnessResults, FilteredTargetResults, LocalChain),
 
     %% wait for the receipts txn to be absorbed, which will be after the poc expires ( poc expiry set to 4 blocks )
@@ -323,7 +329,7 @@ poc_grpc_test(Config) ->
 
     %% TODO confirm the receipts txn is in the block
 
-    ReceiptsTxns = find_txns_in_block(FinalBlock, blockchain_txn_poc_receipts_v1),
+    ReceiptsTxns = find_txns_in_block(FinalBlock, blockchain_txn_poc_receipts_v2),
     ?assertEqual(1, length(ReceiptsTxns)),
     ok.
 
@@ -411,13 +417,18 @@ collect_target_notifications(GWConns) ->
                     #{<<":status">> := HttpStatus} = Headers,
                     case HttpStatus of
                         <<"200">> ->
-                            {data, Notification} = grpc_client:rcv(Stream, 3000),
-                            #{
-                                    msg := {poc_challenge_resp, ChallengeMsg},
-                                    height := NotificationHeight,
-                                    signature := ChallengerSig
-                            } = Notification,
-                            [{GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, NotificationHeight, ChallengerSig, Connection, Stream} | Acc];
+                            case grpc_client:rcv(Stream, 5000) of
+                                {error, timeout} -> Acc;
+                                empty -> Acc;
+                                eof -> Acc;
+                                {data, Notification} ->
+                                    #{
+                                            msg := {poc_challenge_resp, ChallengeMsg},
+                                            height := NotificationHeight,
+                                            signature := ChallengerSig
+                                    } = Notification,
+                                    [{GatewayPubKey, GatewayPrivKey, GatewaySigFun, ChallengeMsg, NotificationHeight, ChallengerSig, Connection, Stream} | Acc]
+                            end;
                         _ ->
                             Acc
 
@@ -547,6 +558,7 @@ send_witness_reports(BroadcastPackets, Witnesses, Targets, Chain) ->
     lists:foreach(
         fun({OnionKeyHash, GatewayPubKey, _GatewayPrivKey, GatewaySigFun, ChallengeMsg, ChallengeResp, Connection, _BlockHash}) ->
             %% get the packet we pretend we heard and will witness
+            ct:pal("finding packet for onionkeyhash ~p", [OnionKeyHash]),
             {_, BroadcastPacket} = lists:keyfind(OnionKeyHash, 1, BroadcastPackets),
             #{challenger := ChallengerRoute} = ChallengeMsg,
             <<_IV:2/binary,
