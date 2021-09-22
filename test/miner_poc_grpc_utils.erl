@@ -21,7 +21,8 @@ p2p_port_to_grpc_port(PeerAddr)->
     {ok, PeerPubKeyBin} = Transport:p2p_addr(PeerAddr),
     {ok, PeerInfo} = libp2p_peerbook:get(Peerbook, PeerPubKeyBin),
     ListenAddrs = libp2p_peer:listen_addrs(PeerInfo),
-    [H | _ ] = libp2p_transport:sort_addrs(SwarmTID, ListenAddrs),
+    ListenAddrs2 = lists:filter(fun(Addr)-> string:left(Addr, 5) /= "/p2p/" end, ListenAddrs),
+    [H | _ ] = libp2p_transport:sort_addrs(SwarmTID, ListenAddrs2),
     [_, _, _IP,_, Port] = _Full = re:split(H, "/"),
     lager:info("*** peer p2p port ~p", [Port]),
     {ok, list_to_integer(binary_to_list(Port)) + 1000}.
