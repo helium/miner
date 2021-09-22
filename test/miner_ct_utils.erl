@@ -211,7 +211,7 @@ wait_until_local_height(TargetHeight) ->
             C = blockchain_worker:blockchain(),
             {ok, CurHeight} = blockchain:height(C),
             ct:pal("local height ~p", [CurHeight]),
-            CurHeight == TargetHeight
+            CurHeight >= TargetHeight
         end,
         30,
         timer:seconds(1)
