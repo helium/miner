@@ -1,7 +1,7 @@
 -module(miner_poc_test_utils).
 
 -include("miner_poc_v11_vars.hrl").
--export([send_receipts/2, poc_v11_vars/0]).
+-export([send_receipts/2, poc_v11_vars/0, decrypt/7]).
 
 send_receipts(LatLongs, Challengees) ->
     lists:foreach(
@@ -151,3 +151,46 @@ construct_param(P) ->
     MaxEIRP = proplists:get_value(<<"max_eirp">>, P),
     Spreading = blockchain_region_spreading_v1:new(proplists:get_value(<<"spreading">>, P)),
     blockchain_region_param_v1:new(CF, BW, MaxEIRP, Spreading).
+
+
+decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, BlockHash, Chain) ->
+    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    ct:pal("decrypting poc with onionkeyhash ~p", [OnionKeyHash]),
+    case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, BlockHash, Chain) of
+        poc_not_found ->
+            {error, poc_not_found};
+        {error, fail_decrypt} = Error->
+            Error;
+        {ok, _Data, _NextPacket} = Res ->
+            Res;
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+-ifdef(EQC).
+-spec try_decrypt(binary(), binary(), binary(), binary(), function(), binary(), blockchain:blockchain()) -> {ok, binary(), binary()} | {error, any()}.
+try_decrypt(IV, OnionCompactKey, Tag, CipherText, ECDHFun, BlockHash, Chain) ->
+    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, BlockHash, Chain).
+-endif.
+
+-spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), binary(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
+try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, BlockHash, Chain) ->
+    Ledger = blockchain:ledger(Chain),
+%%    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+%%        {error, not_found} ->
+%%            poc_not_found;
+%%        {ok, [PoC]} ->
+%%            Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
+            try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, BlockHash, Ledger) of
+                error ->
+                    {error, fail_decrypt};
+                {Payload, NextLayer} ->
+                    {ok, Payload, NextLayer}
+            catch _A:_B ->
+                    {error, {_A, _B}}
+            end.
+%%        {ok, _} ->
+%%            %% TODO we might want to try all the PoCs here
+%%            {error, too_many_pocs}
+%%    end.
