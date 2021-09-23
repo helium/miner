@@ -39,11 +39,7 @@ start_link() ->
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-<<<<<<< HEAD
 init(_Opts) ->
-=======
-init([PublicKey, SigFun, ECDHFun, CryptoWorker]) ->
->>>>>>> f05a22fc... Add TPM support
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 0,
@@ -98,7 +94,6 @@ init([PublicKey, SigFun, ECDHFun, CryptoWorker]) ->
         end,
 
 
-<<<<<<< HEAD
     ChildSpecs0 = [?SUP(blockchain_sup, [BlockchainOpts])] ++ ConsensusMgr,
     GatewayAndMux = case application:get_env(miner, gateway_and_mux_enable) of
                         {ok, true} -> true;
@@ -114,12 +109,4 @@ init([PublicKey, SigFun, ECDHFun, CryptoWorker]) ->
                          ChildSpecs0
                  end,
 
-=======
-    ChildSpecs =
-        CryptoWorker++
-        [
-         ?SUP(blockchain_sup, [BlockchainOpts])
-        ] ++
-        ConsensusMgr,
->>>>>>> f05a22fc... Add TPM support
     {ok, {SupFlags, ChildSpecs}}.

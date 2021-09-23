@@ -19,7 +19,7 @@
    {block_sync_batch_limit, 100},
    {max_inbound_connections, 32},
    {snapshot_memory_limit, 2048},
-   {key, {tpm, [{key_path, "HS/SRK/MinerKey"}]}},
+   {key, undefined},
    {relay_limit, 100},
    {blocks_to_protect_from_gc, 100000},
    {base_dir, "/var/data"}
