@@ -97,15 +97,22 @@ metadata(Version, Meta, Chain) ->
                                 lager:info("no snapshot interval configured"),
                                 ChainMeta0
                         end,
-            %% generate a set of empheral keys for POC usage
-            %% the hashes of the public keys are added to metadata
-            %% the key sets are passed to bc core poc mgr
-            {EmpKeys, EmpKeyHashes} = generate_empheral_keys(N, ChallengeRate),
-            lager:info("poc empheral keys ~p", [EmpKeys]),
-            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-            lager:info("node ~p generating poc empheral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
-            ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
-            ChainMeta1 = maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta),
+            ChainMeta1 =
+                case blockchain:config(?poc_challenger_type, Ledger) of
+                    {ok, validator} ->
+                        %% generate a set of ephemeral keys for POC usage
+                        %% the hashes of the public keys are added to metadata
+                        %% the key sets are passed to bc core poc mgr
+                        {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
+                        lager:info("poc ephemeral keys ~p", [EmpKeys]),
+                        SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+                        lager:info("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
+                        ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
+                        maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
+                    _ ->
+                        ChainMeta
+
+                 end,
             lager:info("ChainMeta1 ~p", [ChainMeta1]),
             t2b(maps:merge(Meta, ChainMeta1))
     end.
@@ -818,8 +825,8 @@ bin_to_msg(<<Bin/binary>>) ->
         {error, truncated}
     end.
 
-generate_empheral_keys(N, ChallengeRate)->
-    NumKeys = normalize_epheral_key_count(trunc(ChallengeRate / (((N-1)/3) * 2 ))),
+generate_ephemeral_keys(N, ChallengeRate)->
+    NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
     lists:foldl(
         fun(_N, {AccKeys, AccHashes})->
             Keys = libp2p_crypto:generate_keys(ecc_compact),
@@ -828,11 +835,6 @@ generate_empheral_keys(N, ChallengeRate)->
             {[Keys | AccKeys], [OnionHash | AccHashes]}
         end,
     {[], []}, lists:seq(1, NumKeys)).
-
-normalize_epheral_key_count(Count) when Count < 1 ->
-    1;
-normalize_epheral_key_count(Count)->
-    Count.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
