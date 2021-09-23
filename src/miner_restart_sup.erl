@@ -81,26 +81,25 @@ init([SigFun, ECDHFun]) ->
     ValServers =
         case application:get_env(miner, mode, gateway) of
             validator ->
+                PocMgrTab = miner_poc_mgr:make_ets_table(),
+                POCMgrOpts = #{tab1 => PocMgrTab},
+                POCDBOpts = #{base_dir => BaseDir,
+                            cfs => ["default",
+                                    "poc_mgr_cf"
+                                   ]
+                           },
                 [?WORKER(miner_val_heartbeat, []),
+                 ?WORKER(miner_poc_mgr_db_owner, [POCDBOpts]),
+                 ?WORKER(miner_poc_mgr, [POCMgrOpts]),
                  ?SUP(sibyl_sup, [])];
             _ -> []
         end,
 
     JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
-    PocMgrTab = miner_poc_mgr:make_ets_table(),
-    POCMgrOpts = #{tab1 => PocMgrTab},
-    POCDBOpts = #{base_dir => BaseDir,
-                cfs => ["default",
-                        "poc_mgr_cf"
-                       ]
-               },
 
     ChildSpecs =
         [
-         ?WORKER(miner_poc_mgr_db_owner, [POCDBOpts]),
-         ?WORKER(miner_poc_mgr, [POCMgrOpts]),
-
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, []),
          ?WORKER(elli, [[{callback, miner_jsonrpc_handler},

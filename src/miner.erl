@@ -24,8 +24,7 @@
     start_chain/2,
     install_consensus/1,
     remove_consensus/0,
-    version/0,
-    poc_keys/2
+    version/0
 ]).
 
 -export_type([
@@ -577,7 +576,13 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
-    POCKeys = poc_keys(Ledger, Metadata),
+    POCKeys =
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, validator} ->
+                poc_keys(Ledger, Metadata);
+            _ ->
+                []
+        end,
     SeenBBAs =
         [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
