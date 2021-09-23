@@ -79,7 +79,7 @@ docker tag "helium:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$DOCKER_NAME"
 docker push "$MINER_REGISTRY_NAME:$DOCKER_NAME"
 
 # if we're building miner and on a GA tag, push "latest" image tag too.
-if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
+if [[ "$BUILDKITE_TAG" =~ _GA$ || "$BUILD_TYPE" == "val" ]]; then
 
     echo "GA release detected: Pushing latest on ${REGISTRY_HOST} for $IMAGE_ARCH"
 
