@@ -25,7 +25,7 @@ region_ru864
 region_us915
 ```
 
-* For each of the above `region_*` variables there will be a corresponding `region_*_params` chain variable which determines the specific LoraWAN region parameters a device is allowed to operate legally. These are binary blobs with encoding driven using protobuf available [here](https://github.com/helium/proto/blob/master/src/blockchain_region_param_v1.proto). A deserialized version of the below variables is available [here](https://gist.github.com/vihu/ac2d6761318672376db7a12fa915519c).
+* For each of the above `region_*` variables there will be a corresponding `region_*_params` chain variable which determines the specific LoraWAN region parameters a device is allowed to operate legally. These are binary blobs with encoding driven using protobuf available [here](https://github.com/helium/proto/blob/master/src/blockchain_region_param_v1.proto). A deserialized version of the below variables is available under `audit/var-poc-v11-params.erl`.
 
 ```
 region_as923_1_params
