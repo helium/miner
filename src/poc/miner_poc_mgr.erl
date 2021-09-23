@@ -495,7 +495,7 @@ process_block_pocs(
 ) ->
     Ledger = blockchain:ledger(Chain),
     BlockHeight = blockchain_block:height(Block),
-    %% get the empheral keys from the block
+    %% get the ephemeral keys from the block
     %% these will be a prop with tuples as {MinerAddr, PocKeyHash}
     BlockPocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
     BlockHeight = blockchain_block_v1:height(Block),
