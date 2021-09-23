@@ -952,7 +952,11 @@ init_per_testcase(Mod, TestCase, Config0) ->
             [{P2PAddr, {GrpcPort, false}} | Acc]
         end, [], Keys),
     ct:pal("miner grpc port aliases ~p", [MinerGRPCPortAliases]),
-    lists:foreach(fun(Miner)-> ct_rpc:call(Miner, application, set_env, [sibyl, node_grpc_port_aliases, MinerGRPCPortAliases]) end, Miners),
+    lists:foreach(fun(Miner)->
+        ct_rpc:call(Miner, application, set_env, [sibyl, node_grpc_port_aliases, MinerGRPCPortAliases]),
+        ct_rpc:call(Miner, application, set_env, [sibyl, poc_mgr_mod, miner_poc_mgr]),
+        ct_rpc:call(Miner, application, set_env, [sibyl, poc_report_handler, miner_poc_report_handler])
+    end, Miners),
 
 
     %% accumulate the address of each miner
