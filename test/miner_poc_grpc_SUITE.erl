@@ -115,7 +115,7 @@ init_per_testcase(_TestCase, Config0) ->
      || Addr <- Addresses] ++ [blockchain_txn_coinbase_v1:new(AuxAddr, ?bones(15000))],
 
     NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = 8000,
+    BlockTime = 12000,
 
     BatchSize = ?config(batch_size, Config),
     Curve = ?config(dkg_curve, Config),
@@ -327,8 +327,6 @@ poc_grpc_test(Config) ->
     {ok, FinalBlock} =  ct_rpc:call(Miner, blockchain, get_block, [12, Chain]),
     ct:pal("FinalBlock: ~p", [FinalBlock]),
 
-    %% TODO confirm the receipts txn is in the block
-
     ReceiptsTxns = find_txns_in_block(FinalBlock, blockchain_txn_poc_receipts_v2),
     ?assertEqual(1, length(ReceiptsTxns)),
     ok.
@@ -369,7 +367,7 @@ build_asserts(LatLongs, Owner, OwnerSigFun) ->
 collect_active_pocs(ConsensusMiners)->
     ActivePOCs = lists:foldl(
         fun(Miner, Acc)->
-            POCs = ct_rpc:call(Miner, blockchain_poc_mgr, active_pocs, []),
+            POCs = ct_rpc:call(Miner, miner_poc_mgr, active_pocs, []),
             ct:pal("Active POCs ~p", [POCs]),
             ct:pal("~p POCs for miner ~p", [length(POCs), Miner]),
             [POCs | Acc]

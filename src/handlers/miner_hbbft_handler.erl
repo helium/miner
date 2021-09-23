@@ -104,7 +104,7 @@ metadata(Version, Meta, Chain) ->
             lager:info("poc empheral keys ~p", [EmpKeys]),
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             lager:info("node ~p generating poc empheral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
-            ok = blockchain_poc_mgr:save_poc_keys(Height, EmpKeys),
+            ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
             ChainMeta1 = maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta),
             lager:info("ChainMeta1 ~p", [ChainMeta1]),
             t2b(maps:merge(Meta, ChainMeta1))
