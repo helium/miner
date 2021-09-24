@@ -773,7 +773,7 @@ packet_rssi(Packet, UseRSSIS) ->
             %% quality object if the packet was received on multiple
             %% antennas/receivers. So let's pick the one with the
             %% highest RSSI[Channel]
-            Key = case UseRSSIS of
+            Key = case UseRSSIS andalso maps:is_key(<<"rssis">>, Packet) of
                 true ->
                     <<"rssis">>;
                 _ ->
