@@ -977,10 +977,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     %% wait until we get confirmation the miners are fully up
     %% which we are determining by the miner_consensus_mgr being registered
-    %% QUESTION: is there a better process to use to determine things are healthy
-    %%           and which works for both in consensus and non consensus miners?
     ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
-    %ok = miner_ct_utils:wait_for_registration(Miners, blockchain_worker),
 
     UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
                                               {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
