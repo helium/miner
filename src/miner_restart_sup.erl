@@ -52,6 +52,8 @@ init([SigFun, ECDHFun]) ->
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     %% Miner Options
 
+    %% TODO: remove onion servers if a validator but breaks a lot of tests
+    %%       leaving for another day
     OnionServer =
         case application:get_env(miner, radio_device, undefined) of
             {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
@@ -78,9 +80,11 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    ValServers =
+    ValOrMinerServers =
         case application:get_env(miner, mode, gateway) of
             validator ->
+                application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
+                application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
                 PocMgrTab = miner_poc_mgr:make_ets_table(),
                 POCMgrOpts = #{tab1 => PocMgrTab},
                 POCDBOpts = #{base_dir => BaseDir,
@@ -92,7 +96,8 @@ init([SigFun, ECDHFun]) ->
                  ?WORKER(miner_poc_mgr_db_owner, [POCDBOpts]),
                  ?WORKER(miner_poc_mgr, [POCMgrOpts]),
                  ?SUP(sibyl_sup, [])];
-            _ -> []
+            _ ->
+                []
         end,
 
     JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
@@ -106,9 +111,9 @@ init([SigFun, ECDHFun]) ->
                          {ip, JsonRpcIp},
                          {port, JsonRpcPort}]])
          ] ++
-        ValServers ++
-        EbusServer ++
-        OnionServer,
+        ValOrMinerServers ++
+        OnionServer ++
+        EbusServer,
     {ok, {SupFlags, ChildSpecs}}.
 
 
