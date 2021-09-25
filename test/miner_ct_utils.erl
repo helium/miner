@@ -982,6 +982,8 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
                            'IN865' => [865.0625, 865.4025, 865.985]}])
     end,
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
+    ct:pal("lager status ~p", [ct_rpc:call(Miner, lager, status, [])]),
+    ct_rpc:call(Miner, lager, set_loglevel, [{lager_file_backend, "console.log"}, debug]),
     ok.
 
 end_per_testcase(TestCase, Config) ->
