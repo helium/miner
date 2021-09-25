@@ -39,7 +39,7 @@
         {
          chain :: undefined | blockchain:blockchain(),
          group :: undefined | pid(),
-         queue = [] :: [{pid(), blockchain_txn:txn(), non_neg_integer()}],
+         queue = [] :: [{{pid(), term()}, blockchain_txn:txn(), non_neg_integer()}],
          validations = #{} :: #{reference() => #validation{}}
         }).
 
@@ -331,4 +331,4 @@ start_validation(Txn, Height, From, Timeout, Chain) ->
           end),
     TRef = erlang:send_after(Timeout, self(), {Attempt, deadline}),
     {Attempt,
-     #validation{timer = TRef, monitor = Ref, txn = Txn, pid = Pid, from = From}}.
+     #validation{timer = TRef, monitor = Ref, txn = Txn, pid = Pid, from = From, height=Height}}.
