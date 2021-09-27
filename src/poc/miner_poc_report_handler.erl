@@ -66,9 +66,8 @@ handle_data(client, Data, State) ->
     %% client should not receive data
     {stop, normal, State};
 handle_data(server, Payload, #state{peer = SelfPeer} = State) ->
-    lager:info("server got data: ~p", [Payload]),
     {OnionKeyHash, Data} = binary_to_term(Payload),
-    lager:info("server got data2: ~p", [{OnionKeyHash, Data}]),
+    lager:info("server got data, OnionKeyHash: ~p, Report: ~p", [OnionKeyHash, Data]),
     P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(SelfPeer),
     try ?MODULE:decode(Data) of
         {witness, _} = Report ->

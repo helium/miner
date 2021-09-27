@@ -576,10 +576,11 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
+    {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     POCKeys =
         case blockchain:config(?poc_challenger_type, Ledger) of
             {ok, validator} ->
-                poc_keys(Ledger, Metadata);
+                poc_keys(Ledger, Metadata, CurrentBlockHash);
             _ ->
                 []
         end,
@@ -749,12 +750,15 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
             <<>>
     end.
 
--spec poc_keys(L, M) -> []
+-spec poc_keys(L, M, B) -> []
     when L :: blockchain_ledger_v1:ledger(),
-         M :: metadata().
-poc_keys(Ledger, Metadata) ->
+         M :: metadata(),
+         B :: blockchain_block:hash().
+poc_keys(Ledger, Metadata, BlockHash) ->
     %% Construct a set of poc keys. Each node will define its own set within the metadata
-    %% We want to take a random subset of these up to a max of poc challenge rate
+    %% We want to take a deterministic random subset of these up to a max of poc challenge rate
+    %% Use the blockhash as the seed
+    RandState = blockchain_utils:rand_state(BlockHash),
     {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
     lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
     PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
@@ -763,10 +767,11 @@ poc_keys(Ledger, Metadata) ->
             NormalisedKeys = lists:map(fun(PocKey) -> {MinerAddr, PocKey} end, PocKeys),
             [NormalisedKeys | Acc]
         end, [], PocKeys0),
-    sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate).
+    sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate, RandState).
 
-sort_and_truncate_poc_keys(L, MaxKeys) ->
-    lists:sublist(lists:sort(fun({_, C1}, {_, C2}) -> C1 > C2 end, L), MaxKeys).
+sort_and_truncate_poc_keys(L, MaxKeys, RandState) ->
+    {_, TruncList} = blockchain_utils:deterministic_subset(MaxKeys, RandState, L),
+    TruncList.
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
 common_enough_or_default(_, [], Default) ->
