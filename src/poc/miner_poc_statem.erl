@@ -974,7 +974,7 @@ find_receipts(BlockHash, #data{blockchain=Blockchain,
 send_onion(_P2P, _Onion, 0) ->
     {error, retries_exceeded};
 send_onion(P2P, Onion, Retry) ->
-    case miner_onion:dial_framed_stream(blockchain_swarm:swarm(), P2P, []) of
+    case miner_onion:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
         {ok, Stream} ->
             unlink(Stream),
             _ = miner_onion_handler:send(Stream, Onion),

@@ -17,10 +17,10 @@
 %% Dial PoC stream
 %% @end
 %%--------------------------------------------------------------------
--spec dial_framed_stream(pid(), string(), list()) -> {ok, pid()} | {error, any()} | ignore.
-dial_framed_stream(Swarm, Address, Args) ->
+-spec dial_framed_stream(ets:tab(), string(), list()) -> {ok, pid()} | {error, any()} | ignore.
+dial_framed_stream(SwarmTID, Address, Args) ->
     libp2p_swarm:dial_framed_stream(
-        Swarm,
+        SwarmTID,
         Address,
         ?POC_VERSION,
         miner_poc_handler,
