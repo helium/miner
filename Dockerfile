@@ -2,8 +2,11 @@ ARG BUILDER_IMAGE=erlang:23.3.4.6-alpine
 ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
 FROM ${BUILDER_IMAGE} as builder
 
-ARG REBAR_BUILD_TARGET
+ARG REBAR_DIAGNOSTIC=0
+ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
+
 ARG VERSION
+ARG REBAR_BUILD_TARGET
 ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
 
 ARG EXTRA_BUILD_APK_PACKAGES
@@ -36,6 +39,7 @@ RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.main
 
 FROM ${RUNNER_IMAGE} as runner
 
+ARG VERSION
 ARG EXTRA_RUNNER_APK_PACKAGES
 
 RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc \
@@ -52,6 +56,8 @@ ENV COOKIE=miner \
     PATH=$PATH:/opt/miner/bin
 
 COPY --from=builder /opt/docker /opt/miner
+
+RUN ln -sf /opt/miner/releases/${VERSION} /config
 
 ENTRYPOINT ["/opt/miner/bin/miner"]
 CMD ["foreground"]
