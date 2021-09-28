@@ -2,6 +2,9 @@ ARG BUILDER_IMAGE=erlang:23.3.4.6-alpine
 ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
 FROM ${BUILDER_IMAGE} as builder
 
+ARG REBAR_DIAGNOSTIC=0
+ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
+
 ARG REBAR_BUILD_TARGET
 ARG VERSION
 ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
@@ -52,6 +55,8 @@ ENV COOKIE=miner \
     PATH=$PATH:/opt/miner/bin
 
 COPY --from=builder /opt/docker /opt/miner
+
+RUN ln -sf /opt/miner/releases/${VERSION} /config
 
 ENTRYPOINT ["/opt/miner/bin/miner"]
 CMD ["foreground"]
