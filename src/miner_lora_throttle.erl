@@ -40,6 +40,7 @@
     | 'region_as923_1'
     | 'region_as923_2'
     | 'region_as923_3'
+    | 'region_as923_4'
     | 'region_au915'
     | 'region_cn470'
     | 'region_eu433'
@@ -80,6 +81,7 @@ model(Region) ->
         'region_as923_1' -> ?COMMON_DUTY;
         'region_as923_2' -> ?COMMON_DUTY;
         'region_as923_3' -> ?COMMON_DUTY;
+        'region_as923_4' -> ?COMMON_DUTY;
         'region_au915'   -> ?COMMON_DUTY;
         'region_cn470'   -> ?COMMON_DUTY;
         'region_eu433'   -> ?COMMON_DUTY;
