@@ -156,11 +156,9 @@ format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
         false ->
             O;
         true ->
-            O#{
-                <<"elevation">> => ?MAYBE(blockchain_ledger_gateway_v2:elevation(GW)),
-                <<"gain">> => ?MAYBE(blockchain_ledger_gateway_v2:gain(GW)),
+            miner_jsonrpc_info:get_gateway_location(undefined, GW, O#{
                 <<"mode">> => ?MAYBE(blockchain_ledger_gateway_v2:mode(GW))
-            }
+            })
     end.
 
 last_challenge(_Height, undefined) -> null;

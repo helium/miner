@@ -5,6 +5,8 @@
 
 %% jsonrpc_handler
 -export([handle_rpc/2]).
+%% helpers
+-export([get_gateway_location/3]).
 
 %%
 %% jsonrpc_handler
@@ -50,6 +52,10 @@ handle_rpc(<<"info_region">>, []) ->
             {ok, Region} -> atom_to_binary(Region, utf8)
         end,
     #{region => R};
+handle_rpc(<<"info_location">>, []) ->
+    PubKey = blockchain_swarm:pubkey_bin(),
+    Chain = blockchain_worker:blockchain(),
+    get_gateway_location(Chain, PubKey, #{});
 
 %% TODO handle onboarding key data??
 handle_rpc(<<"info_summary">>, []) ->
@@ -113,15 +119,36 @@ get_gateway_info(Chain, PubKey) ->
     Ledger = blockchain:ledger(Chain),
     case blockchain_ledger_v1:find_gateway_info(PubKey, Ledger) of
         {ok, Gateway} ->
-            GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
             GWOwnAddr = libp2p_crypto:pubkey_bin_to_p2p(
                 blockchain_ledger_gateway_v2:owner_address(Gateway)
             ),
-            #{ <<"location">> => ?TO_VALUE(GWLoc),
-               <<"owner">> => ?TO_VALUE(GWOwnAddr) };
+            GWMode = blockchain_ledger_gateway_v2:mode(Gateway),
+            get_gateway_location(Chain, Gateway, #{ 
+                <<"owner">> => ?TO_VALUE(GWOwnAddr),
+                <<"mode">> => ?TO_VALUE(GWMode)
+            });
         _ ->
             undefined
     end.
+
+get_gateway_location(Chain, PubKey, Dest) when is_binary(PubKey) ->
+    Ledger = blockchain:ledger(Chain),
+    case blockchain_ledger_v1:find_gateway_info(PubKey, Ledger) of
+        {ok, Gateway} -> get_gateway_location(Chain, Gateway, Dest);
+        _ -> Dest
+    end;
+get_gateway_location(_Chain, Gateway, Dest) ->
+    GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
+    GWElevation = blockchain_ledger_gateway_v2:elevation(Gateway),
+    GWGain = case blockchain_ledger_gateway_v2:gain(Gateway) of
+        undefined -> undefined;
+        V -> V / 10
+    end,
+    Dest#{ 
+        <<"location">> => ?TO_VALUE(GWLoc),
+        <<"gain">> => ?TO_VALUE(GWGain),
+        <<"elevation">> => ?TO_VALUE(GWElevation)
+     }.
 
 format_macs_from_interfaces(IFs) ->
     lists:foldl(
