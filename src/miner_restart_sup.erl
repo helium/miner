@@ -68,8 +68,8 @@ init([SigFun, ECDHFun]) ->
                     sig_fun => SigFun,
                     region_override => RegionOverRide
                 },
-                [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts])];
+                [?WORKER(miner_onion_server_light, [OnionOpts]),
+                 ?WORKER(miner_lora_light, [OnionOpts])];
             _ ->
                 []
         end,
@@ -97,13 +97,17 @@ init([SigFun, ECDHFun]) ->
                  ?WORKER(miner_poc_mgr, [POCMgrOpts]),
                  ?SUP(sibyl_sup, [])];
             _ ->
-                []
+                OnionServer ++
+                [
+                    ?WORKER(miner_poc_grpc_client, [])
+                ]
         end,
 
     JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
 
     ChildSpecs =
+
         [
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, []),
@@ -112,7 +116,6 @@ init([SigFun, ECDHFun]) ->
                          {port, JsonRpcPort}]])
          ] ++
         ValOrMinerServers ++
-        OnionServer ++
         EbusServer,
     {ok, {SupFlags, ChildSpecs}}.
 

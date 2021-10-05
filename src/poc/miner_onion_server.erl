@@ -15,10 +15,10 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    decrypt_p2p/1,
+    decrypt_p2p/2,
     decrypt_radio/7,
     retry_decrypt/11,
-    send_receipt/11,
+    send_receipt/12,
     send_witness/9
 ]).
 
@@ -67,9 +67,9 @@
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
--spec decrypt_p2p(binary()) -> ok.
-decrypt_p2p(Onion) ->
-    gen_server:cast(?MODULE, {decrypt_p2p, Onion}).
+-spec decrypt_p2p(binary(), pid()) -> ok.
+decrypt_p2p(Onion, Stream) ->
+    gen_server:cast(?MODULE, {decrypt_p2p, Onion, Stream}).
 
 decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Channel, Spreading) ->
     gen_server:cast(?MODULE, {decrypt_radio, Packet, RSSI, SNR, Timestamp, Freq, Channel, Spreading}).
@@ -86,13 +86,14 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, 
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
+                   Stream :: undefined | pid(),
                    Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
-send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, State) ->
+send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State) ->
     case miner_lora:location_ok() of
         true ->
             lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
-            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, State, ?BLOCK_RETRY_COUNT);
+            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, State, ?BLOCK_RETRY_COUNT);
         false ->
             ok
     end.
@@ -106,15 +107,17 @@ send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, 
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
                    DataRate :: binary(),
+                   Stream :: undefined | pid(),
                    Power :: non_neg_integer(),
                    State :: state(),
                    Retry :: non_neg_integer()) -> ok | {error, any()}.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Power, _State, 0) ->
+send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Stream, _Power, _State, 0) ->
     lager:error("failed to send receipts, max retry"),
     {error, too_many_retries};
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, #state{chain=Chain}= _State, _Retry) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
     %% check this GW has the capability to send receipts
     %% it not then we are done
     case miner_util:has_valid_local_capability(?GW_CAPABILITY_POC_RECEIPT, Ledger) of
@@ -202,10 +205,10 @@ send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRa
                    Retry :: non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _State, 0) ->
     lager:error("failed to send witness, max retry");
-send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, #state{chain=Chain}= _State, _Retry) ->
+send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-
+    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     %% check this GW has the capability to send witnesses
     %% it not then we are done
@@ -285,18 +288,18 @@ handle_cast(Msg, #state{chain = undefined} = State) ->
 handle_cast({decrypt_p2p, <<IV:2/binary,
                             OnionCompactKey:33/binary,
                             Tag:4/binary,
-                            CipherText/binary>>}, State) ->
-    NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, undefined, undefined, undefined, undefined, State),
+                            CipherText/binary>>, Pid}, State) ->
+    NewState = decrypt(p2p, IV, OnionCompactKey, Tag, CipherText, 0, undefined, undefined, undefined, undefined, Pid, State),
     {noreply, NewState};
 handle_cast({decrypt_radio, <<IV:2/binary,
                               OnionCompactKey:33/binary,
                               Tag:4/binary,
                               CipherText/binary>>,
              RSSI, SNR, _Timestamp, Frequency, Channel, DataRate}, State) ->
-    NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, State),
+    NewState = decrypt(radio, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, undefined, State),
     {noreply, NewState};
-handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate}, State) ->
-    NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, State),
+handle_cast({retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream}, State) ->
+    NewState = decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream, State),
     {noreply, NewState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -332,7 +335,7 @@ wait_for_block_(Fun, Count) ->
             wait_for_block_(Fun, Count - 1)
     end.
 
-decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
+decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream, #state{ecdh_fun=ECDHFun, chain = Chain}=State) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     Ledger = blockchain:ledger(Chain),
@@ -340,7 +343,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
         poc_not_found ->
             _ = erlang:spawn(fun() ->
                 case wait_for_block(fun() ->
-                    case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
+                    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
                         {ok, _} ->
                             true;
                         _ ->
@@ -348,7 +351,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                     end
                 end, 10) of
                     ok ->
-                        ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate);
+                        ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream);
                     {error, _} ->
                         lager:info([{poc_id, POCID}], "unable to locate POC ID ~p, dropping", [POCID]),
                         ok
@@ -412,14 +415,14 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                         ok ->
                                                             lager:info("sending receipt with observed power: ~p with radio power ~p", [EffectiveTxPower, TxPower]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, EffectiveTxPower, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, EffectiveTxPower, State);
                                                         {warning, {tx_power_corrected, CorrectedPower}} ->
                                                             %% Corrected power never takes into account antenna gain config in pkt forwarder so we
                                                             %% always add it back here
                                                             lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, with gain ~p; sending receipt with power ~p",
                                                                           [TxPower, CorrectedPower, AssertedGain, CorrectedPower + AssertedGain]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, CorrectedPower + AssertedGain, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower + AssertedGain, State);
                                                         {warning, {unknown, Other}} ->
                                                             %% This should not happen
                                                             lager:warning("What is this? ~p", [Other]),
@@ -440,7 +443,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                             TxPower = tx_power(Region),
                             erlang:spawn(fun() -> miner_lora:send_poc(Packet, immediate, ChannelSelectorFun, Spreading, TxPower) end),
                             erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                       RSSI, SNR, Frequency, Channel, DataRate, TxPower, State) end)
+                                                                       RSSI, SNR, Frequency, Channel, DataRate, Stream, TxPower, State) end)
                     end;
                 false ->
                     ok
@@ -456,7 +459,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
 try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     Ledger = blockchain:ledger(Chain),
-    case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
+    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, not_found} ->
             poc_not_found;
         {ok, PoC} ->

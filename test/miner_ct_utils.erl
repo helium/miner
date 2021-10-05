@@ -764,6 +764,10 @@ init_per_testcase(Mod, TestCase, Config0) ->
         case TestCase of
             restart_test ->
                 4;
+            poc_grpc_test ->
+                12;
+            poc_dist_v11_test ->
+                12;
             _ ->
                 get_config("T", 8)
         end,
@@ -779,6 +783,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 4;
             autoskip_on_timeout_test ->
                 4;
+            poc_dist_v11_test ->
+                7;
             _ ->
                 get_config("N", 7)
         end,
@@ -790,13 +796,15 @@ init_per_testcase(Mod, TestCase, Config0) ->
     BatchSize = get_config("BS", 500),
     Interval = get_config("INT", 5),
 
-    MinersAndPorts = miner_ct_utils:pmap(
-        fun(I) ->
+    MinersAndPorts = lists:reverse(lists:foldl(
+        fun(I, Acc) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {start_node(MinerName), {45000, 0, JsonRpcBase + I}}
+            [{start_node(MinerName), {45000, 0, JsonRpcBase + I}} | Acc]
         end,
+        [],
         lists:seq(1, TotalMiners)
-    ),
+    )),
+    ct:pal("MinersAndPorts: ~p",[MinersAndPorts]),
 
     case lists:any(fun({{error, _}, _}) -> true; (_) -> false end, MinersAndPorts) of
         true ->
@@ -807,10 +815,12 @@ init_per_testcase(Mod, TestCase, Config0) ->
             ok
     end,
 
-    Keys = miner_ct_utils:pmap(
-             fun({Miner, Ports}) ->
-                     make_keys(Miner, Ports)
-             end, MinersAndPorts),
+    Keys = lists:reverse(lists:foldl(
+             fun({Miner, Ports}, Acc) ->
+                 [make_keys(Miner, Ports) | Acc]
+             end, [], MinersAndPorts)),
+
+    ct:pal("Keys: ~p", [Keys]),
 
     {_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
@@ -824,9 +834,33 @@ init_per_testcase(Mod, TestCase, Config0) ->
                {default_routers, DefaultRouters},
                {port, Port}],
 
-    ConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, Options) end, Keys),
+    %% config nodes
+    ConfigResult =
+        case ?config(validator_cg, Config) of
+            true ->
+                %% split key sets into validators and miners
+                %% first batch of keys up to NumConsensusMembers will be validators, rest miners
+                {ValKeys, MinerKeys} = lists:split(NumConsensusMembers, Keys),
+                ct:pal("validator keys: ~p", [ValKeys]),
+                ct:pal("miner keys: ~p", [MinerKeys]),
+                _MinerConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{mode, gateway} | Options]) end, MinerKeys),
+                ValConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{mode, validator} | Options]) end, ValKeys),
+                ValConfigResult;
+            false ->
+                miner_ct_utils:pmap(fun(N) -> config_node(N, [{mode, gateway} | Options]) end, Keys)
+        end,
 
     Miners = [M || {M, _} <- MinersAndPorts],
+    {Validators, Gateways} =
+        case ?config(validator_cg, Config) of
+            true ->
+                lists:split(NumConsensusMembers, Miners);
+            _ ->
+                {[], Miners}
+        end,
+
+    ct:pal("Miners: ~p", [Miners]),
+
     %% check that the config loaded correctly on each miner
     true = lists:all(
         fun(ok) -> true;
@@ -851,6 +885,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     lists:foreach(fun(Miner)-> ct_rpc:call(Miner, application, set_env, [libp2p, node_aliases, MinerAliases]) end, Miners),
 
     Addrs = get_addrs(Miners),
+    ct:pal("Addrs: ~p", [Addrs]),
 
     miner_ct_utils:pmap(
       fun(Miner) ->
@@ -951,45 +986,90 @@ init_per_testcase(Mod, TestCase, Config0) ->
             GrpcPort = list_to_integer(binary_to_list(Libp2pPort)) + 1000,
             [{P2PAddr, {GrpcPort, false}} | Acc]
         end, [], Keys),
+
+    MinerDefaultValidators = lists:foldl(
+        fun({Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+            Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
+            TID = ct_rpc:call(Miner, blockchain_swarm, tid, []),
+            ListenAddrs = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm]),
+            [H | _ ] = _SortedAddrs = ct_rpc:call(Miner, libp2p_transport, sort_addrs, [TID, ListenAddrs]),
+            [_, _, _IP,_, Libp2pPort] = _Full = re:split(H, "/"),
+            GrpcPort = list_to_integer(binary_to_list(Libp2pPort)) + 1000,
+            [{P2PAddr, "127.0.0.1", GrpcPort} | Acc]
+        end, [], Keys),
+
     ct:pal("miner grpc port aliases ~p", [MinerGRPCPortAliases]),
     lists:foreach(fun(Miner)->
         ct_rpc:call(Miner, application, set_env, [sibyl, node_grpc_port_aliases, MinerGRPCPortAliases]),
         ct_rpc:call(Miner, application, set_env, [sibyl, poc_mgr_mod, miner_poc_mgr]),
-        ct_rpc:call(Miner, application, set_env, [sibyl, poc_report_handler, miner_poc_report_handler])
+        ct_rpc:call(Miner, application, set_env, [sibyl, poc_report_handler, miner_poc_report_handler]),
+        ct_rpc:call(Miner, application, set_env, [miner, default_validators, MinerDefaultValidators])
+
     end, Miners),
 
 
     %% accumulate the address of each miner
-    MinerTaggedAddresses = lists:foldl(
+    MinerTaggedAddresses = lists:reverse(lists:foldl(
         fun(Miner, Acc) ->
             PubKeyBin = ct_rpc:call(Miner, blockchain_swarm, pubkey_bin, []),
             [{Miner, PubKeyBin} | Acc]
         end,
         [],
         Miners
-    ),
+    )),
+    ct:pal("MinerTaggedAddresses: ~p", [MinerTaggedAddresses]),
 
     %% save a version of the address list with the miner and address tuple
     %% and then a version with just a list of addresses
     {_Keys, Addresses} = lists:unzip(MinerTaggedAddresses),
 
+    {ValidatorAddrs, GatewayAddrs} =
+        case ?config(validator_cg, Config) of
+            true ->
+                lists:split(NumConsensusMembers, Addresses);
+            _ ->
+                {[], Addresses}
+        end,
+
+    ct:pal("Validator Addrs: ~p", [ValidatorAddrs]),
+
+
     {ok, _} = ct_cover:add_nodes(Miners),
 
     %% wait until we get confirmation the miners are fully up
     %% which we are determining by the miner_consensus_mgr being registered
-    ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
+%%    ok = miner_ct_utils:wait_for_registration(Miners, miner_consensus_mgr),
 
-    UpdatedMinersAndPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
-                                              {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
+    {ValidatorPorts, GatewayPorts} =
+        case ?config(validator_cg, Config) of
+            true ->
+                lists:split(NumConsensusMembers, MinersAndPorts);
+            _ ->
+                {[], MinersAndPorts}
+        end,
+
+    UpdatedGatewayPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
+                                              {ok, RandomPort} = ct_rpc:call(Miner, miner_lora_light, port, []),
                                               ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
                                               {Miner, {TCPPort, RandomPort, JsonRpcPort}}
-                                      end, MinersAndPorts),
+                                      end, GatewayPorts),
+
+    UpdatedValidatorPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
+                                          {Miner, {TCPPort, ignore, JsonRpcPort}}
+                                  end, ValidatorPorts),
 
     [
         {miners, Miners},
+        {validators, Validators},
+        {gateways, Gateways},
+        {validator_addrs, ValidatorAddrs},
+        {gateway_addrs, GatewayAddrs},
         {addrs, Addrs},
         {keys, Keys},
-        {ports, UpdatedMinersAndPorts},
+        {ports, UpdatedValidatorPorts ++ UpdatedGatewayPorts},
+        {validator_ports, UpdatedValidatorPorts},
+        {gateway_ports, UpdatedGatewayPorts},
         {node_options, Options},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
@@ -1003,17 +1083,19 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ].
 
 get_addrs(Miners) ->
-    miner_ct_utils:pmap(
-      fun(Miner) ->
+    lists:foldl(
+      fun(Miner, Acc) ->
               Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, [], 2000),
+              ct:pal("swarm ~p ~p", [Miner, Swarm]),
               true = miner_ct_utils:wait_until(
                        fun() ->
-                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000)) > 0
-                       end),
-              ct:pal("swarm ~p ~p", [Miner, Swarm]),
-              [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 2000),
-              H
-      end, Miners).
+                               length(ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 5000)) > 0
+                       end, 20, 1000),
+
+              [H|_] = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm], 5000),
+              ct:pal("miner ~p has addr ~p", [Miner, H]),
+              [H | Acc]
+      end, [], Miners).
 
 make_keys(Miner, Ports) ->
     #{secret := GPriv, public := GPub} =
@@ -1032,6 +1114,7 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     Curve = proplists:get_value(curve, Options),
     DefaultRouters = proplists:get_value(default_routers, Options),
     Port = proplists:get_value(port, Options),
+    Mode = proplists:get_value(mode, Options, gateway),
 
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
@@ -1068,7 +1151,7 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     %% set miner configuration
     ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
     ct_rpc:call(Miner, application, set_env, [miner, jsonrpc_port, JSONRPCPort]),
-    ct_rpc:call(Miner, application, set_env, [miner, mode, validator]),
+    ct_rpc:call(Miner, application, set_env, [miner, mode, Mode]),
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),
