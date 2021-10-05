@@ -56,7 +56,8 @@
     miner_name :: binary(),
     sender :: undefined | {pid(), term()},
     packet_id = 0 :: non_neg_integer(),
-    region_params               %% TODO: maybe a better home for this data ?
+    region_params,
+    region
 }).
 
 -define(BLOCK_RETRY_COUNT, 10).
@@ -123,20 +124,15 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     Address = blockchain_swarm:pubkey_bin(),
     Receipt = case application:get_env(miner, data_aggregation_version, 3) of
-                   {ok, 1} ->
+                   1 ->
                        blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
-%%                       #{gateway=>Address, timestamp=>Time, signal=>RSSI, data=>Data, origin=>Type, snr=>SNR, frequency=>Frequency, datarate => DataRate};
-                   {ok, 2} ->
+                   2 ->
                        blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate);
-%%                       #{gateway=>Address, timestamp=>Time, signal=>RSSI, data=>Data, origin=>Type, snr=>SNR, frequency=>Frequency, channel=>Channel, datarate=>DataRate};
-                   {ok, 3} ->
+                   V when V >= 3 ->
                        R0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate),
                        blockchain_poc_receipt_v1:tx_power(R0, Power);
-
-%%                       #{gateway=>Address, timestamp=>Time, signal=>RSSI, data=>Data, origin=>Type, snr=>SNR, frequency=>Frequency, channel=>Channel, datarate=>DataRate, tx_power=>Power};
                    _ ->
                        blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
-%%                       #{gateway=>Address, timestamp=>Time, signal=>RSSI, data=>Data, origin=>Type}
                end,
 
     %% TODO: put retry mechanism back in place
@@ -179,18 +175,14 @@ send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _Channel, 
 send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, #state{}= _State, _Retry) ->
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-    %% TODO: use records rather than maps for clientside grpc calls
-    Witness = case application:get_env(miner, data_aggregation_version, 3) of
-                   {ok, V} when V >= 2 ->
+    Witness = case application:get_env(miner, data_aggregation_version, 2) of
+                   V when V >= 2 ->
                        %% Send channel + datarate with data_aggregation_version >= 2
                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
-%%                        #{gateway => SelfPubKeyBin, timestamp => Time, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency};
-                   {ok, 1} ->
+                   1 ->
                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
-%%                        #{gateway => SelfPubKeyBin, timestamp => Time, signal => RSSI, packet_hash => Data, snr => SNR, frequency => Frequency, channel => Channel, datarate => DataRate};
                    _ ->
                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
-%%                        #{gateway => SelfPubKeyBin, timestamp => Time, signal => RSSI, packet_hash => Data}
                end,
     %% TODO: put retry mechanism back in place
     miner_poc_grpc_client:send_report(witness, Witness, OnionKeyHash).
@@ -255,9 +247,9 @@ handle_info(init, #state{region_params = undefined} = State) ->
             lager:info("failed to get regional params, will try again in a bit", []),
             erlang:send_after(500, self(), init),
             {noreply, State};
-        {ok, #gateway_poc_region_params_resp_v1_pb{params = #blockchain_region_params_v1_pb{region_params = RegionParams}} = Resp, _Details} ->
+        {ok, #gateway_poc_region_params_resp_v1_pb{region = Region, params = #blockchain_region_params_v1_pb{region_params = RegionParams}} = Resp, _Details} ->
             lager:info("got regional params ~p", [Resp]),
-            {noreply, State#state{region_params = RegionParams}}
+            {noreply, State#state{region_params = RegionParams, region = Region}}
     end;
 handle_info(init, State) ->
     {noreply, State};
@@ -268,7 +260,7 @@ handle_info(_Msg, State) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, #state{ecdh_fun=ECDHFun, region_params = RegionParams}=State) ->
+decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, #state{ecdh_fun=ECDHFun, region_params = RegionParams, region = Region}=State) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     lager:info("attempting decrypt of type ~p for onion key hash ~p", [Type, OnionKeyHash]),
@@ -297,7 +289,6 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                     ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem length(FreqList)) + 1, FreqList) end,
-                    Region = application:get_env(miner, region, 'US915'),
 
                     %% NOTE: poc version used to be derived from ledger
                     %%       as we wont be following the chain, cant use that
