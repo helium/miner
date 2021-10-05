@@ -748,6 +748,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     Config = init_base_dir_config(Mod, TestCase, Config0),
     BaseDir = ?config(base_dir, Config),
     LogDir = ?config(log_dir, Config),
+    NumValidators = ?config(num_validators, Config),
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -784,7 +785,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
             autoskip_on_timeout_test ->
                 4;
             poc_dist_v11_test ->
-                7;
+                4;
             _ ->
                 get_config("N", 7)
         end,
@@ -840,7 +841,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
             true ->
                 %% split key sets into validators and miners
                 %% first batch of keys up to NumConsensusMembers will be validators, rest miners
-                {ValKeys, MinerKeys} = lists:split(NumConsensusMembers, Keys),
+                {ValKeys, MinerKeys} = lists:split(NumValidators, Keys),
                 ct:pal("validator keys: ~p", [ValKeys]),
                 ct:pal("miner keys: ~p", [MinerKeys]),
                 _MinerConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{mode, gateway} | Options]) end, MinerKeys),
@@ -854,7 +855,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {Validators, Gateways} =
         case ?config(validator_cg, Config) of
             true ->
-                lists:split(NumConsensusMembers, Miners);
+                lists:split(NumValidators, Miners);
             _ ->
                 {[], Miners}
         end,
@@ -1004,7 +1005,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
         ct_rpc:call(Miner, application, set_env, [sibyl, node_grpc_port_aliases, MinerGRPCPortAliases]),
         ct_rpc:call(Miner, application, set_env, [sibyl, poc_mgr_mod, miner_poc_mgr]),
         ct_rpc:call(Miner, application, set_env, [sibyl, poc_report_handler, miner_poc_report_handler]),
-        ct_rpc:call(Miner, application, set_env, [miner, default_validators, MinerDefaultValidators])
+        ct_rpc:call(Miner, application, set_env, [miner, default_validators, MinerDefaultValidators]),
+        ct_rpc:call(Miner, application, set_env, [miner, data_aggregation_version, 3])
 
     end, Miners),
 
@@ -1027,7 +1029,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {ValidatorAddrs, GatewayAddrs} =
         case ?config(validator_cg, Config) of
             true ->
-                lists:split(NumConsensusMembers, Addresses);
+                lists:split(NumValidators, Addresses);
             _ ->
                 {[], Addresses}
         end,
@@ -1044,7 +1046,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     {ValidatorPorts, GatewayPorts} =
         case ?config(validator_cg, Config) of
             true ->
-                lists:split(NumConsensusMembers, MinersAndPorts);
+                lists:split(NumValidators, MinersAndPorts);
             _ ->
                 {[], MinersAndPorts}
         end,
