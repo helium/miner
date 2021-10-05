@@ -56,7 +56,7 @@ all() ->
      ].
 
 init_per_testcase(poc_dist_v11_test = TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(?MODULE, TestCase, [{validator_cg, true} | Config]);
+    miner_ct_utils:init_per_testcase(?MODULE, TestCase, [{validator_cg, true}, {num_validators, 8} | Config]);
 init_per_testcase(TestCase, Config0) ->
     miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0).
 
