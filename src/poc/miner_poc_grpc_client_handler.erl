@@ -3,10 +3,13 @@
 %%
 -module(miner_poc_grpc_client_handler).
 
+-include("src/grpc/autogen/client/gateway_client_pb.hrl").
+
 %% ------------------------------------------------------------------
 %% Stream Exports
 %% ------------------------------------------------------------------
 -export([
+    init/0,
     handle_msg/2,
     handle_info/2
 ]).
@@ -21,30 +24,40 @@
 -endif.
 
 -export([
-    connect/3
+    connect/5
 ]).
+
+init()->
+    [].
 
 -ifdef(TEST).
 connect(PeerP2P) ->
+    {ok, PubKey, SigFun, _} = blockchain_swarm:keys(),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     %% get the test specific grpc port for the peer
     %% ( which is going to be the libp2p port + 1000 )
     %% see miner_ct_utils for more info
     {ok, PeerGrpcPort} = p2p_port_to_grpc_port(PeerP2P),
-    connect(PeerP2P, "127.0.0.1", PeerGrpcPort).
+    connect(PeerP2P, "127.0.0.1", PeerGrpcPort, PubKeyBin, SigFun).
 -endif.
 
-connect(PeerP2P, PeerIP, GRPCPort) ->
+connect(PeerP2P, PeerIP, GRPCPort, SelfPubKeyBin, SelfSigFun) ->
     try
         lager:info("connecting over grpc to peer ~p via IP ~p and port ~p", [PeerP2P, PeerIP, GRPCPort]),
-        {ok, Connection} = grpc_client:connect(tcp, PeerIP, GRPCPort),
-        grpc_client_stream_custom:new(
+        {ok, Connection} = grpc_client_custom:connect(tcp, PeerIP, GRPCPort),
+        {ok, Stream} = grpc_client_stream_custom:new(
             Connection,
             'helium.gateway',
             stream,
             gateway_client_pb,
             [],
             ?MODULE
-        )
+        ),
+        Req = #gateway_poc_req_v1_pb{address = SelfPubKeyBin, signature = <<>>},
+        ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
+        Req2 = Req#gateway_poc_req_v1_pb{signature = SelfSigFun(ReqEncoded)},
+        grpc_client_custom:send(Stream, #gateway_stream_req_v1_pb{msg = {poc_req, Req2}}),
+        {ok, Connection, Stream}
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect over grpc to peer ~p.  Reason ~p Stack ~p", [PeerP2P, _Reason, _Stack]),
         {error, failed_to_connect_to_grpc_peer}
@@ -53,17 +66,18 @@ connect(PeerP2P, PeerIP, GRPCPort) ->
 
 %% TODO: handle headers
 handle_msg({headers, _Headers}, StreamState) ->
-    lager:debug("*** grpc client ignoring headers ~p", [_Headers]),
+    lager:info("*** grpc client ignoring headers ~p", [_Headers]),
     StreamState;
 %% TODO: handle eof
 handle_msg(eof, StreamState) ->
-    lager:debug("*** grpc client received eof", []),
+    lager:info("*** grpc client received eof", []),
     StreamState;
-handle_msg({data, #{msg := {poc_challenge_resp, ChallengeNotification}, height := NotificationHeight, signature := ChallengerSig}} = _Msg, StreamState) ->
-    lager:debug("grpc client received poc_challenge_resp msg ~p", [_Msg]),
+handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = _Msg, StreamState) ->
+    lager:info("grpc client received poc_challenge_resp msg ~p", [_Msg]),
     ok = miner_poc_grpc_client:check_target(ChallengeNotification, NotificationHeight, ChallengerSig),
     StreamState;
 handle_msg({data, _Msg}, StreamState) ->
+    lager:info("grpc client received unexpected msg ~p",[_Msg]),
     StreamState.
 
 handle_info(_Msg, StreamState) ->

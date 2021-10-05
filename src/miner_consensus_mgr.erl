@@ -177,6 +177,7 @@ einfo() ->
 %%%===================================================================
 
 init(_Args) ->
+    lager:info("Starting consensus_mgr", []),
     ok = blockchain_event:add_handler(self()),
     erlang:send_after(timer:seconds(1), self(), monitor_miner),
     case  blockchain_worker:blockchain() of

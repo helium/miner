@@ -68,7 +68,7 @@ handle_data(client, Data, State) ->
     {stop, normal, State};
 handle_data(server, Data, State) ->
     lager:debug("onion_server, got data: ~p~n", [Data]),
-    ok = miner_onion_server:decrypt_p2p(Data, self()),
+    ok = miner_onion_server_light:decrypt_p2p(Data, self()),
     {noreply, State}.
 
 handle_info(server, {send, Data}, State) ->
