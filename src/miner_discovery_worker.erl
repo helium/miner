@@ -46,7 +46,7 @@ init([Packets]) ->
         length(Packets),
         ?DEFAULT_TRANSMIT_DELAY_MS
     ]),
-    {ok, Region} = miner_lora:region(),
+    {ok, Region} = miner_lora_light:region(),
     TxPower = tx_power(Region),
     timer:send_after(?DEFAULT_TRANSMIT_DELAY_MS, self(), tick),
     {ok, #state{
@@ -75,7 +75,7 @@ handle_info(
         lists:nth(rand:uniform(length(FreqList)), FreqList)
     end,
     Spreading = spreading(Region, byte_size(Packet)),
-    case miner_lora:send_poc(
+    case miner_lora_light:send_poc(
         Packet,
         immediate,
         ChannelSelectorFun,

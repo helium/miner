@@ -70,7 +70,7 @@ handle_data(server, Data, State) ->
                 Sig
             ]);
         true ->
-            case miner_lora:location_ok() of
+            case miner_lora_light:location_ok() of
                 true ->
                     miner_discovery_worker:start(Packets);
                 false ->

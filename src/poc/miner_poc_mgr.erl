@@ -452,7 +452,6 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
             {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
             {ok, B} = blockchain:get_block(LastChallenge, Chain),
             Time = blockchain_block:time(B),
-            %% TODO - need to handle older paths ?
             Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
             lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
@@ -461,7 +460,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                 N + 1
             ),
             OnionList = lists:zip([libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
-            {Onion, Layers} = blockchain_poc_packet:build(Keys, IV, OnionList, BlockHash, Ledger),
+            {Onion, Layers} = blockchain_poc_packet:build(Keys, IV, OnionList, BlockHash, <<"ignore_ledger">>),
             [_|LayerHashes] = [crypto:hash(sha256, L) || L <- Layers],
             Challengees = lists:zip(Path, LayerData),
             PacketHashes = lists:zip(Path, LayerHashes),
@@ -538,7 +537,7 @@ purge_local_pocs(
     LocalPOCs = local_pocs(State),
     lists:foreach(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
-            case (BlockHeight - POCStartHeight) > ?POC_TIMEOUT of
+            case (BlockHeight - POCStartHeight) == ?POC_TIMEOUT of
                 true ->
                     lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received

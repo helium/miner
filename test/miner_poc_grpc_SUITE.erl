@@ -49,7 +49,7 @@ init_per_testcase(_TestCase, Config0) ->
         {key, {LocalNodePubKey, LocalNodeSigFun, LocalNodeECDHFun}},
         {seed_nodes, []},
         {port, 0},
-        {num_consensus_members, 7},
+        {num_consensus_members, 4},
         {base_dir, BaseDir}
     ],
 
