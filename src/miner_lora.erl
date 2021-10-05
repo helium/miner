@@ -424,7 +424,6 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     JSON/binary>>, IP, Port, RxInstantLocal_us,
                     #state{socket=Socket, gateways=Gateways,
                            reg_domain_confirmed = RegDomainConfirmed}=State) ->
-    lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
             {ok, #gateway{received=Received}=G} ->
@@ -448,7 +447,6 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
-    lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
             {ok, #gateway{received=Received}=G} ->
@@ -462,7 +460,6 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     ?TX_ACK:8/integer-unsigned,
                     _MAC:64/integer,
                     MaybeJSON/binary>>, _IP, _Port, _RxInstantLocal_us, #state{packet_timers=Timers, reg_throttle=Throttle}=State0) ->
-    lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
     case maps:find(Token, Timers) of
         {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, _HlmPacket}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
             _ = erlang:cancel_timer(Ref),
@@ -475,7 +472,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             State1 = State0#state{packet_timers=maps:remove(Token, Timers)},
             {Reply, NewState} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
-                    lager:info("packet sent ok"),
+                    lager:debug("packet sent ok"),
                     Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
                     {ok, State1#state{reg_throttle=Throttle1}};
                 <<"COLLISION_", _/binary>> ->
