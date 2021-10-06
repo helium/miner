@@ -267,10 +267,20 @@ signed_block(Signatures, BinBlock) ->
             lager:info("sending the gossiped block to other workers"),
             Swarm = blockchain_swarm:swarm(),
             SwarmTID = blockchain_swarm:tid(),
+            Data =
+                case application:get_env(blockchain, gossip_version, 1) of
+                    1 ->
+                        blockchain_gossip_handler:gossip_data_v1(SwarmTID, Block);
+                    2 ->
+                        Height = blockchain_block:height(Block),
+                        {ok, #block_info{hash = Hash}} = blockchain:get_block_info(Height, Chain),
+                        blockchain_gossip_handler:gossip_data_v2(SwarmTID, Hash, Height)
+                end,
+
             libp2p_group_gossip:send(
               libp2p_swarm:gossip_group(SwarmTID),
               ?GOSSIP_PROTOCOL_V1,
-              blockchain_gossip_handler:gossip_data(SwarmTID, Block)
+              Data
              ),
             {Signatories, _} = lists:unzip(blockchain_block:signatures(Block)),
 
@@ -278,7 +288,12 @@ signed_block(Signatures, BinBlock) ->
             %% FF non signatory consensus members
             lists:foreach(
               fun(Member) ->
-                      spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, Chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
+                      spawn(fun() ->
+                                    blockchain_fastforward_handler:dial(
+                                      Swarm,
+                                      Chain,
+                                      libp2p_crypto:pubkey_bin_to_p2p(Member))
+                            end)
               end, ConsensusAddrs -- Signatories);
 
         Error ->
