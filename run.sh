@@ -104,7 +104,7 @@ while [ $LOOP -gt 0 ]; do
     for node in ${nodes[@]}; do
         if [[ $(./_build/testdev\+miner$node/rel/miner$node/bin/miner$node info in_consensus) = *true* ]]; then
             ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node genesis export $exported_genesis_file
-            if [ $? -eq 0 ]; then
+            if [ $? -eq 0 -a -f $exported_genesis_file ]; then
                 LOOP=0
                 break
             else
@@ -112,6 +112,7 @@ while [ $LOOP -gt 0 ]; do
             fi
         fi
     done
+    sleep 5
 done
 
 if [ -f $exported_genesis_file ]; then
@@ -120,6 +121,14 @@ if [ -f $exported_genesis_file ]; then
     echo "Loading Genesis block on $non_consensus_node"
     for node in $non_consensus_node; do
         ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node genesis load $exported_genesis_file
+    done
+
+    # check everyone has the chain now
+    for node in ${nodes[@]}; do
+        ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node info height > /dev/null
+        if [[ $? -ne 0 ]]; then
+            ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node genesis load $exported_genesis_file
+        fi
     done
 else
     echo "couldn't export genesis file"
