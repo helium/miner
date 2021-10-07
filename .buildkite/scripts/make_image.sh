@@ -21,7 +21,7 @@ fi
 VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//")
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
-if [[ $TEST_BUILD ]]; then
+if [[ ! $TEST_BUILD -eq "0" ]]; then
     REGISTRY_NAME="test-builds"
     DOCKER_BUILD_ARGS="--build-arg REBAR_DIAGNOSTIC=1 $DOCKER_BUILD_ARGS"
 fi
