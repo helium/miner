@@ -223,7 +223,8 @@ info_region_usage() ->
     ].
 
 info_region(["info", "region"], [], []) ->
-    case miner_lora_light:region() of
+    LoraMod = application:get_env(miner, lora_mod, miner_lora),
+    case LoraMod:region() of
         {ok, undefined} ->
             {exit_status, 1, [clique_status:text("undefined")]};
         {ok, Region} ->
