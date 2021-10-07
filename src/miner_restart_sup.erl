@@ -50,16 +50,17 @@ init([SigFun, ECDHFun]) ->
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
     BaseDir = application:get_env(blockchain, base_dir, "data"),
+
     %% Miner Options
 
     %% TODO: remove onion servers if a validator but breaks a lot of tests
     %%       leaving for another day
-    OnionServer =
+    OnionOpts =
         case application:get_env(miner, radio_device, undefined) of
             {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
                 %% check if we are overriding/forcing the region ( for lora )
                 RegionOverRide = check_for_region_override(),
-                OnionOpts = #{
+                #{
                     radio_udp_bind_ip => RadioBindIP,
                     radio_udp_bind_port => RadioBindPort,
                     radio_udp_send_ip => RadioSendIP,
@@ -67,11 +68,9 @@ init([SigFun, ECDHFun]) ->
                     ecdh_fun => ECDHFun,
                     sig_fun => SigFun,
                     region_override => RegionOverRide
-                },
-                [?WORKER(miner_onion_server_light, [OnionOpts]),
-                 ?WORKER(miner_lora_light, [OnionOpts])];
+                };
             _ ->
-                []
+                #{}
         end,
 
     EbusServer =
@@ -80,27 +79,67 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    ValOrMinerServers =
-        case application:get_env(miner, mode, gateway) of
-            validator ->
+    POCTransport = application:get_env(miner, poc_transport, p2p),
+    MinerMode = application:get_env(miner, mode, gateway),
+    lager:info("*** transport mode: ~p, miner mode: ~p", [POCTransport, MinerMode]),
+
+    POCServers =
+        case {MinerMode, POCTransport} of
+            {validator, grpc} ->
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
                 PocMgrTab = miner_poc_mgr:make_ets_table(),
                 POCMgrOpts = #{tab1 => PocMgrTab},
-                POCDBOpts = #{base_dir => BaseDir,
+                POCOpts = #{base_dir => BaseDir,
                             cfs => ["default",
                                     "poc_mgr_cf"
                                    ]
                            },
-                [?WORKER(miner_val_heartbeat, []),
-                 ?WORKER(miner_poc_mgr_db_owner, [POCDBOpts]),
-                 ?WORKER(miner_poc_mgr, [POCMgrOpts]),
-                 ?SUP(sibyl_sup, [])];
-            _ ->
-                OnionServer ++
                 [
+                    ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora, [OnionOpts]),
+                    ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
+                    ?WORKER(miner_poc_mgr, [POCMgrOpts])
+                ];
+            {validator, _} ->
+                POCOpts = #{
+                    base_dir => BaseDir
+                   },
+                [
+                    ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora, [OnionOpts]),
+                    ?WORKER(miner_poc_statem, [POCOpts])
+                ];
+            {gateway, grpc} ->
+                application:set_env(miner, lora_mod, miner_lora_light),
+                application:set_env(miner, onion_server_mod, miner_onion_server_light),
+                [
+                    ?WORKER(miner_onion_server_light, [OnionOpts]),
+                    ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_poc_grpc_client, [])
+                ];
+            {gateway, p2p} ->
+                application:set_env(miner, lora_mod, miner_lora),
+                application:set_env(miner, onion_server_mod, miner_onion_server),
+                POCOpts = #{
+                    base_dir => BaseDir
+                   },
+                [
+                    ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora, [OnionOpts]),
+                    ?WORKER(miner_poc_statem, [POCOpts])
                 ]
+        end,
+
+    ValServers =
+        case MinerMode of
+            validator ->
+                [
+                    ?WORKER(miner_val_heartbeat, []),
+                    ?SUP(sibyl_sup, [POCTransport])
+                ];
+            _ ->
+                []
         end,
 
     JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
@@ -115,7 +154,8 @@ init([SigFun, ECDHFun]) ->
                          {ip, JsonRpcIp},
                          {port, JsonRpcPort}]])
          ] ++
-        ValOrMinerServers ++
+        POCServers ++
+        ValServers ++
         EbusServer,
     {ok, {SupFlags, ChildSpecs}}.
 

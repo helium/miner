@@ -35,7 +35,7 @@ start(_StartType, _StartArgs) ->
         case application:get_env(miner, mode, validator) of
             %% follow mode defaults to false for miner validator mode
             validator -> false;
-            gateway ->
+            _ ->
                 case application:get_env(blockchain, follow_mode) of
                     undefined ->
                         %% check touchfile, since some people are using it

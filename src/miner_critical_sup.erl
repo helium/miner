@@ -66,6 +66,18 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
+    %% if POCs are over grpc and we are not a validator then dont start the chain
+    POCTransport = application:get_env(miner, poc_transport, p2p),
+    MinerMode = application:get_env(miner, mode, gateway),
+    case {MinerMode, POCTransport} of
+        {validator, _} ->
+            ok;
+        {_, grpc} ->
+            application:set_env(blockchain, autoload, false);
+        _ ->
+            ok
+    end,
+
     BlockchainOpts = [
         {key, {PublicKey, SigFun, ECDHFun}},
         {seed_nodes, SeedNodes ++ SeedAddresses},
@@ -74,7 +86,8 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
         {num_consensus_members, NumConsensusMembers},
         {base_dir, BaseDir},
         {update_dir, application:get_env(miner, update_dir, undefined)},
-        {group_delete_predicate, fun miner_consensus_mgr:group_predicate/1}
+        {group_delete_predicate, fun miner_consensus_mgr:group_predicate/1},
+        {}
     ],
 
     ConsensusMgr =

@@ -1,3 +1,22 @@
+%% NOTE:
+%% copied and modified from https://github.com/Bluehouse-Technology/grpc_client/blob/master/src/grpc_client.erl
+%% requires the gpb modules to have been created with the following config:
+%%{gpb_opts, [
+%%        {rename,{msg_fqname,base_name}},
+%%        use_packages,
+%%        {report_errors, false},
+%%        {descriptor, false},
+%%        {recursive, false},
+%%        {i, "_build/default/lib/helium_proto/src"},
+%%        {o, "src/grpc/autogen/client"},
+%%        {module_name_prefix, ""},
+%%        {module_name_suffix, "_client_pb"},
+%%        {rename, {msg_name, {suffix, "_pb"}}},
+%%        {strings_as_binaries, false},
+%%        type_specs,
+%%        {defs_as_proplists, true}
+%%]}
+
 %%%-------------------------------------------------------------------
 %%% Licensed to the Apache Software Foundation (ASF) under one
 %%% or more contributor license agreements.  See the NOTICE file

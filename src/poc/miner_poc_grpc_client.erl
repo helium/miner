@@ -14,7 +14,7 @@
 -export([
     start_link/0,
     connection/0,
-    check_target/3,
+    check_target/6,
     send_report/3,
     region_params/0
 ]).
@@ -53,8 +53,8 @@ connection() ->
 region_params() ->
     gen_server:call(?MODULE, region_params, infinity).
 
-check_target(ChallengeNotification, NotificationHeight, ChallengerSig) ->
-    gen_server:cast(?MODULE, {check_target, ChallengeNotification, NotificationHeight, ChallengerSig}).
+check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) ->
+    gen_server:cast(?MODULE, {check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}).
 
 send_report(ReportType, Report, OnionKeyHash)->
     gen_server:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash}).
@@ -66,7 +66,7 @@ init(_Args) ->
     lager:info("starting ~p", [?MODULE]),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     {ok, _, SigFun, _} = blockchain_swarm:keys(),
-    erlang:send_after(500, self(), connect_stream),
+    erlang:send_after(500, self(), connect_grpc),
     {ok, #state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SigFun}}.
 
 handle_call(connection, _From, State = #state{connection = Connection}) ->
@@ -78,21 +78,21 @@ handle_call(region_params, _From, State = #state{self_pub_key_bin = Addr, self_s
 handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
 
-handle_cast({check_target, ChallengeNotification, NotificationHeight, ChallengerSig}, #state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
-    %% get the challenger route details from the challenge msg we recevied
-    #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI}} = ChallengeNotification,
+handle_cast({check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}, #state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
     %% split the URI into its IP and port parts
-    #{host := _IP, port := Port, scheme := _Scheme} = uri_string:parse(URI),
+    #{host := _IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
     %% build the request
-    Req = build_check_target_req(NotificationHeight, ChallengerSig, ChallengeNotification, SelfPubKeyBin, SelfSigFun),
-%%    {ok, ChallengerConnection} = grpc_client_custom:connect(tcp, "127.0.0.1", Port),
-    %% TODO: verify headers
+    Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
     case send_grpc_unary_req("127.0.0.1", Port, Req, 'check_challenge_target') of
         {ok, Resp, #{height := ResponseHeight, signature := ResponseSig} = _Details} ->
             lager:info("checked target results ~p", [Resp]),
             %% handle the result as to if we are the target or not
             ok = handle_check_target_resp(Resp, ResponseHeight, ResponseSig);
-        _ ->
+        {grpc_error, Reason} ->
+            lager:error("failed to check target.  URI: ~p, reason: ~p", [ChallengerURI, Reason]),
+            ok;
+        {error, Reason, _} ->
+            lager:error("failed to check target.  URI: ~p, reason: ~p", [ChallengerURI, Reason]),
             ok
     end,
     {noreply, State};
@@ -103,18 +103,23 @@ handle_cast({send_report, ReportType, Report, OnionKeyHash}, #state{connection =
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(connect_stream, State) ->
+handle_info(connect_grpc, State) ->
     State0 = connect(State),
     {noreply, State0};
+handle_info(connect_poc_stream, State) ->
+    State0 = connect_poc_stream(State),
+    {noreply, State0};
+
 handle_info({'DOWN', Ref, process, _, Reason}, State = #state{conn_monitor_ref = Ref, connection = Connection}) ->
     lager:warning("GRPC connection to validator is down, reconnecting.  Reason: ~p", [Reason]),
     _ = grpc_client_custom:stop_connection(Connection),
     State0 = connect(State),
     {noreply, State0};
-handle_info({'DOWN', Ref, process, _, Reason}, State = #state{stream_monitor_ref = Ref, connection =  Connection}) ->
+handle_info({'DOWN', Ref, process, _, Reason}, State = #state{stream_monitor_ref = Ref}) ->
+    %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
+    %% so if it goes down start it back up again
     lager:warning("GRPC stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
-    _ = grpc_client_custom:stop_connection(Connection),
-    State0 = connect(State),
+    State0 = connect_poc_stream(State),
     {noreply, State0};
 
 handle_info(_Info, State = #state{}) ->
@@ -133,21 +138,38 @@ connect(#state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = St
         %% TODO: agree on approach to default validators, set in config, pull from peerbook or other
         {P2PAddr, PublicIP, GRPCPort} = lists:nth(rand:uniform(length(DefaultValidators)), DefaultValidators),
         lager:info("connecting to validator, p2paddr: ~p, ip: ~p, port: ~p", [P2PAddr, PublicIP, GRPCPort]),
-        case miner_poc_grpc_client_handler:connect(P2PAddr, PublicIP, GRPCPort, SelfPubKeyBin, SelfSigFun) of
+        case miner_poc_grpc_client_handler:connect(P2PAddr, PublicIP, GRPCPort) of
             {error, _} ->
-                erlang:send_after(500, self(), connect_stream),
+                erlang:send_after(1000, self(), connect_grpc),
                 State;
-            {ok, Connection, Stream} ->
+            {ok, Connection} ->
                 lager:info("successfully connected to validator via connection ~p", [Connection]),
                 #{http_connection := ConnectionPid} = Connection,
-                M1 = erlang:monitor(process, ConnectionPid),
-                M2 = erlang:monitor(process, Stream),
-                %% subscribe to POC msgs
-                State#state{connection = Connection, connection_pid = ConnectionPid, conn_monitor_ref = M1, stream_monitor_ref = M2, validator_p2p_addr = P2PAddr, validator_public_ip = PublicIP, validator_grpc_port = GRPCPort}
+                M = erlang:monitor(process, ConnectionPid),
+                erlang:send_after(1000, self(), connect_poc_stream),
+                State#state{connection = Connection, connection_pid = ConnectionPid, conn_monitor_ref = M, validator_p2p_addr = P2PAddr, validator_public_ip = PublicIP, validator_grpc_port = GRPCPort}
         end
     catch X:Y ->
         lager:info("failed to connect to validator, will try again in a bit. Reason: ~p, Details: ~p", [X, Y]),
-        erlang:send_after(500, self(), connect_stream),
+        erlang:send_after(1000, self(), connect_grpc),
+        State
+    end.
+
+connect_poc_stream(#state{connection = Connection, self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
+    try
+        lager:info("establishing POC stream on connection ~p", [Connection]),
+        case miner_poc_grpc_client_handler:poc_stream(Connection, SelfPubKeyBin, SelfSigFun) of
+            {error, _} ->
+                erlang:send_after(3000, self(), connect_poc_stream),
+                State;
+            {ok, Stream} ->
+                lager:info("successfully connected stream ~p on connection ~p", [Stream, Connection]),
+                M = erlang:monitor(process, Stream),
+                State#state{stream_monitor_ref = M, stream_pid = Stream}
+        end
+    catch _Class:_Error ->
+        lager:info("failed to establish poc stream on connection ~p, will try again in a bit. Reason: ~p, Details: ~p", [Connection, _Class, _Error]),
+        erlang:send_after(3000, self(), connect_poc_stream),
         State
     end.
 
@@ -221,10 +243,9 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
             {grpc_error, req_failed}
     end.
 
-build_check_target_req(ChallengeHeight, ChallengerSig, ChallengeMsg, MyPubKeyBin, SigFun) ->
-    #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{pub_key = ChallengerPubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeMsg,
+build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, ChallengeHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun) ->
     Req = #gateway_poc_check_challenge_target_req_v1_pb{
-        address = MyPubKeyBin,
+        address = SelfPubKeyBin,
         challenger = ChallengerPubKeyBin,
         block_hash = BlockHash,
         onion_key_hash = OnionKeyHash,
@@ -234,7 +255,7 @@ build_check_target_req(ChallengeHeight, ChallengerSig, ChallengeMsg, MyPubKeyBin
         challengee_sig = <<>>
     },
     ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_check_challenge_target_req_v1_pb),
-    Req#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = SigFun(ReqEncoded)}.
+    Req#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = SelfSigFun(ReqEncoded)}.
 
 build_region_params_req(Address, SigFun) ->
     Req = #gateway_poc_region_params_req_v1_pb{
