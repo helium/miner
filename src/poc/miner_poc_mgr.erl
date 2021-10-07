@@ -169,6 +169,7 @@ report(Report, OnionKeyHash, Peer, P2PAddr) ->
 %% gen_server functions
 %% ------------------------------------------------------------------
 init(_Args) ->
+    lager:info("starting ~p", [?MODULE]),
     ok = blockchain_event:add_handler(self()),
     erlang:send_after(500, self(), init),
     {ok, PubKey, SigFun, _ECDHFun} = blockchain_swarm:keys(),
