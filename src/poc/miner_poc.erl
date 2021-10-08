@@ -23,7 +23,7 @@ dial_framed_stream(SwarmTID, Address, Args) ->
         SwarmTID,
         Address,
         ?POC_VERSION,
-        miner_poc_report_handler,
+        get_handler(),
         Args
     ).
 
@@ -36,5 +36,11 @@ add_stream_handler(SwarmTID) ->
     libp2p_swarm:add_stream_handler(
         SwarmTID,
         ?POC_VERSION,
-        {libp2p_framed_stream, server, [miner_poc_report_handler, self(), SwarmTID]}
+        {libp2p_framed_stream, server, [get_handler(), self(), SwarmTID]}
     ).
+
+get_handler()->
+    case application:get_env(miner, poc_transport, p2p) of
+        grpc -> miner_poc_report_handler;
+        _ -> miner_poc_handler
+    end.
