@@ -1391,7 +1391,7 @@ make_vars(Keys, Map, Mode) ->
               ?h3_max_grid_distance => 13,
               ?h3_exclusion_ring_dist => 2,
               ?poc_challenge_interval => 10,
-              ?poc_version => 8,
+              ?poc_version => 3,
               ?poc_path_limit => 7,
               ?poc_typo_fixes => true,
               ?sc_grace_blocks => 4,
