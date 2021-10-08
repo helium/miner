@@ -71,6 +71,7 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
     MinerMode = application:get_env(miner, mode, gateway),
     case {MinerMode, POCTransport} of
         {gateway, grpc} ->
+            lager:info("grpc gateway, not loading chain"),
             application:set_env(blockchain, autoload, false);
         _ ->
             ok

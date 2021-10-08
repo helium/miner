@@ -784,6 +784,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 4;
             autoskip_on_timeout_test ->
                 4;
+            poc_dist_v11_test ->
+                4;
             poc_grpc_dist_v11_test ->
                 8;
             _ ->
@@ -1086,11 +1088,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
                                               ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
                                               {Miner, {TCPPort, RandomPort, JsonRpcPort}}
                                       end, GatewayPorts),
-
     UpdatedValidatorPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
                                           {Miner, {TCPPort, ignore, JsonRpcPort}}
                                   end, ValidatorPorts),
-
     [
         {miners, Miners},
         {validators, Validators},
