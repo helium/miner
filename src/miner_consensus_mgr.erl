@@ -954,9 +954,7 @@ do_initial_dkg(GenesisTransactions, Addrs, N, Curve, State) ->
     %% in the consensus group, run the dkg
     GenesisBlockTransactions = GenesisTransactions ++
         [blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0)],
-    lager:info("GenesisBlockTransactions: ~p", [GenesisBlockTransactions]),
     Artifact = blockchain_block:serialize(blockchain_block:new_genesis_block(GenesisBlockTransactions)),
-    lager:info("Artifact: ~p", [Artifact]),
     do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
            genesis_block_done, N, Curve, true, State).
 

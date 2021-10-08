@@ -879,8 +879,6 @@ init_per_testcase(Mod, TestCase, Config0) ->
         end,
         ConfigResult
     ),
-%%    {"/p2p/112qB3YaH5bZkCnKA5uRH7tBtGNv2Y5B4smv1jsmvGUzgKT71QpE", "/ip4/52.8.80.146/tcp/2154"}
-%%    Aliases = application:get_env(libp2p, node_aliases, [])
 
     %% hardcode some alias for our localhost miners
     %% sibyl will not return routing data unless a miner/validator has a public address
@@ -1059,6 +1057,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     %% wait until we get confirmation the miners are fully up
     %% which we are determining by the miner_consensus_mgr being registered
+    %% if we have a split of validators and gateways, we only need to wait on the validators
+    %% otherwise wait for all gateways
     case SplitMiners of
         true ->
             ok = miner_ct_utils:wait_for_registration(Validators, miner_consensus_mgr);
@@ -1356,6 +1356,7 @@ make_vars(Keys, Map) ->
 
 make_vars(Keys, Map, Mode) ->
     Vars1 = #{?chain_vars_version => 2,
+              ?block_time => 2,
               ?election_interval => 30,
               ?election_restart_interval => 10,
               ?num_consensus_members => 7,
@@ -1402,20 +1403,20 @@ make_vars(Keys, Map, Mode) ->
               ?stake_withdrawal_cooldown => 55,
               ?dkg_penalty => 1.0,
               ?tenure_penalty => 1.0,
-              ?validator_penalty_filter => 5.0,
-              ?penalty_history_limit => 100,
-              ?dc_payload_size => 24,
-              ?assert_loc_txn_version => 2,
-              ?min_antenna_gain => 10,
-              ?max_antenna_gain => 150,
-              ?txn_fees => true,
-              ?staking_fee_txn_oui_v1 => 100 * ?USD_TO_DC, %% $100?
-              ?staking_fee_txn_oui_v1_per_address => 100 * ?USD_TO_DC, %% $100
-              ?staking_fee_txn_add_gateway_v1 => 40 * ?USD_TO_DC, %% $40?
-              ?staking_fee_txn_assert_location_v1 => 10 * ?USD_TO_DC, %% $10?
-              ?txn_fee_multiplier => 5000,
-              ?max_payments => 10,
-              ?poc_challenge_rate => 5
+              ?validator_penalty_filter => 5.0
+%%              ?penalty_history_limit => 100,
+%%              ?dc_payload_size => 24,
+%%              ?assert_loc_txn_version => 2,
+%%              ?min_antenna_gain => 10,
+%%              ?max_antenna_gain => 150,
+%%              ?txn_fees => true,
+%%              ?staking_fee_txn_oui_v1 => 100 * ?USD_TO_DC, %% $100?
+%%              ?staking_fee_txn_oui_v1_per_address => 100 * ?USD_TO_DC, %% $100
+%%              ?staking_fee_txn_add_gateway_v1 => 40 * ?USD_TO_DC, %% $40?
+%%              ?staking_fee_txn_assert_location_v1 => 10 * ?USD_TO_DC, %% $10?
+%%              ?txn_fee_multiplier => 5000,
+%%              ?max_payments => 10,
+%%              ?poc_challenge_rate => 5
              },
 
     #{secret := Priv, public := Pub} = Keys,
