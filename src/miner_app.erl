@@ -35,7 +35,7 @@ start(_StartType, _StartArgs) ->
         case application:get_env(miner, mode, validator) of
             %% follow mode defaults to false
             validator -> false;
-            gateway ->
+            _ ->
                 %% check touchfile, since some people are using it
                 BaseDir = application:get_env(blockchain, base_dir, "data"),
                 Filename = filename:join([BaseDir, "validate-mode"]),
