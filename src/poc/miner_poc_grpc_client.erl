@@ -80,10 +80,11 @@ handle_call(_Request, _From, State = #state{}) ->
 
 handle_cast({check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}, #state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
     %% split the URI into its IP and port parts
-    #{host := _IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
+    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
+    TargetIP = maybe_override_ip(IP),
     %% build the request
     Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
-    case send_grpc_unary_req("127.0.0.1", Port, Req, 'check_challenge_target') of
+    case send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target') of
         {ok, Resp, #{height := ResponseHeight, signature := ResponseSig} = _Details} ->
             lager:info("checked target results ~p", [Resp]),
             %% handle the result as to if we are the target or not
@@ -274,3 +275,11 @@ process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{
     {ok, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {_RespType, Payload}, height = Height, signature = Sig}}}) ->
     {ok, Payload, #{height => Height, signature => Sig}}.
+
+-ifdef(TEST).
+maybe_override_ip(_IP)->
+    "127.0.0.1".
+-else.
+maybe_override_ip(IP)->
+    IP.
+-endif.

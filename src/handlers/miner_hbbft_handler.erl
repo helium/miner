@@ -63,8 +63,6 @@ metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
     Ledger = blockchain:ledger(Chain),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
-    {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
-    lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     case Version of
         tuple ->
@@ -103,6 +101,12 @@ metadata(Version, Meta, Chain) ->
                         %% generate a set of ephemeral keys for POC usage
                         %% the hashes of the public keys are added to metadata
                         %% the key sets are passed to bc core poc mgr
+                        ChallengeRate =
+                            case blockchain:config(?poc_challenge_rate, Ledger) of
+                                {ok, CR} -> CR;
+                                _ -> 1
+                            end,
+                        lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
                         {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
                         lager:info("poc ephemeral keys ~p", [EmpKeys]),
                         SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
