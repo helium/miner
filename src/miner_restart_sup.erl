@@ -53,8 +53,6 @@ init([SigFun, ECDHFun]) ->
 
     %% Miner Options
 
-    %% TODO: remove onion servers if a validator but breaks a lot of tests
-    %%       leaving for another day
     OnionOpts =
         case application:get_env(miner, radio_device, undefined) of
             {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
@@ -83,6 +81,8 @@ init([SigFun, ECDHFun]) ->
     MinerMode = application:get_env(miner, mode, gateway),
     lager:info("*** transport mode: ~p, miner mode: ~p", [POCTransport, MinerMode]),
 
+    %% TODO: dont include onion & lora servers if a validator but breaks a lot of tests
+    %%       leaving for another day
     POCServers =
         case {MinerMode, POCTransport} of
             {validator, grpc} ->
