@@ -20,6 +20,7 @@
 -define(SERVER, ?MODULE).
 
 -define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 10000,
+                    blockchain_txn_poc_receipts_v2 => 10000,
                     blockchain_txn_consensus_group_v1 => 30000}).
 
 %% txns that do not appear naturally

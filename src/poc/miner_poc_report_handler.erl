@@ -1,6 +1,8 @@
 %%%-------------------------------------------------------------------
 %% @doc
 %% == Miner POC Stream Handler ==
+%% used to relay a receipt or witness report received by a validator
+%% onto the actual challenger
 %% @end
 %%%-------------------------------------------------------------------
 -module(miner_poc_report_handler).

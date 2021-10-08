@@ -66,13 +66,11 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
-    %% if POCs are over grpc and we are not a validator then dont start the chain
+    %% if POCs are over grpc and we are a gateway then dont start the chain
     POCTransport = application:get_env(miner, poc_transport, p2p),
     MinerMode = application:get_env(miner, mode, gateway),
     case {MinerMode, POCTransport} of
-        {validator, _} ->
-            ok;
-        {_, grpc} ->
+        {gateway, grpc} ->
             application:set_env(blockchain, autoload, false);
         _ ->
             ok
