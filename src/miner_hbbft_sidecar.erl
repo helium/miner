@@ -197,7 +197,6 @@ handle_cast(_Msg, State) ->
 
 handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chain, group = Group} = State)
   when is_reference(Ref) ->
-    {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
     case maps:get(Ref, Validations, undefined) of
         undefined ->
             lager:warning("response for unknown ref"),
