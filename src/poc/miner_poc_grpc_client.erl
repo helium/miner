@@ -132,7 +132,7 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-connect(#state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
+connect(State) ->
     try
         {ok, DefaultValidators} = application:get_env(miner, default_validators),
         %% pick a random validator as our streaming grpc server

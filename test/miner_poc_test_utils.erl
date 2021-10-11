@@ -64,24 +64,12 @@ region_urls() ->
         {region_us915, ?region_us915_url}
     ].
 
-%%download_regions(RegionURLs) ->
-%%    miner_ct_utils:pmap(
-%%        fun({Region, URL}) ->
-%%            Ser = download_serialized_region(URL),
-%%            timer:sleep(500),
-%%            {Region, Ser}
-%%        end,
-%%        RegionURLs
-%%    ).
-
 download_regions(RegionURLs) ->
-    lists:foldl(
-        fun({Region, URL}, Acc) ->
+    miner_ct_utils:pmap(
+        fun({Region, URL}) ->
             Ser = download_serialized_region(URL),
-            timer:sleep(500),
-            [{Region, Ser} | Acc]
+            {Region, Ser}
         end,
-        [],
         RegionURLs
     ).
 
@@ -134,7 +122,6 @@ region_params_eu433() ->
     blockchain_region_params_v1:serialize(blockchain_region_params_v1:new(Params)).
 
 download_serialized_region(URL) ->
-    ct:pal("downloading URL: ~p",[URL]),
     %% Example URL: "https://github.com/JayKickliter/lorawan-h3-regions/blob/main/serialized/US915.res7.h3idx?raw=true"
     {ok, Dir} = file:get_cwd(),
     %% Ensure priv dir exists
