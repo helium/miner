@@ -33,8 +33,7 @@ init()->
 
 -ifdef(TEST).
 connect(PeerP2P) ->
-    {ok, PubKey, _SigFun, _} = blockchain_swarm:keys(),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {ok, _PubKey, _SigFun, _} = blockchain_swarm:keys(),
     %% get the test specific grpc port for the peer
     %% ( which is going to be the libp2p port + 1000 )
     %% see miner_ct_utils for more info

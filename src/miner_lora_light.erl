@@ -63,15 +63,6 @@
     last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
 }).
 
--record(country, {
-    short_code::binary(),
-    lat::binary(),
-    long::binary(),
-    name::binary(),
-    region::atom(),
-    geo_zone::atom()
-}).
-
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
@@ -550,61 +541,6 @@ send_to_router(Type, RoutingInfo, Packet, Region) ->
     DataRate = maps:get(<<"datr">>, Packet),
     HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
     blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
-
--spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
-country_code_for_addr(Addr)->
-    B58Addr = libp2p_crypto:bin_to_b58(Addr),
-    URL = "https://api.helium.io/v1/hotspots/" ++ B58Addr,
-    case httpc:request(get, {URL, []}, [{timeout, 5000}],[]) of
-        {ok, {{_HTTPVersion, 200, _RespBody}, _Headers, JSONBody}} = Resp ->
-            lager:debug("hotspot info response: ~p", [Resp]),
-            %% body will be a list of geocode info of which one key will be the country code
-            Body = jsx:decode(list_to_binary(JSONBody), [return_maps]),
-            %% return the country code from the returned response
-            CC = maps:get(<<"short_country">>, maps:get(<<"geocode">>, maps:get(<<"data">>, Body)), undefined),
-            {ok, CC};
-        _ ->
-            {error, failed_to_find_geodata_for_addr}
-    end.
-
--spec freq_data(#country{}, map())-> {ok, freq_data()}.
-freq_data(#country{region = undefined} = _Country, _FreqMap)->
-    {error, region_not_set};
-freq_data(#country{region = Region}= _Country, FreqMap)->
-    case maps:get(Region, FreqMap, undefined) of
-        undefined ->
-            lager:warning("frequency data not found for region ~p",[Region]),
-            {error, frequency_not_found_for_region};
-        F->
-            {ok, {Region, F}}
-    end.
-
--spec init_ets() -> ok.
-init_ets() ->
-    PrivDir = code:priv_dir(miner),
-    File = application:get_env(miner, reg_domains_file, "countries_reg_domains.csv"),
-    lager:debug("loading csv file from ~p", [PrivDir ++ "/" ++ File]),
-    {ok, F} = file:open(PrivDir ++ "/" ++ File, [read, raw, binary, {read_ahead, 8192}]),
-    ok = csv_rows_to_ets(F),
-    ok = file:close(F).
-
--spec csv_rows_to_ets(pid())-> ok | {error, any()}.
-csv_rows_to_ets(F) ->
-  try file:read_line(F) of
-    {ok, Line} ->
-        CP = binary:compile_pattern([<<$,>>, <<$\n>>]),
-        [ShortCode, Lat, Long, Country, Region, GeoZone] = binary:split(Line, CP, [global, trim]),
-        Rec = #country{short_code=ShortCode, lat=Lat, long=Long, name=Country,
-                        region=binary_to_atom(Region, utf8), geo_zone=binary_to_atom(GeoZone, utf8)},
-        ets:insert(?COUNTRY_FREQ_DATA, {ShortCode, Rec}),
-        csv_rows_to_ets(F);
-    eof ->
-        ok
-    catch
-        error:Reason ->
-            lager:warning("failed to read file ~p, error: ~p", [F, Reason]),
-            {error, Reason}
-  end.
 
 channel(Freq, Frequencies) ->
     channel(Freq, Frequencies, 0).
