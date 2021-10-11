@@ -326,6 +326,6 @@ start_validation(Txn, Height, From, Timeout, Chain) ->
                       end,
                     Owner ! {Attempt, {Result, Height}}
           end),
-    TRef = erlang:send_after(Timeout, self(), {Attempt, deadline}),
+    TRef = erlang:send_after(Timeout, self(), {Attempt, {deadline, Height}}),
     {Attempt,
      #validation{timer = TRef, monitor = Ref, txn = Txn, pid = Pid, from = From, height=Height}}.
