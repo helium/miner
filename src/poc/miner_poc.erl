@@ -39,6 +39,7 @@ add_stream_handler(SwarmTID) ->
         {libp2p_framed_stream, server, [get_handler(), self(), SwarmTID]}
     ).
 
+-spec get_handler() -> miner_poc_report_handler | miner_poc_handler.
 get_handler()->
     case application:get_env(miner, poc_transport, p2p) of
         grpc -> miner_poc_report_handler;

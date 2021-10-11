@@ -496,9 +496,10 @@ process_block_pocs(
     Ledger = blockchain:ledger(Chain),
     BlockHeight = blockchain_block:height(Block),
     %% get the ephemeral keys from the block
-    %% these will be a prop with tuples as {MinerAddr, PocKeyHash}
+    %% these will be a prop with tuples as {MemberPosInCG, PocKeyHash}
     BlockPocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
     BlockHeight = blockchain_block_v1:height(Block),
+    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
     [
         begin
             %% the published key is a hash of the public key, aka the onion key hash
@@ -506,6 +507,7 @@ process_block_pocs(
             %% if it is one of this local validators POCs, then kick it off
             %% public data on the POC is saved to the ledger whether its a local POC or not
             Ledger1 = blockchain_ledger_v1:new_context(Ledger),
+            ChallengerAddr = lists:nth(CGPos, CGMembers),
             lager:info("saving public poc data for poc key ~p and challenger ~p", [OnionKeyHash, ChallengerAddr]),
             catch ok = blockchain_ledger_v1:save_public_poc(OnionKeyHash, ChallengerAddr, BlockHash, BlockHeight, Ledger1),
             ok = blockchain_ledger_v1:commit_context(Ledger1),
@@ -521,7 +523,7 @@ process_block_pocs(
                     noop
             end
         end
-        || {ChallengerAddr, OnionKeyHash} <- BlockPocEphemeralKeys
+        || {CGPos, OnionKeyHash} <- BlockPocEphemeralKeys
     ],
     ok.
 
@@ -652,7 +654,7 @@ submit_receipts(
             ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
         true ->
             lager:info("node is in consensus", []),
-            ok = miner_hbbft_sidecar:submit(Txn1)
+            _ = miner_hbbft_sidecar:submit(Txn1)
     end,
 
     ok.

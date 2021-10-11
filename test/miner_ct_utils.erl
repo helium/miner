@@ -1403,20 +1403,8 @@ make_vars(Keys, Map, Mode) ->
               ?stake_withdrawal_cooldown => 55,
               ?dkg_penalty => 1.0,
               ?tenure_penalty => 1.0,
-              ?validator_penalty_filter => 5.0
-%%              ?penalty_history_limit => 100,
-%%              ?dc_payload_size => 24,
-%%              ?assert_loc_txn_version => 2,
-%%              ?min_antenna_gain => 10,
-%%              ?max_antenna_gain => 150,
-%%              ?txn_fees => true,
-%%              ?staking_fee_txn_oui_v1 => 100 * ?USD_TO_DC, %% $100?
-%%              ?staking_fee_txn_oui_v1_per_address => 100 * ?USD_TO_DC, %% $100
-%%              ?staking_fee_txn_add_gateway_v1 => 40 * ?USD_TO_DC, %% $40?
-%%              ?staking_fee_txn_assert_location_v1 => 10 * ?USD_TO_DC, %% $10?
-%%              ?txn_fee_multiplier => 5000,
-%%              ?max_payments => 10,
-%%              ?poc_challenge_rate => 5
+              ?validator_penalty_filter => 5.0,
+              ?penalty_history_limit => 100
              },
 
     #{secret := Priv, public := Pub} = Keys,

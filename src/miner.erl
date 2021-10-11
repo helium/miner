@@ -763,9 +763,11 @@ poc_keys(Ledger, Metadata, BlockHash) ->
     {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
     lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
     PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
+    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
     PocKeys1 = lists:foldl(
         fun({MinerAddr, PocKeys}, Acc)->
-            NormalisedKeys = lists:map(fun(PocKey) -> {MinerAddr, PocKey} end, PocKeys),
+            Pos = miner_util:index_of(MinerAddr, CGMembers),
+            NormalisedKeys = lists:map(fun(PocKey) -> {Pos, PocKey} end, PocKeys),
             [NormalisedKeys | Acc]
         end, [], PocKeys0),
     sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate, RandState).
