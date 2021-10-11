@@ -32,16 +32,16 @@ typecheck:
 ci: compile
 	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
-release:
+release: | $(grpc_services_directory)
 	$(REBAR) as prod release -n miner
 
-validator:
+validator: | $(grpc_services_directory)
 	$(REBAR) as validator release -n miner -v $(VAL_VERSION)
 
 cover:
 	$(REBAR) cover
 
-aws:
+aws: | $(grpc_services_directory)
 	$(REBAR) as aws release
 
 seed:
@@ -50,7 +50,7 @@ seed:
 docker:
 	$(REBAR) as docker release
 
-devrel:
+devrel: | $(grpc_services_directory)
 	$(REBAR) as testdev, miner1 release -n miner1
 	$(REBAR) as testdev, miner2 release -n miner2
 	$(REBAR) as testdev, miner3 release -n miner3
@@ -60,17 +60,18 @@ devrel:
 	$(REBAR) as testdev, miner7 release -n miner7
 	$(REBAR) as testdev, miner8 release -n miner8
 
-devrelease:
+devrelease: | $(grpc_services_directory)
 	$(REBAR) as dev release
 
-grpc: | $(grpc_services_directory)
-	@echo "generating grpc services"
+grpc:
+	@echo "generating miner grpc services"
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
-clean_grpc:
-	@echo "cleaning grpc services"
-	rm -rf $(grpc_services_directory)
-
 $(grpc_services_directory):
-	@echo "grpc service directory $(directory) does not exist"
+	@echo "miner grpc service directory $(directory) does not exist"
 	$(REBAR) get-deps
+	$(MAKE) grpc
+
+clean_grpc:
+	@echo "cleaning miner grpc services"
+	rm -rf $(grpc_services_directory)
