@@ -76,10 +76,10 @@
           Rpc::atom(),
           Encoder::module(),
           Options::list(),
-          CallbackFun::function() ) -> {ok, Pid::pid()} | {error, Reason::term()}.
-new(Connection, Service, Rpc, Encoder, Options, HandlerCallBack) ->
+          HandlerMod::atom() ) -> {ok, Pid::pid()} | {error, Reason::term()}.
+new(Connection, Service, Rpc, Encoder, Options, HandlerMod) ->
     gen_server:start_link(?MODULE,
-                          {Connection, Service, Rpc, Encoder, Options, HandlerCallBack}, []).
+                          {Connection, Service, Rpc, Encoder, Options, HandlerMod}, []).
 
 send(Pid, Message) ->
     gen_server:call(Pid, {send, Message}).
@@ -121,12 +121,12 @@ call_rpc(Pid, Message, Timeout) ->
 
 %% gen_server implementation
 %% @private
-init({Connection, Service, Rpc, Encoder, Options, HandlerCallBack}) ->
+init({Connection, Service, Rpc, Encoder, Options, HandlerMod}) ->
     try
         StreamType = proplists:get_value(type, Options, undefined),
         Stream =  new_stream(Connection, Service, Rpc, Encoder, Options),
-        HandlerState = HandlerCallBack:init(),
-        {ok, Stream#{handler_state => HandlerState, handler_callback => HandlerCallBack, type => StreamType}}
+        HandlerState = HandlerMod:init(),
+        {ok, Stream#{handler_state => HandlerState, handler_callback => HandlerMod, type => StreamType}}
     catch
         _Class:_Error:_Stack ->
             lager:warning("failed to create stream, ~p ~p ~p", [_Class, _Error, _Stack]),
@@ -137,8 +137,6 @@ init({Connection, Service, Rpc, Encoder, Options, HandlerCallBack}) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
--spec handle_call(term(), term(), stream()) ->
-    term().
 %% @private
 handle_call(state, _From, #{state := State} = Stream) ->
     {reply, State, Stream};

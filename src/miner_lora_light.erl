@@ -57,7 +57,7 @@
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
     reg_region_params :: blockchain_region_param_v1:region_param_v1(),
-    reg_freq_list :: [float()],
+    reg_freq_list :: [float()] | undefined,
     reg_throttle = undefined :: undefined | miner_lora_throttle:handle(),
     last_tmst_us = undefined :: undefined | integer(),  % last concentrator tmst reported by the packet forwarder
     last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
@@ -156,7 +156,7 @@ location_ok() ->
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr()-> {error, any()} | {ok, freq_data()}.
+-spec reg_domain_data_for_addr()-> {error, any()} | {grpc_error, any()} | {ok, freq_data()}.
 reg_domain_data_for_addr() ->
     case miner_poc_grpc_client:region_params() of
         {grpc_error, _Reason} ->
