@@ -417,10 +417,6 @@ txn_from_future_via_protocol_v1_test(Cfg) ->
         end,
     AssertSubmissionCallbackResult =
         fun(LaggingNodeSubmissionResult) ->
-            ct:pal(
-                ">>> LaggingNodeSubmissionResult: ~p",
-                [LaggingNodeSubmissionResult]
-            ),
             ?assertMatch({error, _}, LaggingNodeSubmissionResult)
         end,
     txn_from_future_test(
