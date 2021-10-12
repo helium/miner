@@ -215,11 +215,11 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                                 lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                                 Error
                         end;
-                    deadline ->
+                    {error, validation_deadline}=Error ->
                         erlang:exit(Pid, kill),
                         write_txn("timed out", Height, Txn),
                         lager:warning("validation timed out for ~s", [blockchain_txn:print(Txn)]),
-                        {error, validation_deadline};
+                        Error;
                     {error, Error} ->
                         write_txn("failed", Height, Txn),
                         lager:warning("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
@@ -326,6 +326,6 @@ start_validation(Txn, Height, From, Timeout, Chain) ->
                       end,
                     Owner ! {Attempt, {Result, Height}}
           end),
-    TRef = erlang:send_after(Timeout, self(), {Attempt, {deadline, Height}}),
+    TRef = erlang:send_after(Timeout, self(), {Attempt, {{error, validation_deadline}, Height}}),
     {Attempt,
      #validation{timer = TRef, monitor = Ref, txn = Txn, pid = Pid, from = From, height=Height}}.
