@@ -76,13 +76,14 @@
 -type state() :: #state{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
 -type poc_key() :: binary().
+-type cached_poc_key_data() :: #poc_key_data{}.
 -type cached_poc_key_type() :: {POCKey :: poc_key(), POCKeyData :: #poc_key_data{}}.
 
 -type local_poc() :: #local_poc{}.
 -type local_pocs() :: [local_poc()].
 -type local_poc_key() :: binary().
 
--export_type([keys/0, local_poc_key/0, cached_poc_key_type/0, local_poc/0, local_pocs/0]).
+-export_type([keys/0, local_poc_key/0, cached_poc_key_data/0, cached_poc_key_type/0, local_poc/0, local_pocs/0]).
 
 %% ------------------------------------------------------------------
 %% API functions
@@ -135,7 +136,7 @@ save_poc_keys(CurHeight, KeyList) ->
             OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(PubKey)),
             POCKeyRec = #poc_key_data{receive_height = CurHeight, keys = Keys},
             lager:info("caching local poc keys with hash ~p", [OnionKeyHash]),
-            cache_poc_key(OnionKeyHash, POCKeyRec)
+            _ = cache_poc_key(OnionKeyHash, POCKeyRec)
         end
         || Keys <- KeyList
     ],
@@ -162,6 +163,11 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
     %%       maybe use a shadow ets cache to store the active POCs
     gen_server:call(?MODULE, {check_target, Challengee, BlockHash, OnionKeyHash}).
 
+-spec report(
+    Report :: {witness, blockchain_poc_witness_v1:poc_witness()} | {receipt, blockchain_poc_receipt_v1:receipt()},
+    OnionKeyHash :: binary(),
+    Peer :: libp2p_crypto:pubkey_bin(),
+    P2PAddr :: libp2p_crypto:peer_id()) -> ok.
 report(Report, OnionKeyHash, Peer, P2PAddr) ->
     gen_server:cast(?MODULE, {Report, OnionKeyHash, Peer, P2PAddr}).
 
@@ -284,11 +290,11 @@ terminate(_Reason, _State = #state{}) ->
 %%% breakout functions
 %%%===================================================================
 -spec handle_witness(
-    Witness :: binary(),
+    Witness :: blockchain_poc_witness_v1:poc_witness(),
     OnionKeyHash :: binary(),
     Address :: libp2p_crypto:pubkey_bin(),
     State :: #state{}
-) -> false | {true, binary()} | {error, any()}.
+) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     lager:info("got witness ~p", [Witness]),
     %% Validate the witness is correct
@@ -348,6 +354,13 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
             end
     end.
 
+-spec handle_receipt(
+    Receipt :: blockchain_poc_receipt_v1:receipt(),
+    OnionKeyHash :: binary(),
+    Peer :: libp2p_crypto:pubkey_bin(),
+    PeerAddr :: libp2p_crypto:peer_id(),
+    State :: #state{}
+) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
     lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
@@ -659,7 +672,7 @@ submit_receipts(
 
     ok.
 
--spec cache_poc_key(poc_key(), keys()) -> ok.
+-spec cache_poc_key(poc_key(), cached_poc_key_data()) -> true.
 cache_poc_key(ID, Keys) ->
     true = ets:insert(?KEYS, {ID, Keys}).
 

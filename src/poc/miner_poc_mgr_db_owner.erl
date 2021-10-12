@@ -95,7 +95,7 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({write, POC, Skewed}, #state{pending=P}=State) ->
-    POCID = miner_poc_mgr:local_poc_onion_key_hash(POC),
+    POCID = miner_poc_mgr:local_poc_key(POC),
     %% defer encoding until write time
     NewP = maps:put(POCID, {POC, Skewed}, P),
     {noreply, State#state{pending=NewP}};
