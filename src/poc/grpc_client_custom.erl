@@ -103,23 +103,23 @@
 
 -type get_response()  :: rcv_response() | empty.
 
--type unary_response(Type) :: ok_response(Type) | error_response(Type).
+-type unary_response() :: ok_response() | error_response().
 
--type ok_response(Type) ::
-    {ok, #{result := Type,
+-type ok_response() ::
+    {ok, #{result := any(),
            status_message := binary(),
            http_status := 200,
            grpc_status := 0,
            headers := metadata(),
            trailers := metadata()}}.
 
--type error_response(Type) ::
+-type error_response() ::
     {error, #{error_type := error_type(),
               http_status => integer(),
               grpc_status => integer(),
               status_message => binary(),
               headers => metadata(),
-              result => Type,
+              result => any(),
               trailers => grpc:metadata()}}.
 
 -type error_type() :: client | timeout | http | grpc.
@@ -128,7 +128,7 @@
               stream_option/0,
               connection_option/0,
               client_stream/0,
-              unary_response/1,
+              unary_response/0,
               metadata/0,
               compression_method/0
              ]).
@@ -198,7 +198,7 @@ new_stream(Connection, Service, Rpc, DecoderModule, Options) ->
     CBMod = proplists:get_value(callback_mod, Options),
     grpc_client_stream_custom:new(Connection, Service, Rpc, DecoderModule, Options, CBMod).
 
--spec send(Stream::client_stream(), Msg::map()) -> ok.
+-spec send(Stream::client_stream(), Msg::any()) -> ok.
 %% @doc Send a message from the client to the server.
 send(Stream, Msg) when is_pid(Stream) ->
     grpc_client_stream_custom:send(Stream, Msg).
@@ -258,10 +258,11 @@ stop_connection(Connection) ->
     grpc_client_connection:stop(Connection).
 
 -spec unary(Connection::connection(),
-            Message::map(), Service::atom(), Rpc::atom(),
+            Message::tuple(), Service::atom(), Rpc::atom(),
             Decoder::module(),
             Options::[stream_option() |
-                      {timeout, timeout()}]) -> unary_response(map()).
+                      {timeout, timeout()} |
+                      {callback_mod, atom()}]) -> unary_response().
 %% @doc Call a unary rpc in one go.
 %%
 %% Set up a stream, receive headers, message and trailers, stop

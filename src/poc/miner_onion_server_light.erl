@@ -96,48 +96,29 @@ region_params() ->
                    DataRate :: binary(),
                    Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
-send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, State) ->
+send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, _State) ->
     case miner_lora_light:location_ok() of
         true ->
             lager:md([{poc_id, blockchain_utils:poc_id(OnionCompactKey)}]),
-            send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, State, ?BLOCK_RETRY_COUNT);
+            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+            Address = blockchain_swarm:pubkey_bin(),
+            Receipt = case application:get_env(miner, data_aggregation_version, 3) of
+                           1 ->
+                               blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
+                           2 ->
+                               blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate);
+                           V when V >= 3 ->
+                               R0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate),
+                               blockchain_poc_receipt_v1:tx_power(R0, Power);
+                           _ ->
+                               blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
+                       end,
+
+            %% TODO: put retry mechanism back in place
+            miner_poc_grpc_client:send_report(receipt, Receipt, OnionKeyHash);
         false ->
             ok
     end.
-
--spec send_receipt(Data :: binary(),
-                   OnionCompactKey :: libp2p_crypto:pubkey_bin(),
-                   Type :: radio | p2p,
-                   Time :: pos_integer(),
-                   RSSI :: integer(),
-                   SNR :: float(),
-                   Frequency :: float(),
-                   Channel :: non_neg_integer(),
-                   DataRate :: binary(),
-                   Power :: non_neg_integer(),
-                   State :: state(),
-                   Retry :: non_neg_integer()) -> ok | {error, any()}.
-send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _Power, _State, 0) ->
-    lager:error("failed to send receipts, max retry"),
-    {error, too_many_retries};
-send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, #state{}= _State, _Retry) ->
-    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    Address = blockchain_swarm:pubkey_bin(),
-    Receipt = case application:get_env(miner, data_aggregation_version, 3) of
-                   1 ->
-                       blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency);
-                   2 ->
-                       blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate);
-                   V when V >= 3 ->
-                       R0 = blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type, SNR, Frequency, Channel, DataRate),
-                       blockchain_poc_receipt_v1:tx_power(R0, Power);
-                   _ ->
-                       blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
-               end,
-
-    %% TODO: put retry mechanism back in place
-    miner_poc_grpc_client:send_report(receipt, Receipt, OnionKeyHash).
-
 
 -spec  send_witness(Data :: binary(),
                     OnionCompactKey :: libp2p_crypto:pubkey_bin(),
@@ -148,44 +129,29 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                     Channel :: non_neg_integer(),
                     DataRate :: binary(),
                     State :: state()) -> ok.
-send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State) ->
+send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, _State) ->
     case miner_lora_light:location_ok() of
         true ->
             POCID = blockchain_utils:poc_id(OnionCompactKey),
             lager:info([{poc_id, POCID}],
                        "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
                        [RSSI, Frequency, SNR]),
-            send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, ?BLOCK_RETRY_COUNT);
+            OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
+            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+            Witness = case application:get_env(miner, data_aggregation_version, 2) of
+                           V when V >= 2 ->
+                               %% Send channel + datarate with data_aggregation_version >= 2
+                               blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
+                           1 ->
+                               blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
+                           _ ->
+                               blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
+                       end,
+            %% TODO: put retry mechanism back in place
+            miner_poc_grpc_client:send_report(witness, Witness, OnionKeyHash);
         false ->
             ok
     end.
-
--spec send_witness(Data :: binary(),
-                   OnionCompactKey :: libp2p_crypto:pubkey_bin(),
-                   Time :: pos_integer(),
-                   RSSI :: integer(),
-                   SNR :: float(),
-                   Frequency :: float(),
-                   Channel :: non_neg_integer(),
-                   DataRate :: binary(),
-                   State :: state(),
-                   Retry :: non_neg_integer()) -> ok.
-send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _State, 0) ->
-    lager:error("failed to send witness, max retry");
-send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, #state{}= _State, _Retry) ->
-    OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-    Witness = case application:get_env(miner, data_aggregation_version, 2) of
-                   V when V >= 2 ->
-                       %% Send channel + datarate with data_aggregation_version >= 2
-                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency, Channel, DataRate);
-                   1 ->
-                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data, SNR, Frequency);
-                   _ ->
-                       blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
-               end,
-    %% TODO: put retry mechanism back in place
-    miner_poc_grpc_client:send_report(witness, Witness, OnionKeyHash).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -370,16 +336,20 @@ try_decrypt(IV, OnionCompactKey, _OnionKeyHash, Tag, CipherText, ECDHFun) ->
 
 -spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
 tx_power(Region, #state{compact_key=_CK, region_params = RegionParams}) ->
-            MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- RegionParams]),
-            %% if the antenna gain is accounted for in the packet forwarder config file
-            %% set this to false
-            %% ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
-            %% TODO - revisit as we are dropping the GW gain from the ledger
-            %%        do we need an API to pull this from a validator ?
-            EIRP = trunc(MaxEIRP/10),
-            lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
-                       [Region, undefined, MaxEIRP/10, EIRP]),
-            {ok, EIRP, EIRP, 0}.
+    try
+        MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- RegionParams]),
+        %% if the antenna gain is accounted for in the packet forwarder config file
+        %% set this to false
+        %% ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
+        %% TODO - revisit as we are dropping the GW gain from the ledger
+        %%        do we need an API to pull this from a validator ?
+        EIRP = trunc(MaxEIRP/10),
+        lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                   [Region, undefined, MaxEIRP/10, EIRP]),
+        {ok, EIRP, EIRP, 0}
+    catch _Class:_Error ->
+        {error, failed_to_get_tx_power}
+    end.
 
 -spec datarate(Spreading :: atom(), BW :: pos_integer()) -> string().
 datarate(Spreading, BW) ->
