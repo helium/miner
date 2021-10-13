@@ -120,7 +120,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
             ok
     end.
 
--spec  send_witness(Data :: binary(),
+-spec send_witness(Data :: binary(),
                     OnionCompactKey :: libp2p_crypto:pubkey_bin(),
                     Time :: pos_integer(),
                     RSSI :: integer(),
@@ -147,7 +147,6 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                            _ ->
                                blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
                        end,
-            %% TODO: put retry mechanism back in place
             miner_poc_grpc_client:send_report(witness, Witness, OnionKeyHash);
         false ->
             ok
