@@ -379,11 +379,12 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             case miner_lora:location_ok() of
                 true ->
                     %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
-                    ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem length(FreqList)) + 1, FreqList) end,
                     {ok, Region} = miner_lora:region(),
 
                     case blockchain:config(?poc_version, Ledger) of
                         {ok, POCVersion} when POCVersion >= 11 ->
+                            %% Do the correct channel selection when v11 is active
+                            ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem length(FreqList)) + 1, FreqList) end,
                             %% send receipt with poc_v11 updates
                             case blockchain_region_params_v1:for_region(Region, Ledger) of
                                 {error, Reason} ->
@@ -432,6 +433,8 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                     end
                             end;
                         _ ->
+                            %% Continue doing the old channel selection (to reflect core validation prior to v11 activation)
+                            ChannelSelectorFun = fun(FreqList) -> lists:nth((IntData rem 8) + 1, FreqList) end,
                             %% continue doing the old way
                             %% the fun below will be executed by miner_lora:send and supplied with the localised lists of channels
                             Spreading = spreading(Region, erlang:byte_size(Packet)),
