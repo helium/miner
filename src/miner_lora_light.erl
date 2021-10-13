@@ -60,7 +60,12 @@
     reg_freq_list :: [float()] | undefined,
     reg_throttle = undefined :: undefined | miner_lora_throttle:handle(),
     last_tmst_us = undefined :: undefined | integer(),  % last concentrator tmst reported by the packet forwarder
-    last_mono_us = undefined :: undefined | integer()  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    last_mono_us = undefined :: undefined | integer(),  % last local monotonic timestamp taken when packet forwarder reported last tmst
+    chain = undefined :: undefined | blockchain:blockchain(),
+    radio_udp_bind_ip,
+    radio_udp_bind_port,
+    cur_poc_challenger_type = undefined :: undefined | validator,
+    following_chain = true :: boolean
 }).
 
 -type state() :: #state{}.
@@ -182,23 +187,15 @@ init(Args) ->
     lager:info("init with args ~p", [Args]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
-    {ok, Socket} = gen_udp:open(UDPPort, [binary, {reuseaddr, true}, {active, 100}, {ip, UDPIP}]),
-    MirrorSocket = case application:get_env(miner, radio_mirror_port, undefined) of
-        undefined ->
-            undefined;
-        P ->
-            {ok, S} = gen_udp:open(P, [binary, {active, true}]),
-            S
-    end,
-
-    S0 = #state{socket=Socket,
-                sig_fun = maps:get(sig_fun, Args),
-                mirror_socket = {MirrorSocket, undefined},
-                pubkey_bin = blockchain_swarm:pubkey_bin(),
-                reg_domain_confirmed = false
+    GatewaysRunChain = application:get_env(miner, gateways_run_chain, true),
+    lager:info("gateways_run_chain: ~p", [GatewaysRunChain]),
+    S0 = #state{pubkey_bin = blockchain_swarm:pubkey_bin(),
+                reg_domain_confirmed = false,
+                radio_udp_bind_ip = UDPIP,
+                radio_udp_bind_port = UDPPort,
+                following_chain = GatewaysRunChain
                },
-    erlang:send_after(500, self(), reg_domain_timeout),
-
+    erlang:send_after(500, self(), init),
     {ok, S0}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
@@ -210,6 +207,8 @@ handle_call({send, Payload, When, ChannelSelectorFun, DataRate, Power, IPol, Hlm
         {error, _}=Error -> {reply, Error, State};
         {ok, State1} -> {noreply, State1}
     end;
+handle_call(port, _From, State = #state{socket = undefined}) ->
+    {reply, {error, no_socket}, State};
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
 
@@ -224,7 +223,58 @@ handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(init, State) ->
+handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort, following_chain = false}) ->
+    %% if we are not following chain then assume validators are running POC challenges and thus
+    %% this module will handle lora packets and will need to open the port
+    application:set_env(miner, lora_mod, miner_lora_light),
+    application:set_env(miner, onion_server_mod, miner_onion_server_light),
+    {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
+    erlang:send_after(500, self(), reg_domain_timeout),
+    {noreply, State#state{socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
+handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort}) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            lager:info("failed to find chain, will retry in a bit",[]),
+            erlang:send_after(500, self(), init),
+            {noreply, State};
+        Chain ->
+            ok = blockchain_event:add_handler(self()),
+            erlang:send_after(500, self(), reg_domain_timeout),
+            Ledger = blockchain:ledger(Chain),
+            case blockchain:config(?poc_challenger_type, Ledger) of
+                {ok, validator} ->
+                    lager:info("poc_challenger_type: ~p", [validator]),
+                    %% we are in validator POC mode, open a socket
+                    %% this module will handle lora packets
+                    application:set_env(miner, lora_mod, miner_lora_light),
+                    application:set_env(miner, onion_server_mod, miner_onion_server_light),
+                    {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
+                    {noreply, State#state{chain = Chain, cur_poc_challenger_type = validator, socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
+                NonValidatorChallenger ->
+                    lager:info("poc_challenger_type: ~p", [NonValidatorChallenger]),
+                    %% we are NOT in validator POC mode, dont open a socket
+                    %% instead let the alternative module 'miner_lora' take it
+                    %% and handle lora packets
+                    application:set_env(miner, lora_mod, miner_lora),
+                    application:set_env(miner, onion_server_mod, miner_onion_server),
+                    {noreply, State#state{cur_poc_challenger_type = NonValidatorChallenger}}
+            end
+    end;
+handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    {noreply, State#state{chain = NC}};
+handle_info(
+    {blockchain_event, {add_block, _BlockHash, _Sync, Ledger} = _Event},
+    #state{cur_poc_challenger_type = CurPoCChallengerType} = State
+)->
+    case blockchain:config(?poc_challenger_type, Ledger) of
+        {ok, V} when V /= CurPoCChallengerType ->
+            %% the poc challenger chain var has been modified, force this server
+            %% to restart.  It will recheck if it can still bind to the lora port
+            {stop, force_restart, State};
+        _ ->
+            {noreply, State}
+    end;
+handle_info({blockchain_event, _}, State) ->
     {noreply, State};
 
 handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr} = State) ->
@@ -754,3 +804,16 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
 -spec reg_region(State :: state()) -> atom().
 reg_region(State) ->
     State#state.reg_region.
+
+-spec open_socket(string(), pos_integer()) -> {ok, port(), port()}.
+open_socket(IP, Port) ->
+    {ok, Socket} = gen_udp:open(Port, [binary, {reuseaddr, true}, {active, 100}, {ip, IP}]),
+    MirrorSocket =
+        case application:get_env(miner, radio_mirror_port, undefined) of
+            undefined ->
+                undefined;
+            P ->
+                {ok, MS} = gen_udp:open(P, [binary, {active, true}]),
+                MS
+        end,
+    {ok, Socket, MirrorSocket}.
