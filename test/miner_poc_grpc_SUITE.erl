@@ -6,12 +6,10 @@
 -include_lib("blockchain/include/blockchain.hrl").
 
 -export([
-    all/0
+    groups/0, all/0, test_cases/0, init_per_group/2, end_per_group/2, init_per_testcase/2, end_per_testcase/2
 ]).
 
 -export([
-    init_per_testcase/2,
-    end_per_testcase/2,
     poc_grpc_dist_v11_test/1,
     poc_dist_v11_cn_test/1,
     poc_dist_v11_partitioned_test/1,
@@ -41,6 +39,16 @@
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
 
+groups() ->
+    [{poc_grpc_with_chain,
+      [],
+      test_cases()
+     },
+     {poc_grpc_no_chain,
+      [],
+      test_cases()
+     }].
+
 %%--------------------------------------------------------------------
 %% @public
 %% @doc
@@ -48,29 +56,40 @@
 %% @end
 %%--------------------------------------------------------------------
 all() ->
+    [{group, poc_grpc_with_chain}, {group, poc_grpc_no_chain}].
+
+test_cases() ->
     [
      poc_grpc_dist_v11_test,
      poc_dist_v11_cn_test,
      poc_dist_v11_partitioned_test,
      poc_dist_v11_partitioned_lying_test
-     ].
+    ].
 
-init_per_testcase(poc_grpc_dist_v11_test = TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(?MODULE, TestCase, [
+init_per_group(poc_grpc_with_chain, Config) ->
+    [
         {split_miners_vals_and_gateways, true},
         {num_validators, 8},
         {poc_version, 11},
-        {poc_transport, grpc} | Config]);
+        {gateways_run_chain, true} | Config];
+init_per_group(poc_grpc_no_chain, Config) ->
+    [
+        {split_miners_vals_and_gateways, true},
+        {num_validators, 8},
+        {poc_version, 11},
+        {gateways_run_chain, false} | Config].
+
+init_per_testcase(poc_grpc_dist_v11_test = TestCase, Config) ->
+    miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config);
 init_per_testcase(TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(?MODULE, TestCase, [
-        {split_miners_vals_and_gateways, false},
-        {num_validators, 0},
-        {poc_transport, grpc} | Config]).
+    miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config).
 
 end_per_testcase(TestCase, Config) ->
     gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
 
+end_per_group(_, _Config) ->
+    ok.
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
@@ -168,16 +187,40 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
 setup_dist_test(TestCase, Config, VarMap, Status) ->
     AllMiners = ?config(miners, Config),
     Validators = ?config(validators, Config),
-    GatewayPorts = ?config(gateway_ports, Config),
+    Gateways = ?config(gateways, Config),
+    RunChainOnGateways = proplists:get_value(gateways_run_chain, Config, true),
     {_, Locations} = lists:unzip(initialize_chain(Validators, TestCase, Config, VarMap)),
-%%    GenesisBlock = miner_ct_utils:get_genesis_block(Gateways, Config),
-    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- GatewayPorts ],
+
+    case RunChainOnGateways of
+        true ->
+            _ = miner_ct_utils:integrate_genesis_block(hd(Validators), Gateways);
+        false ->
+            ok
+    end,
+
+    %% the radio ports used to be fetched from miner lora as part of init_per_testcase
+    %% but the port is only opened now after a chain is up and been consulted to
+    %% determine if validators are running POCs
+    %% So now we have wait until the chain is up and miner lora has opened the port
+    true = miner_ct_util:wait_for_lora_port(Gateways, miner_lora_light, 30),
+
+    RadioPorts = lists:map(
+        fun(Gateway) ->
+            {ok, RandomPort} = ct_rpc:call(Gateway, miner_lora_light, port, []),
+            ct:pal("~p is listening for packet forwarder on ~p", [Gateway, RandomPort]),
+            RandomPort
+        end,
+    Gateways),
     {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
                                                                 lists:zip(RadioPorts, Locations), Status),
-%%    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Validators, Config),
     miner_fake_radio_backplane ! go,
     %% wait till height 2
-    ok = miner_ct_utils:wait_for_gte(height, Validators, 2, all, 30),
+    case RunChainOnGateways of
+        true ->
+            ok = miner_ct_utils:wait_for_gte(height, AllMiners, 2, all, 30);
+        false ->
+            ok = miner_ct_utils:wait_for_gte(height, Validators, 2, all, 30)
+    end,
     ok.
 
 gen_locations(poc_dist_v11_partitioned_lying_test, _, _) ->

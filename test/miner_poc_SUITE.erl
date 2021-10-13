@@ -852,10 +852,26 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
+
+    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
+    %% the radio ports used to be fetched from miner lora as part of init_per_testcase
+    %% but the port is only opened now after a chain is up and been consulted to
+    %% determine if validators are running POCs
+    %% So now we have wait until the chain is up and miner lora has opened the port
+    true = miner_ct_util:wait_for_lora_port(Miners, miner_lora, 30),
+
+    RadioPorts = lists:map(
+        fun(Miner) ->
+            {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
+            ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
+            RandomPort
+        end,
+    Miners),
+
     RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
     {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
                                                                 lists:zip(RadioPorts, Locations), Status),
-    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
+
     miner_fake_radio_backplane ! go,
     %% wait till height 10
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
