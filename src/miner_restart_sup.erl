@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2]).
+-export([start_link/2, start_lora_light/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -35,6 +35,9 @@
 %% ------------------------------------------------------------------
 start_link(SigFun, ECDHFun) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [SigFun, ECDHFun]).
+
+start_lora_light() ->
+    {ok, _Pid} = supervisor:start_child(?MODULE, [?WORKER(miner_lora_light, [])]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
@@ -77,15 +80,13 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    POCTransport = application:get_env(miner, poc_transport, p2p),
     MinerMode = application:get_env(miner, mode, gateway),
-    lager:info("*** transport mode: ~p, miner mode: ~p", [POCTransport, MinerMode]),
-
-    %% TODO: dont include onion & lora servers if a validator but breaks a lot of tests
-    %%       leaving for another day
     POCServers =
-        case {MinerMode, POCTransport} of
-            {validator, grpc} ->
+        case MinerMode of
+            validator ->
+                %% NOTE: validators do not require the onion or lora server
+                %% however removing these here breaks tests
+                %% there is no harm done by leaving them running
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
                 PocMgrTab = miner_poc_mgr:make_ets_table(),
@@ -101,33 +102,24 @@ init([SigFun, ECDHFun]) ->
                     ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
                     ?WORKER(miner_poc_mgr, [POCMgrOpts])
                 ];
-            {validator, _} ->
-                POCOpts = #{
-                    base_dir => BaseDir
-                   },
-                [
-                    ?WORKER(miner_onion_server, [OnionOpts]),
-                    ?WORKER(miner_lora, [OnionOpts]),
-                    ?WORKER(miner_poc_statem, [POCOpts])
-                ];
-            {gateway, grpc} ->
+            gateway ->
+                %% we are a gateway and configured to not run the chain
+                %% so POC challenges must be being handled by validators
+                %% we run both the grpc and libp2p version of the lora & onion modules
+                %% they will work out which is required based on chain vars
+                %% we start poc_statem, if the pocs are being run by validators, it will do nothing
                 application:set_env(miner, lora_mod, miner_lora_light),
                 application:set_env(miner, onion_server_mod, miner_onion_server_light),
-                [
-                    ?WORKER(miner_onion_server_light, [OnionOpts]),
-                    ?WORKER(miner_lora_light, [OnionOpts]),
-                    ?WORKER(miner_poc_grpc_client, [])
-                ];
-            {gateway, p2p} ->
-                application:set_env(miner, lora_mod, miner_lora),
-                application:set_env(miner, onion_server_mod, miner_onion_server),
                 POCOpts = #{
                     base_dir => BaseDir
                    },
                 [
+                    ?WORKER(miner_onion_server_light, [OnionOpts]),
                     ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_lora, [OnionOpts]),
-                    ?WORKER(miner_poc_statem, [POCOpts])
+                    ?WORKER(miner_poc_statem, [POCOpts]),
+                    ?WORKER(miner_poc_grpc_client, [])
                 ]
         end,
 
@@ -136,7 +128,7 @@ init([SigFun, ECDHFun]) ->
             validator ->
                 [
                     ?WORKER(miner_val_heartbeat, []),
-                    ?SUP(sibyl_sup, [POCTransport])
+                    ?SUP(sibyl_sup, [])
                 ];
             _ ->
                 []

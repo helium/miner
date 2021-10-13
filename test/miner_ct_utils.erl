@@ -63,6 +63,7 @@
          wait_for_app_stop/2, wait_for_app_stop/3,
          wait_for_in_consensus/2, wait_for_in_consensus/3,
          wait_for_chain_var_update/3, wait_for_chain_var_update/4,
+         wait_for_lora_port/3,
          delete_dirs/2,
          initial_dkg/5, initial_dkg/6,
          confirm_balance/3,
@@ -511,6 +512,25 @@ wait_for_chain_var_update(Miners, Key, Value, Retries)->
         Else -> Else
     end.
 
+wait_for_lora_port(Miners, Mod, Retries)->
+    ?noAssertAsync(begin
+                     lists:all(
+                        fun(Miner) ->
+                             try
+                                case ct_rpc:call(Miner, Mod, port, []) of
+                                    {error, _} ->
+                                        ct:pal("Failed to find lora port ~p via module ~p", [Miner, Mod]),
+                                        false;
+                                    _ -> true
+                                end
+                             catch What:Why ->
+                                     ct:pal("Failed to find lora port ~p", [Miner]),
+                                     false
+                             end
+                        end, Miners)
+                    end,
+        Retries, timer:seconds(1)).
+
 delete_dirs(DirWildcard, SubDir)->
     Dirs = filelib:wildcard(DirWildcard),
     [begin
@@ -748,9 +768,10 @@ init_per_testcase(Mod, TestCase, Config0) ->
     Config = init_base_dir_config(Mod, TestCase, Config0),
     BaseDir = ?config(base_dir, Config),
     LogDir = ?config(log_dir, Config),
-    NumValidators = proplists:get_value(num_validators, Config, 0),
-    POCTransportType = proplists:get_value(poc_transport, Config, p2p),
     SplitMiners = proplists:get_value(split_miners_vals_and_gateways, Config, false),
+    NumValidators = proplists:get_value(num_validators, Config, 0),
+    LoadChainOnGateways = proplists:get_value(gateways_run_chain, Config, true),
+
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -849,11 +870,11 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 ct:pal("gateway keys: ~p", [GatewayKeys]),
                 %% carry the poc transport setting through to config node so that it can
                 %% set the app env var appropiately on each node
-                _GatewayConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{poc_transport, POCTransportType}, {mode, gateway} | Options]) end, GatewayKeys),
-                ValConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{poc_transport, POCTransportType}, {mode, validator} | Options]) end, ValKeys),
+                _GatewayConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{gateways_run_chain, LoadChainOnGateways}, {mode, gateway} | Options]) end, GatewayKeys),
+                ValConfigResult = miner_ct_utils:pmap(fun(N) -> config_node(N, [{gateways_run_chain, LoadChainOnGateways}, {mode, validator} | Options]) end, ValKeys),
                 ValConfigResult;
             _ ->
-                miner_ct_utils:pmap(fun(N) -> config_node(N, [{poc_transport, POCTransportType}, {mode, validator} | Options]) end, Keys)
+                miner_ct_utils:pmap(fun(N) -> config_node(N, [{gateways_run_chain, LoadChainOnGateways}, {mode, validator} | Options]) end, Keys)
         end,
 
     Miners = [M || {M, _} <- MinersAndPorts],
@@ -1010,17 +1031,13 @@ init_per_testcase(Mod, TestCase, Config0) ->
         end, [], Keys),
 
     %% set any required env vars for grpc gateways
-    case POCTransportType of
-        grpc ->
-            POCVersion = ?config(poc_version, Config),
-            lists:foreach(fun(Gateway)->
-                ct_rpc:call(Gateway, application, set_env, [miner, default_validators, MinerDefaultValidators]),
-                ct_rpc:call(Gateway, application, set_env, [miner, poc_version, POCVersion]),
-                ct_rpc:call(Gateway, application, set_env, [miner, data_aggregation_version, 3])
-            end, Gateways);
-        _ ->
-            ok
-    end,
+    POCVersion = ?config(poc_version, Config),
+    lists:foreach(fun(Gateway)->
+        ct_rpc:call(Gateway, application, set_env, [miner, default_validators, MinerDefaultValidators]),
+        ct_rpc:call(Gateway, application, set_env, [miner, poc_version, POCVersion]),
+        ct_rpc:call(Gateway, application, set_env, [miner, data_aggregation_version, 3]),
+        ct_rpc:call(Gateway, application, set_env, [miner, gateways_run_chain, LoadChainOnGateways])
+    end, Gateways),
 
     %% set any required env vars for validators
     lists:foreach(fun(Val)->
@@ -1077,17 +1094,6 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 {[], MinersAndPorts}
         end,
 
-    UpdatedGatewayPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
-                                              {ok, RandomPort} =
-                                                  case POCTransportType of
-                                                      p2p ->
-                                                          ct_rpc:call(Miner, miner_lora, port, []);
-                                                      grpc ->
-                                                          ct_rpc:call(Miner, miner_lora_light, port, [])
-                                              end,
-                                              ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
-                                              {Miner, {TCPPort, RandomPort, JsonRpcPort}}
-                                      end, GatewayPorts),
     UpdatedValidatorPorts = lists:map(fun({Miner, {TCPPort, _, JsonRpcPort}}) ->
                                           {Miner, {TCPPort, ignore, JsonRpcPort}}
                                   end, ValidatorPorts),
@@ -1099,9 +1105,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {gateway_addrs, GatewayAddrs},
         {addrs, Addrs},
         {keys, Keys},
-        {ports, UpdatedValidatorPorts ++ UpdatedGatewayPorts},
+        {ports, UpdatedValidatorPorts ++ GatewayPorts},
         {validator_ports, UpdatedValidatorPorts},
-        {gateway_ports, UpdatedGatewayPorts},
+        {gateway_ports, GatewayPorts},
         {node_options, Options},
         {addresses, Addresses},
         {tagged_miner_addresses, MinerTaggedAddresses},
@@ -1146,8 +1152,8 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     Curve = proplists:get_value(curve, Options),
     DefaultRouters = proplists:get_value(default_routers, Options),
     Port = proplists:get_value(port, Options),
-    POCTransportType = proplists:get_value(poc_transport, Options, p2p),
     Mode = proplists:get_value(mode, Options, gateway),
+    LoadChainOnGateways = proplists:get_value(gateways_run_chain, Options, true),
 
 
     ct:pal("Miner ~p", [Miner]),
@@ -1185,8 +1191,9 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     %% set miner configuration
     ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
     ct_rpc:call(Miner, application, set_env, [miner, jsonrpc_port, JSONRPCPort]),
-    ct_rpc:call(Miner, application, set_env, [miner, poc_transport, POCTransportType]),
     ct_rpc:call(Miner, application, set_env, [miner, mode, Mode]),
+    ct_rpc:call(Miner, application, set_env, [miner, gateways_run_chain, LoadChainOnGateways]),
+
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, {127,0,0,1}, TCPPort}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
     ct_rpc:call(Miner, application, set_env, [miner, default_routers, [DefaultRouters]]),

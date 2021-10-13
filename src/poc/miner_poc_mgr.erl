@@ -176,7 +176,6 @@ report(Report, OnionKeyHash, Peer, P2PAddr) ->
 %% ------------------------------------------------------------------
 init(_Args) ->
     lager:info("starting ~p", [?MODULE]),
-    ok = blockchain_event:add_handler(self()),
     erlang:send_after(500, self(), init),
     {ok, PubKey, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     SelfPubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -229,6 +228,7 @@ handle_info(init, #state{chain = undefined} = State) ->
             erlang:send_after(500, self(), init),
             {noreply, State};
         Chain ->
+            ok = blockchain_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             {noreply, State#state{
@@ -238,6 +238,8 @@ handle_info(init, #state{chain = undefined} = State) ->
             }}
     end;
 handle_info(init, State) ->
+    {noreply, State};
+handle_info({blockchain_event, _Event}, #state{chain = undefined} = State)->
     {noreply, State};
 handle_info(
     {blockchain_event, {add_block, BlockHash, Sync, _Ledger} = _Event},
