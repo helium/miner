@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2, start_lora_light/0]).
+-export([start_link/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -35,9 +35,6 @@
 %% ------------------------------------------------------------------
 start_link(SigFun, ECDHFun) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [SigFun, ECDHFun]).
-
-start_lora_light() ->
-    {ok, _Pid} = supervisor:start_child(?MODULE, [?WORKER(miner_lora_light, [])]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
