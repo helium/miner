@@ -41,7 +41,4 @@ add_stream_handler(SwarmTID) ->
 
 -spec get_handler() -> miner_poc_report_handler | miner_poc_handler.
 get_handler()->
-    case application:get_env(miner, poc_transport, p2p) of
-        grpc -> miner_poc_report_handler;
-        _ -> miner_poc_handler
-    end.
+    application:get_env(miner, miner_poc_stream_handler, miner_poc_handler).
