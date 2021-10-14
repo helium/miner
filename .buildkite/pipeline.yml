@@ -118,7 +118,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/ && build.tag !~ /^testnet_seed/
     name: ":whale: AMD64 docker"
     env:
       REGISTRY_HOST: "quay.io"
@@ -131,7 +131,7 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/
+  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/ && build.tag !~ /^testnet_seed/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"

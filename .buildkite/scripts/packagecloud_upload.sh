@@ -3,8 +3,9 @@
 set -euo pipefail
 
 TAG=$( git describe --abbrev=0 --tags | sed -e s/$1// )
+DEBNAME=$( echo $1 | sed -e s/_/-/ )
 
-PKGNAME="$1_${TAG}_amd64.deb"
+PKGNAME=$"${DEBNAME}_${TAG}_amd64.deb"
 
 buildkite-agent artifact download ${PKGNAME} .
 

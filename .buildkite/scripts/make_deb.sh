@@ -4,7 +4,7 @@ set -euo pipefail
 
 TAG=$( git describe --abbrev=0 --tags | sed -e s/$1// )
 
-./rebar3 as $1 release -v $TAG -n miner
+DIAGNOSTIC=1 ./rebar3 as $1 release -v $TAG -n miner
 
 fpm -n $1 \
     -v "${TAG}" \
