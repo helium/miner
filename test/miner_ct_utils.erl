@@ -645,9 +645,9 @@ start_node(Name) ->
     %% have the slave nodes monitor the runner node, so they can't outlive it
     NodeConfig = [
                   {monitor_master, true},
-                  {boot_timeout, 10},
-                  {init_timeout, 10},
-                  {startup_timeout, 10},
+                  {boot_timeout, 30},
+                  {init_timeout, 30},
+                  {startup_timeout, 30},
                   {startup_functions, [
                                        {code, set_path, [CodePath]}
                                       ]}],
