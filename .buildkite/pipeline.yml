@@ -19,6 +19,16 @@ steps:
     agents:
       queue: "erlang"
 
+  - if: build.tag =~ /^testnet_seed/
+    name: ":debian: build testnet seed deb"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/make_deb.sh testnet_seed"
+    key: "testnet-seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
     commands:
@@ -35,6 +45,15 @@ steps:
       - "git fetch -t"
       - ".buildkite/scripts/packagecloud_upload.sh seed"
     depends_on: "seed-deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^testnet_seed/
+    name: ":cloud: upload testnet seed deb to packagecloud"
+    commands:
+      - "git fetch -t"
+      - ".buildkite/scripts/packagecloud_upload.sh testnet_seed"
+    depends_on: "testnet-seed-deb"
     agents:
       queue: "erlang"
 

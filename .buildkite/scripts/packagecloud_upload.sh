@@ -8,7 +8,7 @@ PKGNAME="$1_${TAG}_amd64.deb"
 
 buildkite-agent artifact download ${PKGNAME} .
 
-# packagecloud name is seedS or validatorS
+# packagecloud name is testnet_seedS, seedS or validatorS
 REPO="$1s"
 
 curl -u "${PACKAGECLOUD_API_KEY}:" \
