@@ -3,6 +3,7 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(miner_poc_grpc_client).
+-dialyzer({nowarn_function, process_unary_response/1}).
 
 -behaviour(gen_server).
 
@@ -248,19 +249,22 @@ build_region_params_req(Address, SigFun) ->
     ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_region_params_req_v1_pb),
     Req#gateway_poc_region_params_req_v1_pb{signature = SigFun(ReqEncoded)}.
 
--spec process_unary_response(grpc_client_custom:unary_response()) -> {grpc_error, any()} | {error, any(), map()} | {ok, any(), map()} | {ok, map()}.
-process_unary_response({error, ErrorDetails}) ->
-    lager:warning("grpc error response ~p", [ErrorDetails]),
-    {grpc_error, client_error};
-process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {error_resp, #gateway_error_resp_pb{error = ErrorReason}}, height = Height, signature = Sig}}}) ->
+%% TODO: return a better and consistent response
+-spec process_unary_response(grpc_client_custom:unary_response()) -> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
+process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {error_resp, Details}, height = Height, signature = Sig}}}) ->
+    #gateway_error_resp_pb{error = ErrorReason} = Details,
     {error, ErrorReason, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {success_resp, _Payload}, height = Height, signature = Sig}}}) ->
     {ok, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {_RespType, Payload}, height = Height, signature = Sig}}}) ->
     {ok, Payload, #{height => Height, signature => Sig}};
-process_unary_response({ok, #{http_status := 200, result := Result}}) ->
-    lager:warning("unexpected grpc response ~p", [Result]),
+process_unary_response({error, ClientError = #{error_type := 'client'}}) ->
+    lager:warning("grpc error response ~p", [ClientError]),
+    {grpc_error, client_error};
+process_unary_response(_Response) ->
+    lager:warning("unhandled grpc response ~p", [_Response]),
     {error, unexpected_response}.
+
 
 -ifdef(TEST).
 maybe_override_ip(_IP)->
