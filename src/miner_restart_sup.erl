@@ -131,7 +131,7 @@ init([SigFun, ECDHFun]) ->
                 []
         end,
 
-    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
+    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4469),
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
 
     ChildSpecs =
