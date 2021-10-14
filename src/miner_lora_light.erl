@@ -47,7 +47,7 @@
 }).
 
 -record(state, {
-    socket,
+    socket = undefined :: undefined | port(),
     gateways = #{}, %% keyed by MAC
     packet_timers = #{}, %% keyed by token
     sig_fun,
@@ -65,7 +65,7 @@
     radio_udp_bind_ip,
     radio_udp_bind_port,
     cur_poc_challenger_type = undefined :: undefined | validator,
-    following_chain = true :: boolean
+    following_chain = true :: undefined | boolean()
 }).
 
 -type state() :: #state{}.
