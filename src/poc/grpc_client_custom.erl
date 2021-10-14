@@ -106,15 +106,15 @@
 -type unary_response() :: ok_response() | error_response().
 
 -type ok_response() ::
-    {ok, #{result := any(),
-           status_message := binary(),
-           http_status := 200,
-           grpc_status := 0,
-           headers := metadata(),
-           trailers := metadata()}}.
+    {ok, #{result => any(),
+           status_message => binary(),
+           http_status => 200,
+           grpc_status => 0,
+           headers => metadata(),
+           trailers => metadata()}}.
 
 -type error_response() ::
-    {error, #{error_type := error_type(),
+    {error, #{error_type => error_type(),
               http_status => integer(),
               grpc_status => integer(),
               status_message => binary(),
@@ -136,7 +136,7 @@
 -spec compile(FileName::string()) -> ok.
 %% @equiv compile(FileName, [])
 compile(FileName) ->
-    grpc_client:compile(FileName, []).
+    grpc_client_custom:compile(FileName, []).
 
 -spec compile(FileName::string(), Options::gpb_compile:opts()) -> ok.
 %% @doc Compile a .proto file to generate client stubs and a module
@@ -279,5 +279,5 @@ unary(Connection, Message, Service, Rpc, Decoder, Options) ->
         _Type:_Error:_Stack ->
             lager:warning("Failed to create stream. Type: ~p, Error: ~p, Stack:~p", [_Type, _Error, _Stack]),
             {error, #{error_type => client,
-                      status_message => <<"error creating stream">>}}
+                      status_message => <<"stream create failed">>}}
     end.
