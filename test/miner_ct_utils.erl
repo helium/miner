@@ -1761,13 +1761,13 @@ create_block(ConsensusMembers, Txs) ->
 
 signatures(ConsensusMembers, BinBlock) ->
     lists:foldl(
-%%        fun({A, {_, _, F}}, Acc) ->
-%%            Sig = F(BinBlock),
-%%            [{A, Sig}|Acc]
-        fun(M, Acc) ->
-            {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(M, blockchain_swarm, keys, []),
-            Sig = SigFun(BinBlock),
-            [{M, Sig}|Acc]
+        fun({A, {_, _, F}}, Acc) ->
+            Sig = F(BinBlock),
+            [{A, Sig}|Acc]
+%%        fun(M, Acc) ->
+%%            {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(M, blockchain_swarm, keys, []),
+%%            Sig = SigFun(BinBlock),
+%%            [{M, Sig}|Acc]
         end
         ,[]
         ,ConsensusMembers
