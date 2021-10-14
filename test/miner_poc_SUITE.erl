@@ -849,7 +849,6 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
 
 setup_dist_test(TestCase, Config, VarMap, Status) ->
     Miners = ?config(miners, Config),
-    MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
 
@@ -868,7 +867,7 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
         end,
     Miners),
 
-    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
+%%    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
     {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
                                                                 lists:zip(RadioPorts, Locations), Status),
 
