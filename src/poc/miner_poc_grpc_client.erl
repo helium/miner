@@ -261,10 +261,12 @@ process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{
 process_unary_response({error, ClientError = #{error_type := 'client'}}) ->
     lager:warning("grpc error response ~p", [ClientError]),
     {grpc_error, client_error};
+process_unary_response({error, ClientError = #{error_type := 'grpc', http_status := 200, status_message := ErroMsg}}) ->
+    lager:warning("grpc error response ~p", [ClientError]),
+    {grpc_error, ErroMsg};
 process_unary_response(_Response) ->
     lager:warning("unhandled grpc response ~p", [_Response]),
-    {error, unexpected_response}.
-
+    {grpc_error, unexpected_response}.
 
 -ifdef(TEST).
 maybe_override_ip(_IP)->
