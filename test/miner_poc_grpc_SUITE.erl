@@ -202,7 +202,7 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     %% but the port is only opened now after a chain is up and been consulted to
     %% determine if validators are running POCs
     %% So now we have wait until the chain is up and miner lora has opened the port
-    true = miner_ct_util:wait_for_lora_port(Gateways, miner_lora_light, 30),
+    true = miner_ct_utils:wait_for_lora_port(Gateways, miner_lora_light, 30),
 
     RadioPorts = lists:map(
         fun(Gateway) ->
