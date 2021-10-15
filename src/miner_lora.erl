@@ -438,7 +438,7 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #state{socket=Socket}) ->
-    gen_udp:close(Socket),
+    catch gen_udp:close(Socket),
     ok.
 
 %% ------------------------------------------------------------------
