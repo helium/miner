@@ -230,6 +230,7 @@ handle_info(init, #state{chain = undefined} = State) ->
         Chain ->
             ok = blockchain_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
+            ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_report_handler),
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             {noreply, State#state{
                 chain = Chain,
@@ -239,41 +240,22 @@ handle_info(init, #state{chain = undefined} = State) ->
     end;
 handle_info(init, State) ->
     {noreply, State};
+handle_info({blockchain_event, {new_chain, NC}}, State) ->
+    {noreply, State#state{chain = NC}};
 handle_info({blockchain_event, _Event}, #state{chain = undefined} = State)->
     {noreply, State};
 handle_info(
-    {blockchain_event, {add_block, BlockHash, Sync, _Ledger} = _Event},
+    {blockchain_event, {add_block, BlockHash, Sync, Ledger} = _Event},
     #state{chain = Chain} = State
 )->
-    lager:info("received add block event, sync is ~p", [Sync]),
+    CurPOCChallengerType =
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, V}  -> V;
+            _ -> undefined
+        end,
+    lager:info("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
-    case blockchain:get_block(BlockHash, Chain) of
-        {ok, Block} ->
-            %% save public data on each POC key found in the block to the ledger
-            %% that way all validators have access to this public data
-            %% however the validator which is running the POC will be the only node
-            %% which has the secret
-            ok = process_block_pocs(BlockHash, Block, State),
-            %% take care of GC
-            ok = purge_local_pocs(Block, State),
-            BlockHeight = blockchain_block:height(Block),
-            %% GC local pocs keys every 50 blocks
-            case BlockHeight rem 50 == 0 of
-                true ->
-                    ok = purge_pocs_keys(Block);
-                false ->
-                    noop
-            end,
-            %% GC public pocs every 100 blocks
-            case BlockHeight rem 100 == 0 of
-                true ->
-                    ok = purge_public_pocs(Block, Chain);
-                false -> noop
-            end;
-        _ ->
-            %% err what?
-            noop
-    end,
+    ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
     {noreply, State1};
 %% TODO: review approach to syc blocks again
 %%handle_info(
@@ -291,6 +273,40 @@ terminate(_Reason, _State = #state{}) ->
 %%%===================================================================
 %%% breakout functions
 %%%===================================================================
+-spec handle_add_block_event(
+    POCChallengeType :: validator | undefined,
+    BlockHash :: binary(),
+    Chain :: blockchain:blockchain(),
+    State :: state()
+) -> ok.
+handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChallengeType == validator ->
+    case blockchain:get_block(BlockHash, Chain) of
+        {ok, Block} ->
+            %% save public data on each POC key found in the block to the ledger
+            %% that way all validators have access to this public data
+            %% however the validator which is running the POC will be the only node
+            %% which has the secret
+            ok = process_block_pocs(BlockHash, Block, State),
+            %% take care of GC
+            ok = purge_local_pocs(Block, State),
+            BlockHeight = blockchain_block:height(Block),
+            %% GC local pocs keys every 50 blocks
+            case BlockHeight rem 50 == 0 of
+                true -> ok = purge_pocs_keys(Block);
+                false -> ok
+            end,
+            %% GC public pocs every 100 blocks
+            case BlockHeight rem 100 == 0 of
+                true -> ok = purge_public_pocs(Block, Chain);
+                false -> ok
+            end;
+        _ ->
+            %% err what?
+            ok
+    end;
+handle_add_block_event(POCChallengeType, BlockHash, Chain, State) ->
+    ok.
+
 -spec handle_witness(
     Witness :: blockchain_poc_witness_v1:poc_witness(),
     OnionKeyHash :: binary(),

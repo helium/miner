@@ -805,8 +805,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 4;
             autoskip_on_timeout_test ->
                 4;
-            poc_dist_v11_test ->
-                4;
+%%            poc_dist_v11_test ->
+%%                4;
             poc_grpc_dist_v11_test ->
                 8;
             _ ->
