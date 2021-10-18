@@ -523,7 +523,7 @@ wait_for_lora_port(Miners, Mod, Retries)->
                                         false;
                                     _ -> true
                                 end
-                             catch What:Why ->
+                             catch _:_ ->
                                      ct:pal("Failed to find lora port ~p", [Miner]),
                                      false
                              end
@@ -907,8 +907,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
     %% sibyl will not return routing data unless a miner/validator has a public address
     %% so force an alias for each of our miners to a public IP
     MinerAliases = lists:foldl(
-        fun({_Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
-            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+        fun({_, _, _, _, AliasAddr, _}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(AliasAddr),
             [{P2PAddr, "/ip4/52.8.80.146/tcp/2154" } | Acc]
         end, [], Keys),
     ct:pal("miner aliases ~p", [MinerAliases]),
@@ -997,13 +997,13 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     end, Miners),
 
-    %% setup a bunch of aliases for the running miner grpc posts
+    %% setup a bunch of aliases for the running miner grpc hosts
     %% as per above, each such port will be the equivilent libp2p port + 1000
     %% these grpc aliases are added purely for testing purposes
     %% no current need to support in the wild
     MinerGRPCPortAliases = lists:foldl(
-        fun({Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
-            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+        fun({Miner, _, _, _, GrpcAliasAddr, _}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(GrpcAliasAddr),
             Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
             TID = ct_rpc:call(Miner, blockchain_swarm, tid, []),
             ListenAddrs = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm]),
@@ -1019,8 +1019,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
     %% gateways can connect
     %% only used when testing grpc gateways
     MinerDefaultValidators = lists:foldl(
-        fun({Miner, {_TCPPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun}, Acc) ->
-            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Addr),
+        fun({Miner, _, _, _, ValAddr, _}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(ValAddr),
             Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
             TID = ct_rpc:call(Miner, blockchain_swarm, tid, []),
             ListenAddrs = ct_rpc:call(Miner, libp2p_swarm, listen_addrs, [Swarm]),
@@ -1031,7 +1031,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
         end, [], Keys),
 
     %% set any required env vars for grpc gateways
-    POCVersion = ?config(poc_version, Config),
+    %% POCversion here is only in use by the grpc POC tests, default it to 11
+    %% all tests other than the grpc poc tests will ignore it
+    POCVersion = proplists:get_value(poc_version, Config, 11),
     lists:foreach(fun(Gateway)->
         ct_rpc:call(Gateway, application, set_env, [miner, default_validators, MinerDefaultValidators]),
         ct_rpc:call(Gateway, application, set_env, [miner, poc_version, POCVersion]),
@@ -1225,7 +1227,6 @@ end_per_testcase(TestCase, Config) ->
         ok ->
             %% test passed, we can cleanup
             cleanup_per_testcase(TestCase, Config),
-            ok;
         _ ->
             %% leave results alone for analysis
             ok
@@ -1764,10 +1765,6 @@ signatures(ConsensusMembers, BinBlock) ->
         fun({A, {_, _, F}}, Acc) ->
             Sig = F(BinBlock),
             [{A, Sig}|Acc]
-%%        fun(M, Acc) ->
-%%            {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(M, blockchain_swarm, keys, []),
-%%            Sig = SigFun(BinBlock),
-%%            [{M, Sig}|Acc]
         end
         ,[]
         ,ConsensusMembers
