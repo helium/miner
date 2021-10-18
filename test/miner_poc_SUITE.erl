@@ -1186,7 +1186,8 @@ common_poc_vars(Config) ->
       ?poc_v4_target_prob_score_wt => 0.8,
       ?poc_v4_target_score_curve => 5,
       ?poc_target_hex_parent_res => 5,
-      ?poc_v5_target_prob_randomness_wt => 0.0}.
+      ?poc_v5_target_prob_randomness_wt => 0.0,
+      ?poc_witness_consideration_limit => 20}.
 
 do_common_partition_checks(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
@@ -1379,7 +1380,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
 
 extra_vars(poc_v11) ->
     POCVars = maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars()),
-    RewardVars = #{reward_version => 5, rewards_txn_version => 2},
+    RewardVars = #{reward_version => 5, rewards_txn_version => 2, poc_witness_consideration_limit => 20},
     maps:merge(POCVars, RewardVars);
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),
