@@ -53,7 +53,7 @@
   1},
  {<<"erbloom">>,
   {git,"https://github.com/Vagabond/erbloom",
-       {ref,"8fc2a5aa2454bca3b57047c0b3f79f8d9d219483"}},
+       {ref,"a1768fa6a63e979017fe94ee86a86164e3c21d88"}},
   2},
  {<<"erl_angry_purple_tiger">>,
   {git,"https://github.com/helium/erl_angry_purple_tiger.git",
