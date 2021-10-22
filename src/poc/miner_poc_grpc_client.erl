@@ -1,5 +1,13 @@
 %%%-------------------------------------------------------------------
 %%% @doc
+%%% NOTE: this client is a piece of crap atm
+%%%       you should cast your eyes elsewhere, no really....
+%%%       It is discardable and only in use short term
+%%%       Once rust client is up to speed it will be binned
+%%%       That said it still requires additional love before it can
+%%%       be deployed.
+%%% TODO: rewrite to a statem
+%%% TODO: push streams out to child procs
 %%% @end
 %%%-------------------------------------------------------------------
 -module(miner_poc_grpc_client).
@@ -34,9 +42,11 @@
     self_sig_fun,
     connection,
     connection_pid,
-    stream_pid,
     conn_monitor_ref,
-    stream_monitor_ref,
+    stream_poc_pid,
+    stream_poc_monitor_ref,
+    stream_config_update_pid,
+    stream_config_update_monitor_ref,
     validator_p2p_addr,
     validator_public_ip,
     validator_grpc_port
@@ -72,7 +82,7 @@ init(_Args) ->
     lager:info("starting ~p", [?MODULE]),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     {ok, _, SigFun, _} = blockchain_swarm:keys(),
-    erlang:send_after(500, self(), connect_grpc),
+    erlang:send_after(500, self(), find_streaming_validator),
     {ok, #state{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SigFun}}.
 
 handle_call(connection, _From, State = #state{connection = Connection}) ->
@@ -99,11 +109,55 @@ handle_cast({send_report, ReportType, Report, OnionKeyHash}, #state{connection =
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+%% TODO - rewrite this crappy client as a statem and move streams out into child proc
+handle_info(find_streaming_validator, State) ->
+    %% ask a random seed validator for the address of a 'proper' validator
+    %% we will then use this as our default streaming validator
+    case application:get_env(miner, seed_validators) of
+        {ok, SeedValidators} ->
+            {_SeedP2PAddr, SeedValIP, SeedValGRPCPort} = lists:nth(rand:uniform(length(SeedValidators)), SeedValidators),
+            Req = build_validators_req(1),
+            case send_grpc_unary_req(SeedValIP, SeedValGRPCPort, Req, 'validators') of
+                {ok, #gateway_validators_resp_v1_pb{result = []}, _ReqDetails} ->
+                    %% no routes, retry in a bit
+                    lager:warning("failed to find any validator routing from seed validator ~p", [SeedValIP]),
+                    erlang:send_after(1000, self(), find_streaming_validator),
+                    {noreply, State};
+                {ok, #gateway_validators_resp_v1_pb{result = Routing}, _ReqDetails} ->
+                    %% resp will contain the payload 'gateway_validators_resp_v1_pb'
+                    [#routing_address_pb{pub_key = StreamingValPubKeyBin, uri = StreamingValURI}] = Routing,
+                    StreamingValP2PAddr = libp2p_crypto:pubkey_bin_to_p2p(StreamingValPubKeyBin),
+                    #{host := StreamingValIP, port := StreamingValGRPCPort} = uri_string:parse(StreamingValURI),
+                    %% retrieve some config from the returned validator
+                    Req2 = build_config_req(),
+                    case send_grpc_unary_req(StreamingValIP, StreamingValGRPCPort, Req2, 'config') of
+                        {ok, #gateway_config_resp_v1_pb{result = KeyVals}, _Req2Details} ->
+                            [application:set_env(miner, Key, Val) || #key_val_v1_pb{key=Key, val=Val} <- KeyVals],
+                            self() ! connect_grpc,
+                            {noreply, State#state{validator_p2p_addr = StreamingValP2PAddr, validator_public_ip = StreamingValIP, validator_grpc_port = StreamingValGRPCPort}};
+                        _Error ->
+                            lager:warning("failed to retrieve config from val with host ~p: ~p", [StreamingValIP, _Error]),
+                            erlang:send_after(1000, self(), find_streaming_validator),
+                            {noreply, State}
+                    end;
+                _Error ->
+                    lager:warning("request to validator failed: ~p", [_Error]),
+                    erlang:send_after(1000, self(), find_streaming_validator),
+                    {noreply, State}
+            end;
+        _ ->
+            lager:warning("failed to find seed validators", []),
+            erlang:send_after(1000, self(), find_streaming_validator),
+            {noreply, State}
+    end;
 handle_info(connect_grpc, State) ->
     State0 = connect(State),
     {noreply, State0};
 handle_info(connect_poc_stream, State) ->
-    State0 = connect_poc_stream(State),
+    State0 = connect_stream_poc(State),
+    {noreply, State0};
+handle_info(connect_config_update_stream, State) ->
+    State0 = connect_stream_config_update(State),
     {noreply, State0};
 
 handle_info({'DOWN', Ref, process, _, Reason}, State = #state{conn_monitor_ref = Ref, connection = Connection}) ->
@@ -111,11 +165,17 @@ handle_info({'DOWN', Ref, process, _, Reason}, State = #state{conn_monitor_ref =
     _ = grpc_client_custom:stop_connection(Connection),
     State0 = connect(State),
     {noreply, State0};
-handle_info({'DOWN', Ref, process, _, Reason}, State = #state{stream_monitor_ref = Ref}) ->
+handle_info({'DOWN', Ref, process, _, Reason}, State = #state{stream_poc_monitor_ref = Ref}) ->
     %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
-    lager:warning("GRPC stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
-    State0 = connect_poc_stream(State),
+    lager:warning("poc stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
+    State0 = connect_stream_poc(State),
+    {noreply, State0};
+handle_info({'DOWN', Ref, process, _, Reason}, State = #state{stream_config_update_monitor_ref = Ref}) ->
+    %% the config_update stream is meant to be long lived, we always want it up as long as we have a grpc connection
+    %% so if it goes down start it back up again
+    lager:warning("config_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
+    State0 = connect_stream_config_update(State),
     {noreply, State0};
 
 handle_info(_Info, State = #state{}) ->
@@ -128,14 +188,10 @@ terminate(_Reason, _State = #state{}) ->
 %% Internal functions
 %% ------------------------------------------------------------------
 -spec connect(#state{}) -> #state{}.
-connect(State) ->
+connect(State = #state{validator_p2p_addr = ValAddr, validator_public_ip = ValIP, validator_grpc_port = ValPort}) ->
     try
-        {ok, DefaultValidators} = application:get_env(miner, default_validators),
-        %% pick a random validator as our streaming grpc server
-        %% TODO: agree on approach to default validators, set in config, pull from peerbook or other
-        {P2PAddr, PublicIP, GRPCPort} = lists:nth(rand:uniform(length(DefaultValidators)), DefaultValidators),
-        lager:info("connecting to validator, p2paddr: ~p, ip: ~p, port: ~p", [P2PAddr, PublicIP, GRPCPort]),
-        case miner_poc_grpc_client_handler:connect(P2PAddr, PublicIP, GRPCPort) of
+        lager:info("connecting to validator, p2paddr: ~p, ip: ~p, port: ~p", [ValAddr, ValIP, ValPort]),
+        case miner_poc_grpc_client_handler:connect(ValAddr, maybe_override_ip(ValIP), ValPort) of
             {error, _} ->
                 erlang:send_after(1000, self(), connect_grpc),
                 State;
@@ -143,8 +199,9 @@ connect(State) ->
                 lager:info("successfully connected to validator via connection ~p", [Connection]),
                 #{http_connection := ConnectionPid} = Connection,
                 M = erlang:monitor(process, ConnectionPid),
-                erlang:send_after(1000, self(), connect_poc_stream),
-                State#state{connection = Connection, connection_pid = ConnectionPid, conn_monitor_ref = M, validator_p2p_addr = P2PAddr, validator_public_ip = PublicIP, validator_grpc_port = GRPCPort}
+                self() ! connect_poc_stream,
+                self() ! connect_config_update_stream,
+                State#state{connection = Connection, connection_pid = ConnectionPid, conn_monitor_ref = M}
         end
     catch _Class:_Error:_Stack ->
         lager:info("failed to connect to validator, will try again in a bit. Reason: ~p, Details: ~p, Stack: ~p", [_Class, _Error, _Stack]),
@@ -152,8 +209,8 @@ connect(State) ->
         State
     end.
 
--spec connect_poc_stream(#state{}) -> #state{}.
-connect_poc_stream(#state{connection = Connection, self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
+-spec connect_stream_poc(#state{}) -> #state{}.
+connect_stream_poc(#state{connection = Connection, self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = State) ->
     lager:info("establishing POC stream on connection ~p", [Connection]),
     case miner_poc_grpc_client_handler:poc_stream(Connection, SelfPubKeyBin, SelfSigFun) of
         {error, _Reason} ->
@@ -161,9 +218,23 @@ connect_poc_stream(#state{connection = Connection, self_pub_key_bin = SelfPubKey
             erlang:send_after(3000, self(), connect_poc_stream),
             State;
         {ok, Stream} ->
-            lager:info("successfully connected stream ~p on connection ~p", [Stream, Connection]),
+            lager:info("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
             M = erlang:monitor(process, Stream),
-            State#state{stream_monitor_ref = M, stream_pid = Stream}
+            State#state{stream_poc_monitor_ref = M, stream_poc_pid = Stream}
+    end.
+
+-spec connect_stream_config_update(#state{}) -> #state{}.
+connect_stream_config_update(#state{connection = Connection} = State) ->
+    lager:info("establishing config_update stream on connection ~p", [Connection]),
+    case miner_poc_grpc_client_handler:config_update_stream(Connection) of
+        {error, _Reason} ->
+            lager:info("failed to establish config_update stream on connection ~p, will try again in a bit. Reason: ~p", [Connection, _Reason]),
+            erlang:send_after(3000, self(), connect_config_update_stream),
+            State;
+        {ok, Stream} ->
+            lager:info("successfully connected config_update stream ~p on connection ~p", [Stream, Connection]),
+            M = erlang:monitor(process, Stream),
+            State#state{stream_config_update_monitor_ref = M, stream_config_update_pid = Stream}
     end.
 
 -spec send_report(witness | receipt, any(), binary(), function(), grpc_client_custom:connection()) -> ok.
@@ -206,8 +277,9 @@ send_grpc_unary_req(Connection, Req, RPC) ->
 -spec send_grpc_unary_req(string(), non_neg_integer(), any(), atom()) -> {grpc_error, any()} | {error, any(), map()} | {ok, any(), map()}.
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
     try
-        {ok, Connection} = grpc_client_custom:connect(tcp, PeerIP, GRPCPort),
-        lager:info("New Connection, send unary request: ~p", [Req]),
+        lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
+        {ok, Connection} = grpc_client_custom:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
+
         Res = grpc_client_custom:unary(
             Connection,
             Req,
@@ -218,7 +290,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
             %% we dont need the connection to hang around, so close it out
-        _ = grpc_client_custom:stop_connection(Connection),
+        catch _ = grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack  ->
@@ -248,6 +320,22 @@ build_region_params_req(Address, SigFun) ->
     },
     ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_region_params_req_v1_pb),
     Req#gateway_poc_region_params_req_v1_pb{signature = SigFun(ReqEncoded)}.
+
+-spec build_validators_req(Quantity:: pos_integer()) -> #gateway_validators_req_v1_pb{}.
+build_validators_req(Quantity) ->
+    #gateway_validators_req_v1_pb{
+        quantity = Quantity
+    }.
+
+-spec build_config_req() -> #gateway_config_req_v1_pb{}.
+build_config_req() ->
+    #gateway_config_req_v1_pb{ keys =
+        [
+        <<"poc_version">>,
+        <<"data_aggregation_version">>,
+        <<"gateways_run_chain">>
+    ]
+    }.
 
 %% TODO: return a better and consistent response
 -spec process_unary_response(grpc_client_custom:unary_response()) -> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.

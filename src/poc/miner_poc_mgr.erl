@@ -304,7 +304,7 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
             %% err what?
             ok
     end;
-handle_add_block_event(POCChallengeType, BlockHash, Chain, State) ->
+handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
     ok.
 
 -spec handle_witness(
