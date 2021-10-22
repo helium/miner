@@ -159,7 +159,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
         true ->
             ?assert(check_validators_are_creating_poc_keys(Validators)),
             %% Check that the receipts are growing
-            case maps:get(?poc_version, VarMap, 1) of
+            case maps:get(?poc_version, VarMap, 11) of
                 V when V >= 10 ->
                     %% There are no paths in v11 or v10 for that matter, so we'll consolidate
                     %% the checks for both poc-v10 and poc-v11 here

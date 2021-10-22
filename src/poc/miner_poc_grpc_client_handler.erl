@@ -25,7 +25,8 @@
 
 -export([
     connect/3,
-    poc_stream/3
+    poc_stream/3,
+    config_update_stream/1
 ]).
 
 init()->
@@ -58,19 +59,40 @@ poc_stream(Connection, PubKeyBin, SigFun)->
         {ok, Stream} = grpc_client_stream_custom:new(
             Connection,
             'helium.gateway',
-            stream,
+            stream_poc,
             gateway_client_pb,
             [],
             ?MODULE),
+        %% subscribe to poc updates
         Req = #gateway_poc_req_v1_pb{address = PubKeyBin, signature = <<>>},
         ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
-        Req2 = Req#gateway_poc_req_v1_pb{signature = SigFun(ReqEncoded)},
-        ok = grpc_client_custom:send(Stream, #gateway_stream_req_v1_pb{msg = {poc_req, Req2}}),
+        ReqSigned = Req#gateway_poc_req_v1_pb{signature = SigFun(ReqEncoded)},
+        ok = grpc_client_custom:send(Stream, ReqSigned),
         {ok, Stream}
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect to poc stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
         {error, stream_failed}
      end.
+
+-spec config_update_stream(grpc_client_custom:connection()) -> {ok, pid()} | {error, any()}.
+config_update_stream(Connection)->
+    try
+        {ok, Stream} = grpc_client_stream_custom:new(
+            Connection,
+            'helium.gateway',
+            stream_config_update,
+            gateway_client_pb,
+            [],
+            ?MODULE),
+        %% subscribe to config updates
+        Req = #gateway_config_update_req_v1_pb{},
+        ok = grpc_client_custom:send(Stream, Req),
+        {ok, Stream}
+     catch _Error:_Reason:_Stack ->
+        lager:warning("*** failed to connect to poc stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
+        {error, stream_failed}
+     end.
+
 
 %% TODO: handle headers
 handle_msg({headers, _Headers}, StreamState) ->
@@ -91,6 +113,11 @@ handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotifi
         {grpc_error, _Reason} ->
             ok
     end,
+    StreamState;
+handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
+    lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
+    #gateway_config_update_streamed_resp_v1_pb{vars = KeyVals} = Payload,
+    [application:set_env(miner, Key, Val) || #key_val_v1_pb{key=Key, val=Val} <- KeyVals],
     StreamState;
 handle_msg({data, _Msg}, StreamState) ->
     lager:info("grpc client received unexpected msg ~p",[_Msg]),

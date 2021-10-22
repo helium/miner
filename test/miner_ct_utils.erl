@@ -1018,7 +1018,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     %% use this list to set an app env var to provide a list of default validators to which
     %% gateways can connect
     %% only used when testing grpc gateways
-    MinerDefaultValidators = lists:foldl(
+    SeedValidators = lists:foldl(
         fun({Miner, _, _, _, ValAddr, _}, Acc) ->
             P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(ValAddr),
             Swarm = ct_rpc:call(Miner, blockchain_swarm, swarm, []),
@@ -1029,13 +1029,14 @@ init_per_testcase(Mod, TestCase, Config0) ->
             GrpcPort = list_to_integer(binary_to_list(Libp2pPort)) + 1000,
             [{P2PAddr, "127.0.0.1", GrpcPort} | Acc]
         end, [], Keys),
+    ct:pal("seed validators: ~p", [SeedValidators]),
 
     %% set any required env vars for grpc gateways
     %% POCversion here is only in use by the grpc POC tests, default it to 11
     %% all tests other than the grpc poc tests will ignore it
     POCVersion = proplists:get_value(poc_version, Config, 11),
     lists:foreach(fun(Gateway)->
-        ct_rpc:call(Gateway, application, set_env, [miner, default_validators, MinerDefaultValidators]),
+        ct_rpc:call(Gateway, application, set_env, [miner, seed_validators, SeedValidators]),
         ct_rpc:call(Gateway, application, set_env, [miner, poc_version, POCVersion]),
         ct_rpc:call(Gateway, application, set_env, [miner, data_aggregation_version, 3]),
         ct_rpc:call(Gateway, application, set_env, [miner, gateways_run_chain, LoadChainOnGateways])
@@ -1226,7 +1227,8 @@ end_per_testcase(TestCase, Config) ->
     case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-            cleanup_per_testcase(TestCase, Config),
+%%            cleanup_per_testcase(TestCase, Config);
+            ok;
         _ ->
             %% leave results alone for analysis
             ok
