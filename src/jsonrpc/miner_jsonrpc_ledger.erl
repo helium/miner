@@ -71,6 +71,18 @@ handle_rpc(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
         [],
         L
     );
+handle_rpc(<<"ledger_gateways">>, #{ <<"address">> := Address}) ->
+    Ledger = get_ledger(),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    try
+        BinAddr = ?B58_TO_BIN(Address),
+        case blockchain_ledger_v1:find_gateway_info(BinAddr, Ledger) of
+            {error, not_found} -> ?jsonrpc_error({not_found, Address});
+            {ok, GW} -> format_ledger_gateway_entry(BinAddr, GW, Height, true)
+        end
+    catch
+        _:_ -> ?jsonrpc_error({invalid_params, Address})
+    end;
 handle_rpc(<<"ledger_gateways">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
 handle_rpc(<<"ledger_validators">>, []) ->
@@ -141,11 +153,15 @@ format_ledger_balance(Addr, Entry) ->
 
 format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
     GWAddr = ?BIN_TO_B58(Addr),
+    GWLoc = case blockchain_ledger_gateway_v2:location(GW) of
+        undefined -> undefined;
+        L -> h3:to_string(L)
+    end,
     O = #{
-        <<"name">> => iolist_to_binary(blockchain_utils:addr2name(GWAddr)),
+        <<"name">> => iolist_to_binary(blockchain_utils:addr2name(Addr)),
         <<"address">> => GWAddr,
         <<"owner_address">> => ?BIN_TO_B58(blockchain_ledger_gateway_v2:owner_address(GW)),
-        <<"location">> => ?MAYBE(blockchain_ledger_gateway_v2:location(GW)),
+        <<"location">> => ?TO_VALUE(GWLoc),
         <<"last_challenge">> => last_challenge(
             Height,
             blockchain_ledger_gateway_v2:last_poc_challenge(GW)

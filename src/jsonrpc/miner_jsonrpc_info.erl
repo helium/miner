@@ -94,9 +94,10 @@ handle_rpc(<<"info_summary">>, []) ->
         peer_book_entry_count => PeerBookEntryCount,
         firmware_version => FirmwareVersion,
         gateway_details => GWInfo,
-        version => miner:version()
+        version => ?TO_VALUE(get_miner_version())
     };
-
+handle_rpc(<<"info_version">>, []) ->
+    #{version => ?TO_VALUE(get_miner_version())};
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -109,6 +110,13 @@ get_mac_addrs() ->
 
 get_firmware_version() ->
     iolist_to_binary(os:cmd("cat /etc/lsb_release")).
+
+get_miner_version() ->
+    Releases = release_handler:which_releases(),
+    case erlang:hd(Releases) of
+        {_,ReleaseVersion,_,_} -> ReleaseVersion;
+        {error,_} -> undefined
+    end.
 
 get_uptime() ->
     %% returns seconds of uptime
@@ -138,7 +146,10 @@ get_gateway_location(Chain, PubKey, Dest) when is_binary(PubKey) ->
         _ -> Dest
     end;
 get_gateway_location(_Chain, Gateway, Dest) ->
-    GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
+    GWLoc = case blockchain_ledger_gateway_v2:location(Gateway) of
+        undefined -> undefined;
+        L -> h3:to_string(L)
+    end,
     GWElevation = blockchain_ledger_gateway_v2:elevation(Gateway),
     GWGain = case blockchain_ledger_gateway_v2:gain(Gateway) of
         undefined -> undefined;
