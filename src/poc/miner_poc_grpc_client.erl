@@ -7,11 +7,13 @@
 %%%       That said it still requires additional love before it can
 %%%       be deployed.
 %%% TODO: rewrite to a statem
-%%% TODO: push streams out to child procs
 %%% @end
 %%%-------------------------------------------------------------------
 -module(miner_poc_grpc_client).
 -dialyzer({nowarn_function, process_unary_response/1}).
+-dialyzer({nowarn_function, handle_info/2}).
+-dialyzer({nowarn_function, build_config_req/0}).
+
 
 -behaviour(gen_server).
 
@@ -252,7 +254,7 @@ send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
     _ = send_grpc_unary_req(Connection, Req, 'send_report'),
     ok.
 
--spec send_grpc_unary_req(grpc_client_custom:connection(), any(), atom())-> {grpc_error, any()} | {error, any(), map()} | {ok, any(), map()}.
+-spec send_grpc_unary_req(grpc_client_custom:connection(), any(), atom())-> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 send_grpc_unary_req(undefined, _Req, _RPC) ->
     {grpc_error, no_connection};
 send_grpc_unary_req(Connection, Req, RPC) ->
@@ -274,7 +276,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             {grpc_error, req_failed}
     end.
 
--spec send_grpc_unary_req(string(), non_neg_integer(), any(), atom()) -> {grpc_error, any()} | {error, any(), map()} | {ok, any(), map()}.
+-spec send_grpc_unary_req(string(), non_neg_integer(), any(), atom()) -> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
     try
         lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
@@ -332,8 +334,7 @@ build_config_req() ->
     #gateway_config_req_v1_pb{ keys =
         [
         <<"poc_version">>,
-        <<"data_aggregation_version">>,
-        <<"gateways_run_chain">>
+        <<"data_aggregation_version">>
     ]
     }.
 
@@ -349,9 +350,9 @@ process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{
 process_unary_response({error, ClientError = #{error_type := 'client'}}) ->
     lager:warning("grpc error response ~p", [ClientError]),
     {grpc_error, client_error};
-process_unary_response({error, ClientError = #{error_type := 'grpc', http_status := 200, status_message := ErroMsg}}) ->
+process_unary_response({error, ClientError = #{error_type := 'grpc', http_status := 200, status_message := ErrorMsg}}) ->
     lager:warning("grpc error response ~p", [ClientError]),
-    {grpc_error, ErroMsg};
+    {grpc_error, ErrorMsg};
 process_unary_response(_Response) ->
     lager:warning("unhandled grpc response ~p", [_Response]),
     {grpc_error, unexpected_response}.
