@@ -145,19 +145,6 @@ position() ->
 
 -spec location_ok() -> true | false.
 location_ok() ->
-    %% the below code is tested and working.  we're going to roll
-    %% out the metadata update so app users can see their status
-    %% case position() of
-    %%     {error, _Error} ->
-    %%         lager:debug("pos err ~p", [_Error]),
-    %%         false;
-    %%     {ok, _} ->
-    %%         true;
-    %%     %% fix but too far from assert
-    %%     {ok, _, _} ->
-    %%         false
-    %% end.
-
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
