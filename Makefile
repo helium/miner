@@ -30,7 +30,7 @@ typecheck:
 	$(REBAR) dialyzer xref
 
 ci: compile
-	$(REBAR) do dialyzer && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
+	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
 release: | $(grpc_services_directory)
 	$(REBAR) as prod release -n miner
