@@ -297,41 +297,52 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                                                    packet_hashes=PacketHashes,
                                                    blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
-    %% Validate the witness is correct
-    Ledger = blockchain:ledger(Chain),
-    LocationOK = miner_lora:location_ok(),
-    case {LocationOK, validate_witness(Witness, Ledger)} of
-        {false, Valid} ->
-            lager:warning("location is bad, validity: ~p", [Valid]),
+
+    GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
+    %% Check that the receiving `Address` is of the `Witness`
+    case Address == GatewayWitness of
+        false ->
+            lager:warning("witness gw: ~p, recv addr: ~p mismatch!",
+                          [libp2p_crypto:bin_to_b58(GatewayWitness),
+                           libp2p_crypto:bin_to_b58(Address)]),
             {keep_state, Data};
-        {_, false} ->
-            lager:warning("ignoring invalid witness ~p", [Witness]),
-            {keep_state, Data};
-        {_, true} ->
-            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
-            GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
-            %% check this is a known layer of the packet
-            case lists:keyfind(PacketHash, 2, PacketHashes) of
-                false ->
-                    lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+        true ->
+            %% Validate the witness is correct
+            Ledger = blockchain:ledger(Chain),
+            LocationOK = miner_lora:location_ok(),
+            case {LocationOK, validate_witness(Witness, Ledger)} of
+                {false, Valid} ->
+                    lager:warning("location is bad, validity: ~p", [Valid]),
                     {keep_state, Data};
-                {GatewayWitness, PacketHash} ->
-                    lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                {_, false} ->
+                    lager:warning("ignoring invalid witness ~p", [Witness]),
                     {keep_state, Data};
-                _ ->
-                    Witnesses = maps:get(PacketHash, Responses0, []),
-                    %% Don't allow putting duplicate response in the witness list resp
-                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
-                    Responses1 =
-                        case lists:any(Predicate, Witnesses) of
-                            false ->
-                                maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
-                            true ->
-                                Responses0
-                        end,
-                    {keep_state, save_data(Data#data{responses=Responses1})}
+                {_, true} ->
+                    PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+                    %% check this is a known layer of the packet
+                    case lists:keyfind(PacketHash, 2, PacketHashes) of
+                        false ->
+                            lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                            {keep_state, Data};
+                        {GatewayWitness, PacketHash} ->
+                            lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                            {keep_state, Data};
+                        _ ->
+                            Witnesses = maps:get(PacketHash, Responses0, []),
+                            %% Don't allow putting duplicate response in the witness list resp
+                            Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                            Responses1 =
+                                case lists:any(Predicate, Witnesses) of
+                                    false ->
+                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
+                                    true ->
+                                        Responses0
+                                end,
+                            {keep_state, save_data(Data#data{responses=Responses1})}
+                    end
             end
     end;
+
 receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
