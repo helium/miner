@@ -845,7 +845,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
             end,
 
             Token = mk_token(Timers),
-            Packet = create_packet(Payload, When, AdjustedTmst_us, LocalFreq, DataRate, Power, IPol, Token),
+            Packet = create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token),
             maybe_mirror(State#state.mirror_socket, Packet),
             lager:debug("sending packet via channel: ~p",[LocalFreq]),
             ok = gen_udp:send(Socket, IP, Port, Packet),
@@ -857,19 +857,25 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
 -spec create_packet(
     Payload :: binary(),
     When :: atom() | integer(),
-    AdjustedTmst_us :: integer(),
     LocalFreq :: integer(),
     DataRate :: string(),
     Power :: float(),
     IPol :: boolean(),
     Token :: binary()
 ) -> binary().
-create_packet(Payload, When, AdjustedTmst_us, LocalFreq, DataRate, Power, IPol, Token) ->
+create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
+
+    IsImme = When == immediate,
+    Tmst = case IsImme of
+               false -> When;
+               true -> 0
+           end,
+
     DecodedJSX = #{<<"txpk">> => #{
                         <<"ipol">> => IPol, %% IPol for downlink to devices only, not poc packets
-                        <<"imme">> => When == immediate,
+                        <<"imme">> => IsImme,
                         <<"powe">> => trunc(Power),
-                        <<"tmst">> => AdjustedTmst_us,
+                        <<"tmst">> => Tmst,
                         <<"freq">> => LocalFreq,
                         <<"modu">> => <<"LORA">>,
                         <<"datr">> => list_to_binary(DataRate),
