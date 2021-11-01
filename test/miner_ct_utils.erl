@@ -1032,13 +1032,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
     ct:pal("seed validators: ~p", [SeedValidators]),
 
     %% set any required env vars for grpc gateways
-    %% POCversion here is only in use by the grpc POC tests, default it to 11
-    %% all tests other than the grpc poc tests will ignore it
-    POCVersion = proplists:get_value(poc_version, Config, 11),
     lists:foreach(fun(Gateway)->
         ct_rpc:call(Gateway, application, set_env, [miner, seed_validators, SeedValidators]),
-        ct_rpc:call(Gateway, application, set_env, [miner, poc_version, POCVersion]),
-        ct_rpc:call(Gateway, application, set_env, [miner, data_aggregation_version, 3]),
         ct_rpc:call(Gateway, application, set_env, [miner, gateways_run_chain, LoadChainOnGateways])
     end, Gateways),
 
@@ -1221,7 +1216,7 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
     ok.
 
-end_per_testcase(TestCase, Config) ->
+end_per_testcase(_TestCase, Config) ->
     Miners = ?config(miners, Config),
     miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
     case ?config(tc_status, Config) of
