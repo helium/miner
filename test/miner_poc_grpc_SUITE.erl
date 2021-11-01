@@ -70,13 +70,11 @@ init_per_group(poc_grpc_with_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
         {num_validators, 8},
-        {poc_version, 11},
         {gateways_run_chain, true} | Config];
 init_per_group(poc_grpc_no_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
         {num_validators, 8},
-        {poc_version, 11},
         {gateways_run_chain, false} | Config].
 
 init_per_testcase(poc_grpc_dist_v11_test = TestCase, Config) ->
@@ -134,19 +132,9 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
 
 exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
     do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v10_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v10_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v8_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v8_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v7_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v7_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v6_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v6_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v5_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v5_partitioned_lying_test, Config, VarMap);
 exec_dist_test(poc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
     do_common_partition_checks(poc_dist_v11_partitioned_test, Config, VarMap);
-exec_dist_test(TestCase, Config, VarMap, Status) ->
+exec_dist_test(_TestCase, Config, VarMap, Status) ->
     Validators = ?config(validators, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -231,9 +219,6 @@ gen_locations(poc_dist_v11_partitioned_test, _, _) ->
 gen_locations(poc_dist_v11_cn_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?CNLOCS1 ++ ?CNLOCS2, ?CNLOCS1 ++ ?CNLOCS2};
-%%gen_locations(poc_dist_v11_test, _, _) ->
-%%    %% Actual locations are the same as the claimed locations for the dist test
-%%    {?AUSTINLOCS1 ++ ?AUSTINLOCS2, ?AUSTINLOCS1 ++ ?AUSTINLOCS2};
 gen_locations(_TestCase, Addresses, VarMap) ->
     LocationJitter = case maps:get(?poc_version, VarMap, 1) of
                          V when V > 3 ->
@@ -324,93 +309,10 @@ check_validators_are_creating_poc_keys([Val |_] = _Validators) ->
         [_] -> true
     end.
 
-check_eventual_path_growth(TestCase, Miners) ->
-    ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
-    check_growing_paths(TestCase, ReceiptMap, active_gateways(Miners), false).
-
-check_partitioned_path_growth(_TestCase, Miners) ->
-    ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
-    check_subsequent_path_growth(ReceiptMap).
-
 check_partitioned_lying_path_growth(_TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
     ct:pal("ReceiptMap: ~p", [ReceiptMap]),
     not check_subsequent_path_growth(ReceiptMap).
-
-check_growing_paths(TestCase, ReceiptMap, ActiveGateways, PartitionFlag) ->
-    Results = lists:foldl(fun({_Challenger, TaggedReceipts}, Acc) ->
-                                  [{_, FirstReceipt} | Rest] = TaggedReceipts,
-                                  %% It's possible that the first receipt itself has multiple elements path, I think
-                                  RemainingGrowthCond = case PartitionFlag of
-                                                            true ->
-                                                                check_remaining_partitioned_grow(TestCase, Rest, ActiveGateways);
-                                                            false ->
-                                                                check_remaining_grow(Rest)
-                                                        end,
-                                  Res = length(blockchain_txn_poc_receipts_v2:path(FirstReceipt)) >= 1 andalso RemainingGrowthCond,
-                                  [Res | Acc]
-                          end,
-                          [],
-                          maps:to_list(ReceiptMap)),
-    lists:all(fun(R) -> R == true end, Results) andalso maps:size(ReceiptMap) == maps:size(ActiveGateways).
-
-check_remaining_grow([]) ->
-    false;
-check_remaining_grow(TaggedReceipts) ->
-    Res = lists:map(fun({_, Receipt}) ->
-                            length(blockchain_txn_poc_receipts_v2:path(Receipt)) > 1
-                    end,
-                    TaggedReceipts),
-    %% It's possible that even some of the remaining receipts have single path
-    %% but there should eventually be some which have multi element paths
-    lists:any(fun(R) -> R == true end, Res).
-
-check_remaining_partitioned_grow(_TestCase, [], _ActiveGateways) ->
-    false;
-check_remaining_partitioned_grow(TestCase, TaggedReceipts, ActiveGateways) ->
-    Res = lists:map(fun({_, Receipt}) ->
-                            Path = blockchain_txn_poc_receipts_v2:path(Receipt),
-                            PathLength = length(Path),
-                            ct:pal("PathLength: ~p", [PathLength]),
-                            PathLength > 1 andalso PathLength =< 4 andalso check_partitions(TestCase, Path, ActiveGateways)
-                    end,
-                    TaggedReceipts),
-    ct:pal("Res: ~p", [Res]),
-    %% It's possible that even some of the remaining receipts have single path
-    %% but there should eventually be some which have multi element paths
-    lists:any(fun(R) -> R == true end, Res).
-
-check_partitions(TestCase, Path, ActiveGateways) ->
-    PathLocs = sets:from_list(lists:foldl(fun(Element, Acc) ->
-                                                  Challengee = blockchain_poc_path_element_v1:challengee(Element),
-                                                  ChallengeeGw = maps:get(Challengee, ActiveGateways),
-                                                  ChallengeeLoc = blockchain_ledger_gateway_v2:location(ChallengeeGw),
-                                                  [ChallengeeLoc | Acc]
-                                          end,
-                                          [],
-                                          Path)),
-    {LocSet1, LocSet2} = location_sets(TestCase),
-    case sets:is_subset(PathLocs, LocSet1) of
-        true ->
-            %% Path is in LocSet1, check that it's not in LocSet2
-            sets:is_disjoint(PathLocs, LocSet2);
-        false ->
-            %% Path is not in LocSet1, check that it's only in LocSet2
-            sets:is_subset(PathLocs, LocSet2) andalso sets:is_disjoint(PathLocs, LocSet1)
-    end.
-
-
-check_atleast_k_receipts(Miners, K) ->
-    ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    TotalReceipts = lists:foldl(fun(ReceiptList, Acc) ->
-                                        length(ReceiptList) + Acc
-                                end,
-                                0,
-                                maps:values(ReceiptMap)),
-    ct:pal("TotalReceipts: ~p", [TotalReceipts]),
-    TotalReceipts >= K.
 
 receipt_counter(ReceiptMap) ->
     lists:foldl(fun({Name, ReceiptList}, Acc) ->
@@ -422,12 +324,6 @@ receipt_counter(ReceiptMap) ->
                 end,
                 #{},
                 maps:to_list(ReceiptMap)).
-
-active_gateways([Miner | _]=_Miners) ->
-    %% Get active gateways to get the locations
-    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
-    ct_rpc:call(Miner, blockchain_ledger_v1, active_gateways, [Ledger]).
 
 gateway_scores(Config) ->
     [V | _] = ?config(validators, Config),
@@ -474,7 +370,7 @@ common_poc_vars(Config) ->
       ?poc_target_hex_parent_res => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
-do_common_partition_checks(TestCase, Config, VarMap) ->
+do_common_partition_checks(_TestCase, Config, VarMap) ->
     Validators = ?config(validators, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
@@ -658,35 +554,11 @@ extra_vars(poc_v10) ->
                  ?poc_challenger_type => validator,
                  ?election_interval => 10,
                  ?block_time => 5000
-
-%%              ?penalty_history_limit => 100,
-%%              ?dc_payload_size => 24,
-%%              ?assert_loc_txn_version => 2,
-%%              ?min_antenna_gain => 10,
-%%              ?max_antenna_gain => 150,
-%%              ?txn_fees => true,
-%%              ?staking_fee_txn_oui_v1 => 100 * ?USD_TO_DC, %% $100?
-%%              ?staking_fee_txn_oui_v1_per_address => 100 * ?USD_TO_DC, %% $100
-%%              ?staking_fee_txn_add_gateway_v1 => 40 * ?USD_TO_DC, %% $40?
-%%              ?staking_fee_txn_assert_location_v1 => 10 * ?USD_TO_DC, %% $10?
-%%              ?txn_fee_multiplier => 5000,
-%%              ?max_payments => 10,
-%%              ?poc_challenge_rate => 5
-
                 });
 extra_vars(poc_v8) ->
     maps:merge(extra_poc_vars(), #{?poc_version => 8});
 extra_vars(_) ->
     {error, poc_v8_and_above_only}.
-
-location_sets(poc_dist_v11_partitioned_test) ->
-    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
-location_sets(poc_dist_v10_partitioned_test) ->
-    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
-location_sets(poc_dist_v8_partitioned_test) ->
-    {sets:from_list(?AUSTINLOCS1), sets:from_list(?LALOCS)};
-location_sets(_TestCase) ->
-    {sets:from_list(?SFLOCS), sets:from_list(?NYLOCS)}.
 
 extra_poc_vars() ->
     #{?poc_good_bucket_low => -132,
@@ -706,12 +578,3 @@ check_subsequent_path_growth(ReceiptMap) ->
     ct:pal("PathLengths: ~p", [PathLengths]),
     lists:any(fun(L) -> L > 1 end, PathLengths).
 
-signatures(ConsensusMembers, BinBlock) ->
-    lists:foldl(
-        fun({A, {_, _, F}}, Acc) ->
-            Sig = F(BinBlock),
-            [{A, Sig}|Acc]
-        end
-        ,[]
-        ,ConsensusMembers
-    ).
