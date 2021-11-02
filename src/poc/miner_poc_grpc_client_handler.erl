@@ -110,14 +110,14 @@ handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotifi
             handle_check_target_resp(Result);
         {error, _Reason, _Details} ->
             ok;
-        {grpc_error, _Reason} ->
+        {error, _Reason} ->
             ok
     end,
     StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
     lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
-    #gateway_config_update_streamed_resp_v1_pb{vars = KeyVals} = Payload,
-    [application:set_env(miner, Key, Val) || #key_val_v1_pb{key=Key, val=Val} <- KeyVals],
+    #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
+    miner_poc_grpc_client:update_config(UpdatedKeys),
     StreamState;
 handle_msg({data, _Msg}, StreamState) ->
     lager:info("grpc client received unexpected msg ~p",[_Msg]),
