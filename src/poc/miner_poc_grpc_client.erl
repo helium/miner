@@ -12,13 +12,18 @@
 -module(miner_poc_grpc_client).
 -dialyzer({nowarn_function, process_unary_response/1}).
 -dialyzer({nowarn_function, handle_info/2}).
--dialyzer({nowarn_function, build_config_req/0}).
+-dialyzer({nowarn_function, build_config_req/1}).
 
 
 -behaviour(gen_server).
 
 -include("src/grpc/autogen/client/gateway_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
+
+%% these are config vars the miner is interested in, if they change we
+%% will want to get their latest valuess
+-define(CONFIG_VARS, ["poc_version", "data_aggregation_version"]).
 
 %% ------------------------------------------------------------------
 %% API exports
@@ -28,7 +33,8 @@
     connection/0,
     check_target/6,
     send_report/3,
-    region_params/0
+    region_params/0,
+    update_config/1
 ]).
 %% ------------------------------------------------------------------
 %% gen_server exports
@@ -77,6 +83,10 @@ check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, Notifi
 send_report(ReportType, Report, OnionKeyHash)->
     gen_server:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash}).
 
+-spec update_config([string()]) -> ok.
+update_config(UpdatedKeys)->
+    gen_server:cast(?MODULE, {update_config, UpdatedKeys}).
+
 %% ------------------------------------------------------------------
 %% gen_server functions
 %% ------------------------------------------------------------------
@@ -108,6 +118,10 @@ handle_cast({send_report, ReportType, Report, OnionKeyHash}, #state{connection =
     lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, Report]),
     ok = send_report(ReportType, Report, OnionKeyHash, SelfSigFun, Connection),
     {noreply, State};
+handle_cast({update_config, Keys}, #state{validator_public_ip = ValIP, validator_grpc_port = ValPort} = State) ->
+    lager:info("update_config for keys ~p", [Keys]),
+    _ = update_config(Keys, ValIP, ValPort),
+    {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -130,13 +144,13 @@ handle_info(find_streaming_validator, State) ->
                     [#routing_address_pb{pub_key = StreamingValPubKeyBin, uri = StreamingValURI}] = Routing,
                     StreamingValP2PAddr = libp2p_crypto:pubkey_bin_to_p2p(StreamingValPubKeyBin),
                     #{host := StreamingValIP, port := StreamingValGRPCPort} = uri_string:parse(StreamingValURI),
-                    %% retrieve some config from the returned validator
-                    Req2 = build_config_req(),
-                    case send_grpc_unary_req(StreamingValIP, StreamingValGRPCPort, Req2, 'config') of
-                        {ok, #gateway_config_resp_v1_pb{result = KeyVals}, _Req2Details} ->
-                            [application:set_env(miner, Key, Val) || #key_val_v1_pb{key=Key, val=Val} <- KeyVals],
+                    %% retrieve config from the returned validator
+                    case update_config(?CONFIG_VARS, StreamingValIP, StreamingValGRPCPort) of
+                        ok ->
                             self() ! connect_grpc,
-                            {noreply, State#state{validator_p2p_addr = StreamingValP2PAddr, validator_public_ip = StreamingValIP, validator_grpc_port = StreamingValGRPCPort}};
+                            {noreply, State#state{  validator_public_ip = StreamingValIP,
+                                                    validator_grpc_port = StreamingValGRPCPort,
+                                                    validator_p2p_addr = StreamingValP2PAddr}};
                         _Error ->
                             lager:warning("failed to retrieve config from val with host ~p: ~p", [StreamingValIP, _Error]),
                             erlang:send_after(1000, self(), find_streaming_validator),
@@ -201,6 +215,7 @@ connect(State = #state{validator_p2p_addr = ValAddr, validator_public_ip = ValIP
                 lager:info("successfully connected to validator via connection ~p", [Connection]),
                 #{http_connection := ConnectionPid} = Connection,
                 M = erlang:monitor(process, ConnectionPid),
+                %% connect streams we are interested in
                 self() ! connect_poc_stream,
                 self() ! connect_config_update_stream,
                 State#state{connection = Connection, connection_pid = ConnectionPid, conn_monitor_ref = M}
@@ -253,6 +268,32 @@ send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
     Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedWitness}},
     _ = send_grpc_unary_req(Connection, Req, 'send_report'),
     ok.
+
+-spec update_config([string()], string(), pos_integer()) -> ok.
+update_config(UpdatedKeys, ValIP, ValGRPCPort)->
+    %% filter out keys we are not interested in
+    %% and then ask our validator for current values
+    %% for remaining keys
+    FilteredKeys = lists:filter(fun(K)-> lists:member(K, ?CONFIG_VARS) end, UpdatedKeys),
+    case FilteredKeys of
+        [] -> ok;
+        _ ->
+            %% retrieve some config from the returned validator
+            Req2 = build_config_req(FilteredKeys),
+            case send_grpc_unary_req(ValIP, ValGRPCPort, Req2, 'config') of
+                {ok, #gateway_config_resp_v1_pb{result = Vars}, _Req2Details} ->
+                    [
+                        begin
+                            {Name, Value} = blockchain_txn_vars_v1:from_var(Var),
+                            application:set_env(miner, list_to_atom(Name), Value)
+                        end || #blockchain_var_v1_pb{} = Var <- Vars],
+                    ok;
+                {error, Reason, _Details} ->
+                    {error, Reason};
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
 
 -spec send_grpc_unary_req(grpc_client_custom:connection(), any(), atom())-> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 send_grpc_unary_req(undefined, _Req, _RPC) ->
@@ -329,33 +370,28 @@ build_validators_req(Quantity) ->
         quantity = Quantity
     }.
 
--spec build_config_req() -> #gateway_config_req_v1_pb{}.
-build_config_req() ->
-    #gateway_config_req_v1_pb{ keys =
-        [
-        <<"poc_version">>,
-        <<"data_aggregation_version">>
-    ]
-    }.
+-spec build_config_req([string()]) -> #gateway_config_req_v1_pb{}.
+build_config_req(Keys) ->
+    #gateway_config_req_v1_pb{ keys = Keys}.
 
 %% TODO: return a better and consistent response
 -spec process_unary_response(grpc_client_custom:unary_response()) -> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
+process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {success_resp, _Payload}, height = Height, signature = Sig}}}) ->
+    {ok, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {error_resp, Details}, height = Height, signature = Sig}}}) ->
     #gateway_error_resp_pb{error = ErrorReason} = Details,
     {error, ErrorReason, #{height => Height, signature => Sig}};
-process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {success_resp, _Payload}, height = Height, signature = Sig}}}) ->
-    {ok, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {_RespType, Payload}, height = Height, signature = Sig}}}) ->
     {ok, Payload, #{height => Height, signature => Sig}};
 process_unary_response({error, ClientError = #{error_type := 'client'}}) ->
     lager:warning("grpc error response ~p", [ClientError]),
-    {grpc_error, client_error};
+    {error, grpc_client_error};
 process_unary_response({error, ClientError = #{error_type := 'grpc', http_status := 200, status_message := ErrorMsg}}) ->
     lager:warning("grpc error response ~p", [ClientError]),
-    {grpc_error, ErrorMsg};
+    {error, ErrorMsg};
 process_unary_response(_Response) ->
     lager:warning("unhandled grpc response ~p", [_Response]),
-    {grpc_error, unexpected_response}.
+    {error, unexpected_response}.
 
 -ifdef(TEST).
 maybe_override_ip(_IP)->
