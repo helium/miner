@@ -166,31 +166,45 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
         undefined ->
             {error, no_ledger};
         Ledger ->
-            %% check if the poc 11 vars are active yet
-            case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
-                {ok, Location} ->
-                    case blockchain_region_v1:h3_to_region(Location, Ledger) of
-                        {ok, Region} ->
-                            case blockchain_region_params_v1:for_region(Region, Ledger) of
-                                {ok, RegionParams} ->
-                                    {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end;
-                        {error, regulatory_regions_not_set} ->
-                            case country_code_for_addr(Addr) of
-                                {ok, CC} ->
-                                    %% use country code to get regulatory domain data
-                                    reg_domain_data_for_countrycode(CC);
+            case blockchain:config(poc_version, Ledger) of
+                {ok, V} when V > 10 ->
+                    %% check if the poc 11 vars are active yet
+                    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                        {ok, Location} ->
+                            case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                                {ok, Region} ->
+                                    case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                        {ok, RegionParams} ->
+                                            {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
+                                        {error, Reason} ->
+                                            {error, Reason}
+                                    end;
+                                {error, region_var_not_set} ->
+                                    %% poc-v11 is partially active
+                                    lookup_via_country_code(Addr);
+                                {error, regulatory_regions_not_set} ->
+                                    %% poc-v11 is partially active
+                                    lookup_via_country_code(Addr);
                                 {error, Reason} ->
                                     {error, Reason}
                             end;
                         {error, Reason} ->
                             {error, Reason}
                     end;
-                {error, Reason} ->
-                    {error, Reason}
+                {error, _Reason} ->
+                    %% before poc-v11
+                    lookup_via_country_code(Addr)
             end
+    end.
+
+lookup_via_country_code(Addr) ->
+    %% lookup via country code
+    case country_code_for_addr(Addr) of
+        {ok, CC} ->
+            %% use country code to get regulatory domain data
+            reg_domain_data_for_countrycode(CC);
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
