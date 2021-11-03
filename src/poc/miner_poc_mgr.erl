@@ -28,7 +28,8 @@
     check_target/3,
     report/4,
     active_pocs/0,
-    local_poc_key/1
+    local_poc_key/1,
+    local_poc/1
 ]).
 %% ------------------------------------------------------------------
 %% gen_server exports
@@ -149,8 +150,13 @@ cached_poc_key(ID) ->
         _ -> false
     end.
 
+-spec active_pocs()->[local_poc()].
 active_pocs() ->
     gen_server:call(?MODULE, {active_pocs}).
+
+-spec local_poc(binary()) -> {ok, local_poc()} | {error, any()}.
+local_poc(OnionKeyHash) ->
+    gen_server:call(?MODULE, {local_poc, OnionKeyHash}).
 
 -spec check_target(
     Challengee :: libp2p_crypto:pubkey_bin(),
@@ -158,10 +164,24 @@ active_pocs() ->
     OnionKeyHash :: binary()
 ) -> false | {true, binary()} | {error, any()}.
 check_target(Challengee, BlockHash, OnionKeyHash) ->
-    %% TODO: try to get this to operate in caller context rather than a blocking call to the mgr
-    %%       barrier to doing so atm is need to have the rocks db and cf handles
-    %%       maybe use a shadow ets cache to store the active POCs
-    gen_server:call(?MODULE, {check_target, Challengee, BlockHash, OnionKeyHash}).
+    lager:info("*** check target with key ~p", [OnionKeyHash]),
+    LocalPOC = e2qc:cache(
+                local_pocs,
+                OnionKeyHash,
+                60,
+                fun() -> ?MODULE:local_poc(OnionKeyHash) end
+    ),
+    lager:info("*** Local POC Result ~p", [LocalPOC]),
+    case LocalPOC of
+        {error, _} ->
+            {error, <<"invalid_or_expired_poc">>};
+        {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
+            {true, Onion};
+        {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
+            false;
+        {ok, #local_poc{block_hash = _OtherBlockHash, target = _Target}} ->
+            {error, mismatched_block_hash}
+    end.
 
 -spec report(
     Report :: {witness, blockchain_poc_witness_v1:poc_witness()} | {receipt, blockchain_poc_receipt_v1:receipt()},
@@ -188,26 +208,9 @@ init(_Args) ->
         pub_key = SelfPubKeyBin
     }}.
 
-handle_call({check_target, Challengee, BlockHash, OnionKeyHash}, _From, State = #state{chain = Chain}) ->
-    %% TODO: do we really need the blockhash to be supplied and checked here?
-    Res =
-        case blockchain:get_block(BlockHash, Chain) of
-            {ok, _Block} ->
-                lager:info("*** check target with key ~p", [OnionKeyHash]),
-                lager:info("*** check target challengee ~p", [Challengee]),
-                case get_local_poc(OnionKeyHash, State) of
-                    {error, _} ->
-                        {error, <<"invalid_or_expired_poc">>};
-                    {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
-                        {true, Onion};
-                    {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
-                        false;
-                    {ok, #local_poc{block_hash = _OtherBlockHash, target = _OtherTarget}} ->
-                        {error, mismatched_block_hash}
-                end;
-            {error, not_found} ->
-                {error, block_not_found}
-        end,
+handle_call({local_poc, OnionKeyHash}, _From, State) ->
+    lager:info("reading local_poc from DB for key ~p",[OnionKeyHash]),
+    Res = get_local_poc(OnionKeyHash, State),
     {reply, Res, State};
 handle_call({active_pocs}, _From, State = #state{}) ->
     {reply, local_pocs(State), State};
