@@ -105,7 +105,7 @@ handle_msg(eof, StreamState) ->
 handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = _Msg, StreamState) ->
     lager:info("grpc client received poc_challenge_resp msg ~p", [_Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
-    case miner_poc_grpc_client:check_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
+    case miner_poc_grpc_client_statem:check_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
         {ok, Result, _Details} ->
             handle_check_target_resp(Result);
         {error, _Reason, _Details} ->
@@ -117,7 +117,7 @@ handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotifi
 handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
     lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
     #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
-    miner_poc_grpc_client:update_config(UpdatedKeys),
+    miner_poc_grpc_client_statem:update_config(UpdatedKeys),
     StreamState;
 handle_msg({data, _Msg}, StreamState) ->
     lager:info("grpc client received unexpected msg ~p",[_Msg]),

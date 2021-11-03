@@ -150,8 +150,8 @@ location_ok() ->
 
 -spec reg_domain_data_for_addr()-> {error, any()} | {grpc_error, any()} | {ok, freq_data()}.
 reg_domain_data_for_addr() ->
-    case miner_poc_grpc_client:region_params() of
-        {grpc_error, _Reason} ->
+    case miner_poc_grpc_client_statem:region_params() of
+        {error, _Reason} ->
             lager:info("failed to get regional params, reason: ~p", [_Reason]),
             {error, fail_to_get_region_params};
         {error, Reason, _Details} ->
