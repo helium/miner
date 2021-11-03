@@ -115,7 +115,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                        end,
 
             %% TODO: put retry mechanism back in place
-            miner_poc_grpc_client:send_report(receipt, Receipt, OnionKeyHash);
+            miner_poc_grpc_client_statem:send_report(receipt, Receipt, OnionKeyHash);
         false ->
             ok
     end.
@@ -147,7 +147,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                            _ ->
                                blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
                        end,
-            miner_poc_grpc_client:send_report(witness, Witness, OnionKeyHash);
+            miner_poc_grpc_client_statem:send_report(witness, Witness, OnionKeyHash);
         false ->
             ok
     end.
@@ -203,8 +203,8 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(init, #state{region_params = undefined} = State) ->
-    case miner_poc_grpc_client:region_params() of
-        {grpc_error, _} ->
+    case miner_poc_grpc_client_statem:region_params() of
+        {error, _} ->
             lager:info("failed to get regional params, will try again in a bit", []),
             erlang:send_after(500, self(), init),
             {noreply, State};
