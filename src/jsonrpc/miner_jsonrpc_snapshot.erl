@@ -28,7 +28,7 @@ handle_rpc(<<"snapshot_list">>, []) ->
             ]
     end;
 handle_rpc(<<"snapshot_info">>, [#{<<"path">> := Path}]) ->
-    case file:read_file(Filename) of
+    case file:read_file(Path) of
         {error, Error} ->
             ?jsonrpc_error({error, Error});
         {ok, Snap} ->
