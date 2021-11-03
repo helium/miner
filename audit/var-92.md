@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction unsets `regulatory_regions`.
+This transaction unsets `regulatory_regions` in order to address an issue confirming regulatory regions while the remaining PoCv11 variables were unset. 
 
 ## Version threshold
 
