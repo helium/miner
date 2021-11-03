@@ -117,7 +117,7 @@ init([SigFun, ECDHFun]) ->
                     ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_lora, [OnionOpts]),
                     ?WORKER(miner_poc_statem, [POCOpts]),
-                    ?WORKER(miner_poc_grpc_client, [])
+                    ?WORKER(miner_poc_grpc_client_statem, [])
                 ]
         end,
 
