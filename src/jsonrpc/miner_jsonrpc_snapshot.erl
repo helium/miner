@@ -32,7 +32,7 @@ handle_rpc(<<"snapshot_info">>, [#{<<"path">> := Path}]) ->
         {error, Error} ->
             ?jsonrpc_error({error, Error});
         {ok, Snap} ->
-            blockchain_ledger_snapshot_v1:deserialize(BinSnap),
+            blockchain_ledger_snapshot_v1:deserialize(Snap),
             #{
                 height => blockchain_ledger_snapshot_v1:height(Snap),
                 hash => ?BIN_TO_B64(blockchain_ledger_snapshot_v1:hash(Snap))
