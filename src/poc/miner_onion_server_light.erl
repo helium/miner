@@ -8,7 +8,7 @@
 
 -behavior(gen_server).
 
--include("src/grpc/autogen/client/gateway_client_pb.hrl").
+-include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain_caps.hrl").
 
