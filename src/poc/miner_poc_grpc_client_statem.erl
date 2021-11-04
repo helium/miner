@@ -1,6 +1,10 @@
 -module(miner_poc_grpc_client_statem).
-
 -behavior(gen_statem).
+
+%%-dialyzer({nowarn_function, process_unary_response/1}).
+%%-dialyzer({nowarn_function, handle_info/2}).
+%%-dialyzer({nowarn_function, build_config_req/1}).
+
 
 -include("src/grpc/autogen/client/gateway_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
@@ -46,7 +50,7 @@
 }).
 
 %% these are config vars the miner is interested in, if they change we
-%% will want to get their latest valuess
+%% will want to get their latest values
 -define(CONFIG_VARS, ["poc_version", "data_aggregation_version"]).
 
 %% delay between validator reconnects attempts
@@ -75,11 +79,11 @@ start_link() ->
 connection() ->
     gen_statem:call(?MODULE, connection, infinity).
 
--spec region_params() -> {grpc_error, any()} | {error, any(), map()} | {ok, #gateway_poc_region_params_resp_v1_pb{}, map()}.
+-spec region_params() -> {error, any()} | {error, any(), map()} | {ok, #gateway_poc_region_params_resp_v1_pb{}, map()}.
 region_params() ->
     gen_statem:call(?MODULE, region_params, 15000).
 
--spec check_target(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), non_neg_integer(), libp2p_crypto:signature()) -> {grpc_error, any()} | {error, any(), map()} | {ok, any(), map()}.
+-spec check_target(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), non_neg_integer(), libp2p_crypto:signature()) -> {error, any()} | {error, any(), map()} | {ok, any(), map()}.
 check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) ->
     gen_statem:call(?MODULE, {check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}, 15000).
 
@@ -121,12 +125,12 @@ setup(info, find_validator, Data) ->
     %% ask a random seed validator for the address of a 'proper' validator
     %% we will then use this as our default durable validator
     case find_validator() of
+        {error, _Reason} ->
+            {repeat_state, Data};
         {ok, ValIP, ValPort, ValP2P} ->
             {keep_state,
                 Data#data{val_public_ip = ValIP, val_grpc_port = ValPort, val_p2p_addr = ValP2P},
-                [{next_event, info, connect_validator}]};
-        {error, _} ->
-            {repeat_state, Data}
+                [{next_event, info, connect_validator}]}
     end;
 setup(info, connect_validator, #data{val_public_ip = ValIP, val_grpc_port = ValGRPCPort, val_p2p_addr = ValP2P} = Data) ->
     %% connect to our durable validator
@@ -238,9 +242,9 @@ find_validator()->
                     DurableValP2PAddr = libp2p_crypto:pubkey_bin_to_p2p(DurableValPubKeyBin),
                     #{host := DurableValIP, port := DurableValGRPCPort} = uri_string:parse(DurableValURI),
                     {ok, DurableValIP, DurableValGRPCPort, DurableValP2PAddr};
-                _Error ->
+                {error, Reason} = _Error ->
                     lager:warning("request to validator failed: ~p", [_Error]),
-                    {error, no_validators}
+                    {error, Reason}
             end;
         _ ->
             lager:warning("failed to find seed validators", []),
@@ -406,7 +410,7 @@ build_config_req(Keys) ->
     #gateway_config_req_v1_pb{ keys = Keys}.
 
 %% TODO: return a better and consistent response
--spec process_unary_response(grpc_client_custom:unary_response()) -> {grpc_error, any()} | {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
+%%-spec process_unary_response(grpc_client_custom:unary_response()) -> {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {success_resp, _Payload}, height = Height, signature = Sig}}}) ->
     {ok, #{height => Height, signature => Sig}};
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {error_resp, Details}, height = Height, signature = Sig}}}) ->
