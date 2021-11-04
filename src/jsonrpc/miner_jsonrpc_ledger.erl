@@ -244,7 +244,7 @@ format_region_parameter(RegionParam) ->
     #{
         <<"channel_frequency_hz">> => ChannelFrequencyHz,
         <<"bandwidth_hz">> => BandwidthHz,
-        <<"max_eirp_cbm">> => MaxEIRPcBm,
+        <<"max_eirp_dbm">> => MaxEIRPcBm / 10.0,
         <<"spreading">> => SpreadingObject
     }.
 
