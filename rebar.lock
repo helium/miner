@@ -132,7 +132,7 @@
  {<<"libp2p_crypto">>,{pkg,<<"libp2p_crypto">>,<<"1.4.1">>},2},
  {<<"longfi">>,
   {git,"https://github.com/helium/longfi-erlang",
-       {ref,"af47a584ebfe695d968bc46592b8145679288a8d"}},
+       {ref,"6a787a637475b3d3d0ef76e799ed06cb396050d2"}},
   0},
  {<<"merkerl">>,
   {git,"https://github.com/helium/merkerl.git",
