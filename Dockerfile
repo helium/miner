@@ -30,6 +30,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 
 # Add our code
 ADD . /usr/src/miner/
+ADD config/grpc_client_gen.config config/grpc_client_gen.config
 
 RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 

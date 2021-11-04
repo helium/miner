@@ -6,7 +6,7 @@
 %%-dialyzer({nowarn_function, build_config_req/1}).
 
 
--include("src/grpc/autogen/client/gateway_client_pb.hrl").
+-include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
 
@@ -291,14 +291,14 @@ connect_stream_config_update(Connection) ->
 
 -spec send_report(witness | receipt, any(), binary(), function(), grpc_client_custom:connection()) -> ok.
 send_report(receipt = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
-    EncodedReceipt = gateway_client_pb:encode_msg(Report, blockchain_poc_receipt_v1_pb),
+    EncodedReceipt = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_receipt_v1_pb),
     SignedReceipt = Report#blockchain_poc_receipt_v1_pb{signature = SigFun(EncodedReceipt)},
     Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedReceipt}},
     %%TODO: add a retry mechanism ??
     _ = send_grpc_unary_req(Connection, Req, 'send_report'),
     ok;
 send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
-    EncodedWitness = gateway_client_pb:encode_msg(Report, blockchain_poc_witness_v1_pb),
+    EncodedWitness = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_witness_v1_pb),
     SignedWitness = Report#blockchain_poc_witness_v1_pb{signature = SigFun(EncodedWitness)},
     Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedWitness}},
     _ = send_grpc_unary_req(Connection, Req, 'send_report'),
@@ -341,7 +341,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             Req,
             'helium.gateway',
             RPC,
-            gateway_client_pb,
+            gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
         lager:info("send unary result: ~p", [Res]),
@@ -363,7 +363,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
             Req,
             'helium.gateway',
             RPC,
-            gateway_client_pb,
+            gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
@@ -388,7 +388,7 @@ build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, ChallengeHe
         notifier_sig = ChallengerSig,
         challengee_sig = <<>>
     },
-    ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_check_challenge_target_req_v1_pb),
+    ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_check_challenge_target_req_v1_pb),
     Req#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = SelfSigFun(ReqEncoded)}.
 
 -spec build_region_params_req(libp2p_crypto:pubkey_bin(), function()) -> #gateway_poc_region_params_req_v1_pb{}.
@@ -396,7 +396,7 @@ build_region_params_req(Address, SigFun) ->
     Req = #gateway_poc_region_params_req_v1_pb{
         address = Address
     },
-    ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_region_params_req_v1_pb),
+    ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_region_params_req_v1_pb),
     Req#gateway_poc_region_params_req_v1_pb{signature = SigFun(ReqEncoded)}.
 
 -spec build_validators_req(Quantity:: pos_integer()) -> #gateway_validators_req_v1_pb{}.

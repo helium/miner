@@ -6,7 +6,7 @@
 %%%-------------------------------------------------------------------
 -module(miner_lora_light).
 
--include("src/grpc/autogen/client/gateway_client_pb.hrl").
+-include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -behaviour(gen_server).
 
 -export([

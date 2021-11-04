@@ -3,7 +3,7 @@
 %%
 -module(miner_poc_grpc_client_handler).
 
--include("src/grpc/autogen/client/gateway_client_pb.hrl").
+-include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% Stream Exports
@@ -60,12 +60,12 @@ poc_stream(Connection, PubKeyBin, SigFun)->
             Connection,
             'helium.gateway',
             stream_poc,
-            gateway_client_pb,
+            gateway_miner_client_pb,
             [],
             ?MODULE),
         %% subscribe to poc updates
         Req = #gateway_poc_req_v1_pb{address = PubKeyBin, signature = <<>>},
-        ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
+        ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
         ReqSigned = Req#gateway_poc_req_v1_pb{signature = SigFun(ReqEncoded)},
         ok = grpc_client_custom:send(Stream, ReqSigned),
         {ok, Stream}
@@ -81,7 +81,7 @@ config_update_stream(Connection)->
             Connection,
             'helium.gateway',
             stream_config_update,
-            gateway_client_pb,
+            gateway_miner_client_pb,
             [],
             ?MODULE),
         %% subscribe to config updates
