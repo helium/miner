@@ -191,7 +191,7 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
                         {error, Reason} ->
                             {error, Reason}
                     end;
-                {error, _Reason} ->
+                _ ->
                     %% before poc-v11
                     lookup_via_country_code(Addr)
             end
