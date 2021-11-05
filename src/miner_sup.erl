@@ -56,7 +56,7 @@ init(_Args) ->
                ecdh_fun := ECDHFun,
                sig_fun := SigFun
              } = miner_keys:keys({file, BaseDir}),
-            ECCWorker = [];
+            CryptoWorker = [];
         {ecc, Props} when is_list(Props) ->
             #{ pubkey := PublicKey,
                key_slot := KeySlot,
@@ -65,15 +65,22 @@ init(_Args) ->
                ecdh_fun := ECDHFun,
                sig_fun := SigFun
              } = miner_keys:keys({ecc, Props}),
-            ECCWorker = [?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])];
+            CryptoWorker = [?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])];
+        {tpm, Props} when is_list(Props) ->
+            #{ pubkey := PublicKey,
+               key_path := KeyPath,
+               ecdh_fun := ECDHFun,
+               sig_fun := SigFun
+             } = miner_keys:keys({tpm, Props}),
+            CryptoWorker = [?WORKER(miner_tpm_worker, [KeyPath])];
         {PublicKey, ECDHFun, SigFun} ->
-            ECCWorker = [],
+            CryptoWorker = [],
             ok
     end,
 
     ChildSpecs =
         [
-         ?SUP(miner_critical_sup, [PublicKey, SigFun, ECDHFun, ECCWorker]),
+         ?SUP(miner_critical_sup, [PublicKey, SigFun, ECDHFun, CryptoWorker]),
          ?SUP(miner_restart_sup, [SigFun, ECDHFun])
         ],
     {ok, {SupFlags, ChildSpecs}}.

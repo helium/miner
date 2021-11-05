@@ -1,5 +1,7 @@
 -module(miner_keys).
 
+-include_lib("public_key/include/public_key.hrl").
+
 -export([key_config/0, keys/0, keys/1, print_keys/1]).
 
 -type key_configuration() :: {ecc, proplists:proplist()} | {file, BaseDir::string()}.
@@ -118,7 +120,49 @@ keys({ecc, Props}) when is_list(Props) ->
                           Sig
                   end,
        onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
-     }.
+     };
+
+keys({tpm, Props}) when is_list(Props) ->
+    KeyPath = proplists:get_value(key_path, Props, undefined),
+
+    case whereis(miner_tpm_worker) of
+        undefined ->
+            %% Create a temporary ecc link to get the public key and
+            %% onboarding keys for the given slots as well as the
+            erlfapi:initialize(null);
+        _ -> ok
+    end,
+
+    {ok, PubKey} = case whereis(miner_tpm_worker) of
+            undefined -> case erlfapi:get_public_key_ecc(KeyPath) of
+                             {ok, PubPoint} ->
+                                 CompactKey = {#'ECPoint'{point=PubPoint}, {namedCurve, ?secp256r1}},
+                                 case ecc_compact:is_compact(CompactKey) of
+                                     {true, _} -> {ok, {ecc_compact, CompactKey}};
+                                     _Else -> {error, PubPoint}
+                                 end;
+                             _Else -> _Else
+                         end;
+            _Worker -> miner_tpm_worker:get_pub_key()
+    end,
+
+    case whereis(miner_tpm_worker) of
+        undefined -> erlfapi:finalize();
+        _ -> ok
+    end,
+
+    #{ pubkey => PubKey,
+        key_path => KeyPath,
+        ecdh_fun => fun(PublicKey) ->
+            {ok, [X, Y]} = miner_tpm_worker:ecdh(PublicKey),
+            <<X/binary>>
+                    end,
+        sig_fun => fun(Bin) ->
+            {ok, {Sig, _PublicKey,_Cert}} = miner_tpm_worker:sign(Bin),
+            Sig
+                   end,
+        onboarding_key => libp2p_crypto:pubkey_to_b58(PubKey)
+    }.
 
 -spec key_config() -> key_configuration().
 key_config() ->
