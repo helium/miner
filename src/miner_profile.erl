@@ -27,6 +27,14 @@ filter_receipts(Block) ->
               blockchain_txn:type(T) == blockchain_txn_poc_receipts_v1
       end, blockchain_block:transactions(Block)).
 
+filter_rewards(Block) ->
+    lists:filter(
+      fun(T) ->
+              Type = blockchain_txn:type(T),
+              Type == blockchain_txn_rewards_v1 orelse
+                  Type == blockchain_txn_rewards_v2
+      end, blockchain_block:transactions(Block)).
+
 profile_txns(Reqs, Height, Chain) ->
     {ok, LedgerAt0} = blockchain:ledger_at(Height - 1, Chain),
     LedgerAt = blockchain_ledger_v1:new_context(LedgerAt0),
@@ -60,3 +68,12 @@ profile_receipts(Reqs, Recs, Height, Chain) ->
     eprof:stop_profiling(),
     blockchain_ledger_v1:delete_context(LedgerAt),
     ok.
+
+%% depending on how far back the last election was, this might not always be runnable
+rewards() ->
+    Chain = blockchain_worker:blockchain(),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {_Epoch, ElectionHeight} = blockchain_block_v1:election_info(HeadBlock),
+    {ok, Block} = blockchain:get_block(ElectionHeight, Chain),
+    Rewards = filter_rewards(Block),
+    profile_txns(Rewards, ElectionHeight, Chain).
