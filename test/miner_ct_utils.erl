@@ -1216,13 +1216,13 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     {ok, _StartedApps} = ct_rpc:call(Miner, application, ensure_all_started, [miner]),
     ok.
 
-end_per_testcase(_TestCase, Config) ->
+end_per_testcase(TestCase, Config) ->
     Miners = ?config(miners, Config),
     miner_ct_utils:pmap(fun(Miner) -> ct_slave:stop(Miner) end, Miners),
     case ?config(tc_status, Config) of
         ok ->
             %% test passed, we can cleanup
-%%            cleanup_per_testcase(TestCase, Config);
+            cleanup_per_testcase(TestCase, Config),
             ok;
         _ ->
             %% leave results alone for analysis
