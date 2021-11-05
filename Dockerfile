@@ -6,9 +6,9 @@ ARG REBAR_DIAGNOSTIC=0
 ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
 
 ARG VERSION
+ARG BUILD_NET
 ARG REBAR_BUILD_TARGET
 ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
-
 ARG EXTRA_BUILD_APK_PACKAGES
 
 RUN apk add --no-cache --update \
@@ -28,14 +28,29 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
     PATH="/root/.cargo/bin:$PATH" \
     RUSTFLAGS="-C target-feature=-crt-static"
 
-# Add our code
+# # Add some basic pieces in
+# ADD config /usr/src/miner/
+# ADD rebar3 /usr/src/miner/
+# ADD rebar.config /usr/src/miner/
+# ADD rebar.lock /usr/src/miner/
+# ADD rebar.config.script /usr/src/miner/
+#
+# # build the deps in a separate step
+# RUN ./rebar3 get-deps as ${REBAR_BUILD_TARGET} && \
+#     (cd _build/default/lib/rocksdb && ./../../../../rebar3 compile) && \
+#     (cd _build/default/lib/ebus && ./../../../../rebar3 compile) && \
+#     (cd _build/default/lib/longfi && ./../../../../rebar3 compile) && \
+#     (cd _build/default/lib/blockchain && ./../../../../rebar3 compile) && \
+#     (cd _build/default/lib/hbbft && ./../../../../rebar3 compile)
+
+
 ADD . /usr/src/miner/
 
 RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 
 RUN mkdir -p /opt/docker/update
 RUN tar -zxvf ${TAR_PATH} -C /opt/docker
-RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.mainnet
+RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
 
 FROM ${RUNNER_IMAGE} as runner
 
