@@ -112,12 +112,13 @@ init([SigFun, ECDHFun]) ->
                     base_dir => BaseDir
                    },
                 [
+                    ?WORKER(miner_poc_grpc_client_statem, []),
                     ?WORKER(miner_onion_server_light, [OnionOpts]),
                     ?WORKER(miner_onion_server, [OnionOpts]),
                     ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_lora, [OnionOpts]),
-                    ?WORKER(miner_poc_statem, [POCOpts]),
-                    ?WORKER(miner_poc_grpc_client_statem, [])
+                    ?WORKER(miner_poc_statem, [POCOpts])
+
                 ]
         end,
 
