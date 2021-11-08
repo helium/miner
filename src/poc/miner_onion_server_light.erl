@@ -206,11 +206,11 @@ handle_info(init, #state{region_params = undefined} = State) ->
     case miner_poc_grpc_client_statem:region_params() of
         {error, _} ->
             lager:info("failed to get regional params, will try again in a bit", []),
-            erlang:send_after(500, self(), init),
+            erlang:send_after(2000, self(), init),
             {noreply, State};
         {error, _Reason, _Details} ->
             lager:info("failed to get regional params, will try again in a bit", []),
-            erlang:send_after(500, self(), init),
+            erlang:send_after(2000, self(), init),
             {noreply, State};
         {ok, #gateway_poc_region_params_resp_v1_pb{region = Region, params = #blockchain_region_params_v1_pb{region_params = RegionParams}} = Resp, _Details} ->
             lager:info("got regional params ~p", [Resp]),
