@@ -29,7 +29,8 @@
     kvc,
     longfi,
     elli,
-    jsonrpc2
+    jsonrpc2,
+    grpc_client
    ]},
   {included_applications, [blockchain, sibyl]},
   {env,[]},
