@@ -332,12 +332,12 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                             %% Don't allow putting duplicate response in the witness list resp
                             Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
                             Responses1 =
-                                case lists:any(Predicate, Witnesses) of
-                                    false ->
-                                        maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
-                                    true ->
-                                        Responses0
-                                end,
+                            case lists:any(Predicate, Witnesses) of
+                                false ->
+                                    maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
+                                true ->
+                                    Responses0
+                            end,
                             {keep_state, save_data(Data#data{responses=Responses1})}
                     end
             end
@@ -807,19 +807,27 @@ check_addr_hash(PeerAddr, #data{addr_hash_filter=#addr_hash_filter{byte_size=Siz
 validate_witness(Witness, Ledger) ->
     Gateway = blockchain_poc_witness_v1:gateway(Witness),
     %% TODO this should be against the ledger at the time the receipt was mined
-    case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
-        {error, _Reason} ->
-            lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
+
+    case blockchain_poc_witness_v1:frequency(Witness) of
+        0.0 ->
+            %% Witnesses with 0.0 frequency are considered invalid
             false;
-        {ok, GwInfo} ->
-            case blockchain_ledger_gateway_v2:location(GwInfo) of
-                undefined ->
-                    lager:warning("ignoring witness ~p location undefined", [Gateway]),
+        _ ->
+            case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
+                {error, _Reason} ->
+                    lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
                     false;
-                _ ->
-                    blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                {ok, GwInfo} ->
+                    case blockchain_ledger_gateway_v2:location(GwInfo) of
+                        undefined ->
+                            lager:warning("ignoring witness ~p location undefined", [Gateway]),
+                            false;
+                        _ ->
+                            blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                    end
             end
     end.
+
 
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
