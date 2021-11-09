@@ -35,6 +35,8 @@
   [
    {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
    {mode, validator},
+   {rocksdb_cache_size, 64},
+   {rocksdb_write_buffer_size, 64},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
