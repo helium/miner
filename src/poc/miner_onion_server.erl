@@ -229,26 +229,31 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                                        blockchain_poc_witness_v1:new(SelfPubKeyBin, Time, RSSI, Data)
                                end,
 
-                    {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
-                    Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
-                    case SelfPubKeyBin =:= Challenger of
-                        true ->
-                            lager:info("challenger is ourself so sending directly to poc statem"),
-                            miner_poc_statem:witness(SelfPubKeyBin, Witness1);
-                        false ->
-                            EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
-                            P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                            case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
-                                {error, _Reason} ->
-                                    lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
-                                    timer:sleep(timer:seconds(30)),
-                                    POCID = blockchain_utils:poc_id(OnionCompactKey),
-                                    lager:info([{poc_id, POCID}],
-                                               "re-sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
-                                               [RSSI, Frequency, SNR]),
-                                    send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
-                                {ok, Stream} ->
-                                    _ = miner_poc_handler:send(Stream, EncodedWitness)
+                    case blockchain_poc_witness_v1:frequency(Witness0) of
+                        0.0 ->
+                            ok;
+                        _ ->
+                            {ok, _, SigFun, _ECDHFun} = blockchain_swarm:keys(),
+                            Witness1 = blockchain_poc_witness_v1:sign(Witness0, SigFun),
+                            case SelfPubKeyBin =:= Challenger of
+                                true ->
+                                    lager:info("challenger is ourself so sending directly to poc statem"),
+                                    miner_poc_statem:witness(SelfPubKeyBin, Witness1);
+                                false ->
+                                    EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
+                                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
+                                    case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
+                                        {error, _Reason} ->
+                                            lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
+                                            timer:sleep(timer:seconds(30)),
+                                            POCID = blockchain_utils:poc_id(OnionCompactKey),
+                                            lager:info([{poc_id, POCID}],
+                                                       "re-sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
+                                                       [RSSI, Frequency, SNR]),
+                                            send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
+                                        {ok, Stream} ->
+                                            _ = miner_poc_handler:send(Stream, EncodedWitness)
+                                    end
                             end
                     end
                 end,
