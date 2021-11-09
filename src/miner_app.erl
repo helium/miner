@@ -19,8 +19,10 @@ start(_StartType, _StartArgs) ->
     persistent_term:put(ospid, os:getpid()),
 
     GlobalOpts = application:get_env(rocksdb, global_opts, []),
-    {ok, Cache} = rocksdb:new_cache(lru, 4 * 1024 * 1024),
-    {ok, BufferMgr} = rocksdb:new_write_buffer_manager(4 * 1024 * 1024, Cache),
+    RocksDBCacheSize = application:get_env(miner, rocksdb_cache_size, 4),
+    RocksDBWriteBufferSize = application:get_env(miner, rocksdb_write_buffer_size, 4),
+    {ok, Cache} = rocksdb:new_cache(lru, RocksDBCacheSize * 1024 * 1024),
+    {ok, BufferMgr} = rocksdb:new_write_buffer_manager(RocksDBWriteBufferSize * 1024 * 1024, Cache),
     BBOpts = proplists:get_value(block_based_table_options, GlobalOpts, []),
     Opts1 = proplists:delete(block_based_table_options, GlobalOpts),
     Opts = Opts1 ++ [{write_buffer_manager, BufferMgr},
