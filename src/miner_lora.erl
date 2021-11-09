@@ -362,7 +362,7 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
     case blockchain_utils:find_txn(Block, Predicate) of
         Txs when length(Txs) > 0 ->
             %% Resend the timeout for regulatory domain
-            erlang:send_after(500, self(), reg_domain_timeout);
+            self() ! reg_domain_timeout;
         _ ->
             ok
     end,
