@@ -40,8 +40,8 @@
    {mode, validator},
    {stabilization_period, 8000},
    {network, testnet},
-   {rocksdb_cache_size, 64},
-   {rocksdb_write_buffer_size, 64},
+   {rocksdb_cache_size, 32},
+   {rocksdb_write_buffer_size, 32},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
