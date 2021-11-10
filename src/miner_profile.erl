@@ -36,9 +36,18 @@ filter_rewards(Block) ->
       end, blockchain_block:transactions(Block)).
 
 profile_txns(Reqs, Height, Chain) ->
+    profile_txns(Reqs, Height, Chain, false).
+
+profile_txns(Reqs, Height, Chain, Precalc) ->
     {ok, LedgerAt0} = blockchain:ledger_at(Height - 1, Chain),
     LedgerAt = blockchain_ledger_v1:new_context(LedgerAt0),
     Chain1 = blockchain:ledger(LedgerAt, Chain),
+    case Precalc of
+        true ->
+            blockchain_hex:precalc(false, LedgerAt);
+        false ->
+            ok
+    end,
     eprof:start_profiling([self()]),
     blockchain_txn:validate(Reqs, Chain1),
     eprof:stop_profiling(),
@@ -76,4 +85,4 @@ rewards() ->
     {_Epoch, ElectionHeight} = blockchain_block_v1:election_info(HeadBlock),
     {ok, Block} = blockchain:get_block(ElectionHeight, Chain),
     Rewards = filter_rewards(Block),
-    profile_txns(Rewards, ElectionHeight, Chain).
+    profile_txns(Rewards, ElectionHeight, Chain, true).
