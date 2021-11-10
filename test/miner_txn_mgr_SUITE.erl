@@ -1,3 +1,4 @@
+%%% RELOC KEEP - works with consensus group
 -module(miner_txn_mgr_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
