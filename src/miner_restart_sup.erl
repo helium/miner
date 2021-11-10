@@ -101,13 +101,11 @@ init([SigFun, ECDHFun]) ->
                     ?WORKER(miner_poc_mgr, [POCMgrOpts])
                 ];
             gateway ->
-                %% we are a gateway and configured to not run the chain
-                %% so POC challenges must be being handled by validators
-                %% we run both the grpc and libp2p version of the lora & onion modules
+                %% running as a gateway
+                %% run both the grpc and libp2p version of the lora & onion modules
                 %% they will work out which is required based on chain vars
-                %% we start poc_statem, if the pocs are being run by validators, it will do nothing
-                application:set_env(miner, lora_mod, miner_lora_light),
-                application:set_env(miner, onion_server_mod, miner_onion_server_light),
+                %% start miner_poc_statem, if the pocs are being run by validators, it will do nothing
+                %% start the grpc start client, if the pocs are NOT being run by validators, it will do nothing
                 POCOpts = #{
                     base_dir => BaseDir
                    },
