@@ -15,7 +15,6 @@
     send/1,
     send_poc/5,
     port/0,
-    position/0,
     location_ok/0,
     region/0
 ]).
@@ -132,16 +131,6 @@ send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
 -spec port() -> {ok, inet:port_number()} | {error, any()}.
 port() ->
     gen_server:call(?MODULE, port, 11000).
-
--spec position() -> {ok, {float(), float()}} |
-                    {ok, bad_assert, {float(), float()}} |
-                    {error, any()}.
-position() ->
-    try
-        gen_server:call(?MODULE, position, infinity)
-    catch _:_ ->
-            {error, no_fix}
-    end.
 
 -spec location_ok() -> true | false.
 location_ok() ->
@@ -721,7 +710,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
 
 -spec create_packet(
     Payload :: binary(),
-    When :: integer(),
+    When :: atom() | integer(),
     LocalFreq :: integer(),
     DataRate :: string(),
     Power :: float(),
@@ -729,11 +718,18 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
     Token :: binary()
 ) -> binary().
 create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
+
+    IsImme = When == immediate,
+    Tmst = case IsImme of
+               false -> When;
+               true -> 0
+           end,
+
     DecodedJSX = #{<<"txpk">> => #{
                         <<"ipol">> => IPol, %% IPol for downlink to devices only, not poc packets
-                        <<"imme">> => When == immediate,
+                        <<"imme">> => IsImme,
                         <<"powe">> => trunc(Power),
-                        <<"tmst">> => When, %% TODO gps time?
+                        <<"tmst">> => Tmst,
                         <<"freq">> => LocalFreq,
                         <<"modu">> => <<"LORA">>,
                         <<"datr">> => list_to_binary(DataRate),
