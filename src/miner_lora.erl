@@ -647,8 +647,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
 route_non_longfi(<<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>>) ->
     {lorawan, {eui, DevEUI, AppEUI}};
 route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4,
-                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when MType == ?UNCONFIRMED_UP; MType == ?CONFIRMED_UP ->
-    Body = binary:part(PayloadAndMIC, {0, max(0, byte_size(PayloadAndMIC) - 4)}),
+                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when (MType == ?UNCONFIRMED_UP orelse MType == ?CONFIRMED_UP) andalso
+                                                                                                          %% MIC is 4 bytes, so the binary must be at least that long
+                                                                                                          byte_size(PayloadAndMIC) >= 4 ->
+    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) - 4}),
     {FPort, _FRMPayload} =
         case Body of
             <<>> -> {undefined, <<>>};
