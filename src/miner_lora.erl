@@ -355,7 +355,17 @@ handle_info(chain_check, State) ->
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
     {noreply, update_state_using_chain(NC, State)};
-handle_info({blockchain_event, _}, State) ->
+handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
+            #state{chain=Chain}=State) when Chain /= undefined ->
+    {ok, Block} = blockchain:get_block(Hash, Chain),
+    Predicate = fun(T) -> blockchain_txn:type(T) == blockchain_txn_vars_v1 end,
+    case blockchain_utils:find_txn(Block, Predicate) of
+        Txs when length(Txs) > 0 ->
+            %% Resend the timeout for regulatory domain
+            self() ! reg_domain_timeout;
+        _ ->
+            ok
+    end,
     {noreply, State};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
     %% There is no chain, we cannot lookup regulatory domain data yet
