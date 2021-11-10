@@ -166,7 +166,7 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
         undefined ->
             {error, no_ledger};
         Ledger ->
-            case blockchain:config(poc_version, Ledger) of
+            case blockchain:config(?poc_version, Ledger) of
                 {ok, V} when V > 10 ->
                     %% check if the poc 11 vars are active yet
                     case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
