@@ -624,7 +624,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
 -spec route(binary()) -> any().
- route(Pkt) ->
+route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
             route_non_longfi(Pkt);
@@ -986,3 +986,71 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
 -spec reg_region(State :: state()) -> atom().
 reg_region(State) ->
     State#state.reg_region.
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+route_test_() ->
+    %% TODO LongFi tests
+    [
+        ?_assertMatch(error, route(<<>>))
+    ]
+    ++
+    [
+        {
+            lists:flatten(io_lib:format(
+                "non-LongFi eui. DevEUI: ~p, AppEUI: ~p",
+                [DevEUI, AppEUI]
+            )),
+            ?_assertMatch(
+                {lorawan, {eui, DevEUI, AppEUI}},
+                route(
+                    <<
+                        ?JOIN_REQUEST:3,
+                        0:5, % TODO What is this part?
+                        AppEUI:64/integer-unsigned-little,
+                        DevEUI:64/integer-unsigned-little,
+                        0:16/integer-unsigned-big,
+                        0:32/integer-unsigned-big
+                    >>
+                )
+            )
+        }
+    ||
+        DevEUI <- lists:seq(0, 8),  % TODO What are the right/good values to test?
+        AppEUI <- lists:seq(0, 8)   % TODO What are the right/good values to test?
+    ]
+    ++
+    [
+        {
+            lists:flatten(io_lib:format(
+                "non-LongFi devaddr. DevAddr: ~p, FOptsLen: ~p",
+                [DevAddr, FOptsLen]
+            )),
+            ?_assertMatch(
+                {lorawan, {devaddr, DevAddr}},
+                route(
+                    <<
+                        ?CONFIRMED_UP:3,
+                        0:5,
+                        DevAddr:32/integer-unsigned-little,
+                        0:1,
+                        0:1,
+                        0:1,
+                        0:1,
+                        FOptsLen:4,
+                        0:16/little-unsigned-integer,
+                        FOpts:FOptsLen,
+                        0:32
+                    >>
+                )
+            )
+        }
+    ||
+        DevAddr <- lists:seq(0, 8),         % TODO What are the right/good values to test?
+        FOpts <- lists:seq(0, 8),           % TODO What are the right/good values to test?
+        FOptsLen <- lists:seq(16, 128, 16)  % TODO What are the right/good values to test?
+    ].
+
+-endif.
