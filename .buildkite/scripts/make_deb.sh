@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-VERSION=$(git describe --abbrev=0 | sed -e 's,validator,,')
+VERSION=$(echo $VERSION_TAG | sed -e 's,validator,,')
 ./rebar3 as validator release -n miner -v ${VERSION}
 
 fpm -n validator \

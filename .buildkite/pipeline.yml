@@ -11,6 +11,8 @@ steps:
 
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_deb.sh"
@@ -22,6 +24,8 @@ steps:
 
   - if: build.tag =~ /^validator/
     name: ":cloud: upload validator deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/packagecloud_upload.sh"
