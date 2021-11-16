@@ -652,12 +652,35 @@ select_transactions(Chain, Txns, BlockCurr, BlockHeightCurr, BlockHeightNext) ->
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(BlockCurr),
     SortedTransactions =
         lists:sort(fun blockchain_txn:sort/2, [T || T <- Txns, not txn_is_rewards(T)]),
-    {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
+    {ValidTransactions0, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
     %% InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason}
     %% we dont need the invalid reason here so need to remove the tuple format
     %% and have a regular list of txn items in prep for returning to hbbft.
-    InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
+    InvalidTransactions1 = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
+
     Ledger = blockchain:ledger(Chain),
+
+    SizeLimit = case blockchain:config(?block_size_limit, Ledger) of
+                    {ok, Limit} -> Limit;
+                    _ -> 50*1024*1024 %% 50mb default
+                end,
+    {_, ValidTransactions1} = lists:foldl(fun(_Txn, {done, Acc}) ->
+                                                 %% already full, don't want to skip because
+                                                 %% of possible txn ordering issues so just drop everything
+                                                 {done, Acc};
+                                             (Txn, {Count, Acc}) ->
+                                                 case Count - byte_size(blockchain_txn:serialize(Txn)) of
+                                                     Remainder when Remainder < 0 ->
+                                                         {done, Acc};
+                                                     Remainder ->
+                                                         {Remainder, [Txn|Acc]}
+                                                 end
+                                         end, {SizeLimit, []}, ValidTransactions0),
+
+    ValidTransactions = lists:reverse(ValidTransactions1),
+
+    %% any that overflowed go back into the buffer
+    InvalidTransactions = InvalidTransactions1 ++ (ValidTransactions0 -- ValidTransactions),
     case blockchain_election:has_new_group(ValidTransactions) of
             {true, _, ConsensusGroupTxn, _} ->
                 Epoch = ElectionEpoch0 + 1,
