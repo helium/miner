@@ -22,6 +22,7 @@
         ]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 %% get the firmware release data from a hotspot
 -define(LSB_FILE, "/etc/lsb_release").
@@ -222,13 +223,11 @@ merge_map(Addrs, Votes, Height, Acc) ->
           blockchain_block:block().
 mk_rescue_block(Vars, Addrs, KeyStr) ->
     Chain = blockchain_worker:blockchain(),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {ok, #block_info_v2{height=Height, election_info={ElectionEpoch, EpochStart}, hash=Hash, hbbft_round=Round}} = blockchain:head_block_info(Chain),
 
-    Height = blockchain_block:height(HeadBlock),
     NewHeight = Height + 1,
     lager:info("new height is ~p", [NewHeight]),
-    Hash = blockchain_block:hash_block(HeadBlock),
-    NewRound = blockchain_block:hbbft_round(HeadBlock) + 1,
+    NewRound = Round + 1,
 
     #{secret := Priv} =
         libp2p_crypto:keys_from_bin(
@@ -241,7 +240,6 @@ mk_rescue_block(Vars, Addrs, KeyStr) ->
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
     VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
 
-    {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(HeadBlock),
     io:format("current election epoch: ~p new height: ~p~n", [ElectionEpoch, NewHeight]),
 
     GrpTxn = blockchain_txn_consensus_group_v1:new(Addrs, <<>>, NewHeight, 0),

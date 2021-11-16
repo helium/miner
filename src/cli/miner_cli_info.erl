@@ -11,6 +11,8 @@
 
 -export([get_info/0]).
 
+-include_lib("blockchain/include/blockchain.hrl").
+
 
 -define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
 -define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
@@ -96,10 +98,8 @@ info_height_usage() ->
 
 get_info() ->
     Chain = blockchain_worker:blockchain(),
-    {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    {ok, #block_info_v2{election_info={Epoch, _}, height=Height}} = blockchain:head_block_info(Chain),
     {Height, SyncHeight, Epoch}.
 
 info_height(["info", "height"], [], []) ->
@@ -373,8 +373,7 @@ get_summary_info(ErrorCount, ScanRange)->
     SyncHeight0 = format_sync_height(SyncHeight, Height),
 
     %% get epoch
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    {ok, #block_info_v2{election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
 
     %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
