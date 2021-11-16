@@ -36,7 +36,7 @@ steps:
       IMAGE_ARCH: "amd64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      VERSION_TAG: build.tag
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "erlang"
     commands:
@@ -50,7 +50,7 @@ steps:
       IMAGE_ARCH: "arm64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      VERSION_TAG: build.tag
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "arm64"
     commands:
