@@ -753,15 +753,14 @@ common_enough_or_default(Threshold, Xs, Default) ->
 set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
-    {ok, #block_info_v2{time=BlockTime0}} = blockchain:head_block_info(Chain),
+    {ok, #block_info_v2{time=LastBlockTime, height=Height}} = blockchain:head_block_info(Chain),
     BlockTime = BlockTime0 div 1000,
-    {ok, Height} = blockchain:height(Chain),
     LastBlockTimestamp = case Height of
                              1 ->
                                  %% make up a plausible time for the genesis block
                                  Now;
                              _ ->
-                                 BlockTime0
+                                 LastBlockTime
                          end,
 
     StartHeight0 = application:get_env(miner, stabilization_period, 0),
