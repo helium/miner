@@ -273,7 +273,7 @@ signed_block(Signatures, BinBlock) ->
                         blockchain_gossip_handler:gossip_data_v1(SwarmTID, Block);
                     2 ->
                         Height = blockchain_block:height(Block),
-                        {ok, #block_info{hash = Hash}} = blockchain:get_block_info(Height, Chain),
+                        {ok, #block_info_v2{hash = Hash}} = blockchain:get_block_info(Height, Chain),
                         blockchain_gossip_handler:gossip_data_v2(SwarmTID, Hash, Height)
                 end,
 
