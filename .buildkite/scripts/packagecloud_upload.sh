@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TAG=$( git describe --abbrev=0 --tags | sed -e s/validator// )
+TAG=$(echo $VERSION_TAG | sed -e s/validator// )
 
 PKGNAME="validator_${TAG}_amd64.deb"
 

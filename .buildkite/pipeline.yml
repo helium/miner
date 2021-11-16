@@ -11,6 +11,8 @@ steps:
 
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_deb.sh"
@@ -22,6 +24,8 @@ steps:
 
   - if: build.tag =~ /^validator/
     name: ":cloud: upload validator deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/packagecloud_upload.sh"
@@ -32,10 +36,11 @@ steps:
   - if: build.tag =~ /^validator/
     name: "validator AMD64 docker"
     env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "amd64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_ARCH: "amd64"
-      BUILD_TYPE: "validator"
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "erlang"
     commands:
@@ -45,10 +50,11 @@ steps:
   - if: build.tag =~ /^validator/
     name: "validator ARM64 docker"
     env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "arm64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_ARCH: "arm64"
-      BUILD_TYPE: "validator"
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "arm64"
     commands:

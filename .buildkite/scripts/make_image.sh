@@ -18,7 +18,7 @@ if [[ "$IMAGE_ARCH" == "arm64" ]]; then
     BASE_IMAGE="arm64v8/$BASE_IMAGE"
 fi
 
-VERSION=$(git describe --abbrev=0 | sed -e "s/$BUILD_TYPE//")
+VERSION=$(echo $VERSION_TAG | sed -e "s/$BUILD_TYPE//")
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION"
 
 if [[ ! $TEST_BUILD -eq "0" ]]; then
@@ -61,7 +61,7 @@ if [[ ! $TEST_BUILD ]]; then
 fi
 
 # update latest tag if github tag ends in `_GA` and don't do the rest of a build
-if [[ "$BUILDKITE_TAG" =~ _GA$ ]]; then
+if [[ "$VERSION_TAG" =~ _GA$ ]]; then
 
     echo "GA release detected: Updating latest tag on ${REGISTRY_HOST} for ${BUILD_TYPE}"
 
