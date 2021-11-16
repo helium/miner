@@ -22,6 +22,7 @@
         ]).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 %% get the firmware release data from a hotspot
 -define(LSB_FILE, "/etc/lsb_release").
@@ -180,16 +181,14 @@ hbbft_perf() ->
                   || {S, _L, A} <- blockchain_election:adjust_old_group(
                                      [{0, 0, A} || A <- ConsensusAddrs], Ledger)]}
         end,
-    Blocks = [begin {ok, Block} = blockchain:get_block(Ht, Chain), Block end
+    HeightsWithPenalties = [begin {ok, #block_info_v2{penalties=Pens}} = blockchain:get_block_info(Ht, Chain), {Ht, Pens} end
                     || Ht <- lists:seq(EpochStart, CurrentHeight)],
     {BBATotals, SeenTotals, MaxSeen} =
         lists:foldl(
-          fun(Blk, {BBAAcc, SeenAcc, Count}) ->
-                  H = blockchain_block:height(Blk),
+          fun({H, {BBAVotes, SeenVotes}}, {BBAAcc, SeenAcc, Count}) ->
                   BBAs = blockchain_utils:bitvector_to_map(
                            length(ConsensusAddrs),
-                           blockchain_block_v1:bba_completion(Blk)),
-                  SeenVotes = blockchain_block_v1:seen_votes(Blk),
+                           BBAVotes),
                   Seen = lists:foldl(
                            fun({_Idx, Votes0}, Acc) ->
                                    Votes = blockchain_utils:bitvector_to_map(
@@ -197,7 +196,7 @@ hbbft_perf() ->
                                    merge_map(ConsensusAddrs, Votes, H, Acc)
                            end,SeenAcc, SeenVotes),
                   {merge_map(ConsensusAddrs, BBAs, H, BBAAcc), Seen, Count + length(SeenVotes)}
-          end, {InitMap, InitMap, 0}, Blocks),
+          end, {InitMap, InitMap, 0}, HeightsWithPenalties),
      #{
          consensus_members => ConsensusAddrs,
          bba_totals => BBATotals,
@@ -222,13 +221,11 @@ merge_map(Addrs, Votes, Height, Acc) ->
           blockchain_block:block().
 mk_rescue_block(Vars, Addrs, KeyStr) ->
     Chain = blockchain_worker:blockchain(),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {ok, #block_info_v2{height=Height, election_info={ElectionEpoch, EpochStart}, hash=Hash, hbbft_round=Round}} = blockchain:head_block_info(Chain),
 
-    Height = blockchain_block:height(HeadBlock),
     NewHeight = Height + 1,
     lager:info("new height is ~p", [NewHeight]),
-    Hash = blockchain_block:hash_block(HeadBlock),
-    NewRound = blockchain_block:hbbft_round(HeadBlock) + 1,
+    NewRound = Round + 1,
 
     #{secret := Priv} =
         libp2p_crypto:keys_from_bin(
@@ -241,7 +238,6 @@ mk_rescue_block(Vars, Addrs, KeyStr) ->
     Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn),
     VarsTxn = blockchain_txn_vars_v1:proof(Txn, Proof),
 
-    {ElectionEpoch, EpochStart} = blockchain_block_v1:election_info(HeadBlock),
     io:format("current election epoch: ~p new height: ~p~n", [ElectionEpoch, NewHeight]),
 
     GrpTxn = blockchain_txn_consensus_group_v1:new(Addrs, <<>>, NewHeight, 0),

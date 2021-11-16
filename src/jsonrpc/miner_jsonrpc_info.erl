@@ -1,6 +1,7 @@
 -module(miner_jsonrpc_info).
 
 -include("miner_jsonrpc.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -behavior(miner_jsonrpc_handler).
 
 %% jsonrpc_handler
@@ -14,10 +15,8 @@
 
 handle_rpc(<<"info_height">>, []) ->
     Chain = blockchain_worker:blockchain(),
-    {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
     Output = #{
         epoch => Epoch,
         height => Height
@@ -71,12 +70,10 @@ handle_rpc(<<"info_summary">>, []) ->
     GWInfo = get_gateway_info(Chain, PubKey),
 
     % get height data
-    {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
 
-    %% get epoch
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    %% get epoch and height
+    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
 
     %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
