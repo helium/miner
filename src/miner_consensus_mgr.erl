@@ -166,7 +166,19 @@ einfo() ->
             #{};
         Chain ->
             try
-                blockchain_election:election_info(blockchain:ledger(Chain))
+                %% simple pdict cache for election info until block_info contains election info
+                Ledger = blockchain:ledger(Chain),
+                {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+                Res = case get(einfo) of
+                          undefined ->
+                              blockchain_election:election_info(Ledger);
+                          {OtherHeight, _OldEInfo} when OtherHeight /= Height ->
+                              blockchain_election:election_info(Ledger);
+                          {Height, EInfo} ->
+                              EInfo
+                      end,
+                put(einfo, {Height, Res}),
+                Res
             catch _:_ ->
                     #{}
             end
