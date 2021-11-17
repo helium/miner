@@ -15,6 +15,7 @@ steps:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_deb.sh"
     key: "deb"
     artifact_paths: "*.deb"
@@ -28,6 +29,7 @@ steps:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/packagecloud_upload.sh"
     depends_on: "deb"
     agents:
@@ -45,6 +47,7 @@ steps:
       queue: "erlang"
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^validator/
@@ -59,6 +62,7 @@ steps:
       queue: "arm64"
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
@@ -73,6 +77,7 @@ steps:
       queue: "erlang"
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
@@ -87,6 +92,7 @@ steps:
       queue: "arm64"
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
@@ -101,6 +107,7 @@ steps:
       queue: "erlang"
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
@@ -115,4 +122,5 @@ steps:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
+      - "git tag --points-at HEAD | grep -v $BUILDKITE_TAG | xargs -n 1 git tag -d"
       - ".buildkite/scripts/make_image.sh"
