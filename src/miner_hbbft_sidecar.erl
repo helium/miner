@@ -198,7 +198,13 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
   when is_reference(Ref) ->
     case maps:get(Ref, Validations, undefined) of
         undefined ->
-            lager:warning("response for unknown ref"),
+            case Res of
+                {error, validation_deadline} ->
+                    %% these are expected from the validation timer below
+                    ok;
+                _ ->
+                    lager:warning("response for unknown ref [~p]: ~p", [Ref, Res])
+            end,
             {noreply, State};
         #validation{from = From, pid = Pid, txn = Txn, monitor = MRef} ->
             Result =
