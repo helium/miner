@@ -64,10 +64,11 @@ steps:
   - if: build.tag =~ /^val\d/
     name: "testnet validator AMD64 docker"
     env:
+      BUILD_TYPE: "val"
+      IMAGE_ARCH: "amd64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_ARCH: "amd64"
-      BUILD_TYPE: "val"
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "erlang"
     commands:
@@ -77,10 +78,11 @@ steps:
   - if: build.tag =~ /^val\d/
     name: "testnet validator ARM64 docker"
     env:
+      BUILD_TYPE: "val"
+      IMAGE_ARCH: "arm64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
-      IMAGE_ARCH: "arm64"
-      BUILD_TYPE: "val"
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "arm64"
     commands:
@@ -90,10 +92,11 @@ steps:
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
     name: ":whale: AMD64 docker"
     env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "amd64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
-      IMAGE_ARCH: "amd64"
-      BUILD_TYPE: "miner"
+      VERSION_TAG: $BUILDKITE_TAG
     agents:
       queue: "erlang"
     commands:
@@ -105,10 +108,11 @@ steps:
     agents:
       queue: "arm64"
     env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "arm64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "miner"
-      IMAGE_ARCH: "arm64"
-      BUILD_TYPE: "miner"
+      VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git fetch -t"
       - ".buildkite/scripts/make_image.sh"
