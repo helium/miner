@@ -1,5 +1,5 @@
 ARG BUILDER_IMAGE=erlang:23.3.4.6-alpine
-ARG RUNNER_IMAGE=erlang:23.3.4.6-alpine
+ARG RUNNER_IMAGE=alpine
 FROM ${BUILDER_IMAGE} as builder
 
 ARG REBAR_DIAGNOSTIC=0
@@ -42,7 +42,7 @@ FROM ${RUNNER_IMAGE} as runner
 ARG VERSION
 ARG EXTRA_RUNNER_APK_PACKAGES
 
-RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc \
+RUN apk add --no-cache --update ncurses dbus libsodium libgcc libstdc++ \
                                 ${EXTRA_RUNNER_APK_PACKAGES}
 
 RUN ulimit -n 64000

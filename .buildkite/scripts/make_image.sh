@@ -13,9 +13,13 @@ TEST_BUILD=${TEST_BUILD:-0}
 ERLANG_IMAGE="23.3.4.7-alpine"
 ERLANG_IMAGE_SOURCE="erlang"
 
-BASE_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
+BUILD_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
+
+RUN_IMAGE="alpine:3.14.3"
+
 if [[ "$IMAGE_ARCH" == "arm64" ]]; then
-    BASE_IMAGE="arm64v8/$BASE_IMAGE"
+    BUILD_IMAGE="arm64v8/$BUILD_IMAGE"
+    RUN_IMAGE="arm64v8/$RUN_IMAGE"
 fi
 
 VERSION=$(echo $VERSION_TAG | sed -e "s/$BUILD_TYPE//")
@@ -32,20 +36,20 @@ LATEST_TAG="latest-${IMAGE_ARCH}"
 case "$BUILD_TYPE" in
     "val")
         echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
-        DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BASE_IMAGE --build-arg RUNNER_IMAGE=$BASE_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
+        DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=$BUILD_IMAGE --build-arg RUNNER_IMAGE=$RUN_IMAGE --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
         LATEST_TAG="latest-val-${IMAGE_ARCH}"
         ;;
     "validator")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
-        DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker_val ${DOCKER_BUILD_ARGS}"
+        DOCKER_BUILD_ARGS="--build-arg BUILDER_IMAGE=${BUILD_IMAGE} --build-arg RUNNER_IMAGE=${RUN_IMAGE} --build-arg REBAR_BUILD_TARGET=docker_val ${DOCKER_BUILD_ARGS}"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     "miner")
         echo "Doing a miner image build for ${IMAGE_ARCH}"
-        DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BASE_IMAGE} --build-arg RUNNER_IMAGE=${BASE_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
+        DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BUILD_IMAGE} --build-arg RUNNER_IMAGE=${RUN_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
         BASE_DOCKER_NAME=$(basename $(pwd))
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
