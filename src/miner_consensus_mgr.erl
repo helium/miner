@@ -347,12 +347,17 @@ handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
 
     %% first we need to add ourselves to the chain for the existing
     %% group to validate
-    %% TODO we should also add this to the buffer of the local chain
     {ok, ElectionHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
     case ElectionHeight < Height of
         true ->
-            ok = blockchain_worker:submit_txn(
-                   blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+            Txn = blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+            %% add this to the buffer of the local chain
+            %% catch is because there might not be a sidecar running if
+            %% we are currently not in the group
+            catch miner_hbbft_sidecar:submit(Txn),
+            %% send it to the txn mgr
+            ok = blockchain_txn_mgr:submit(
+                   Txn,
                    fun(Res) ->
                            case Res of
                                ok ->
