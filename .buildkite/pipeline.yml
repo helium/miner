@@ -27,7 +27,6 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/packagecloud_upload.sh"
     depends_on: "deb"
     agents:
