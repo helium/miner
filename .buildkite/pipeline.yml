@@ -14,8 +14,7 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh"
     key: "deb"
     artifact_paths: "*.deb"
@@ -28,8 +27,6 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
       - ".buildkite/scripts/packagecloud_upload.sh"
     depends_on: "deb"
     agents:
@@ -46,8 +43,7 @@ steps:
     agents:
       queue: "erlang"
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^validator/
@@ -61,8 +57,7 @@ steps:
     agents:
       queue: "arm64"
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
@@ -76,8 +71,7 @@ steps:
     agents:
       queue: "erlang"
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag =~ /^val\d/
@@ -91,8 +85,7 @@ steps:
     agents:
       queue: "arm64"
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
@@ -106,8 +99,7 @@ steps:
     agents:
       queue: "erlang"
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
   - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/
@@ -121,6 +113,5 @@ steps:
       REGISTRY_NAME: "miner"
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - "git fetch -t"
-      - "git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | grep -v ^$BUILDKITE_TAG$ | xargs -n 1 git tag -d"
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
