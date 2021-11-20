@@ -271,7 +271,7 @@ handle_command(UnknownCommand, _State) ->
     RelcastMsg ::
           {multicast, binary()}
         | {unicast, pos_integer(), binary()}.
-handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Skips}=S0) ->
+handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Skips, f=F}=S0) ->
     CurRound = hbbft:round(HBBFT),
     case bin_to_msg(BinMsgIn) of
         %% Multiple sigs
@@ -325,8 +325,11 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
         {ok, {proposed_skip, ProposedRound, IndexRound}} ->
             Skips1 = Skips#{Index => {ProposedRound, IndexRound}},
             {S0#state{skip_votes = Skips1}, []};
-        {ok, {skip, Round, Sigs}} when Round /= CurRound ->
-            case lists:all(fun({SigIndex, Sig}) ->
+        {ok, {skip, Round, Sigs}} when Round > CurRound ->
+            %% this is a message containing proof there were enough skip votes for this round
+            %% check we got enough skip messages and they're all valid
+            case length(Sigs) >= (2 * F) + 1 andalso
+                 lists:all(fun({SigIndex, Sig}) ->
                                    libp2p_crypto:verify(t2b({proposed_skip, Round}), Sig, libp2p_crypto:bin_to_pubkey(lists:nth(SigIndex, S0#state.members)))
                            end, Sigs) of
                 true ->
