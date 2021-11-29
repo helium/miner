@@ -181,6 +181,7 @@ init(_Args) ->
     erlang:send_after(timer:seconds(1), self(), monitor_miner),
     case  blockchain_worker:blockchain() of
         undefined ->
+            erlang:send_after(timer:seconds(1), self(), chain_check),
             {ok, #state{}};
         Chain ->
             {ok, #state{chain = Chain}, 0}
@@ -680,6 +681,17 @@ handle_info({'DOWN', MinerRef, process, _MinerPid, _Reason},
             #state{miner_monitor = MinerRef} = State) ->
     self() ! monitor_miner,
     {noreply, State};
+handle_info(chain_check, State) ->
+    State1 =
+        case blockchain_worker:blockchain() of
+            undefined ->
+                erlang:send_after(timer:seconds(1), self(), chain_check),
+                State;
+            Chain ->
+                self() ! timeout,
+                State#state{chain = Chain}
+        end,
+    {noreply, State1};
 handle_info(monitor_miner, #state{active_group = Group} = State) ->
     %% we've seen cases where the miner will think that it's out of consensus because
     %% miner process has crashed, but the group is still running, just not participating
