@@ -426,7 +426,9 @@ get_mac_addrs()->
     Macs.
 
 get_firmware_version()->
-    os:cmd("cat /etc/lsb_release").
+    ReleaseInfo = os:cmd("cat /etc/os-release"),
+    {match, [PrettyName]} = re:run(ReleaseInfo, "PRETTY_NAME=\"(.*)\"", [{capture, all_but_first, list}]),
+    PrettyName.
 
 get_log_errors(ErrorCount, ScanRange)->
     {ok, BaseDir} = application:get_env(lager, log_root),
