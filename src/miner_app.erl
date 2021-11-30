@@ -33,15 +33,21 @@ start(_StartType, _StartArgs) ->
     Follow =
         %% validator as the default here because it's a safer failure mode.
         case application:get_env(miner, mode, validator) of
-            %% follow mode defaults to false
+            %% follow mode defaults to false for miner validator mode
             validator -> false;
             gateway ->
-                %% check touchfile, since some people are using it
-                BaseDir = application:get_env(blockchain, base_dir, "data"),
-                Filename = filename:join([BaseDir, "validate-mode"]),
-                case file:read_file_info(Filename) of
-                    {ok, _} -> false;
-                    _ -> true
+                case application:get_env(blockchain, follow_mode) of
+                    undefined ->
+                        %% check touchfile, since some people are using it
+                        BaseDir = application:get_env(blockchain, base_dir, "data"),
+                        Filename = filename:join([BaseDir, "validate-mode"]),
+                        case file:read_file_info(Filename) of
+                            {ok, _} -> false;
+                            _ -> true
+                        end;
+                    FollowMode ->
+                        %% blockchain follow_mode was already set, honor that
+                        FollowMode
                 end
         end,
 
