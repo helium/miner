@@ -948,17 +948,6 @@ group_change_test(Config) ->
 
     ok.
 
-mvars(Map, Nonce, Privs) ->
-    Txn0 = blockchain_txn_vars_v1:new(Map, Nonce),
-    Proofs = [blockchain_txn_vars_v1:create_proof(P, Txn0)
-               || P <- Privs],
-    blockchain_txn_vars_v1:multi_proofs(Txn0, Proofs).
-
-vars(Map, Nonce, Priv) ->
-    Txn0 = blockchain_txn_vars_v1:new(Map, Nonce),
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn0),
-    blockchain_txn_vars_v1:proof(Txn0, Proof).
-
 election_v3_test(Config) ->
     %% TODO Describe main idea and method.
     %% get all the miners
