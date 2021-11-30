@@ -13,6 +13,7 @@
  {blockchain,
   [
    {listen_addresses, ["/ip4/0.0.0.0/tcp/2154"]},
+   {fetch_latest_from_snap_source, false},
    {validation_width, "${VALIDATION_WIDTH}"},
    {block_sync_batch_size, 10},
    {block_sync_batch_limit, 100},
