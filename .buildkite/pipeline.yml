@@ -84,6 +84,7 @@ steps:
       IMAGE_ARCH: "arm64"
       REGISTRY_HOST: "quay.io"
       REGISTRY_NAME: "validator"
+      VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
     agents:
       queue: "arm64"
