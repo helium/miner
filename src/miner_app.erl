@@ -45,7 +45,7 @@ start(_StartType, _StartArgs) ->
                             {ok, _} -> false;
                             _ -> true
                         end;
-                    FollowMode ->
+                    {ok, FollowMode} ->
                         %% blockchain follow_mode was already set, honor that
                         FollowMode
                 end
