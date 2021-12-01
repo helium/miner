@@ -29,6 +29,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
     PATH="/root/.cargo/bin:$PATH" \
     RUSTFLAGS="-C target-feature=-crt-static"
 
+# Add our code
 ADD . /usr/src/miner/
 
 RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
