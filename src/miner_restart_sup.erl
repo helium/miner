@@ -68,7 +68,12 @@ init([SigFun, ECDHFun]) ->
                     region_override => RegionOverRide
                 };
             _ ->
-                #{}
+                #{
+                  radio_udp_bind_ip => {127, 0, 0, 1},
+                  radio_udp_bind_port => 0,
+                  ecdh_fun => ECDHFun,
+                  sig_fun => SigFun
+                 }
         end,
 
     EbusServer =
