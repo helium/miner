@@ -431,7 +431,7 @@ handle_info({udp, Socket, IP, Port, _Packet}, #state{mirror_socket={Socket, _}}=
     lager:info("received mirror port connection from ~p ~p", [IP, Port]),
     {noreply, State#state{mirror_socket={Socket, {IP, Port}}}};
 handle_info(_Msg, State) ->
-    lager:warning("rcvd unknown info msg: ~p", [_Msg]),
+    lager:debug("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) ->
