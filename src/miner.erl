@@ -760,7 +760,11 @@ poc_keys(Ledger, Metadata, BlockHash) ->
     %% We want to take a deterministic random subset of these up to a max of poc challenge rate
     %% Use the blockhash as the seed
     RandState = blockchain_utils:rand_state(BlockHash),
-    {ok, ChallengeRate} = blockchain:config(?poc_challenge_rate, Ledger),
+    ChallengeRate =
+        case blockchain:config(?poc_challenge_rate, Ledger) of
+            {ok, V} -> V;
+            _ -> 1
+        end,
     lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
     PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
     {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
