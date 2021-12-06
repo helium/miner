@@ -544,7 +544,6 @@ process_block_pocs(
     %% get the ephemeral keys from the block
     %% these will be a prop with tuples as {MemberPosInCG, PocKeyHash}
     BlockPocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
-    BlockHeight = blockchain_block_v1:height(Block),
     {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
     [
         begin
@@ -552,11 +551,11 @@ process_block_pocs(
             %% use this to check our local cache containing the secret keys of POCs owned by this validator
             %% if it is one of this local validators POCs, then kick it off
             %% public data on the POC is saved to the ledger whether its a local POC or not
-            Ledger1 = blockchain_ledger_v1:new_context(Ledger),
-            ChallengerAddr = lists:nth(CGPos, CGMembers),
-            lager:info("saving public poc data for poc key ~p and challenger ~p", [OnionKeyHash, ChallengerAddr]),
-            catch ok = blockchain_ledger_v1:save_public_poc(OnionKeyHash, ChallengerAddr, BlockHash, BlockHeight, Ledger1),
-            ok = blockchain_ledger_v1:commit_context(Ledger1),
+%%            Ledger1 = blockchain_ledger_v1:new_context(Ledger),
+%%            ChallengerAddr = lists:nth(CGPos, CGMembers),
+%%            lager:info("saving public poc data for poc key ~p and challenger ~p", [OnionKeyHash, ChallengerAddr]),
+%%            catch ok = blockchain_ledger_v1:save_public_poc(OnionKeyHash, ChallengerAddr, BlockHash, BlockHeight, Ledger1),
+%%            ok = blockchain_ledger_v1:commit_context(Ledger1),
             case cached_poc_key(OnionKeyHash) of
                 {ok, {KeyHash, #poc_key_data{keys = Keys}}} ->
                     lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
@@ -570,7 +569,7 @@ process_block_pocs(
                     noop
             end
         end
-        || {CGPos, OnionKeyHash} <- BlockPocEphemeralKeys
+        || {_CGPos, OnionKeyHash} <- BlockPocEphemeralKeys
     ],
     ok.
 
