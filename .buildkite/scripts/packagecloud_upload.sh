@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TAG=$( git describe --abbrev=0 --tags | sed -e s/$1// )
+TAG=$(echo $VERSION_TAG | sed -e s/$1// )
 DEBNAME=$( echo $1 | sed -e s/_/-/ )
 
 PKGNAME=$"${DEBNAME}_${TAG}_amd64.deb"
