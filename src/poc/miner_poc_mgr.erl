@@ -14,8 +14,19 @@
 
 -define(ACTIVE_POCS, active_pocs).
 -define(KEYS, keys).
--define(POC_TIMEOUT, 4).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
+-ifdef(TEST).
+%% lifespan of a POC, after which we will
+%% submit the receipts txn and delete the local poc data
+-define(POC_TIMEOUT, 4).
+%% timeout after which we will GC the public poc data,
+%% we expect the receipt txn to be absorbed before this
+-define(POC_RECEIPTS_ABSORB_TIMEOUT, 15).
+-else.
+-define(POC_TIMEOUT, 10).
+-define(POC_RECEIPTS_ABSORB_TIMEOUT, 200).
+-endif.
+
 
 %% ------------------------------------------------------------------
 %% API exports
@@ -299,6 +310,7 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
                 false -> ok
             end,
             %% GC public pocs every 100 blocks
+            %% GC is also run on a public poc when the receipt txn is absorbed
             case BlockHeight rem 100 == 0 of
                 true -> ok = purge_public_pocs(Block, Chain);
                 false -> ok
@@ -545,13 +557,14 @@ process_block_pocs(
             lager:info("saving public poc data for poc key ~p and challenger ~p", [OnionKeyHash, ChallengerAddr]),
             catch ok = blockchain_ledger_v1:save_public_poc(OnionKeyHash, ChallengerAddr, BlockHash, BlockHeight, Ledger1),
             ok = blockchain_ledger_v1:commit_context(Ledger1),
-
             case cached_poc_key(OnionKeyHash) of
-                {ok, {_KeyHash, #poc_key_data{keys = Keys}}} ->
+                {ok, {KeyHash, #poc_key_data{keys = Keys}}} ->
                     lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end),
+                    %% cached key no longer required, GC it
+                    _ = delete_cached_poc_key(KeyHash);
                 _ ->
                     lager:info("failed to find local poc key for ~p", [OnionKeyHash]),
                     noop
@@ -569,16 +582,22 @@ purge_local_pocs(
     Block,
     #state{chain = Chain, pub_key = SelfPubKeyBin, sig_fun = SigFun} = State
 ) ->
+    %% iterate over the local POCs in our rocksdb
+    %% end and clean up any which have exceeded their life span
+    %% these are POCs which were initiated by this node
+    %% and the data is known only to this node
     BlockHeight = blockchain_block:height(Block),
-    %% iterate over the active POCs, end and clean up any which have exceeded their life span
     LocalPOCs = local_pocs(State),
     lists:foreach(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
-            case (BlockHeight - POCStartHeight) == ?POC_TIMEOUT of
+            case (BlockHeight - POCStartHeight) > ?POC_TIMEOUT of
                 true ->
                     lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
-                    ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain);
+                    ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain),
+                    %% as receipts have been submitted, we can delete the local poc from the db
+                    %% the public poc data will remain until at least the receipt txn is absorbed
+                    _ = delete_local_poc(OnionKeyHash, State);
                 _ ->
                     lager:info("*** not purging local poc with key ~p.  BlockHeight: ~p, POCStartHeight: ~p", [OnionKeyHash, BlockHeight, POCStartHeight]),
                     ok
@@ -596,6 +615,13 @@ purge_public_pocs(
     Block,
     Chain
 ) ->
+    %% iterate and GC the public pocs on the ledger
+    %% a public poc is a representation of the data
+    %% included in a block as part of poc metadata
+    %% we need to keep it available on the ledger
+    %% until after the assocaited receipt v2 txn has
+    %% has been absorbed or would have been expected
+    %% expected to be aborbed
     Ledger = blockchain:ledger(Chain),
     BlockHeight = blockchain_block:height(Block),
     %% iterate over the public POCs, delete any which are beyond the lifespan of when the active POC would have ended
@@ -604,7 +630,11 @@ purge_public_pocs(
         fun(PublicPOC) ->
             POCHeight = blockchain_ledger_poc_v3:start_height(PublicPOC),
             OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(PublicPOC),
-            case (BlockHeight - POCHeight) > ?POC_TIMEOUT of
+            %% the public poc data is required by the receipts v2 txn absorb
+            %% the public poc will be GCed as part of that absorb
+            %% but in case that fails we will GC it here after giving
+            %% the txn N blocks to be absorbed
+            case (BlockHeight - POCHeight) > ?POC_RECEIPTS_ABSORB_TIMEOUT of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     ok = blockchain_ledger_v1:delete_public_poc(OnionKeyHash, Ledger);
@@ -622,6 +652,16 @@ purge_public_pocs(
 purge_pocs_keys(
     Block
 ) ->
+    %% iterate over the poc keys in our ets cache
+    %% these are the a copy of the keys generated by this node
+    %% as part of its block creation ( whilst it is in the CG)
+    %% and submitted as part of the block metadata
+    %% one or more of these keys *may* make it into the block
+    %% we cache all our locally generated keys
+    %% and then each new block check if each mined key
+    %% for that block is one of our own
+    %% if it is then we initiate a new local POC
+    %% the keys are purged periodically
     BlockHeight = blockchain_block:height(Block),
     %% iterate over the cached POC keys, delete any which are beyond the lifespan of when the active POC would have ended
     CachedPOCKeys = cached_poc_keys(),
@@ -931,21 +971,13 @@ local_pocs(Itr, {error, invalid_iterator}, Acc) ->
 local_pocs(Itr, {ok, _, LocalPOCBin}, Acc) ->
     local_pocs(Itr, rocksdb:iterator_move(Itr, next), [binary_to_term(LocalPOCBin)|Acc]).
 
-%%-spec overwrite_local_poc(LocalPOC :: local_poc(),
-%%                          State :: state()) -> ok | {error, any()}.
-%%overwrite_local_poc(#local_poc{onion_key_hash = OnionKeyHash} = LocalPOC, State) ->
-%%    case get_local_poc(OnionKeyHash, State) of
-%%        {error, _} ->
-%%            write_local_poc(LocalPOC, State);
-%%        {ok, [KnownLocalPOC]} ->
-%%            case blockchain_state_channel_v1:is_causally_newer(SC, KnownSC) of
-%%                true -> write_sc(SC, State);
-%%                false -> ok
-%%            end
-%%    end.
-
 -spec write_local_poc(  LocalPOC ::local_poc(),
                         State :: state()) -> ok.
 write_local_poc(#local_poc{onion_key_hash=OnionKeyHash} = LocalPOC, #state{db=DB, cf=CF}) ->
     ToInsert = erlang:term_to_binary([LocalPOC]),
     rocksdb:put(DB, CF, OnionKeyHash, ToInsert, []).
+
+-spec delete_local_poc( OnionKeyHash ::binary(),
+                        State :: state()) -> ok.
+delete_local_poc(OnionKeyHash, #state{db=DB, cf=CF}) ->
+    rocksdb:delete(DB, CF, OnionKeyHash, []).
