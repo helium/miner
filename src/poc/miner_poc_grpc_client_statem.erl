@@ -240,7 +240,7 @@ find_validator()->
                     %% resp will contain the payload 'gateway_validators_resp_v1_pb'
                     [#routing_address_pb{pub_key = DurableValPubKeyBin, uri = DurableValURI}] = Routing,
                     DurableValP2PAddr = libp2p_crypto:pubkey_bin_to_p2p(DurableValPubKeyBin),
-                    #{host := DurableValIP, port := DurableValGRPCPort} = uri_string:parse(DurableValURI),
+                    #{host := DurableValIP, port := DurableValGRPCPort} = uri_string:parse(binary_to_list(DurableValURI)),
                     {ok, DurableValIP, DurableValGRPCPort, DurableValP2PAddr};
                 {error, Reason} = _Error ->
                     lager:warning("request to validator failed: ~p", [_Error]),
