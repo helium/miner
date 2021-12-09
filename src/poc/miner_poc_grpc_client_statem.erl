@@ -85,7 +85,15 @@ region_params() ->
 
 -spec check_target(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), non_neg_integer(), libp2p_crypto:signature()) -> {error, any()} | {error, any(), map()} | {ok, any(), map()}.
 check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) ->
-    gen_statem:call(?MODULE, {check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}, 15000).
+    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+    {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
+    %% split the URI into its IP and port parts
+    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
+    TargetIP = maybe_override_ip(IP),
+    %% build the request
+    Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash,
+        BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
+    send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target').
 
 -spec send_report(witness | receipt, any(), binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash)->
@@ -204,15 +212,6 @@ connected({call, From}, connection, #data{connection = Connection} = Data) ->
 connected({call, From}, region_params, #data{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun, connection = Connection} = Data) ->
     Req = build_region_params_req(SelfPubKeyBin, SelfSigFun),
     Resp = send_grpc_unary_req(Connection, Req, 'region_params'),
-    {keep_state, Data, [{reply, From, Resp}]};
-connected({call, From}, {check_target, ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig}, #data{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SelfSigFun} = Data) ->
-    %% split the URI into its IP and port parts
-    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
-    TargetIP = maybe_override_ip(IP),
-    %% build the request
-    Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash,
-        BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
-    Resp = send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target'),
     {keep_state, Data, [{reply, From, Resp}]};
 connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:info("got down event ~p", [Event]),
