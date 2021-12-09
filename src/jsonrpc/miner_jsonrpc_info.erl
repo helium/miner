@@ -106,7 +106,9 @@ get_mac_addrs() ->
     Macs.
 
 get_firmware_version() ->
-    iolist_to_binary(os:cmd("cat /etc/lsb_release")).
+    ReleaseInfo = os:cmd("cat /etc/os-release"),
+    {match, [PrettyName]} = re:run(ReleaseInfo, "PRETTY_NAME=\"(.*)\"", [{capture, all_but_first, list}]),
+    iolist_to_binary(PrettyName).
 
 get_miner_version() ->
     Releases = release_handler:which_releases(),
