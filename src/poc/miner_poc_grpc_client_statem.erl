@@ -128,6 +128,7 @@ setup(info, find_validator, Data) ->
         {error, _Reason} ->
             {repeat_state, Data};
         {ok, ValIP, ValPort, ValP2P} ->
+            lager:info("*** Found validator with ip: ~p, port: ~p, addr: ~p", [ValIP, ValPort, ValP2P]),
             {keep_state,
                 Data#data{val_public_ip = ValIP, val_grpc_port = ValPort, val_p2p_addr = ValP2P},
                 [{next_event, info, connect_validator}]}
@@ -158,6 +159,7 @@ setup(info, connect_poc_stream, #data{connection = Connection, self_pub_key_bin 
     case connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) of
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
+            lager:info("monitoring stream poc pid ~p with ref ~p", [StreamPid, M]),
             {keep_state,
                 Data#data{stream_poc_monitor_ref = M, stream_poc_pid = StreamPid},
                 [{next_event, info, connect_config_stream}]};
@@ -176,6 +178,7 @@ setup(info, connect_config_stream, #data{connection = Connection} = Data) ->
             {repeat_state, Data}
     end;
 setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
+    lager:info("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
     handle_down_event(setup, Event, Data);
 setup({call, From}, _Msg, Data) ->
@@ -211,6 +214,10 @@ connected({call, From}, {check_target, ChallengerURI, ChallengerPubKeyBin, Onion
         BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
     Resp = send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target'),
     {keep_state, Data, [{reply, From, Resp}]};
+connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
+    lager:info("got down event ~p", [Event]),
+    %% handle down msgs, such as from our streams or validator connection
+    handle_down_event(connected, Event, Data);
 connected(_EventType, _Msg, Data)->
     lager:info("unhandled event whilst in ~p state: Type: ~p, Msg: ~p", [connected, _EventType, _Msg]),
     {keep_state, Data}.
