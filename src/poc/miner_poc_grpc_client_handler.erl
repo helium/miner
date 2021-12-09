@@ -61,8 +61,9 @@ poc_stream(Connection, PubKeyBin, SigFun)->
             'helium.gateway',
             stream_poc,
             gateway_miner_client_pb,
-            [],
+            [{type, stream}],
             ?MODULE),
+        lager:info("*** new poc stream established with pid ~p", [Stream]),
         %% subscribe to poc updates
         Req = #gateway_poc_req_v1_pb{address = PubKeyBin, signature = <<>>},
         ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
@@ -82,7 +83,7 @@ config_update_stream(Connection)->
             'helium.gateway',
             stream_config_update,
             gateway_miner_client_pb,
-            [],
+            [{type, stream}],
             ?MODULE),
         %% subscribe to config updates
         Req = #gateway_config_update_req_v1_pb{},
@@ -103,9 +104,9 @@ handle_msg(eof, StreamState) ->
     lager:info("*** grpc client received eof", []),
     StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = _Msg, StreamState) ->
-    lager:info("grpc client received poc_challenge_resp msg ~p", [_Msg]),
+    lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [_Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
-    case miner_poc_grpc_client_statem:check_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
+    case miner_poc_grpc_client_statem:check_target(binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
         {ok, Result, _Details} ->
             handle_check_target_resp(Result);
         {error, _Reason, _Details} ->
