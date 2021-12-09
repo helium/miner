@@ -124,7 +124,9 @@ call_rpc(Pid, Message, Timeout) ->
 init({Connection, Service, Rpc, Encoder, Options, HandlerMod}) ->
     try
         StreamType = proplists:get_value(type, Options, undefined),
+        lager:info("init stream for RPC ~p and type ~p", [Rpc, StreamType]),
         Stream =  new_stream(Connection, Service, Rpc, Encoder, Options),
+        lager:info("init stream success with state ~p, handle_mod: ~p", [Stream, HandlerMod]),
         HandlerState = HandlerMod:init(),
         {ok, Stream#{handler_state => HandlerState, handler_callback => HandlerMod, type => StreamType}}
     catch
@@ -359,7 +361,7 @@ info_response(Response, #{queue := Queue, type := unary} = Stream) ->
 
 info_response(eof = Response, #{type := Type} = Stream) ->
     lager:info("info_response ~p, stream type: ~p", [Response, Type]),
-    {stop, eof, Stream};
+    {stop, normal, Stream};
 info_response(Response, #{handler_callback := CB, handler_state := CBState} = Stream) ->
     lager:info("info_response ~p, CB: ~p", [Response, CB]),
     NewCBState = CB:handle_msg(Response, CBState),
