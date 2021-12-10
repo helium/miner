@@ -185,7 +185,17 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
     lager:info("*** Local POC Result ~p", [LocalPOC]),
     case LocalPOC of
         {error, _} ->
-            {error, <<"invalid_or_expired_poc">>};
+            %% if the POC does not exist it could be it hasnt yet been initialized
+            %% so check if we have a cached POC key. these are added at the point
+            %% a block is proposed and then before the block has been gossiped
+            %% if such a key exists its a strong indication its not yet initialized
+            %% clients should retry after a period of time
+            case cached_poc_key(OnionKeyHash) of
+                {ok, {_KeyHash, _POCData}} ->
+                    {error, <<"queued_poc">>};
+                _ ->
+                    {error, <<"invalid_or_expired_poc">>}
+            end;
         {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
             {true, Onion};
         {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
