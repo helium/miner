@@ -106,16 +106,20 @@ handle_msg(eof, StreamState) ->
 handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = Msg, StreamState) ->
     lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
-    case miner_poc_grpc_client_statem:check_target(binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
-        {ok, Result, _Details} ->
-            handle_check_target_resp(Result);
-        {error, <<"queued_poc">>} ->
-            erlang:send_after(5000, self(), {retry_check_target, 1, Msg});
-        {error, _Reason, _Details} ->
-            ok;
-        {error, _Reason} ->
-            ok
-    end,
+    Self = self(),
+    F = fun() ->
+            case miner_poc_grpc_client_statem:check_target(binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
+                {ok, Result, _Details} ->
+                    handle_check_target_resp(Result);
+                {error, <<"queued_poc">>} ->
+                    erlang:send_after(5000, Self, {retry_check_target, 1, Msg});
+                {error, _Reason, _Details} ->
+                    ok;
+                {error, _Reason} ->
+                    ok
+            end
+        end,
+    spawn(F),
     StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
     lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
@@ -130,16 +134,20 @@ handle_info({retry_check_target, Attempt, Msg}, StreamState)  when Attempt < 3 -
     lager:warning("retry_check_target with attempt ~p for msg: ~p", [Attempt, Msg]),
     #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig} = Msg,
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
-    case miner_poc_grpc_client_statem:check_target(binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
-        {ok, Result, _Details} ->
-            handle_check_target_resp(Result);
-        {error, <<"queued_poc">>} ->
-            erlang:send_after(5000, self(), {retry_check_target, Attempt +1, Msg});
-        {error, _Reason, _Details} ->
-            ok;
-        {error, _Reason} ->
-            ok
-    end,
+    Self = self(),
+    F = fun()->
+            case miner_poc_grpc_client_statem:check_target(binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) of
+                {ok, Result, _Details} ->
+                    handle_check_target_resp(Result);
+                {error, <<"queued_poc">>} ->
+                    erlang:send_after(5000, Self, {retry_check_target, Attempt +1, Msg});
+                {error, _Reason, _Details} ->
+                    ok;
+                {error, _Reason} ->
+                    ok
+            end
+        end,
+    spawn(F),
     StreamState;
 handle_info(_Msg, StreamState) ->
     lager:warning("grpc client unhandled msg: ~p", [_Msg]),
