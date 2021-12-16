@@ -554,26 +554,17 @@ process_block_pocs(
     %% get the ephemeral keys from the block
     %% these will be a prop with tuples as {MemberPosInCG, PocKeyHash}
     BlockPocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
-    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
     [
         begin
             %% the published key is a hash of the public key, aka the onion key hash
             %% use this to check our local cache containing the secret keys of POCs owned by this validator
             %% if it is one of this local validators POCs, then kick it off
-            %% public data on the POC is saved to the ledger whether its a local POC or not
-%%            Ledger1 = blockchain_ledger_v1:new_context(Ledger),
-%%            ChallengerAddr = lists:nth(CGPos, CGMembers),
-%%            lager:info("saving public poc data for poc key ~p and challenger ~p", [OnionKeyHash, ChallengerAddr]),
-%%            catch ok = blockchain_ledger_v1:save_public_poc(OnionKeyHash, ChallengerAddr, BlockHash, BlockHeight, Ledger1),
-%%            ok = blockchain_ledger_v1:commit_context(Ledger1),
             case cached_poc_key(OnionKeyHash) of
-                {ok, {KeyHash, #poc_key_data{keys = Keys}}} ->
+                {ok, {_KeyHash, #poc_key_data{keys = Keys}}} ->
                     lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end),
-                    %% cached key no longer required, GC it
-                    _ = delete_cached_poc_key(KeyHash);
+                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
                     lager:info("failed to find local poc key for ~p", [OnionKeyHash]),
                     noop
