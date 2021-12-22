@@ -248,6 +248,8 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                                                [RSSI, Frequency, SNR]),
                                     send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
                                 {ok, Stream} ->
+                                    lager:info("successfully sent witness to challenger ~p with RSSI: ~p, Frequency: ~p, SNR: ~p",
+                                                  [P2P, RSSI, Frequency, SNR]),
                                     _ = miner_poc_handler:send(Stream, EncodedWitness)
                             end
                     end
