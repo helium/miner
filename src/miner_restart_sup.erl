@@ -143,6 +143,11 @@ init(_Opts) ->
                 []
         end,
 
+    Telemetry = case application:get_env(miner, telemetry, false) of
+                    true -> [?WORKER(miner_telemetry, [])];
+                    _ -> []
+                end,
+
     ChildSpecs =
 
         [
@@ -155,7 +160,8 @@ init(_Opts) ->
          ] ++
         POCServers ++
         ValServers ++
-        EbusServer,
+        EbusServer ++
+        Telemetry,
     {ok, {SupFlags, ChildSpecs}}.
 
 
