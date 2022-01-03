@@ -473,7 +473,7 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             catch C:E:S ->
                     lager:warning([{poc_id, POCID}], "crash during decrypt ~p:~p ~p", [C, E, S]),
                     {error, {C, E}}
-            end;
+            end
     end.
 
 -spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
