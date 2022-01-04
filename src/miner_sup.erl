@@ -47,9 +47,6 @@ init(_Args) ->
                 },
 
     BaseDir = application:get_env(blockchain, base_dir, "data"),
-
-    ok = libp2p_crypto:set_network(application:get_env(miner, network, testnet)),
-
     case application:get_env(blockchain, key, undefined) of
         undefined ->
             #{ pubkey := PublicKey,
