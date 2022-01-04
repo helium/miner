@@ -170,6 +170,8 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
                 {ok, V} when V > 10 ->
                     %% check if the poc 11 vars are active yet
                     case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                        {ok, undefined} ->
+                            {error, no_location};
                         {ok, Location} ->
                             case blockchain_region_v1:h3_to_region(Location, Ledger) of
                                 {ok, Region} ->
