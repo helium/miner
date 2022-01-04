@@ -149,7 +149,7 @@ init(Args) ->
                             {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                  address=Address, poc_interval=Delay, state=requesting})}
                     end;
-                false ->
+                _ ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
                     {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                            address=Address, poc_interval=Delay, state=requesting})}
