@@ -107,12 +107,20 @@ metadata(Version, Meta, Chain) ->
                                 _ -> 1
                             end,
                         lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
-                        {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
-                        lager:info("poc ephemeral keys ~p", [EmpKeys]),
+                        %% if a val is in the ignore list then dont generate poc keys for it
+                        %% TODO: this is a temp hack.  remove when testing finished
+                        IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
                         SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-                        lager:info("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
-                        ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
-                        maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
+                        case not lists:member(SelfPubKeyBin, IgnoreVals) of
+                            true ->
+                                {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
+                                lager:info("poc ephemeral keys ~p", [EmpKeys]),
+                                lager:info("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
+                                ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
+                                maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
+                            false ->
+                                ChainMeta
+                        end;
                     _ ->
                         ChainMeta
 
@@ -829,7 +837,7 @@ bin_to_msg(<<Bin/binary>>) ->
         {error, truncated}
     end.
 
-generate_ephemeral_keys(N, ChallengeRate)->
+generate_ephemeral_keys(N, ChallengeRate) ->
     NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
     lists:foldl(
         fun(_N, {AccKeys, AccHashes})->
