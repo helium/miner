@@ -3,9 +3,9 @@
 
 -export([sign/1,
          ecdh/1,
-         get_connection/0]).
+         get_pid/0]).
 
--export([start_link/3,
+-export([start_link/1,
          init/1,
          handle_call/3,
          handle_cast/2,
@@ -33,7 +33,7 @@ ecdh({ecc_compact, PubKey}) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
 -spec get_pid() -> pid() | undefined.
-get_connection() ->
+get_pid() ->
     gen_server:call(?MODULE, get_connection).
 
 start_link(Options) when is_list(Options) ->
@@ -48,13 +48,13 @@ init([Options]) ->
 
 handle_call({sign, Binary}, _From, State=#state{connection=Connection}) ->
     Reply = case rpc(Connection, #{data => Binary}, sign, ?MAX_RETRIES) of
-                {ok, #{signature => Signature}} -> Signature;
+                {ok, #{signature := Signature}} -> Signature;
                 Error -> Error
             end,
     {ok, Reply, State};
 handle_call({ecdh, PubKey}, _From, State=#state{connection=Connection}) ->
     Reply = case rpc(Connection, #{address => PubKey}, ecdh, ?MAX_RETRIES) of
-                {ok, #{secret => Secret}} -> Secret;
+                {ok, #{secret := Secret}} -> Secret;
                 Error -> Error
             end,
     {ok, Reply, State};
@@ -65,20 +65,23 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
-    lager:warning("unhandled cast ~p by ~p" [_Msg, ?MODULE]),
+    lager:warning("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
-rpc(_Connection, _Req, 0) ->
+terminate(_Reason, State=#state{}) ->
+    catch grpc_client:stop_connection(State#state.connection).
+
+rpc(_Connection, _Req, _RPC, 0) ->
     lager:error("failed to execute grpc request ~p", [_Req]),
     {error, retries_exceeded};
 rpc(Connection, Req, RPC, Tries) ->
     Timeout = rpc_timeout(Tries),
     case grpc_client:unary(Connection, Req, 'helium.local.api', RPC, api_client_pb, [{timeout, Timeout}]) of
-        {ok, #{result => Result, trailers => #{<<"grpc-status">> => <<"0">>}}} ->
+        {ok, #{result := Result, trailers := #{<<"grpc-status">> := <<"0">>}}} ->
             {ok, Result};
-        {error, #{error_type => timeout}} ->
-            {error, timeout}
-        {error, #{error_type => ErrType, status_message => Message}} ->
+        {error, #{error_type := timeout}} ->
+            {error, timeout};
+        {error, #{error_type := ErrType, status_message := Message}} ->
             Retries = Tries - 1,
             lager:warning("grpc request failed with ~p for reason ~p; retrying ~p times", [ErrType, Message, Retries]),
             timer:sleep(?RETRY_WAIT),
