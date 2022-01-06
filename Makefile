@@ -9,15 +9,24 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
+GRPC_SERVICES_DIR=src/grpc/autogen
+
+GATEWAY_RS_VSN ?= main
+SEMTECH_UDP_VSN ?= master
+
 all: compile
 
 deps:
 	$(REBAR) get-deps
 
 compile:
+	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+	$(MAKE) external_svcs
 	$(REBAR) compile
 
 clean:
+	$(MAKE) clean_external_svcs
+	$(MAKE) clean_grpc
 	$(REBAR) clean
 
 test: compile
@@ -60,3 +69,49 @@ devrel:
 devrelease:
 	$(REBAR) as dev release
 
+grpc:
+	@echo "generating miner grpc services"
+	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+
+$(GRPC_SERVICE_DIR):
+	@echo "miner grpc service directory $(directory) does not exist"
+	$(REBAR) get-deps
+	$(MAKE) grpc
+
+clean_grpc:
+	@echo "cleaning miner grpc services"
+	rm -rf $(GRPC_SERVICES_DIR)
+
+external_svcs:
+	@echo "cloning external dependency projects"
+	@echo "--- gateway-rs ---"
+	$(call clone_project,gateway-rs,$(GATEWAY_RS_VSN))
+	@(cd ./external/gateway-rs && cargo build --release)
+	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
+	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
+
+	@echo "--- semtech-udp ---"
+	$(call clone_project,semtech-udp,$(SEMTECH_UDP_VSN))
+	@(cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux)
+	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
+
+clean_external_svcs:
+	@echo "removing external dependency project files"
+	$(call remove,./external/gateway-rs)
+	$(call remove,./priv/gateway_rs/helium_gateway)
+	$(call remove,./priv/gateway_rs/default.toml)
+	$(call remove,./external/semtech-udp)
+	$(call remove,./priv/semtech_udp/gwmp-mux)
+
+define clone_project
+	@git clone --quiet --depth 1 --branch $(2) https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true
+endef
+
+define install_rust_bin
+	@mkdir -p ./priv/$(3)
+	@mv ./external/$(1)/target/release/$(2) ./priv/$(3)/ 2>/dev/null || true
+endef
+
+define remove
+	@rm -rf $(1) 2>/dev/null || true
+endef
