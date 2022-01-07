@@ -9,15 +9,29 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
+IMAGE_ARCH ?= amd64
+
+ifeq ($(IMAGE_ARCH), amd64)
+  RUST_TARGET=x86_64
+else
+  RUST_TARGET=aarch64
+endif
+
+GRPC_SERVICES_DIR=src/grpc/autogen
+
 all: compile
 
 deps:
 	$(REBAR) get-deps
 
 compile:
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+	$(MAKE) external_svcs
 	$(REBAR) compile
 
 clean:
+	$(MAKE) clean_external_svcs
+	$(MAKE) clean_grpc
 	$(REBAR) clean
 
 test: compile
@@ -60,3 +74,24 @@ devrel:
 devrelease:
 	$(REBAR) as dev release
 
+grpc:
+	@echo "generating miner grpc services"
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+
+$(GRPC_SERVICE_DIR):
+	@echo "miner grpc service directory $(directory) does not exist"
+	$(REBAR) get-deps
+	$(MAKE) grpc
+
+clean_grpc:
+	@echo "cleaning miner grpc services"
+	rm -rf $(GRPC_SERVICES_DIR)
+
+external_svcs:
+	@echo "cloning external dependency projects"
+	git clone --quiet --depth 1 https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
+	cargo build --release --target $(RUST_TARGET)-unknown-linux-musl
+
+clean_external_svcs:
+	@echo "removing external dependency project files"
+	rm -rf ./external/gateway-rs 2>/dev/null || true

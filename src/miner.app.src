@@ -31,6 +31,9 @@
     elli,
     jsonrpc2,
     xorf
+    http2_client,
+    grpc_lib,
+    grpc_client
    ]},
   {included_applications, [blockchain, sibyl]},
   {env,[]},
