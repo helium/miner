@@ -29,6 +29,10 @@
 
 -type region() ::
     'AS923'
+    | 'AS923_1'
+    | 'AS923_2'
+    | 'AS923_3'
+    | 'AS923_4'
     | 'AU915'
     | 'CN470'
     | 'CN779'
@@ -67,6 +71,10 @@
 model(Region) ->
     case Region of
         'AS923' -> ?COMMON_DUTY;
+        'AS923_1' -> ?COMMON_DUTY;
+        'AS923_2' -> ?COMMON_DUTY;
+        'AS923_3' -> ?COMMON_DUTY;
+        'AS923_4' -> ?COMMON_DUTY;
         'AU915' -> ?COMMON_DUTY;
         'CN470' -> ?COMMON_DUTY;
         'CN779' -> ?COMMON_DUTY;
