@@ -462,9 +462,9 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
     case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, not_found} ->
             poc_not_found;
-        {ok, PoC} ->
+        {ok, [PoC]} ->
             lager:info([{poc_id, POCID}], "found poc. attempting to decrypt", []),
-            Blockhash = blockchain_ledger_poc_v3:block_hash(PoC),
+            Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
             try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, Blockhash, Ledger) of
                 error ->
                     {error, fail_decrypt};
@@ -473,7 +473,10 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
             catch C:E:S ->
                     lager:warning([{poc_id, POCID}], "crash during decrypt ~p:~p ~p", [C, E, S]),
                     {error, {C, E}}
-            end
+            end;
+        {ok, _} ->
+            %% TODO we might want to try all the PoCs here
+            {error, too_many_pocs}
     end.
 
 -spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
