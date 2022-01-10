@@ -90,7 +90,8 @@ clean_grpc:
 external_svcs:
 	@echo "cloning external dependency projects"
 	git clone --quiet --depth 1 https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
-	cargo build --release --target $(RUST_TARGET)-unknown-linux-musl
+	cd ./external/gateway-rs && cargo build --release --target $(RUST_TARGET)-unknown-linux-musl && cd ../../
+	mv ./external/gateway-rs/target/$(RUST_TARGET)-unknown-linux-musl/release/helium_gateway ./priv/gateway_rs/
 
 clean_external_svcs:
 	@echo "removing external dependency project files"
