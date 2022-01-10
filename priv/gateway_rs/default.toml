@@ -1,0 +1,89 @@
+## gateway-rs default configuration file
+##
+## NOTE: Do _NOT_ change values in this file. 
+##   Override settings in settings.toml by putting the sections and
+##   settings that need to be changed there.  
+
+## Keypair is a string that supports specifying different locations for 
+## the secrets. The default one is file based one since all devices 
+## can support it.
+##
+## Override the setting by putting a keypair line in the 
+## local settings.toml. Changing things in this file will be overwritten
+## by upgrades. 
+##
+## File: 
+keypair = "/etc/helium_gateway/gateway_key.bin"
+## ECC608 based
+# keypair = "ecc://i2c-1:96&slot=0"
+listen = "127.0.0.1:1680"
+region = "US915"
+
+[log]
+method = "stdio"
+level = "info"
+timestamp = false
+
+[update]
+# Enable update checking
+enabled = true
+# OVERRIDE: Platform to use as part of update check. This MUST be overriden by a
+# local settings file
+platform = "unknown"
+# Channel to use, alpha, beta, release, or semver which pulls it from the
+# running program
+channel = "semver"
+# Interval in minutes between update checks
+interval = 10
+# The github release stream to check for updates
+uri = "https://api.github.com/repos/helium/gateway-rs/releases"
+# The command to run to install the update.
+command = "/etc/helium_gateway/install_update"
+
+[cache]
+max_packets = 20
+
+# A list of gateway service keys and urls (note https is not supported
+[[gateways]]
+# lgw-ireland
+pubkey = "11tk4zzbyfMPYYHYda255ACoqfYFVdrUSoCWrCYfn8BoyuYrERK"
+uri = "http://52.49.199.40:8080"
+
+[[gateways]]
+# lgw-ohio
+pubkey = "115PmCR6fpFihdjw626JXYdUEdzwjh66yoWzWkMvB9CRGEx1U6G"
+uri = "http://3.132.190.192:8080"
+
+[[gateways]]
+# lgw-oregon
+pubkey = "11pUovhssQdXzrfcYMTUrNNTQossgny8WqhfdbprrAVFyHcmvAN"
+uri = "http://35.84.173.125:8080"
+
+[[gateways]]
+# lgw-seoul
+pubkey = "11yJXQPG9deHqvw2ac6VWtNP7gZj8X3t3Qb3Gqm9j729p4AsdaA"
+uri = "http://3.38.70.101:8080"
+
+[[gateways]]
+# lgw-singapore
+pubkey = "11Gx2yPEmBGUrbHUiUWQs9vV7JDHQLZSddQs6e3WB2uvqSMUDBW"
+uri = "http://54.251.77.229:8080"
+
+## Default routers for various release channels
+[router.alpha]
+# staging: oui 4
+# pubkey = "11263KvqW3GZPAvag5sQYtBJSjb25azSTSwoi5Tza9kboaLRxcsv"
+# uri = "http://54.193.165.228:8080"
+# dev: oui 2
+pubkey = "1124CJ9yJaHq4D6ugyPCDnSBzQik61C1BqD9VMh1vsUmjwt16HNB"
+uri = "http://54.176.88.149:8080"
+
+[router.beta]
+# production
+pubkey = "112qB3YaH5bZkCnKA5uRH7tBtGNv2Y5B4smv1jsmvGUzgKT71QpE"
+uri = "http://52.8.80.146:8080"
+
+[router.release]
+# production: oui 1
+pubkey = "112qB3YaH5bZkCnKA5uRH7tBtGNv2Y5B4smv1jsmvGUzgKT71QpE"
+uri = "http://52.8.80.146:8080"
