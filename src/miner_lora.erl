@@ -381,11 +381,12 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, Ledger}},
                 {ok, V} when V /= CurPoCChallengerType ->
                     %% the poc challenger chain var has been modified, force this server
                     %% to restart and recheck if it can still bind to the lora port
+                    %% in addition restart the grpc client so that we start afresh
+                    _ = miner_poc_grpc_client_statem:stop(),
                     {stop, force_restart, State};
                 _ ->
                     {noreply, State}
             end;
-
         _ ->
             {noreply, State}
     end;

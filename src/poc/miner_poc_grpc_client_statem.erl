@@ -15,6 +15,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/0,
+    stop/0,
     connection/0,
     check_target/6,
     send_report/3,
@@ -74,6 +75,10 @@
 -spec start_link() -> {ok, pid()}.
 start_link() ->
     gen_statem:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+-spec stop() -> ok.
+stop() ->
+    gen_statem:stop(?MODULE).
 
 -spec connection() -> {ok, grpc_client_custom:connection()}.
 connection() ->
