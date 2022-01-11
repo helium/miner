@@ -1,9 +1,15 @@
+%%%-------------------------------------------------------------------
+%% @doc miner gateway ecc worker
+%% Interface to the rust-based gateway service over grpc
+%% @end
+%%%-------------------------------------------------------------------
 -module(miner_gateway_ecc_worker).
+
 -behaviour(gen_server).
 
--export([sign/1,
+-export([pubkey/0,
          ecdh/1,
-         get_pid/0]).
+         sign/1]).
 
 -export([start_link/1,
          init/1,
@@ -23,6 +29,10 @@
 %% Make the call timeout quite long since this worker has to process
 %% all signing requests for the system
 -define(CALL_TIMEOUT, (?MAX_RETRIES * ?RETRY_WAIT) * 10).
+
+-spec pubkey() -> {ok, libp2p_crypto:pubkey()} | {error, term()}.
+pubkey() ->
+    gen_server:call(?MODULE, pubkey, ?CALL_TIMEOUT).
 
 -spec sign(binary()) -> {ok, Signature::binary() | {error, term()}}.
 sign(Binary) ->
@@ -46,6 +56,12 @@ init([Options]) ->
     {ok, Connection} = grpc_client:connect(Transport, Host, Port),
     {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
 
+handle_call(pubkey, _From, State=#state{connection=Connection}) ->
+    Reply = case rpc(Connection, #{}, pubkey, ?MAX_RETRIES) of
+                {ok, #{address := Pubkey}} -> Pubkey;
+                Error -> Error
+            end,
+    {ok, Reply, State};
 handle_call({sign, Binary}, _From, State=#state{connection=Connection}) ->
     Reply = case rpc(Connection, #{data => Binary}, sign, ?MAX_RETRIES) of
                 {ok, #{signature := Signature}} -> Signature;
