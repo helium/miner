@@ -1024,6 +1024,19 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
 reg_region(State) ->
     State#state.reg_region.
 
+-spec open_socket(string(), pos_integer()) -> {ok, port(), port()}.
+open_socket(IP, Port) ->
+    {ok, Socket} = gen_udp:open(Port, [binary, {reuseaddr, true}, {active, 100}, {ip, IP}]),
+    MirrorSocket =
+        case application:get_env(miner, radio_mirror_port, undefined) of
+            undefined ->
+                undefined;
+            P ->
+                {ok, MS} = gen_udp:open(P, [binary, {active, true}]),
+                MS
+        end,
+    {ok, Socket, MirrorSocket}.
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -1058,15 +1071,4 @@ rssi_fetch_test() ->
     ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, true), 4),
     ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, false), 4).
 
--spec open_socket(string(), pos_integer()) -> {ok, port(), port()}.
-open_socket(IP, Port) ->
-    {ok, Socket} = gen_udp:open(Port, [binary, {reuseaddr, true}, {active, 100}, {ip, IP}]),
-    MirrorSocket =
-        case application:get_env(miner, radio_mirror_port, undefined) of
-            undefined ->
-                undefined;
-            P ->
-                {ok, MS} = gen_udp:open(P, [binary, {active, true}]),
-                MS
-        end,
-    {ok, Socket, MirrorSocket}.
+-endif.
