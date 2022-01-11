@@ -22,3 +22,5 @@ data
 src/pb
 .repos/
 external/
+src/grpc/
+helium_gateway
