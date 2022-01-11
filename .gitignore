@@ -21,3 +21,5 @@ data
 \#*
 src/pb
 external/
+src/grpc/
+helium_gateway
