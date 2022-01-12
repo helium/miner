@@ -9,6 +9,7 @@
 
 -export([pubkey/0,
          ecdh/1,
+         get_pid/0,
          sign/1]).
 
 -export([start_link/1,
@@ -20,7 +21,7 @@
 -record(state, {
                  connection :: pid(),
                  host="localhost" :: string(),
-                 port=1680 :: integer(),
+                 port=4467 :: integer(),
                  transport=tcp :: tcp | ssl
                }).
 
@@ -39,7 +40,7 @@ sign(Binary) ->
     gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
 -spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed::binary()} | {error, term()}.
-ecdh({ecc_compact, PubKey}) ->
+ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
 -spec get_pid() -> pid() | undefined.
@@ -52,7 +53,7 @@ start_link(Options) when is_list(Options) ->
 init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
     Host = proplists:get_value(host, Options, "localhost"),
-    Port = proplists:get_value(port, Options, 1680),
+    Port = proplists:get_value(port, Options, 4467),
     {ok, Connection} = grpc_client:connect(Transport, Host, Port),
     {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
 
@@ -61,27 +62,27 @@ handle_call(pubkey, _From, State=#state{connection=Connection}) ->
                 {ok, #{address := Pubkey}} -> Pubkey;
                 Error -> Error
             end,
-    {ok, Reply, State};
+    {reply, {ok, Reply}, State};
 handle_call({sign, Binary}, _From, State=#state{connection=Connection}) ->
     Reply = case rpc(Connection, #{data => Binary}, sign, ?MAX_RETRIES) of
                 {ok, #{signature := Signature}} -> Signature;
                 Error -> Error
             end,
-    {ok, Reply, State};
+    {reply, {ok, Reply}, State};
 handle_call({ecdh, PubKey}, _From, State=#state{connection=Connection}) ->
-    Reply = case rpc(Connection, #{address => PubKey}, ecdh, ?MAX_RETRIES) of
+    Reply = case rpc(Connection, #{address => libp2p_crypto:pubkey_to_bin(PubKey)}, ecdh, ?MAX_RETRIES) of
                 {ok, #{secret := Secret}} -> Secret;
                 Error -> Error
             end,
-    {ok, Reply, State};
+    {reply, {ok, Reply}, State};
 handle_call(get_connection, _From, State=#state{connection=Connection}) ->
     {reply, {ok, Connection}, State};
 handle_call(_Msg, _From, State) ->
-    lager:warn("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
-    lager:warning("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
+    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_Reason, State=#state{}) ->
@@ -92,7 +93,7 @@ rpc(_Connection, _Req, _RPC, 0) ->
     {error, retries_exceeded};
 rpc(Connection, Req, RPC, Tries) ->
     Timeout = rpc_timeout(Tries),
-    case grpc_client:unary(Connection, Req, 'helium.local.api', RPC, api_client_pb, [{timeout, Timeout}]) of
+    case grpc_client:unary(Connection, Req, 'helium.local.api', RPC, local_miner_client_pb, [{timeout, Timeout}]) of
         {ok, #{result := Result, trailers := #{<<"grpc-status">> := <<"0">>}}} ->
             {ok, Result};
         {error, #{error_type := timeout}} ->
