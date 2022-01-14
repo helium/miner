@@ -44,7 +44,7 @@ init([Type, URL, Key]) ->
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     DenyFile = filename:join([BaseDir, "denylist", "latest"]),
     ok = filelib:ensure_dir(DenyFile),
-    %% filter version will be an integer or undefined, depending on if we could load one from disk
+    %% filter version will be a positive integer or 0 depending on if we could load one from disk
     FilterVersion = case filelib:is_regular(DenyFile) of
                         true ->
                             case file:read_file(DenyFile) of
@@ -53,24 +53,24 @@ init([Type, URL, Key]) ->
                                     case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
                                         true ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
-                                            case xorf:from_bin(FilterBin) of
+                                            case xorf:from_bin({{binary_fuse, 32}, FilterBin}) of
                                                 {ok, Filter} ->
-                                                    ok = persistent_term:put(?MODULE, Filter),
+                                                    ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
                                                     Serial;
                                                 {error, Reason} ->
                                                     lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
-                                                    undefined
+                                                    0
                                             end;
                                         false ->
                                             lager:notice("failed to verify signature on denylist on disk"),
-                                            undefined
+                                            0
                                     end;
                                 _ ->
                                     lager:notice("unrecognized or corrupt denylist on disk"),
-                                    undefined
+                                    0
                             end;
                         false ->
-                            undefined
+                            0
                     end,
     {ok, schedule_check(#state{type=Type, url=URL, key=Key, version=FilterVersion}, 0)}.
 
@@ -115,7 +115,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                                                     case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
                                                         true ->
                                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
-                                                            case xorf:from_bin(FilterBin) of
+                                                            case xorf:from_bin({{binary_fuse, 32}, FilterBin}) of
                                                                 {ok, Filter} ->
                                                                     BaseDir = application:get_env(blockchain, base_dir, "data"),
                                                                     DenyFile = filename:join([BaseDir, "denylist", "latest"]),
@@ -131,7 +131,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                                                                         {error, WriteReason} ->
                                                                             lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
                                                                     end,
-                                                                    ok = persistent_term:put(?MODULE, Filter),
+                                                                    ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
                                                                     {noreply, schedule_check(State#state{version=Serial})};
                                                                 {error, Reason} ->
                                                                     lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
