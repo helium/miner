@@ -89,7 +89,10 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                             {noreply, schedule_check(State)};
                         VersionBin ->
                             {noreply, schedule_check(State)};
-                        NewVersion when NewVersion > Version ->
+                        NewVersion when Version /= undefined andalso NewVersion < Version ->
+                            lager:notice("denylist version has regressed from ~p to ~p", [Version, NewVersion]),
+                            {noreply, schedule_check(State)};
+                        NewVersion when Version == undefined orelse NewVersion > Version ->
                             lager:info("new denylist version appeared: ~p have ~p", [NewVersion, Version]),
                             case maps:get(<<"zipball_url">>, Json, undefined) of
                                 undefined ->
