@@ -175,7 +175,7 @@
   1},
  {<<"xorf">>,
   {git,"https://github.com/helium/erlang-xorf.git",
-       {ref,"c54fe5078529f099d6f17667b66390e7145bc66d"}},
+       {ref,"a4a1cc604212cca0b6411bf4eda61c40abe3f6ad"}},
   0},
  {<<"xxhash">>,
   {git,"https://github.com/pierreis/erlang-xxhash",

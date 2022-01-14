@@ -21,7 +21,7 @@ start_link(Type, URL, Key) ->
 check(PubkeyBin) ->
     try persistent_term:get(?MODULE) of
         Xor ->
-            xorf:contains(Xor, xxhash:xxhash64(PubkeyBin))
+            xorf:contains(Xor, xxhash:hash64(PubkeyBin))
     catch
         _:_ ->
             %% not enabled/ready
