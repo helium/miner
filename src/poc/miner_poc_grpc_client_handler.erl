@@ -99,10 +99,6 @@ config_update_stream(Connection)->
 handle_msg({headers, _Headers}, StreamState) ->
     lager:info("*** grpc client ignoring headers ~p", [_Headers]),
     StreamState;
-%% TODO: handle eof
-handle_msg(eof, StreamState) ->
-    lager:info("*** grpc client received eof", []),
-    StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = Msg, StreamState) ->
     lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,

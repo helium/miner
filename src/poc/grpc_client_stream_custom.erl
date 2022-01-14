@@ -361,7 +361,7 @@ info_response(Response, #{queue := Queue, type := unary} = Stream) ->
 
 info_response(eof = Response, #{type := Type} = Stream) ->
     lager:info("info_response ~p, stream type: ~p", [Response, Type]),
-    {stop, normal, Stream};
+    {stop, normal, rst_stream(Stream, 0)};
 info_response(Response, #{handler_callback := CB, handler_state := CBState} = Stream) ->
     lager:info("info_response ~p, CB: ~p", [Response, CB]),
     NewCBState = CB:handle_msg(Response, CBState),

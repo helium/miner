@@ -113,6 +113,7 @@ update_config(UpdatedKeys)->
 %% ------------------------------------------------------------------
 init(_Args) ->
     lager:info("starting ~p", [?MODULE]),
+    erlang:process_flag(trap_exit, true),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     {ok, _, SigFun, _} = blockchain_swarm:keys(),
     {ok, setup, #data{self_pub_key_bin = SelfPubKeyBin, self_sig_fun = SigFun}}.
@@ -120,7 +121,8 @@ init(_Args) ->
 callback_mode() -> [state_functions,state_enter].
 
 terminate(_Reason, Data) ->
-    ok = disconnect(Data),
+    lager:info("terminating with reason ~p", [_Reason]),
+    _ = disconnect(Data),
     ok.
 
 %% ------------------------------------------------------------------
