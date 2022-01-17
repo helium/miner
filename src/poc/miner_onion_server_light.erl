@@ -328,7 +328,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
 
 -spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, _OnionKeyHash, Tag, CipherText, ECDHFun) ->
-            try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, <<"ignore_block_hash">>, <<"ignore_ledger">>) of
+            try blockchain_poc_packet_v2:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun) of
                 error ->
                     {error, fail_decrypt};
                 {Payload, NextLayer} ->

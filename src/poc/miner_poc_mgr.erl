@@ -524,7 +524,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                 N + 1
             ),
             OnionList = lists:zip([libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
-            {Onion, Layers} = blockchain_poc_packet:build(Keys, IV, OnionList, BlockHash, <<"ignore_ledger">>),
+            {Onion, Layers} = blockchain_poc_packet_v2:build(Keys, IV, OnionList),
             [_|LayerHashes] = [crypto:hash(sha256, L) || L <- Layers],
             Challengees = lists:zip(Path, LayerData),
             PacketHashes = lists:zip(Path, LayerHashes),

@@ -93,22 +93,22 @@ end_per_group(_, _Config) ->
 %%--------------------------------------------------------------------
 poc_grpc_dist_v11_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(poc_v11),
+    ExtraVars = extra_vars(grpc),
     run_dist_with_params(poc_grpc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_dist_v11_cn_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(poc_v11),
+    ExtraVars = extra_vars(grpc),
     run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_dist_v11_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(poc_v11),
+    ExtraVars = extra_vars(grpc),
     run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_dist_v11_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(poc_v11),
+    ExtraVars = extra_vars(grpc),
     run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 %% ------------------------------------------------------------------
@@ -533,7 +533,14 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
     %% There should be no poc_witness or poc_challengees rewards
     ?assert(not check_poc_rewards(Rewards)),
     ok.
-
+extra_vars(grpc) ->
+    GrpcVars = #{
+                 ?poc_challenge_rate => 1,
+                 ?poc_challenger_type => validator,
+                 ?poc_timeout => 4,
+                 ?poc_receipts_absorb_timeout => 2
+    },
+    maps:merge(extra_vars(poc_v11), GrpcVars);
 extra_vars(poc_v11) ->
     POCVars = maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars()),
     RewardVars = #{reward_version => 5, rewards_txn_version => 2},
@@ -552,6 +559,8 @@ extra_vars(poc_v10) ->
                  ?rewards_txn_version => 2,
                  ?poc_challenge_rate => 1,
                  ?poc_challenger_type => validator,
+                 ?poc_timeout => 4,
+                 ?poc_receipts_absorb_timeout => 2,
                  ?election_interval => 10,
                  ?block_time => 5000
                 });
