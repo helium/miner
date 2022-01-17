@@ -557,7 +557,7 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v1:create_secret_hash(Entropy, N+1),
             OnionList = lists:zip([ libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
-            {Onion, Layers} = blockchain_poc_packet_v2:build(OnionKey, IV, OnionList),
+            {Onion, Layers} = blockchain_poc_packet:build(OnionKey, IV, OnionList, BlockHash, Ledger),
             %% no witness will exist for the first layer hash as it is delivered over p2p
             [_|LayerHashes] = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
