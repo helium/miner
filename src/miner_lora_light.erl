@@ -619,24 +619,37 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
 %% GWMP JSON V1/V2.
 -spec packet_rssi(map(), boolean()) -> number().
 packet_rssi(Packet, UseRSSIS) ->
-    case maps:get(<<"rssi">>, Packet, undefined) of
-        %% GWMP V2
+    RSSIS = maps:get(<<"rssis">>, Packet, undefined),
+    SingleRSSI = case UseRSSIS andalso RSSIS =/= undefined of
+        true  -> RSSIS;
+        false -> maps:get(<<"rssi">>, Packet, undefined)
+    end,
+    case SingleRSSI of
+        %% No RSSI, perhaps this is a GWMP V2
         undefined ->
             %% `rsig` is a list. It can contain more than one signal
             %% quality object if the packet was received on multiple
             %% antennas/receivers. So let's pick the one with the
-            %% highest RSSI[Channel]
-            Key = case UseRSSIS of
+            %% highest RSSI.
+            FetchRSSI = case UseRSSIS of
                 true ->
-                    <<"rssis">>;
-                _ ->
-                    <<"rssic">>
+                    %% Use RSSIS if available, fall back to RSSIC.
+                    fun (Obj) ->
+                        maps:get(<<"rssis">>, Obj,
+                                 maps:get(<<"rssic">>, Obj, undefined))
+                    end;
+                false ->
+                    %% Just use RSSIC.
+                    fun (Obj) ->
+                        maps:get(<<"rssic">>, Obj, undefined)
+                    end
             end,
+            BestRSSISelector =
+                fun (Obj, Best) ->
+                    erlang:max(Best, FetchRSSI(Obj))
+                end,
             [H|T] = maps:get(<<"rsig">>, Packet),
-            Selector = fun(Obj, Best) ->
-                               erlang:max(Best, maps:get(Key, Obj))
-                       end,
-            lists:foldl(Selector, maps:get(Key, H), T);
+            lists:foldl(BestRSSISelector, FetchRSSI(H), T);
         %% GWMP V1
         RSSI ->
             RSSI
@@ -802,3 +815,39 @@ open_socket(IP, Port) ->
                 MS
         end,
     {ok, Socket, MirrorSocket}.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+rssi_fetch_test() ->
+    PacketWithRSSIS = #{
+        <<"rssis">> => 1,
+        <<"rssi">> => 2
+    },
+    PacketWithoutRSSIS = #{
+        <<"rssi">> => 2
+    },
+    RSIGPacketWithRSSIS = #{
+        <<"rsig">> => [
+            #{ <<"rssis">> => 1, <<"rssic">> => 2 },
+            #{ <<"rssis">> => 3, <<"rssic">> => 4 },
+            #{ <<"rssis">> => -1, <<"rssic">> => 0 }
+        ]
+    },
+    RSIGPacketWithoutRSSIS = #{
+        <<"rsig">> => [
+            #{ <<"rssic">> => 2 },
+            #{ <<"rssic">> => 4 },
+            #{ <<"rssic">> => 0 }
+        ]
+    },
+    ?assertEqual(packet_rssi(PacketWithRSSIS, true), 1),
+    ?assertEqual(packet_rssi(PacketWithRSSIS, false), 2),
+    ?assertEqual(packet_rssi(PacketWithoutRSSIS, true), 2),
+    ?assertEqual(packet_rssi(PacketWithoutRSSIS, false), 2),
+    ?assertEqual(packet_rssi(RSIGPacketWithRSSIS, true), 3),
+    ?assertEqual(packet_rssi(RSIGPacketWithRSSIS, false), 4),
+    ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, true), 4),
+    ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, false), 4).
+
+-endif.
