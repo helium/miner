@@ -213,7 +213,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 {error, mismatched_block_hash}
                         end;
                     _ ->
-                        lager:info("*** ~p is NOT a known key ~p", [OnionKeyHash]),
+                        lager:info("*** ~p is NOT a known key", [OnionKeyHash]),
                         {error, <<"invalid_or_expired_poc">>}
                 end;
             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
@@ -225,7 +225,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash]),
+    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
