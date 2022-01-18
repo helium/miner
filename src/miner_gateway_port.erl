@@ -7,10 +7,10 @@
 
 -behaviour(gen_server).
 
--export([get_os_pid/0]).
 -export([start_link/0,
          init/1,
          handle_call/3,
+         handle_cast/2,
          handle_info/2,
          terminate/2]).
 
@@ -20,9 +20,6 @@
         os_pid
     }).
 
-get_os_pid() ->
-    gen_server:call(?MODULE, os_pid).
-
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
@@ -31,8 +28,13 @@ init(_Opts) ->
     State = open_gateway_port(),
     {ok, State}.
 
-handle_call(os_pid, _From, State) ->
-    {reply, State#state.os_pid, State}.
+handle_call(_Msg, _From, State) ->
+    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    {noreply, State}.
+
+handle_cast(_Msg, State) ->
+    lager:info("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
+    {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     lager:warning("gateway-rs process ~p exited with status ~p, restarting", [Port, Status]),
@@ -45,7 +47,7 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
     NewState = open_gateway_port(),
     {noreply, NewState};
 handle_info(_Msg, State) ->
-    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:info("unhandled info ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_, State) ->
@@ -74,7 +76,7 @@ open_gateway_port() ->
                 {env, GatewayEnv}],
     Port = erlang:open_port({spawn_executable, gateway_bin()}, PortOpts),
     Ref = erlang:monitor(port, Port),
-    OSPid = erlang:port_info(Port, os_pid),
+    {os_pid, OSPid} = erlang:port_info(Port, os_pid),
     #state{port = Port, monitor = Ref, os_pid = OSPid}.
 
 cleanup_port(State) ->
