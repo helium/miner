@@ -31,14 +31,19 @@
 %% all signing requests for the system
 -define(CALL_TIMEOUT, (?MAX_RETRIES * ?RETRY_WAIT) * 10).
 
+%% Retrieve the public key for the ecc chip from the rust gateway and
+%% deserialize it from the binary returned
 -spec pubkey() -> {ok, libp2p_crypto:pubkey()} | {error, term()}.
 pubkey() ->
     gen_server:call(?MODULE, pubkey, ?CALL_TIMEOUT).
 
+%% Pass a binary to the rust gateway for signing and returned the signed binary
 -spec sign(binary()) -> {ok, Signature::binary() | {error, term()}}.
 sign(Binary) ->
     gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
+%% Pass an ecc public key to the rust gateway and return a point on the
+%% eliptic curve as a binary
 -spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed::binary()} | {error, term()}.
 ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
@@ -59,8 +64,10 @@ init([Options]) ->
 
 handle_call(pubkey, _From, State=#state{connection=Connection}) ->
     Reply = case rpc(Connection, #{}, pubkey, ?MAX_RETRIES) of
-                {ok, #{address := Pubkey}} -> Pubkey;
-                Error -> Error
+                {ok, #{address := Pubkey}} ->
+                    libp2p_crypto:bin_to_pubkey(Pubkey);
+                Error ->
+                    Error
             end,
     {reply, {ok, Reply}, State};
 handle_call({sign, Binary}, _From, State=#state{connection=Connection}) ->
