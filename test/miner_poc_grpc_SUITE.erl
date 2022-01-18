@@ -11,9 +11,9 @@
 
 -export([
     poc_grpc_dist_v11_test/1,
-    poc_dist_v11_cn_test/1,
-    poc_dist_v11_partitioned_test/1,
-    poc_dist_v11_partitioned_lying_test/1
+    poc_grpc_dist_v11_cn_test/1,
+    poc_grpc_dist_v11_partitioned_test/1,
+    poc_grpc_dist_v11_partitioned_lying_test/1
 ]).
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
@@ -61,24 +61,22 @@ all() ->
 test_cases() ->
     [
      poc_grpc_dist_v11_test,
-     poc_dist_v11_cn_test,
-     poc_dist_v11_partitioned_test,
-     poc_dist_v11_partitioned_lying_test
+     poc_grpc_dist_v11_cn_test,
+     poc_grpc_dist_v11_partitioned_test,
+     poc_grpc_dist_v11_partitioned_lying_test
     ].
 
 init_per_group(poc_grpc_with_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
-        {num_validators, 8},
+        {num_validators, 5},
         {gateways_run_chain, true} | Config];
 init_per_group(poc_grpc_no_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
-        {num_validators, 8},
+        {num_validators, 5},
         {gateways_run_chain, false} | Config].
 
-init_per_testcase(poc_grpc_dist_v11_test = TestCase, Config) ->
-    miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config);
 init_per_testcase(TestCase, Config) ->
     miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config).
 
@@ -96,20 +94,20 @@ poc_grpc_dist_v11_test(Config) ->
     ExtraVars = extra_vars(grpc),
     run_dist_with_params(poc_grpc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
-poc_dist_v11_cn_test(Config) ->
+poc_grpc_dist_v11_cn_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(grpc),
-    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_grpc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
-poc_dist_v11_partitioned_test(Config) ->
+poc_grpc_dist_v11_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(grpc),
-    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_grpc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
-poc_dist_v11_partitioned_lying_test(Config) ->
+poc_grpc_dist_v11_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(grpc),
-    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_grpc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -130,10 +128,10 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
-exec_dist_test(poc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_dist_v11_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
-    do_common_partition_checks(poc_dist_v11_partitioned_test, Config, VarMap);
+exec_dist_test(poc_grpc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
+    do_common_partition_lying_checks(poc_grpc_dist_v11_partitioned_lying_test, Config, VarMap);
+exec_dist_test(poc_grpc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
+    do_common_partition_checks(poc_grpc_dist_v11_partitioned_test, Config, VarMap);
 exec_dist_test(_TestCase, Config, VarMap, Status) ->
     Validators = ?config(validators, Config),
     %% Print scores before we begin the test
@@ -162,7 +160,7 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
                                      ct:pal("C2: ~p, C3: ~p", [C2, C3]),
                                      C2 andalso C3
                              end,
-                             12, 6000),
+                             25, 5000),
                     FinalRewards = get_rewards(Config),
                     ct:pal("FinalRewards: ~p", [FinalRewards]),
                     ok;
@@ -211,12 +209,12 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     end,
     ok.
 
-gen_locations(poc_dist_v11_partitioned_lying_test, _, _) ->
+gen_locations(poc_grpc_dist_v11_partitioned_lying_test, _, _) ->
     {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
-gen_locations(poc_dist_v11_partitioned_test, _, _) ->
+gen_locations(poc_grpc_dist_v11_partitioned_test, _, _) ->
     %% These are taken from the ledger
     {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
-gen_locations(poc_dist_v11_cn_test, _, _) ->
+gen_locations(poc_grpc_dist_v11_cn_test, _, _) ->
     %% Actual locations are the same as the claimed locations for the dist test
     {?CNLOCS1 ++ ?CNLOCS2, ?CNLOCS1 ++ ?CNLOCS2};
 gen_locations(_TestCase, Addresses, VarMap) ->
@@ -250,6 +248,7 @@ initialize_chain(_AllMiners, TestCase, Config, VarMap) ->
     AddValTxns = [blockchain_txn_gen_validator_v1:new(Addr, Addr, ?bones(10000)) || Addr <- ValidatorAddrs],
 
     {ActualLocations, ClaimedLocations} = gen_locations(TestCase, GatewayAddrs, VarMap),
+    ct:pal("GatewayAddrs: ~p, ActualLocations: ~p, ClaimedLocations: ~p",[GatewayAddrs, ActualLocations, ClaimedLocations]),
     AddressesWithLocations = lists:zip(GatewayAddrs, ActualLocations),
     AddressesWithClaimedLocations = lists:zip(GatewayAddrs, ClaimedLocations),
     InitialGenGatewayTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, Loc, 0) || {Addr, Loc} <- AddressesWithLocations],
@@ -533,6 +532,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
     %% There should be no poc_witness or poc_challengees rewards
     ?assert(not check_poc_rewards(Rewards)),
     ok.
+
 extra_vars(grpc) ->
     GrpcVars = #{
                  ?poc_challenge_rate => 1,
