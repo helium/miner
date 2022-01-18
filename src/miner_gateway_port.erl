@@ -27,6 +27,7 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init(_Opts) ->
+    process_flag(trap_exit, true),
     State = open_gateway_port(),
     {ok, State}.
 
@@ -43,7 +44,8 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
     ok = cleanup_port(State),
     NewState = open_gateway_port(),
     {noreply, NewState};
-handle_info(_, State) ->
+handle_info(_Msg, State) ->
+    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_, State) ->
