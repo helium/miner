@@ -85,7 +85,8 @@
     sig_fun :: undefined | libp2p_crypto:sig_fun(),
     pub_key = undefined :: undefined | libp2p_crypto:pubkey_bin(),
     addr_hash_filter :: undefined | #addr_hash_filter{},
-    poc_timeout :: pos_integer()
+    poc_timeout :: pos_integer(),
+    poc_receipts_absorb_timeout :: pos_integer()
 }).
 -type state() :: #state{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
@@ -296,14 +297,20 @@ handle_info(init, #state{chain = undefined} = State) ->
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             POCTimeout =
                 case blockchain:config(?poc_timeout, Ledger) of
-                    {ok, V} -> V;
+                    {ok, T1} -> T1;
                     _ -> ?POC_TIMEOUT
+                end,
+            POCReceiptsAborbTimeout =
+                case blockchain:config(?poc_receipts_absorb_timeout, Ledger) of
+                    {ok, T2} -> T2;
+                    _ -> ?POC_RECEIPTS_ABSORB_TIMEOUT
                 end,
             {noreply, State#state{
                 chain = Chain,
                 ledger = Ledger,
                 pub_key = SelfPubKeyBin,
-                poc_timeout = POCTimeout
+                poc_timeout = POCTimeout,
+                poc_receipts_absorb_timeout = POCReceiptsAborbTimeout
             }}
     end;
 handle_info(init, State) ->
@@ -658,7 +665,7 @@ purge_local_pocs(
 ) -> ok.
 purge_public_pocs(
     Block,
-    #state{chain = Chain, poc_timeout = POCTimeout} = _State
+    #state{chain = Chain, poc_timeout = POCTimeout, poc_receipts_absorb_timeout = POCReceiptsAbsorbTimeout} = _State
 ) ->
     %% iterate and GC the public pocs on the ledger
     %% a public poc is a representation of the data
@@ -679,7 +686,7 @@ purge_public_pocs(
             %% the public poc will be GCed as part of that absorb
             %% but in case that fails we will GC it here after giving
             %% the txn N blocks to be absorbed
-            case (BlockHeight - POCHeight) > (POCTimeout + ?POC_RECEIPTS_ABSORB_TIMEOUT) of
+            case (BlockHeight - POCHeight) > (POCTimeout + POCReceiptsAbsorbTimeout) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     ok = blockchain_ledger_v1:delete_public_poc(OnionKeyHash, Ledger);
