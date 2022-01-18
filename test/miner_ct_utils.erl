@@ -786,29 +786,27 @@ init_per_testcase(Mod, TestCase, Config0) ->
     %% Miner configuration, can be input from os env
     TotalMiners =
         case TestCase of
-            restart_test ->
-                4;
             poc_grpc_dist_v11_test ->
-                12;
+                11; %% 5 vals, 6 gateways
+            poc_grpc_dist_v11_cn_test ->
+                13; %% 5 vals, 8 gateways
+            poc_grpc_dist_v11_partitioned_test ->
+                13; %% 5 vals, 8 gateways
+            poc_grpc_dist_v11_partitioned_lying_test ->
+                13; %% 5 vals, 8 gateways
             _ ->
                 get_config("T", 8)
         end,
     NumConsensusMembers =
         case TestCase of
-            group_change_test ->
-                4;
-            restart_test ->
-                4;
-            validator_transition_test ->
-                4;
-            autoskip_chain_vars_test ->
-                4;
-            autoskip_on_timeout_test ->
-                4;
-%%            poc_dist_v11_test ->
-%%                4;
             poc_grpc_dist_v11_test ->
-                8;
+                NumValidators;
+            poc_grpc_dist_v11_cn_test ->
+                NumValidators;
+            poc_grpc_dist_v11_partitioned_test ->
+                NumValidators;
+            poc_grpc_dist_v11_partitioned_lying_test ->
+                NumValidators;
             _ ->
                 get_config("N", 7)
         end,
