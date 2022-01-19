@@ -17,7 +17,7 @@ keypair = "/etc/helium_gateway/gateway_key.bin"
 ## ECC608 based
 # keypair = "ecc://i2c-1:96&slot=0"
 listen = "127.0.0.1:1680"
-api = 44670
+api = 4468
 region = "US915"
 
 [log]

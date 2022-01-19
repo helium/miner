@@ -7,7 +7,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/0,
+-export([start_link/1,
          init/1,
          handle_call/3,
          handle_cast/2,
@@ -15,17 +15,23 @@
          terminate/2]).
 
 -record(state, {
+        keypair,
         port,
         monitor,
-        os_pid
+        os_pid,
+        tcp_port
     }).
 
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link(Options) when is_list(Options) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
 
-init(_Opts) ->
+init([Options]) ->
+    Keypair = proplists:get_value(keypair, Options),
+    TcpPort = proplists:get_value(port, Options, 4468),
+
     process_flag(trap_exit, true),
-    State = open_gateway_port(),
+
+    State = open_gateway_port(Keypair, TcpPort),
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
@@ -39,12 +45,12 @@ handle_cast(_Msg, State) ->
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     lager:warning("gateway-rs process ~p exited with status ~p, restarting", [Port, Status]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(),
+    NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
     {noreply, NewState};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(),
+    NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
     {noreply, NewState};
 handle_info(_Msg, State) ->
     lager:info("unhandled info ~p by ~p", [_Msg, ?MODULE]),
@@ -53,15 +59,10 @@ handle_info(_Msg, State) ->
 terminate(_, State) ->
     ok = cleanup_port(State).
 
-open_gateway_port() ->
+open_gateway_port(KeyPair, TcpPort0) ->
     Args = ["-c", gateway_config_dir(), "server"],
-    Key = case application:get_env(miner, gateway_keypair) of
-              undefined ->
-                  os:getenv("GW_KEYPAIR", "ecc://i2c-1:96&slot=0");
-              {ok, Keypair} ->
-                  Keypair
-          end,
-    GatewayEnv0 = [{"GW_KEYPAIR", Key}],
+    TcpPort = erlang:integer_to_list(TcpPort0),
+    GatewayEnv0 = [{"GW_API", TcpPort}, {"GW_KEYPAIR", KeyPair}],
     GatewayEnv = case application:get_env(miner, gateway_env) of
                      undefined ->
                          GatewayEnv0;
@@ -77,7 +78,13 @@ open_gateway_port() ->
     Port = erlang:open_port({spawn_executable, gateway_bin()}, PortOpts),
     Ref = erlang:monitor(port, Port),
     {os_pid, OSPid} = erlang:port_info(Port, os_pid),
-    #state{port = Port, monitor = Ref, os_pid = OSPid}.
+    #state{
+        keypair = KeyPair,
+        monitor = Ref,
+        port = Port,
+        os_pid = OSPid,
+        tcp_port = TcpPort
+    }.
 
 cleanup_port(State) ->
     erlang:demonitor(State#state.monitor),
