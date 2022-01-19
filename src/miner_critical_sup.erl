@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/4]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,18 +33,23 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link(PublicKey, SigFun, ECDHFun, ECCWorker) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, [PublicKey, SigFun, ECDHFun, ECCWorker]).
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [[]]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
+init(_Opts) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 0,
         period => 1
     },
+
+    #{ pubkey := PublicKey,
+       ecdh_fun := ECDHFun,
+       sig_fun := SigFun
+     } = miner_keys:keys(),
 
     %% Blockchain Supervisor Options
     SeedNodes =
@@ -87,7 +92,6 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
 
 
     ChildSpecs =
-        ECCWorker ++
         [
          ?SUP(blockchain_sup, [BlockchainOpts])
         ] ++
