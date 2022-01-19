@@ -37,7 +37,7 @@ start(_StartType, _StartArgs) ->
             case code:add_patha(HotfixDir) of
                 true ->
                     lager:info("added ~p to the code path", [HotfixDir]);
-                {error, bad_dir} ->
+                {error, bad_directory} ->
                     lager:info("failed to add ~p to the code path", [HotfixDir])
             end;
         false ->
