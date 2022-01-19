@@ -20,7 +20,7 @@
 -record(state, {
                  connection :: pid(),
                  host="localhost" :: string(),
-                 port=44670 :: integer(),
+                 port=4468 :: integer(),
                  transport=tcp :: tcp | ssl
                }).
 
@@ -53,7 +53,7 @@ start_link(Options) when is_list(Options) ->
 init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
     Host = proplists:get_value(host, Options, "localhost"),
-    Port = proplists:get_value(port, Options, 44670),
+    Port = proplists:get_value(port, Options, 4468),
     {ok, Connection} = grpc_client:connect(Transport, Host, Port),
     {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
 
