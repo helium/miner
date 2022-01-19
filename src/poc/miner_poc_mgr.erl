@@ -187,12 +187,12 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             {error, not_found} ->
                 %% if the cache returns not found it could be it hasnt yet been initialized
                 %% so check if we have a cached POC key. these are added at the point
-                %% a block is proposed and then before the block has been gossiped
-                %% if such a key exists its a strong indication its not yet initialized
+                %% a block is proposed *and* before the block has been gossiped
+                %% if such a key exists it is a strong indication the poc has not yet initialized
                 %% OR the e2qc cache was called before the POC was initialised and it
                 %% has cached the {error, not_found} term
                 %% so if we have the key then check rocks again,
-                %% if still not available then its likely the POC hasnt been initialized
+                %% if still not available then its likely the POC still hasnt been initialized
                 %% if found then invalidate the e2qc cache
                 case cached_poc_key(OnionKeyHash) of
                     {ok, {_KeyHash, _POCData}} ->
