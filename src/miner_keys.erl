@@ -71,28 +71,13 @@ keys({file, BaseDir}) ->
                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              }
     end;
-keys({gateway_ecc, Props}) when is_list(Props) ->
-    KeySlot0 = proplists:get_value(key_slot, Props, 0),
-    OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
-    Bus = proplists:get_value(bus, Props, "i2c-1"),
-    Address = proplists:get_value(address, Props, 16#60),
-    %% Create a temporary ecc link to get the public key and onboarding keys for the given slots
-    {ok, ECCPid} = ecc508:start_link(Bus, Address),
-    {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
-    {ok, OnboardingKey} =
-        case get_public_key(ECCPid, OnboardingKeySlot) of
-            {ok, Key, OnboardingKeySlot} ->
-                {ok, Key};
-            {error, empty_slot} ->
-                %% Key not present, this slot is (assumed to be) empty so use the public key
-                %% as the onboarding key
-                {ok, PubKey};
-            Other -> Other
-        end,
-    ok = ecc508:stop(ECCPid),
+keys({ecc, Props}) when is_list(Props) ->
+    KeySlot = proplists:get_value(key_slot, Props, 0),
+
+    {ok, PubKey} = miner_gateway_ecc_worker:pubkey(),
 
     #{ pubkey => PubKey,
-       key_slot => undefined,
+       key_slot => KeySlot,
        %% The signing and ecdh functions will use an actual
        %% worker against a named process.
        ecdh_fun => fun(PublicKey) ->
@@ -103,56 +88,7 @@ keys({gateway_ecc, Props}) when is_list(Props) ->
                           {ok, Sig} = miner_gateway_ecc_worker:sign(Bin),
                           Sig
                   end,
-       onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
-     };
-keys({ecc, Props}) when is_list(Props) ->
-    KeySlot0 = proplists:get_value(key_slot, Props, 0),
-    OnboardingKeySlot = proplists:get_value(onboarding_key_slot, Props, 15),
-    Bus = proplists:get_value(bus, Props, "i2c-1"),
-    Address = proplists:get_value(address, Props, 16#60),
-    {ok, ECCPid} = case whereis(miner_ecc_worker) of
-                       undefined ->
-                           %% Create a temporary ecc link to get the public key and
-                           %% onboarding keys for the given slots as well as the
-                           ecc508:start_link(Bus, Address);
-                       _ECCWorker ->
-                           %% use the existing ECC pid
-                           miner_ecc_worker:get_pid()
-                   end,
-    {ok, PubKey, KeySlot} = get_public_key(ECCPid, KeySlot0),
-    {ok, OnboardingKey} =
-        case get_public_key(ECCPid, OnboardingKeySlot) of
-            {ok, Key, OnboardingKeySlot} ->
-                {ok, Key};
-            {error, empty_slot} ->
-                %% Key not present, this slot is (assumed to be) empty so use the public key
-                %% as the onboarding key
-                {ok, PubKey};
-            Other -> Other
-        end,
-    case whereis(miner_ecc_worker) of
-        undefined ->
-            %% Stop ephemeral ecc pid
-            ecc508:stop(ECCPid);
-        _ ->
-            ok
-    end,
-
-    #{ pubkey => PubKey,
-       key_slot => KeySlot,
-       bus => Bus,
-       address => Address,
-       %% The signing and ecdh functions will use an actual
-       %% worker against a named process.
-       ecdh_fun => fun(PublicKey) ->
-                           {ok, Bin} = miner_ecc_worker:ecdh(PublicKey),
-                           Bin
-                   end,
-       sig_fun => fun(Bin) ->
-                          {ok, Sig} = miner_ecc_worker:sign(Bin),
-                          Sig
-                  end,
-       onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
+       onboarding_key => PubKey
      }.
 
 -spec key_config() -> key_configuration().
