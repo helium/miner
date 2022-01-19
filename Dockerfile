@@ -73,5 +73,7 @@ COPY --from=builder /opt/docker /opt/miner
 
 RUN ln -sf /opt/miner/releases/${VERSION} /config
 
+VOLUME ["/opt/miner/hotfix", "/var/data"]
+
 ENTRYPOINT ["/opt/miner/bin/miner"]
 CMD ["foreground"]
