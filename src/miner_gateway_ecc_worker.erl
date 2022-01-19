@@ -9,7 +9,6 @@
 
 -export([pubkey/0,
          ecdh/1,
-         get_pid/0,
          sign/1]).
 
 -export([start_link/1,
@@ -21,7 +20,7 @@
 -record(state, {
                  connection :: pid(),
                  host="localhost" :: string(),
-                 port=4467 :: integer(),
+                 port=44670 :: integer(),
                  transport=tcp :: tcp | ssl
                }).
 
@@ -48,17 +47,13 @@ sign(Binary) ->
 ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
--spec get_pid() -> pid() | undefined.
-get_pid() ->
-    gen_server:call(?MODULE, get_connection).
-
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
 
 init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
     Host = proplists:get_value(host, Options, "localhost"),
-    Port = proplists:get_value(port, Options, 4467),
+    Port = proplists:get_value(port, Options, 44670),
     {ok, Connection} = grpc_client:connect(Transport, Host, Port),
     {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
 
@@ -82,8 +77,6 @@ handle_call({ecdh, PubKey}, _From, State=#state{connection=Connection}) ->
                 Error -> Error
             end,
     {reply, {ok, Reply}, State};
-handle_call(get_connection, _From, State=#state{connection=Connection}) ->
-    {reply, {ok, Connection}, State};
 handle_call(_Msg, _From, State) ->
     lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {reply, ok, State}.

@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,18 +33,22 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link(SigFun, ECDHFun) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, [SigFun, ECDHFun]).
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [[]]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init([SigFun, ECDHFun]) ->
+init(_Opts) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 4,
         period => 10
     },
+
+    #{ ecdh_fun := ECDHFun,
+       sig_fun := SigFun
+     } = miner_keys:keys(),
 
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
