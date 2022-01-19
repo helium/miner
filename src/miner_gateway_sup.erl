@@ -37,15 +37,29 @@ init(_Opts) ->
         period => 1
     },
 
+    GatewayTcpPort = application:get_env(miner, gateway_api_port, 4468),
+
+    KeyPair = case application:get_env(miner, gateway_keypair) of
+                  undefined ->
+                      code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin";
+                  {ok, {Type, Keypair}} when Type == ecc orelse Type == file ->
+                      Keypair
+              end,
+
+    GatewayPortOpts = [
+        {keypair, KeyPair},
+        {port, GatewayTcpPort}
+    ],
+
     GatewayECCWorkerOpts = [
-        {transport, application:get_env(miner, gateway_worker_transport, tcp)},
-        {host, application:get_env(miner, gateway_worker_host, "localhost")},
-        {port, application:get_env(miner, gateway_worker_port, 44670)}
+        {transport, application:get_env(miner, gateway_transport, tcp)},
+        {host, application:get_env(miner, gateway_host, "localhost")},
+        {port, GatewayTcpPort}
     ],
 
     ChildSpecs =
         [
-         ?WORKER(miner_gateway_port, []),
+         ?WORKER(miner_gateway_port, [GatewayPortOpts]),
          ?WORKER(miner_gateway_ecc_worker, [GatewayECCWorkerOpts])
         ],
 
