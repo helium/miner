@@ -30,6 +30,20 @@ start(_StartType, _StartArgs) ->
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
+    HotfixDir = application:get_env(miner, hotfix_dir, "hotfix"),
+
+    case filelib:is_dir(HotfixDir) of
+        true ->
+            case code:add_patha(HotfixDir) of
+                true ->
+                    lager:info("added ~p to the code path", [HotfixDir]);
+                {error, bad_directory} ->
+                    lager:info("failed to add ~p to the code path", [HotfixDir])
+            end;
+        false ->
+            lager:info("failed to modify code path; ~p not a directory", [HotfixDir])
+    end,
+
     Follow =
         %% validator as the default here because it's a safer failure mode.
         case application:get_env(miner, mode, validator) of
