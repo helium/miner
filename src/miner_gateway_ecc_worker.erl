@@ -15,6 +15,7 @@
          init/1,
          handle_call/3,
          handle_cast/2,
+         handle_info/2,
          terminate/2]).
 
 -record(state, {
@@ -83,6 +84,10 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast(_Msg, State) ->
     lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    {noreply, State}.
+
+handle_info(_Msg, State) ->
+    lager:info("unhandled info ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_Reason, State=#state{}) ->

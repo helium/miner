@@ -55,6 +55,8 @@ keys({file, BaseDir}) ->
             FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
+               bus => undefined,
+               address => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
@@ -66,6 +68,8 @@ keys({file, BaseDir}) ->
             FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
                key_slot => undefined,
+               bus => undefined,
+               address => undefined,
                ecdh_fun => libp2p_crypto:mk_ecdh_fun(PrivKey0),
                sig_fun => libp2p_crypto:mk_sig_fun(PrivKey0),
                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
@@ -127,6 +131,8 @@ keys({gateway_ecc, Props}) when is_list(Props) ->
 
     #{ pubkey => PubKey,
        key_slot => KeySlot,
+       bus => undefined,
+       address => undefined,
        %% The signing and ecdh functions will use an actual
        %% worker against a named process.
        ecdh_fun => fun(PublicKey) ->

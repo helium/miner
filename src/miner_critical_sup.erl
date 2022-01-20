@@ -47,7 +47,10 @@ init(_Opts) ->
     },
 
     #{ pubkey := PublicKey,
+       key_slot := KeySlot,
        ecdh_fun := ECDHFun,
+       bus := Bus,
+       address := Address,
        sig_fun := SigFun
      } = miner_keys:keys(),
 
@@ -91,9 +94,14 @@ init(_Opts) ->
         end,
 
 
-    ChildSpecs =
-        [
-         ?SUP(blockchain_sup, [BlockchainOpts])
-        ] ++
-        ConsensusMgr,
+    ChildSpecs0 = [?SUP(blockchain_sup, [BlockchainOpts])] ++ ConsensusMgr,
+    ChildSpecs = case application:get_env(blockchain, key) of
+                     {ok, {ecc, _}} ->
+                         [
+                          ?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])
+                         ] ++ ChildSpecs0;
+                     _ ->
+                         ChildSpecs0
+                 end,
+
     {ok, {SupFlags, ChildSpecs}}.
