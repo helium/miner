@@ -59,10 +59,9 @@ handle_info(_Msg, State) ->
 terminate(_, State) ->
     ok = cleanup_port(State).
 
-open_gateway_port(KeyPair, TcpPort0) ->
+open_gateway_port(KeyPair, TcpPort) ->
     Args = ["-c", gateway_config_dir(), "server"],
-    TcpPort = erlang:integer_to_list(TcpPort0),
-    GatewayEnv0 = [{"GW_API", TcpPort}, {"GW_KEYPAIR", KeyPair}],
+    GatewayEnv0 = [{"GW_API", erlang:integer_to_list(TcpPort)}, {"GW_KEYPAIR", KeyPair}],
     GatewayEnv = case application:get_env(miner, gateway_env) of
                      undefined ->
                          GatewayEnv0;
@@ -86,9 +85,12 @@ open_gateway_port(KeyPair, TcpPort0) ->
         tcp_port = TcpPort
     }.
 
-cleanup_port(State) ->
-    erlang:demonitor(State#state.monitor),
-    erlang:port_close(State#state.port),
+cleanup_port(#state{port = Port} = State) ->
+    erlang:demonitor(State#state.monitor, [flush]),
+    case erlang:port_info(Port) of
+        undefined -> true;
+        _Result -> erlang:port_close(Port)
+    end,
     os:cmd(io_lib:format("kill -9 ~p", [State#state.os_pid])),
     ok.
 
