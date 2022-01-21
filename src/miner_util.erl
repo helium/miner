@@ -24,10 +24,6 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 
-%% get the firmware release data from a hotspot
--define(LSB_FILE, "/etc/lsb_release").
--define(RELEASE_CMD, "cat " ++ ?LSB_FILE ++ " | grep RELEASE | cut -d'=' -f2").
-
 %%-----------------------------------------------------------------------------
 %% @doc Count the number of occurrences of each element in the list.
 %% @end
@@ -102,18 +98,12 @@ mark(Module, MarkCurr) ->
 metadata_fun() ->
     try
         Map = blockchain_worker:signed_metadata_fun(),
+        Vsn = miner_info:version(),
         case application:get_env(miner, mode, gateway) of
             validator ->
-                Vsn = element(2, hd(release_handler:which_releases(permanent))),
                 Map#{<<"release_version">> => list_to_binary(Vsn)};
             gateway ->
-                FWRelease = case filelib:is_regular(?LSB_FILE) of
-                                true ->
-                                    iolist_to_binary(string:trim(os:cmd(?RELEASE_CMD)));
-                                false ->
-                                    <<"unknown">>
-                            end,
-                Map#{<<"release_info">> => FWRelease};
+                Map#{<<"release_info">> => list_to_binary(Vsn)};
             _ ->
                 Map
         end

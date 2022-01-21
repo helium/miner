@@ -1,7 +1,6 @@
 -module(miner_jsonrpc_info).
 
 -include("miner_jsonrpc.hrl").
--include_lib("blockchain/include/blockchain.hrl").
 -behavior(miner_jsonrpc_handler).
 
 %% jsonrpc_handler
@@ -14,9 +13,7 @@
 %%
 
 handle_rpc(<<"info_height">>, []) ->
-    Chain = blockchain_worker:blockchain(),
-    {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
+    #{height := Height, sync_height := SyncHeight, epoch := Epoch} = miner_info:height_info(),
     Output = #{
         epoch => Epoch,
         height => Height
@@ -66,14 +63,14 @@ handle_rpc(<<"info_summary">>, []) ->
     Macs = get_mac_addrs(),
     BlockAge = miner:block_age(),
     Uptime = get_uptime(),
-    FirmwareVersion = get_firmware_version(),
+    FirmwareVersion = iolist_to_binary(miner_info:firmware_version()),
     GWInfo = get_gateway_info(Chain, PubKey),
 
     % get height data
     {ok, SyncHeight} = blockchain:sync_height(Chain),
 
     %% get epoch and height
-    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
+    #{height := Height, epoch := Epoch} = miner_info:height_info(),
 
     %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
@@ -91,10 +88,10 @@ handle_rpc(<<"info_summary">>, []) ->
         peer_book_entry_count => PeerBookEntryCount,
         firmware_version => FirmwareVersion,
         gateway_details => GWInfo,
-        version => ?TO_VALUE(get_miner_version())
+        version => ?TO_VALUE(miner_info:version())
     };
 handle_rpc(<<"info_version">>, []) ->
-    #{version => ?TO_VALUE(get_miner_version())};
+    #{version => ?TO_VALUE(miner_info:version())};
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -104,18 +101,6 @@ get_mac_addrs() ->
     {ok, IFs} = inet:getifaddrs(),
     Macs = format_macs_from_interfaces(IFs),
     Macs.
-
-get_firmware_version() ->
-    ReleaseInfo = os:cmd("cat /etc/os-release"),
-    {match, [PrettyName]} = re:run(ReleaseInfo, "PRETTY_NAME=\"(.*)\"", [{capture, all_but_first, list}]),
-    iolist_to_binary(PrettyName).
-
-get_miner_version() ->
-    Releases = release_handler:which_releases(),
-    case erlang:hd(Releases) of
-        {_,ReleaseVersion,_,_} -> ReleaseVersion;
-        {error,_} -> undefined
-    end.
 
 get_uptime() ->
     %% returns seconds of uptime

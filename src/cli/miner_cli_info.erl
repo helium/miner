@@ -9,11 +9,6 @@
 
 -export([register_cli/0]).
 
--export([get_info/0]).
-
--include_lib("blockchain/include/blockchain.hrl").
-
-
 -define(DEFAULT_LOG_HIT_COUNT, "5").                                                        %% the default number of error log hits to return as part of info summary
 -define(DEFAULT_LOG_SCAN_RANGE, "500").                                                     %% the default number of error log entries to scan as part of info summary
 -define(ONBOARDING_API_URL_BASE, "https://onboarding.dewi.org/api/v2").
@@ -96,14 +91,8 @@ info_height_usage() ->
      ]
     ].
 
-get_info() ->
-    Chain = blockchain_worker:blockchain(),
-    {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, #block_info_v2{election_info={Epoch, _}, height=Height}} = blockchain:head_block_info(Chain),
-    {Height, SyncHeight, Epoch}.
-
 info_height(["info", "height"], [], []) ->
-    {Height, SyncHeight, Epoch0} = get_info(),
+    #{height := Height, sync_height := SyncHeight, epoch := Epoch0} = miner_info:height_info(),
     Epoch = integer_to_list(Epoch0),
 
     case SyncHeight == Height of
@@ -364,16 +353,11 @@ get_summary_info(ErrorCount, ScanRange)->
     Macs = get_mac_addrs(),
     BlockAge = miner:block_age(),
     Uptime = get_uptime(),
-    FirmwareVersion = get_firmware_version(),
     GWInfo = get_gateway_info(Chain, PubKey),
 
-    % get height data
-    {ok, Height} = blockchain:height(Chain),
-    {ok, SyncHeight} = blockchain:sync_height(Chain),
+    % get height and epoch data
+    #{height := Height, sync_height := SyncHeight, epoch := Epoch} = miner_info:height_info(),
     SyncHeight0 = format_sync_height(SyncHeight, Height),
-
-    %% get epoch
-    {ok, #block_info_v2{election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
 
     %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
@@ -392,7 +376,7 @@ get_summary_info(ErrorCount, ScanRange)->
             {"sync height", SyncHeight0},
             {"uptime", Uptime},
             {"peer book size", PeerBookEntryCount },
-            {"firmware version", FirmwareVersion},
+            {"firmware version", miner_info:firmware_version()},
             {"gateway details", GWInfo}
         ],
     {GeneralInfo, POCErrors, TxnErrors, GenErrors}.
@@ -424,11 +408,6 @@ get_mac_addrs()->
     {ok, IFs} = inet:getifaddrs(),
     Macs = format_macs_from_interfaces(IFs),
     Macs.
-
-get_firmware_version()->
-    ReleaseInfo = os:cmd("cat /etc/os-release"),
-    {match, [PrettyName]} = re:run(ReleaseInfo, "PRETTY_NAME=\"(.*)\"", [{capture, all_but_first, list}]),
-    PrettyName.
 
 get_log_errors(ErrorCount, ScanRange)->
     {ok, BaseDir} = application:get_env(lager, log_root),
