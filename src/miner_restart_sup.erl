@@ -91,8 +91,7 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
-    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort, JsonRpcIp} = jsonrpc_server_config(),
 
     ChildSpecs =
         [
@@ -123,3 +122,26 @@ check_for_region_override(undefined)->
     end;
 check_for_region_override(SysConfigRegion)->
     SysConfigRegion.
+
+-ifdef(TEST).
+jsonrpc_server_config() ->
+    %% choose a random high port above the grpc port
+    JsonRpcPort = rand:uniform(40000)+10000,
+    %% lookup the port in case it's set
+    JsonRpcPort0 = application:get_env(miner, jsonrpc_port, JsonRpcPort),
+    %% maybe set it so we can easily get the port number during a test if needed
+    %%
+    %% if it's already set, it shouldn't match the random port number, so don't
+    %% do anything in that case.
+    case JsonRpcPort0 of
+        JsonRpcPort -> application:set_env(miner, jsonrpc_port, JsonRpcPort);
+        _ -> ok
+    end,
+    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort0, JsonRpcIp}.
+-else.
+jsonrpc_server_config() ->
+    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
+    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort, JsonRpcIp}.
+-endif.
