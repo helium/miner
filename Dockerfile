@@ -28,7 +28,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 
 # Add and compile the dependencies to cache
 COPY ./rebar* ./Makefile ./
-COPY ./config/grpc_client_gen.config ./config/
+COPY ./config/grpc_client_gen_local.config ./config/
 
 RUN ./rebar3 compile
 
