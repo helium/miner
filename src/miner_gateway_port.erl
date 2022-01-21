@@ -35,25 +35,27 @@ init([Options]) ->
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
-    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 handle_cast(_Msg, State) ->
-    lager:info("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     lager:warning("gateway-rs process ~p exited with status ~p, restarting", [Port, Status]),
     ok = cleanup_port(State),
     NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
+    ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
     NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
+    ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info(_Msg, State) ->
-    lager:info("unhandled info ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_, State) ->

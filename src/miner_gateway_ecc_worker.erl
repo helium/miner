@@ -9,7 +9,8 @@
 
 -export([pubkey/0,
          ecdh/1,
-         sign/1]).
+         sign/1,
+         reconnect/0]).
 
 -export([start_link/1,
          init/1,
@@ -48,6 +49,11 @@ sign(Binary) ->
 ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
 
+%% Trigger a reconnect of the grpc_client connection
+-spec reconnect() -> ok.
+reconnect() ->
+    gen_server:cast(?MODULE, reconnect).
+
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
 
@@ -55,7 +61,7 @@ init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
     Host = proplists:get_value(host, Options, "localhost"),
     Port = proplists:get_value(port, Options, 4468),
-    {ok, Connection} = grpc_client:connect(Transport, Host, Port),
+    {ok, Connection} = grpc_connect(Transport, Host, Port),
     {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
 
 handle_call(pubkey, _From, State=#state{connection=Connection}) ->
@@ -63,6 +69,7 @@ handle_call(pubkey, _From, State=#state{connection=Connection}) ->
                 {ok, #{address := Pubkey}} ->
                     libp2p_crypto:bin_to_pubkey(Pubkey);
                 Error ->
+
                     Error
             end,
     {reply, {ok, Reply}, State};
@@ -79,19 +86,24 @@ handle_call({ecdh, PubKey}, _From, State=#state{connection=Connection}) ->
             end,
     {reply, {ok, Reply}, State};
 handle_call(_Msg, _From, State) ->
-    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {reply, ok, State}.
 
+handle_cast(reconnect, State) ->
+    lager:info("reconnecting ~p grpc client", [?MODULE]),
+    ok = grpc_disconnect(State#state.connection),
+    {ok, NewConnection} = grpc_connect(State#state.transport, State#state.host, State#state.port),
+    {noreply, State#state{connection = NewConnection}};
 handle_cast(_Msg, State) ->
-    lager:info("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 handle_info(_Msg, State) ->
-    lager:info("unhandled info ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
     {noreply, State}.
 
 terminate(_Reason, State=#state{}) ->
-    catch grpc_client:stop_connection(State#state.connection).
+    grpc_disconnect(State#state.connection).
 
 rpc(_Connection, _Req, _RPC, 0) ->
     lager:error("failed to execute grpc request ~p", [_Req]),
@@ -115,3 +127,22 @@ rpc_timeout(Tries) ->
         Timeout when Timeout < 0 -> 0;
         Timeout -> Timeout
     end.
+
+grpc_connect(Transport, Host, Port) ->
+    grpc_connect(Transport, Host, Port, 10).
+
+grpc_connect(_, _, _, 0) ->
+    lager:error("failed to connect ~p grpc client", [?MODULE]),
+    erlang:error({error, no_connection});
+grpc_connect(Transport, Host, Port, Tries) ->
+    case grpc_client:connect(Transport, Host, Port) of
+        {ok, Connection} ->
+            {ok, Connection};
+        _ ->
+            timer:sleep(?RETRY_WAIT),
+            grpc_connect(Transport, Host, Port, Tries - 1)
+    end.
+
+grpc_disconnect(GrpcConnection) ->
+    catch grpc_client:stop_connection(GrpcConnection),
+    ok.
