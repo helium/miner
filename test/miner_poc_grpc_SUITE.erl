@@ -557,12 +557,10 @@ extra_vars(poc_v10) ->
                  ?securities_percent => 0.34,
                  ?reward_version => 5,
                  ?rewards_txn_version => 2,
-                 ?poc_challenge_rate => 1,
-                 ?poc_challenger_type => validator,
-                 ?poc_timeout => 4,
-                 ?poc_receipts_absorb_timeout => 2,
                  ?election_interval => 10,
-                 ?block_time => 5000
+                 ?block_time => 5000,
+                 ?poc_target_pool_size => 2,
+                 ?poc_target_hex_parent_res => 5
                 });
 extra_vars(poc_v8) ->
     maps:merge(extra_poc_vars(), #{?poc_version => 8});
@@ -586,4 +584,3 @@ check_subsequent_path_growth(ReceiptMap) ->
     PathLengths = [ length(blockchain_txn_poc_receipts_v2:path(Txn)) || {_, Txn} <- lists:flatten(maps:values(ReceiptMap)) ],
     ct:pal("PathLengths: ~p", [PathLengths]),
     lists:any(fun(L) -> L > 1 end, PathLengths).
-
