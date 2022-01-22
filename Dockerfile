@@ -1,4 +1,4 @@
-ARG BUILDER_IMAGE=erlang:24-alpine
+ARG BUILDER_IMAGE=erlang:23.3.4.7-alpine
 ARG RUNNER_IMAGE=alpine
 FROM ${BUILDER_IMAGE} as deps-compiler
 
