@@ -115,7 +115,7 @@ keys({ecc, Props}) when is_list(Props) ->
        %% The signing and ecdh functions will use an actual
        %% worker against a named process.
        ecdh_fun => fun(PublicKey) ->
-                       {ok, Bin} = miner_ecc_worker:ecdh(PubKey),
+                       {ok, Bin} = miner_ecc_worker:ecdh(PublicKey),
                        Bin
                    end,
        sig_fun => fun(Bin) ->
