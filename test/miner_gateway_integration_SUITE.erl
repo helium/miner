@@ -28,6 +28,7 @@ init_per_testcase(_Case, Config) ->
     Config.
 
 end_per_testcase(_Case, _Config) ->
+    application:stop(miner),
     ok.
 
 gateway_signing_test(_Config) ->
