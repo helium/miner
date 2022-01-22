@@ -46,8 +46,6 @@ init(_Args) ->
                  period => 1
                 },
 
-    BaseDir = application:get_env(blockchain, base_dir, "data"),
-
     ok = libp2p_crypto:set_network(application:get_env(miner, network, mainnet)),
 
     ChildSpecs =
