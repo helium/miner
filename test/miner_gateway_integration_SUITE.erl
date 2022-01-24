@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -export([
          init_per_suite/1,
@@ -17,10 +18,14 @@ all() ->
     [gateway_signing_test].
 
 init_per_suite(Config) ->
+    #{secret := {ecc_compact, PrivKey}} = libp2p_crypto:generate_keys(ecc_compact),
+    PrivKeyMap = #{secret => {ecc_compact, PrivKey#'ECPrivateKey'{publicKey = <<>>}}, public => {ecc_compact, undefined}},
+    ok = libp2p_crypto:save_keys(PrivKeyMap, code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin"),
     ok = application:set_env(blockchain, key, {gateway_ecc, [{key_slot, 0}]}),
     Config.
 
 end_per_suite(Config) ->
+    file:delete(code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin", [raw]),
     Config.
 
 init_per_testcase(_Case, Config) ->
@@ -36,7 +41,7 @@ gateway_signing_test(_Config) ->
     ?assert(is_pid(whereis(miner_gateway_ecc_worker))),
 
     {ok, PubKey} = miner_gateway_ecc_worker:pubkey(),
-    ?assertMatch({ecc_compact, {{'ECPoint',_},{namedCurve,_}}}, PubKey),
+    ?assertMatch({ecc_compact, {#'ECPoint'{},{namedCurve,{1,2,840,10045,3,1,7}}}}, PubKey),
 
     Binary = <<"go go gadget gateway">>,
     {ok, Signature} = miner_gateway_ecc_worker:sign(Binary),
