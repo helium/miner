@@ -31,7 +31,7 @@ handle_rpc(<<"txn_queue">>, []) ->
 handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     try
         Payer = optional_binary_to_list(
-            maps:get(payer, Params, undefined)
+            maps:get(<<"payer">>, Params, undefined)
         ),
         Owner = binary_to_list(OwnerB58),
         {ok, Bin} = blockchain:add_gateway_txn(Owner, Payer),
@@ -47,14 +47,14 @@ handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
 handle_rpc(<<"txn_assert_location">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     try
         Payer = optional_binary_to_list(
-            maps:get(payer, Params, undefined)
+            maps:get(<<"payer">>, Params, undefined)
         ),
         Owner = binary_to_list(OwnerB58),
         H3String = case parse_location(Params) of
                        {error, _} = Err -> throw(Err);
                        {ok, S} -> S
                    end,
-        Nonce = maps:get(nonce, Params, 1),
+        Nonce = maps:get(<<"nonce">>, Params, 1),
         {ok, Bin} = blockchain:assert_loc_txn(H3String, Owner, Payer, Nonce),
         B64 = base64:encode(Bin),
         #{ <<"result">> => B64 }
