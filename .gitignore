@@ -21,6 +21,13 @@ data
 \#*
 src/pb
 .repos/
+
+# make build output for external deps
 external/
+
+# gpb auto-generatd erl modules
 src/grpc/
+
+# gateway-rs generated files
+gateway_key.bin
 helium_gateway
