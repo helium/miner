@@ -7,10 +7,11 @@
     ]},
   {blockchain,
     [
-      {key, undefined}
+      {key, ${KEYCONFIG}}, %% {gateway_ecc, [{key_slot, 0}]}
     ]},
   {miner,
     [
+     {gateway_keypair, ${ECC_KEY}},
      {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
      {radio_device, { {0,0,0,0}, 1680,
         {0,0,0,0}, 31341} },
