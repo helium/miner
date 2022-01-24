@@ -53,7 +53,7 @@ init([Type, URL, Key]) ->
                                     case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
                                         true ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
-                                            case xorf:from_bin({{binary_fuse, 32}, FilterBin}) of
+                                            case xorf:from_bin({exor, 32}, FilterBin) of
                                                 {ok, Filter} ->
                                                     ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
                                                     Serial;
@@ -74,92 +74,94 @@ init([Type, URL, Key]) ->
                     end,
     {ok, schedule_check(#state{type=Type, url=URL, key=Key, version=FilterVersion}, 0)}.
 
-handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version, etag=Etag}=State0) ->
+handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version, etag=Etag}=State) ->
     %% pull the release definition
     case httpc:request(get, {URL, [{"user-agent", "https://github.com/helium/miner"}] ++ [ {"if-none-match", Etag} || Etag /= undefined] }, [], [{body_format, binary}]) of
         {ok, {{_HttpVersion, 200, "OK"}, Headers, Body}} ->
-            %% update the etag, no matter how the download/parse turns out
-            State = State0#state{etag=proplists:get_value("etag", Headers)},
             try jsx:decode(Body, [{return_maps, true}]) of
-                Json ->
+                [Json] ->
                     VersionBin = integer_to_binary(Version),
                     case maps:get(<<"tag_name">>, Json, undefined) of
                         undefined ->
                             lager:notice("github release for ~p returning json without \"tag_name\" key"),
                             {noreply, schedule_check(State)};
                         VersionBin ->
-                            {noreply, schedule_check(State)};
+                            lager:info("already have version ~p", [Version]),
+                            {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when Version /= undefined andalso NewVersion < Version ->
                             lager:notice("denylist version has regressed from ~p to ~p", [Version, NewVersion]),
-                            {noreply, schedule_check(State)};
+                            {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when Version == undefined orelse NewVersion > Version ->
                             lager:info("new denylist version appeared: ~p have ~p", [NewVersion, Version]),
-                            case maps:get(<<"zipball_url">>, Json, undefined) of
+                            case maps:get(<<"assets">>, Json, undefined) of
                                 undefined ->
                                     lager:notice("no zipball_url for release ~p", [NewVersion]),
                                     {noreply, schedule_check(State)};
-                                ZipURL ->
-                                    case httpc:request(get, {ZipURL, [{"user-agent", "https://github.com/helium/miner"}]}, [], [{body_format, binary}, {full_result, false}]) of
-                                        {ok, {200, ZipBin}} ->
-                                            case catch zip:foldl(fun(<<"denyfile">>, _I, B, _Acc) ->
-                                                                         %% got what we wanted
-                                                                         throw(B());
-                                                                    (_, _, _, Acc) ->
-                                                                            Acc
-                                                                    end, none, {"zipfile", ZipBin}) of
-                                                none ->
-                                                    lager:notice("zip file for denylist release did not contain \"denyfile\" file"),
-                                                    {noreply, schedule_check(State)};
-                                                <<Version:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>> = Bin when Version == 1 ->
-                                                    %% check signature is still valid against our key
-                                                    case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
-                                                        true ->
-                                                            <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
-                                                            case xorf:from_bin({{binary_fuse, 32}, FilterBin}) of
-                                                                {ok, Filter} ->
-                                                                    BaseDir = application:get_env(blockchain, base_dir, "data"),
-                                                                    DenyFile = filename:join([BaseDir, "denylist", "latest"]),
-                                                                    TmpDenyFile = DenyFile ++ "-tmp",
-                                                                    case file:write_file(TmpDenyFile, Bin) of
-                                                                        ok ->
-                                                                            case file:rename(TmpDenyFile, DenyFile) of
+                                Assets ->
+                                    case lists:filter(fun(Asset) ->
+                                                              maps:get(<<"name">>, Asset, undefined) == <<"filter.bin">>
+                                                      end, Assets) of
+                                        [] ->
+                                            lager:notice("no filter.bin asset in release ~p", [NewVersion]),
+                                            {noreply, schedule_check(State)};
+                                        [Asset] ->
+                                            AssetURL = maps:get(<<"browser_download_url">>, Asset),
+                                            case httpc:request(get, {binary_to_list(AssetURL), [{"user-agent", "https://github.com/helium/miner"}]}, [], [{body_format, binary}, {full_result, false}]) of
+                                                {ok, {200, AssetBin}} ->
+                                                    case AssetBin of
+                                                        <<AssetVersion:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>> = Bin when AssetVersion == 1 ->
+                                                            %% check signature is still valid against our key
+                                                            case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+                                                                true ->
+                                                                    <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
+                                                                    case xorf:from_bin({exor, 32}, FilterBin) of
+                                                                        {ok, Filter} ->
+                                                                            BaseDir = application:get_env(blockchain, base_dir, "data"),
+                                                                            DenyFile = filename:join([BaseDir, "denylist", "latest"]),
+                                                                            TmpDenyFile = DenyFile ++ "-tmp",
+                                                                            case file:write_file(TmpDenyFile, Bin) of
                                                                                 ok ->
-                                                                                    ok;
-                                                                                {error, RenameReason} ->
-                                                                                    lager:notice("failed to rename ~p to ~p: ~p", [TmpDenyFile, DenyFile, RenameReason])
-                                                                            end;
-                                                                        {error, WriteReason} ->
-                                                                            lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
-                                                                    end,
-                                                                    ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
-                                                                    {noreply, schedule_check(State#state{version=Serial})};
-                                                                {error, Reason} ->
-                                                                    lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
+                                                                                    case file:rename(TmpDenyFile, DenyFile) of
+                                                                                        ok ->
+                                                                                            ok;
+                                                                                        {error, RenameReason} ->
+                                                                                            lager:notice("failed to rename ~p to ~p: ~p", [TmpDenyFile, DenyFile, RenameReason])
+                                                                                    end;
+                                                                                {error, WriteReason} ->
+                                                                                    lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
+                                                                            end,
+                                                                            ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
+                                                                            {noreply, schedule_check(State#state{version=Serial, etag=proplists:get_value("etag", Headers)})};
+                                                                        {error, Reason} ->
+                                                                            lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
+                                                                            {noreply, schedule_check(State)}
+                                                                    end;
+                                                                false ->
+                                                                    lager:notice("failed to verify signature on denylist"),
                                                                     {noreply, schedule_check(State)}
                                                             end;
-                                                        false ->
-                                                            lager:notice("failed to verify signature on denylist"),
+                                                        Corrupt ->
+                                                            lager:notice("unrecognized or corrupt denylist ~p", [Corrupt]),
                                                             {noreply, schedule_check(State)}
                                                     end;
-                                                _ ->
-                                                    lager:notice("unrecognized or corrupt denylist"),
+                                                AssetDownloadOther ->
+                                                    lager:notice("failed to download asset file release ~p : ~p", [AssetURL, AssetDownloadOther]),
                                                     {noreply, schedule_check(State)}
-                                            end;
-                                        ZipDownloadOther ->
-                                            lager:notice("failed to download zip file release ~p : ~p", [ZipURL, ZipDownloadOther]),
-                                            {noreply, schedule_check(State)}
+                                            end
                                     end
                             end
                     end
             catch
                 _:_ ->
-                    lager:notice("failed to decode github release json: ~p", [Body])
+                    lager:notice("failed to decode github release json: ~p", [Body]),
+                    {noreply, schedule_check(State)}
             end;
-        {ok,{{_,304,"Not Modified"}, _}} ->
-            schedule_check(State0);
+        {ok,{{_,304,"Not Modified"}, _, _}} ->
+            lager:info("already have this etag"),
+            {noreply, schedule_check(State)};
         OtherHttpResult ->
             lager:notice("failed to fetch github release info ~p", [OtherHttpResult]),
-            schedule_check(State0)
+            {noreply, schedule_check(State)}
     end;
 handle_info(Msg, State) ->
     lager:info("unhandled info msg ~p", [Msg]),
