@@ -110,6 +110,7 @@ receipt(Address, Data, PeerAddr) ->
 witness(Address, Data) ->
     case miner_poc_denylist:check(Address) of
         true ->
+            lager:notice("dropping witness from ~p due to denylist", [libp2p_crypto:bin_to_b58(Address)]),
             ok;
         false ->
             gen_statem:cast(?SERVER, {witness, Address, Data})
@@ -559,10 +560,8 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
             %% no witness will exist for the first layer hash as it is delivered over p2p
             [_|LayerHashes] = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
-            case lists:any(fun miner_poc_denylist:check/1, Path) of
-                true ->
-                    {next_state, requesting, save_data(Data#data{state=requesting})};
-                false ->
+            case lists:filter(fun miner_poc_denylist:check/1, Path) of
+                [] ->
                     [Start|_] = Path,
                     P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
                     case send_onion(P2P, Onion, 3) of
@@ -574,7 +573,10 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
                             lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
                             lager:info("selecting new target"),
                             handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
-                    end
+                    end;
+                Denied ->
+                    lager:notice("cancelling challenge to ~p due to denylist", [[libp2p_crypto:bin_to_b58(Address) || Address <- Denied]]),
+                    {next_state, requesting, save_data(Data#data{state=requesting})}
             end;
         {'DOWN', Ref, process, _Pid, Reason} ->
             lager:error("blockchain_poc_path went down ~p: ~p", [Reason, {Entropy, Target, Gateways, Height}]),
