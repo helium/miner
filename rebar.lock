@@ -18,7 +18,7 @@
  {<<"cowlib">>,
   {git,"https://github.com/ninenines/cowlib",
        {ref,"0f5c2f8922c89c58f51696cce690245cbdc5f327"}},
-  2},
+  1},
  {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},2},
  {<<"cuttlefish">>,
   {git,"https://github.com/helium/cuttlefish.git",

@@ -48,7 +48,7 @@
    %% we only realy need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'}
-
+   {region_override, 'US915'},
+   {gateway_keypair, undefined}
   ]}
 ].
