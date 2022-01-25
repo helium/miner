@@ -78,7 +78,7 @@ if [[ "$BUILD_TYPE" == "miner" ]]; then
         UPDATE_TAG="latest"
     elif [[ "$VERSION_TAG" =~ _alpha$ ]]; then
         UPDATE_TAG="alpha"
-    elif [["$VERSION_TAG" =~ _beta$ ]]; then
+    elif [[ "$VERSION_TAG" =~ _beta$ ]]; then
         UPDATE_TAG="beta"
     fi
 
