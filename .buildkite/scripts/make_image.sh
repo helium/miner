@@ -33,8 +33,6 @@ if [[ ! $TEST_BUILD -eq "0" ]]; then
 fi
 MINER_REGISTRY_NAME="$REGISTRY_HOST/$REGISTRY_ORG/$REGISTRY_NAME"
 
-LATEST_TAG="latest-${IMAGE_ARCH}"
-
 case "$BUILD_TYPE" in
     "val")
         echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
@@ -72,24 +70,30 @@ if [[ ! $TEST_BUILD ]]; then
     docker login -u="${REGISTRY_ORG}+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
 fi
 
-# update latest tag if github tag ends in `_GA` and don't do the rest of a build
-if [[ "$VERSION_TAG" =~ _GA$ ]]; then
-
-    echo "GA release detected: Updating latest tag on ${REGISTRY_HOST} for ${BUILD_TYPE}"
-
-    DOCKER_NAME=$(echo "$DOCKER_NAME" | sed -e 's/_GA//')
-
-    docker pull "$MINER_REGISTRY_NAME:$DOCKER_NAME"
-    docker tag "$MINER_REGISTRY_NAME:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$LATEST_TAG"
-    docker push "$MINER_REGISTRY_NAME:$LATEST_TAG"
-
-    if [[ "$BUILD_TYPE" == "miner" ]]; then
-        echo "miner GA release detected: Updating 'GA' tag on ${REGISTRY_HOST} for ${VERSION}"
-        docker tag "$MINER_REGISTRY_NAME:$DOCKER_NAME" "$MINER_REGISTRY_NAME:${DOCKER_NAME}_GA"
-        docker push "$MINER_REGISTRY_NAME:${DOCKER_NAME}_GA"
+if [[ "$BUILD_TYPE" == "miner" ]]; then
+    UPDATE_TAG="none"
+    # only update tag if github tag ends in `_GA|alpha|beta` and don't do the rest of a build
+    # This syntax uses bash's built in regex matching evaluation stuff...
+    if [[ "$VERSION_TAG" =~ _GA$ ]]; then
+        UPDATE_TAG="latest"
+    elif [[ "$VERSION_TAG" =~ _alpha$ ]]; then
+        UPDATE_TAG="alpha"
+    elif [["$VERSION_TAG" =~ _beta$ ]]; then
+        UPDATE_TAG="beta"
     fi
 
-    exit $?
+    if [[ "$UPDATE_TAG" != "none" ]]; then
+        echo "Miner tag update detected; Updating ${UPDATE_TAG} on ${REGISTRY_HOST}..."
+
+        UPDATE_TAG="${UPDATE_TAG}-${IMAGE_ARCH}"
+        DOCKER_NAME=$(echo "$DOCKER_NAME" | sed -e 's/_GA//' -e 's/_alpha//' -e 's/_beta//')
+
+        docker pull "$MINER_REGISTRY_NAME:$DOCKER_NAME"
+        docker tag "$MINER_REGISTRY_NAME:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$UPDATE_TAG"
+        docker push "$MINER_REGISTRY_NAME:$UPDATE_TAG"
+
+        exit $?
+    fi
 fi
 
 docker build $DOCKER_BUILD_ARGS -t "helium:${DOCKER_NAME}" .
