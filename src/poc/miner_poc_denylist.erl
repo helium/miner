@@ -4,7 +4,7 @@
 
 -record(state, {
           type,
-          key,
+          keys,
           url,
           version,
           etag
@@ -15,17 +15,20 @@
 -export([start_link/0, check/1, get_version/0, get_binary/0]).
 
 start_link() ->
-    case application:get_env(miner, denylist_key, undefined) of
-        undefined ->
-            ignore;
-        DenyKey ->
+    case application:get_env(miner, denylist_keys, undefined) of
+        DenyKeys = [H|_] when is_list(H) ->
             case application:get_env(miner, denylist_url, undefined) of
                 undefined ->
                     ignore;
                 DenyURL ->
                     Type = application:get_env(miner, denylist_type, github_release),
-                    gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, DenyURL, DenyKey], [])
-            end
+                    gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, DenyURL, DenyKeys], [])
+            end;
+        undefined ->
+            ignore;
+        Other ->
+            lager:warning("unhandled denylist_keys format ~p", [Other]),
+            ignore
     end.
 
 -spec check(libp2p_crypto:pubkey_bin()) -> boolean().
@@ -43,7 +46,7 @@ check(PubkeyBin) ->
 get_version() ->
     gen_server:call(?MODULE, get_version).
 
--spec get_binary() -> binary().
+-spec get_binary() -> {ok, binary()} | {error, term()}.
 get_binary() ->
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     DenyFile = filename:join([BaseDir, "denylist", "latest"]),
@@ -51,7 +54,7 @@ get_binary() ->
 
 %% gen_server callbacks
 
-init([Type, URL, Key]) ->
+init([Type, URL, Keys]) ->
     %% load up any existing xor we have on disk
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     DenyFile = filename:join([BaseDir, "denylist", "latest"]),
@@ -62,7 +65,7 @@ init([Type, URL, Key]) ->
                             case file:read_file(DenyFile) of
                                 {ok, <<Version:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>>} when Version == 1 ->
                                     %% check signature is still valid against our key
-                                    case catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+                                    case lists:any(fun(Key) -> catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) end, Keys) of
                                         true ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                             case xorf:from_bin({exor, 32}, FilterBin) of
@@ -84,9 +87,9 @@ init([Type, URL, Key]) ->
                         false ->
                             0
                     end,
-    {ok, schedule_check(#state{type=Type, url=URL, key=Key, version=FilterVersion}, 0)}.
+    {ok, schedule_check(#state{type=Type, url=URL, keys=Keys, version=FilterVersion}, 0)}.
 
-handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version, etag=Etag}=State) ->
+handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Version, etag=Etag}=State) ->
     %% pull the release definition
     case httpc:request(get, {URL, [{"user-agent", "https://github.com/helium/miner"}] ++ [ {"if-none-match", Etag} || Etag /= undefined] }, [], [{body_format, binary}]) of
         {ok, {{_HttpVersion, 200, "OK"}, Headers, Body}} ->
@@ -123,7 +126,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                                                     case AssetBin of
                                                         <<AssetVersion:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>> = Bin when AssetVersion == 1 ->
                                                             %% check signature is still valid against our key
-                                                            case catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+                                                            case lists:any(fun(Key) -> catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) end, Keys) of
                                                                 true ->
                                                                     <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                                                     case xorf:from_bin({exor, 32}, FilterBin) of
