@@ -31,3 +31,6 @@ src/grpc/
 # gateway-rs generated files
 gateway_key.bin
 helium_gateway
+
+# semtech-udp generated files
+gwmp-mux
