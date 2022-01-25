@@ -481,7 +481,7 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _Region} = State) ->
     POCVersion = application:get_env(miner, poc_version, 11),
     Data = base64:decode(maps:get(<<"data">>, Packet)),
     case route(Data) of
@@ -504,9 +504,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
-        {Type, RoutingInfo} ->
-            lager:notice("Routing ~p", [RoutingInfo]),
-            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
+        {_Type, _RoutingInfo} ->
+            %% normally packets here would be send to the router
+            %% but in light mode we can just discard non poc packets
+            noop
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -556,19 +557,6 @@ maybe_mirror({_, undefined}, _) ->
     ok;
 maybe_mirror({Sock, Destination}, Packet) ->
     gen_udp:send(Sock, Destination, Packet).
-
--spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
-send_to_router(Type, RoutingInfo, Packet, Region) ->
-    Data = base64:decode(maps:get(<<"data">>, Packet)),
-    %% always ok to use rssis here
-    RSSI = packet_rssi(Packet, true),
-    SNR = packet_snr(Packet),
-    %% TODO we might want to send GPS time here, if available
-    Time = maps:get(<<"tmst">>, Packet),
-    Freq = maps:get(<<"freq">>, Packet),
-    DataRate = maps:get(<<"datr">>, Packet),
-    HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
-    blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
 
 channel(Freq, Frequencies) ->
     channel(Freq, Frequencies, 0).
