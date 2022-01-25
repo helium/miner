@@ -99,7 +99,8 @@ init([SigFun, ECDHFun]) ->
          ?WORKER(miner, []),
          ?WORKER(elli, [[{callback, miner_jsonrpc_handler},
                          {ip, JsonRpcIp},
-                         {port, JsonRpcPort}]])
+                         {port, JsonRpcPort}]]),
+         ?WORKER(miner_poc_denylist, [])
          ] ++
         ValServers ++
         EbusServer ++
