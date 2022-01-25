@@ -36,6 +36,7 @@ all() ->
 %% @end
 %%--------------------------------------------------------------------
 basic(Config) ->
+    application:ensure_all_started(meck),
     application:ensure_all_started(lager),
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, "log/console.log"}, debug),
@@ -54,13 +55,16 @@ basic(Config) ->
     meck:new(blockchain_swarm, [passthrough]),
     meck:expect(blockchain_swarm, pubkey_bin, fun() -> libp2p_crypto:pubkey_to_bin(PubKey) end),
 
+    meck:new(blockchain_event, [passthrough]),
+    meck:expect(blockchain_event, add_handler, fun(_) -> ok end),
+
     % This is for `try_decrypt`
     meck:new(blockchain_worker, [passthrough]),
     meck:expect(blockchain_worker, blockchain, fun() -> ok end),
     meck:new(blockchain, [passthrough]),
     meck:expect(blockchain, ledger, fun(_) -> Ledger end),
     meck:new(blockchain_ledger_v1, [passthrough]),
-    meck:expect(blockchain_ledger_v1, find_poc, fun(_, _) ->
+    meck:expect(blockchain_ledger_v1, find_pocs, fun(_, _) ->
         PoC = blockchain_ledger_poc_v2:new(<<"SecretHash">>, <<"OnionKeyHash">>, <<"Challenger">>, BlockHash),
         {ok, [PoC]}
     end),
@@ -216,6 +220,7 @@ basic(Config) ->
     meck:unload(blockchain),
     ?assert(meck:validate(blockchain_ledger_v1)),
     meck:unload(blockchain_ledger_v1),
+    meck:unload(blockchain_event),
     gen_server:stop(Server1),
     gen_server:stop(RadioServer1),
     ok.
