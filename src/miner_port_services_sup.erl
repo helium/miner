@@ -1,8 +1,8 @@
 %%%-------------------------------------------------------------------
-%% @doc miner Gateway-rs component supervisor
+%% @doc miner external port components supervisor
 %% @end
 %%%-------------------------------------------------------------------
--module(miner_gateway_sup).
+-module(miner_port_services_sup).
 
 -behaviour(supervisor).
 
@@ -41,12 +41,13 @@ init(_Opts) ->
 
             GatewayTcpPort = application:get_env(miner, gateway_api_port, 4468),
 
-            KeyPair = case application:get_env(miner, gateway_keypair) of
-                        undefined ->
-                            code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin";
-                        {ok, {Type, Keypair}} when Type == ecc orelse Type == file ->
-                            Keypair
-                    end,
+            KeyPair =
+                case application:get_env(miner, gateway_keypair) of
+                    undefined ->
+                        code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin";
+                    {ok, {Type, Keypair}} when Type == ecc orelse Type == file ->
+                        Keypair
+                end,
 
             GatewayPortOpts = [
                 {keypair, KeyPair},
@@ -59,10 +60,16 @@ init(_Opts) ->
                 {port, GatewayTcpPort}
             ],
 
+            MuxOpts = [
+                {host_port, application:get_env(miner, mux_host_port, 1680)},
+                {client_ports, application:get_env(miner, mux_client_ports, [1681, 1682])}
+            ],
+
             ChildSpecs =
                 [
-                ?WORKER(miner_gateway_port, [GatewayPortOpts]),
-                ?WORKER(miner_gateway_ecc_worker, [GatewayECCWorkerOpts])
+                    ?WORKER(miner_gateway_port, [GatewayPortOpts]),
+                    ?WORKER(miner_gateway_ecc_worker, [GatewayECCWorkerOpts]),
+                    ?WORKER(miner_mux_port, [MuxOpts])
                 ],
 
             {ok, {SupFlags, ChildSpecs}};
