@@ -50,7 +50,7 @@ init(_Args) ->
 
     ChildSpecs =
         [
-         ?SUP(miner_gateway_sup, []),
+         ?SUP(miner_port_services_sup, []),
          ?SUP(miner_critical_sup, []),
          ?SUP(miner_restart_sup, [])
         ],

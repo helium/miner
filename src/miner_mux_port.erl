@@ -1,9 +1,10 @@
 %%%-------------------------------------------------------------------
-%% @doc miner gateway service manager
-%% Start and monitor the port that runs the external rust-based gateway
+%% @doc miner gwmp-mux service manager
+%% Start and monitor the port that runs the external rust-based semtech
+%% gwmp mux service
 %% @end
 %%%-------------------------------------------------------------------
--module(miner_gateway_port).
+-module(miner_mux_port).
 
 -behaviour(gen_server).
 
@@ -17,23 +18,22 @@
 ]).
 
 -record(state, {
-    keypair,
-    port,
+    host_port,
+    client_ports,
     monitor,
-    os_pid,
-    tcp_port
+    os_pid
 }).
 
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
 
 init([Options]) ->
-    Keypair = proplists:get_value(keypair, Options),
-    TcpPort = proplists:get_value(port, Options, 4468),
+    HostTcpPort = proplists:get_value(host_port, Options, 1680),
+    ClientTcpPorts = proplists:get_value(client_ports, Options, [1681, 1682]),
 
     process_flag(trap_exit, true),
 
-    State = open_gateway_port(Keypair, TcpPort),
+    State = open_mux_port(HostTcpPort, ClientTcpPorts),
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
@@ -45,16 +45,14 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
-    lager:warning("gateway-rs process ~p exited with status ~p, restarting", [Port, Status]),
+    lager:warning("gwmp-mux process ~p exited with status ~p, restart", [Port, Status]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
-    ok = miner_gateway_ecc_worker:reconnect(),
+    NewState = open_mux_port(State#state.host_port, State#state.client_ports),
     {noreply, NewState};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
-    lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
+    lager:warning("gwmp-mux port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
-    ok = miner_gateway_ecc_worker:reconnect(),
+    NewState = open_mux_port(State#state.host_port, State#state.client_ports),
     {noreply, NewState};
 handle_info(_Msg, State) ->
     lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
@@ -63,33 +61,25 @@ handle_info(_Msg, State) ->
 terminate(_, State) ->
     ok = cleanup_port(State).
 
-open_gateway_port(KeyPair, TcpPort) ->
-    Args = ["-c", gateway_config_dir(), "server"],
-    GatewayEnv0 = [{"GW_API", erlang:integer_to_list(TcpPort)}, {"GW_KEYPAIR", KeyPair}],
-    GatewayEnv =
-        case application:get_env(miner, gateway_env) of
-            undefined ->
-                GatewayEnv0;
-            {ok, AddlEnvs} when is_list(AddlEnvs) ->
-                GatewayEnv0 ++ AddlEnvs
-        end,
+open_mux_port(HostTcpPort, ClientTcpPorts) when is_list(ClientTcpPorts) ->
+    ClientList = client_address_list(ClienTcpPorts),
+    Args = ["--host", erlang:integer_to_list(HostTcpPort), "--client", ClientList],
     PortOpts = [
         {packet, 2},
         binary,
         use_stdio,
         exit_status,
-        {args, Args},
-        {env, GatewayEnv}
+        {args, Args}
     ],
-    Port = erlang:open_port({spawn_executable, gateway_bin()}, PortOpts),
+    Port = erlang:open_port({spawn_executable, mux_bin()}, PortOpts),
     Ref = erlang:monitor(port, Port),
     {os_pid, OSPid} = erlang:port_info(Port, os_pid),
     #state{
-        keypair = KeyPair,
-        monitor = Ref,
-        port = Port,
+        client_ports = ClientTcpPorts,
+        host_port = HostTcpPort,
         os_pid = OSPid,
-        tcp_port = TcpPort
+        monitor = Ref,
+        port = Port
     }.
 
 cleanup_port(#state{port = Port} = State) ->
@@ -101,7 +91,8 @@ cleanup_port(#state{port = Port} = State) ->
     os:cmd(io_lib:format("kill -9 ~p", [State#state.os_pid])),
     ok.
 
-gateway_config_dir() ->
-    code:priv_dir(miner) ++ "/gateway_rs/".
-gateway_bin() ->
-    gateway_config_dir() ++ "helium_gateway".
+mux_bin() ->
+    code:priv_dir(miner) ++ "/semtech_udp/gwmp-mux".
+
+client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
+    string:join([io_lib:format("127.0.0.1:~p", [TcpPort]) || TcpPort <- ClientTcpPorts], ",").
