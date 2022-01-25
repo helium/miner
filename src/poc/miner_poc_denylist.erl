@@ -12,10 +12,21 @@
 
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3]).
 
--export([start_link/3, check/1, get_version/0, get_binary/0]).
+-export([start_link/0, check/1, get_version/0, get_binary/0]).
 
-start_link(Type, URL, Key) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, URL, Key], []).
+start_link() ->
+    case application:get_env(miner, denylist_key, undefined) of
+        undefined ->
+            ignore;
+        DenyKey ->
+            case application:get_env(miner, denylist_url, undefined) of
+                undefined ->
+                    ignore;
+                DenyURL ->
+                    Type = application:get_env(miner, denylist_type, github_release),
+                    gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, DenyURL, DenyKey], [])
+            end
+    end.
 
 -spec check(libp2p_crypto:pubkey_bin()) -> boolean().
 check(PubkeyBin) ->
@@ -34,8 +45,9 @@ get_version() ->
 
 -spec get_binary() -> binary().
 get_binary() ->
-    gen_server:call(?MODULE, get_binary).
-
+    BaseDir = application:get_env(blockchain, base_dir, "data"),
+    DenyFile = filename:join([BaseDir, "denylist", "latest"]),
+    file:read_file(DenyFile).
 
 %% gen_server callbacks
 
@@ -50,7 +62,7 @@ init([Type, URL, Key]) ->
                             case file:read_file(DenyFile) of
                                 {ok, <<Version:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>>} when Version == 1 ->
                                     %% check signature is still valid against our key
-                                    case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+                                    case catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
                                         true ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                             case xorf:from_bin({exor, 32}, FilterBin) of
@@ -61,7 +73,7 @@ init([Type, URL, Key]) ->
                                                     lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
                                                     0
                                             end;
-                                        false ->
+                                        _ ->
                                             lager:notice("failed to verify signature on denylist on disk"),
                                             0
                                     end;
@@ -79,7 +91,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
     case httpc:request(get, {URL, [{"user-agent", "https://github.com/helium/miner"}] ++ [ {"if-none-match", Etag} || Etag /= undefined] }, [], [{body_format, binary}]) of
         {ok, {{_HttpVersion, 200, "OK"}, Headers, Body}} ->
             try jsx:decode(Body, [{return_maps, true}]) of
-                [Json] ->
+                Json ->
                     VersionBin = integer_to_binary(Version),
                     case maps:get(<<"tag_name">>, Json, undefined) of
                         undefined ->
@@ -111,7 +123,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                                                     case AssetBin of
                                                         <<AssetVersion:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>> = Bin when AssetVersion == 1 ->
                                                             %% check signature is still valid against our key
-                                                            case libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+                                                            case catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
                                                                 true ->
                                                                     <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                                                     case xorf:from_bin({exor, 32}, FilterBin) of
@@ -136,7 +148,7 @@ handle_info(check, #state{type=github_release, url=URL, key=Key, version=Version
                                                                             lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
                                                                             {noreply, schedule_check(State)}
                                                                     end;
-                                                                false ->
+                                                                _ ->
                                                                     lager:notice("failed to verify signature on denylist"),
                                                                     {noreply, schedule_check(State)}
                                                             end;
@@ -171,6 +183,8 @@ handle_cast(Msg, State) ->
     lager:info("unhandled cast msg ~p", [Msg]),
     {noreply, State}.
 
+handle_call(get_version, _From, State) ->
+    {reply, {ok, State#state.version}, State};
 handle_call(Msg, _From, State) ->
     lager:info("unhandled call msg ~p", [Msg]),
     {reply, ok, State}.

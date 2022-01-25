@@ -94,31 +94,18 @@ init([SigFun, ECDHFun]) ->
     JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
 
-    DenylistWorker = case application:get_env(miner, denylist_key, undefined) of
-                        undefined ->
-                            [];
-                        DenyKey ->
-                            case application:get_env(miner, denylist_url, undefined) of
-                                undefined ->
-                                    [];
-                                DenyURL ->
-                                    Type = application:get_env(miner, denylist_type, github_release),
-                                    [?WORKER(miner_poc_denylist, [Type, DenyURL, DenyKey])]
-                            end
-                    end,
-
     ChildSpecs =
         [
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, []),
          ?WORKER(elli, [[{callback, miner_jsonrpc_handler},
                          {ip, JsonRpcIp},
-                         {port, JsonRpcPort}]])
+                         {port, JsonRpcPort}]]),
+         ?WORKER(miner_poc_denylist, [])
          ] ++
         ValServers ++
         EbusServer ++
-        OnionServer ++
-        DenylistWorker,
+        OnionServer,
     {ok, {SupFlags, ChildSpecs}}.
 
 
