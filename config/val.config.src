@@ -37,6 +37,7 @@
   ]},
  {miner,
   [
+   {denylist_keys, undefined},
    {mode, validator},
    {rocksdb_cache_size, 32},
    {rocksdb_write_buffer_size, 32},
