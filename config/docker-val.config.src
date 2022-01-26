@@ -36,6 +36,7 @@
   ]},
  {miner,
   [
+   {denylist_keys, undefined},
    {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
    {mode, validator},
    {rocksdb_cache_size, 32},
