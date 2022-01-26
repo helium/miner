@@ -90,22 +90,20 @@ clean_grpc:
 	rm -rf $(GRPC_SERVICES_DIR)
 
 external_svcs:
-ifeq ($(LINKING), musl)
-	@rustup target add $(RUST_TARGET)-unknown-linux-musl
-endif
-
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
 	@git clone --quiet --depth 1 https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
-	@cd ./external/gateway-rs && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) && cd ../../
+	@cd ./external/gateway-rs && rustup target add $(RUST_TARGET)-unknown-linux-$(LINKING) && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) && cd ../../
 	@mv ./external/gateway-rs/target/$(RUST_TARGET)-unknown-linux-$(LINKING)/release/helium_gateway ./priv/gateway_rs/ 2>/dev/null || true
 
 	@echo "--- semtech-udp ---"
 	@git clone --quiet --depth 1 https://github.com/helium/semtech-udp ./external/semtech-udp 2>/dev/null || true
-	@cd ./external/semtech-udp && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) --features client,server --example gwmp-mux && cd ../../
+	@cd ./external/semtech-udp && rustup target add $(RUST_TARGET)-unknown-linux-$(LINKING) && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) --features client,server --example gwmp-mux && cd ../../
 	@mv ./external/semtech-udp/target/$(RUST_TARGET)-unknown-linux-$(LINKING)/release/examples/gwmp-mux ./priv/semtech_udp/ 2>/dev/null || true
 
 clean_external_svcs:
 	@echo "removing external dependency project files"
 	@rm -rf ./external/gateway-rs 2>/dev/null || true
-	@rm ./priv/gateway_rs/helium_gateway || true
+	@rm ./priv/gateway_rs/helium_gateway 2>/dev/null || true
+	@rm -rf ./external/semtech-udp 2>/dev/null || true
+	@rm ./priv/semtech_udp/gwmp-mux 2>/dev/null || true
