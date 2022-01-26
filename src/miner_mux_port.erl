@@ -18,10 +18,11 @@
 ]).
 
 -record(state, {
-    host_port,
     client_ports,
+    host_port,
     monitor,
-    os_pid
+    os_pid,
+    port
 }).
 
 start_link(Options) when is_list(Options) ->
@@ -62,7 +63,7 @@ terminate(_, State) ->
     ok = cleanup_port(State).
 
 open_mux_port(HostTcpPort, ClientTcpPorts) when is_list(ClientTcpPorts) ->
-    ClientList = client_address_list(ClienTcpPorts),
+    ClientList = client_address_list(ClientTcpPorts),
     Args = ["--host", erlang:integer_to_list(HostTcpPort), "--client", ClientList],
     PortOpts = [
         {packet, 2},
