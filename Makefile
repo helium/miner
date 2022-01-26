@@ -11,13 +11,13 @@ endif
 
 IMAGE_ARCH ?= amd64
 
-ifeq ($(IMAGE_ARCH), amd64)
-  RUST_TARGET=x86_64
-else
-  RUST_TARGET=aarch64
-endif
+LIBC ?= musl
 
-LINKING ?= musl
+ifeq ($(IMAGE_ARCH), amd64)
+  RUST_TARGET=x86_64-unknown-linux-$(LIBC)
+else
+  RUST_TARGET=aarch64-unknown-linux-$(LIBC)
+endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
@@ -92,18 +92,30 @@ clean_grpc:
 external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
-	@git clone --quiet --depth 1 https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
-	@cd ./external/gateway-rs && rustup target add $(RUST_TARGET)-unknown-linux-$(LINKING) && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) && cd ../../
-	@mv ./external/gateway-rs/target/$(RUST_TARGET)-unknown-linux-$(LINKING)/release/helium_gateway ./priv/gateway_rs/ 2>/dev/null || true
+	$(call clone_project,gateway-rs)
+	@cd ./external/gateway-rs && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) && cd ../../
+	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 
 	@echo "--- semtech-udp ---"
-	@git clone --quiet --depth 1 https://github.com/helium/semtech-udp ./external/semtech-udp 2>/dev/null || true
-	@cd ./external/semtech-udp && rustup target add $(RUST_TARGET)-unknown-linux-$(LINKING) && cargo build --release --target $(RUST_TARGET)-unknown-linux-$(LINKING) --features client,server --example gwmp-mux && cd ../../
-	@mv ./external/semtech-udp/target/$(RUST_TARGET)-unknown-linux-$(LINKING)/release/examples/gwmp-mux ./priv/semtech_udp/ 2>/dev/null || true
+	$(call clone_project,semtech-udp)
+	@cd ./external/semtech-udp && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) --features client\,server --example gwmp-mux && cd ../../
+	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
 
 clean_external_svcs:
 	@echo "removing external dependency project files"
-	@rm -rf ./external/gateway-rs 2>/dev/null || true
-	@rm ./priv/gateway_rs/helium_gateway 2>/dev/null || true
-	@rm -rf ./external/semtech-udp 2>/dev/null || true
-	@rm ./priv/semtech_udp/gwmp-mux 2>/dev/null || true
+	$(call remove,./external/gateway-rs)
+	$(call remove,./priv/gateway_rs/helium_gateway)
+	$(call remove,./external/semtech-udp)
+	$(call remove,./priv/semtech_udp/gwmp-mux)
+
+define clone_project
+	@git clone --quiet --depth 1 https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true
+endef
+
+define install_rust_bin
+	mv ./external/$(1)/target/$(RUST_TARGET)/release/$(2) ./priv/$(3)/ 2>/dev/null || true
+endef
+
+define remove
+	@rm -rf $(1) 2>/dev/null || true
+endef
