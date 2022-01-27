@@ -70,7 +70,7 @@ init([Type, URL, Keys]) ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                             case xorf:from_bin({exor, 32}, FilterBin) of
                                                 {ok, Filter} ->
-                                                    ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
+                                                    ok = persistent_term:put(?MODULE, Filter),
                                                     Serial;
                                                 {error, Reason} ->
                                                     lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
@@ -145,7 +145,7 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
                                                                                 {error, WriteReason} ->
                                                                                     lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
                                                                             end,
-                                                                            ok = persistent_term:put(?MODULE, {{binary_fuse, 32}, Filter}),
+                                                                            ok = persistent_term:put(?MODULE, Filter),
                                                                             {noreply, schedule_check(State#state{version=Serial, etag=proplists:get_value("etag", Headers)})};
                                                                         {error, Reason} ->
                                                                             lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
