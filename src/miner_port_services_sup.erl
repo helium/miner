@@ -45,8 +45,10 @@ init(_Opts) ->
                 case application:get_env(miner, gateway_keypair) of
                     undefined ->
                         code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin";
-                    {ok, {Type, Keypair}} when Type == ecc orelse Type == file ->
-                        Keypair
+                    {ok, {ecc, Keypair}} ->
+                        Keypair;
+                    {ok, {file, File}} ->
+                        filename:absname(File)
                 end,
 
             GatewayPortOpts = [
