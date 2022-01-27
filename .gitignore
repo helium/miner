@@ -30,6 +30,7 @@ src/grpc/
 
 # gateway-rs generated files
 gateway_key.bin
+default.toml
 helium_gateway
 
 # semtech-udp generated files

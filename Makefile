@@ -95,6 +95,7 @@ external_svcs:
 	$(call clone_project,gateway-rs)
 	@cd ./external/gateway-rs && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) && cd ../../
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
+	@mv ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
 	@echo "--- semtech-udp ---"
 	$(call clone_project,semtech-udp)
@@ -105,6 +106,7 @@ clean_external_svcs:
 	@echo "removing external dependency project files"
 	$(call remove,./external/gateway-rs)
 	$(call remove,./priv/gateway_rs/helium_gateway)
+	$(call remove,./priv/gateway_rs/default.toml)
 	$(call remove,./external/semtech-udp)
 	$(call remove,./priv/semtech_udp/gwmp-mux)
 
@@ -113,7 +115,7 @@ define clone_project
 endef
 
 define install_rust_bin
-	mv ./external/$(1)/target/$(RUST_TARGET)/release/$(2) ./priv/$(3)/ 2>/dev/null || true
+	@mv ./external/$(1)/target/$(RUST_TARGET)/release/$(2) ./priv/$(3)/ 2>/dev/null || true
 endef
 
 define remove
