@@ -95,8 +95,12 @@ init(_Opts) ->
 
 
     ChildSpecs0 = [?SUP(blockchain_sup, [BlockchainOpts])] ++ ConsensusMgr,
-    ChildSpecs = case application:get_env(blockchain, key) of
-                     {ok, {ecc, _}} ->
+    GatewayAndMux = case application:get_env(miner, gateway_and_mux_enable) of
+                        {ok, true} -> true;
+                        _ -> false
+                    end,
+    ChildSpecs = case {GatewayAndMux, application:get_env(blockchain, key)} of
+                     {false, {ok, {ecc, _}}} ->
                          [
                           ?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])
                          ] ++ ChildSpecs0;
