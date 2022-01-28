@@ -221,7 +221,7 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
             Comparator = fun(OtherSerializedTxn) ->
                                  OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
                                  %% we want to insert before any txn with a lower fee
-                                 blockchain_txn:fee(OtherTxn) < Fee
+                                 blockchain_txn:fee(OtherTxn) > Fee
                          end,
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
                 {NewHBBFT, {result, {Position, Length}}} ->
