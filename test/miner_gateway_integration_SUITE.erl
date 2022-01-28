@@ -5,12 +5,12 @@
 -include_lib("public_key/include/public_key.hrl").
 
 -export([
-         init_per_suite/1,
-         end_per_suite/1,
-         init_per_testcase/2,
-         end_per_testcase/2,
-         all/0
-        ]).
+    init_per_suite/1,
+    end_per_suite/1,
+    init_per_testcase/2,
+    end_per_testcase/2,
+    all/0
+]).
 
 -export([gateway_signing_test/1]).
 
@@ -18,14 +18,10 @@ all() ->
     [gateway_signing_test].
 
 init_per_suite(Config) ->
-    #{secret := {ecc_compact, PrivKey}} = libp2p_crypto:generate_keys(ecc_compact),
-    PrivKeyMap = #{secret => {ecc_compact, PrivKey#'ECPrivateKey'{publicKey = <<>>}}, public => {ecc_compact, undefined}},
-    ok = libp2p_crypto:save_keys(PrivKeyMap, code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin"),
-    ok = application:set_env(blockchain, key, {gateway_ecc, [{key_slot, 0}]}),
+    ok = application:set_env(miner, gateway_and_mux_enable, true),
     Config.
 
 end_per_suite(Config) ->
-    file:delete(code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin", [raw]),
     Config.
 
 init_per_testcase(_Case, Config) ->
@@ -37,17 +33,21 @@ end_per_testcase(_Case, _Config) ->
     ok.
 
 gateway_signing_test(_Config) ->
+    {ok, BaseDir} = application:get_env(blockchain, base_dir),
+
     ?assert(is_pid(whereis(miner_gateway_port))),
     ?assert(is_pid(whereis(miner_gateway_ecc_worker))),
 
     {ok, PubKey} = miner_gateway_ecc_worker:pubkey(),
-    ?assertMatch({ecc_compact, {#'ECPoint'{},{namedCurve,{1,2,840,10045,3,1,7}}}}, PubKey),
+    ?assertMatch({ecc_compact, {#'ECPoint'{}, {namedCurve, {1, 2, 840, 10045, 3, 1, 7}}}}, PubKey),
 
     Binary = <<"go go gadget gateway">>,
     {ok, Signature} = miner_gateway_ecc_worker:sign(Binary),
     ?assert(libp2p_crypto:verify(Binary, Signature, PubKey)),
 
-    {ok, PrivKeyBin} = file:read_file(code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin"),
+    {ok, PrivKeyBin} = file:read_file(
+        filename:absname(filename:join([BaseDir, "miner", "gateway_swarm_key"]))
+    ),
     #{secret := PrivKey} = libp2p_crypto:keys_from_bin(PrivKeyBin),
     VerifyFun = libp2p_crypto:mk_ecdh_fun(PrivKey),
 
