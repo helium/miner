@@ -95,7 +95,7 @@ external_svcs:
 	$(call clone_project,gateway-rs)
 	@cd ./external/gateway-rs && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) && cd ../../
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
-	@mv ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
+	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
 	@echo "--- semtech-udp ---"
 	$(call clone_project,semtech-udp)
