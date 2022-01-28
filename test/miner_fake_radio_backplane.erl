@@ -89,12 +89,22 @@ handle_cast({transmit, Payload, Frequency, TxLocation}, State = #state{udp_sock=
                 case Distance > 32 of
                     true -> ok;
                     false ->
-                        NewJSON = #{<<"rxpk">> => [#{<<"rssi">> => RSSI,
-                                                     <<"lsnr">> => approx_snr(RSSI),
-                                                     <<"tmst">> => erlang:system_time(seconds),
-                                                     <<"data">> => base64:encode(Payload),
+                        EncodedPayload = base64:encode(Payload),
+                        NewJSON = #{<<"rxpk">> => [#{
+                                                     <<"chan">> => 0,
+                                                     <<"codr">> => <<"4/5">>,
+                                                     <<"data">> => EncodedPayload,
+                                                     <<"datr">> => <<"SF8BW125">>,
                                                      <<"freq">> => Frequency,
-                                                     <<"datr">> => <<"SF8BW125">>}]},
+                                                     <<"lsnr">> => float(approx_snr(RSSI)),
+                                                     <<"modu">> => <<"LORA">>,
+                                                     <<"rfch">> => 0,
+                                                     <<"rssi">> => approx_snr(RSSI),
+                                                     <<"size">> => byte_size(EncodedPayload),
+                                                     <<"stat">> => 0,
+                                                     <<"time">> => format_utc_timestamp(calendar:universal_time()),
+                                                     <<"tmst">> => erlang:system_time(seconds)
+                                                   }]},
                         ct:pal("Sending ~p ~p", [Port, NewJSON]),
                         gen_udp:send(UDPSock, {127, 0, 0, 1},
                                      Port,
@@ -173,7 +183,14 @@ send_status_packets(#state{udp_sock = Sock, udp_ports = UDPPorts}) ->
          Token = <<0, 0>>,
          Data = jsx:encode(#{<<"stat">> =>
                                  #{<<"lati">> => Lat,
-                                   <<"long">> => Long}}),
+                                   <<"long">> => Long,
+                                   <<"time">> => format_utc_timestamp(calendar:universal_time()),
+                                   <<"rxnb">> => 0,
+                                   <<"rxok">> => 0,
+                                   <<"rxfw">> => 0,
+                                   <<"ackr">> => 0,
+                                   <<"dwnb">> => 0,
+                                   <<"txnb">> => 0}}),
          gen_udp:send(Sock, {127, 0, 0, 1}, Port,
                   <<?PROTOCOL_2:8/integer-unsigned,
                     Token:2/binary,
@@ -206,3 +223,6 @@ approx_snr(FSPL) ->
         [] -> -20;
         SNRs -> hd(SNRs)
     end.
+
+format_utc_timestamp({{Year, Mon, Day}, {Hour, Min, Sec}}) ->
+    list_to_binary(io_lib:format("~p-~p-~pT~p:~p:~pZ", [Year, Mon, Day, Hour, Min, Sec])).
