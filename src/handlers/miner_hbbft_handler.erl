@@ -214,15 +214,22 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
     Buf = hbbft:buf(HBBFT),
     case lists:member(blockchain_txn:serialize(Txn), Buf) of
         true ->
+            %% TODO return the existant position in Buf
             {reply, ok, ignore};
         false ->
-            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn)) of
-                {NewHBBFT, ok} ->
-                    {reply, ok, [], State#state{hbbft=NewHBBFT}};
+            Fee = blockchain_txn:fee(Txn),
+            Comparator = fun(OtherSerializedTxn) ->
+                                 OtherTxn = block_time:deserialize(OtherSerializedTxn),
+                                 %% we want to insert before any txn with a lower fee
+                                 blockchain_txn:fee(OtherTxn) < Fee
+                         end,
+            case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
+                {NewHBBFT, {result, {Position, Length}}} ->
+                    {reply, {ok, Position, Length}, [], State#state{hbbft=NewHBBFT}};
                 {_HBBFT, full} ->
                     {reply, {error, full}, ignore};
-                {NewHBBFT, {send, Msgs}} ->
-                    {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
+                {NewHBBFT, {result_and_send, {Position, Length}, Msgs}} ->
+                    {reply, {ok, Position, Length}, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
 handle_command(maybe_skip, State = #state{hbbft = HBBFT,
