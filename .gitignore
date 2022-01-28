@@ -21,6 +21,7 @@ data
 \#*
 src/pb
 .repos/
+*.deb
 
 # make build output for external deps
 external/
