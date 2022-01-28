@@ -74,7 +74,6 @@ open_gateway_port(KeyPair, TcpPort) ->
                 GatewayEnv0 ++ AddlEnvs
         end,
     PortOpts = [
-        {packet, 2},
         binary,
         use_stdio,
         exit_status,

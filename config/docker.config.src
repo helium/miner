@@ -11,7 +11,7 @@
     ]},
   {miner,
     [
-     {gateway_keypair, ${ECC_KEY}},
+     {gateway_and_mux_enable, ${GW_AND_MUX}},
      {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
      {radio_device, { {0,0,0,0}, 1681,
         {0,0,0,0}, 31341} },
