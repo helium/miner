@@ -31,8 +31,8 @@ start_link() ->
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
 init(_Opts) ->
-    case application:get_env(blockchain, key) of
-        {ok, {gateway_ecc, _}} ->
+    case application:get_env(miner, gateway_and_mux_enable) of
+        {ok, true} ->
             SupFlags = #{
                 strategy => rest_for_one,
                 intensity => 0,
@@ -42,13 +42,35 @@ init(_Opts) ->
             GatewayTcpPort = application:get_env(miner, gateway_api_port, 4468),
 
             KeyPair =
-                case application:get_env(miner, gateway_keypair) of
+                case application:get_env(blockchain, key, undefined) of
                     undefined ->
-                        code:priv_dir(miner) ++ "/gateway_rs/gateway_key.bin";
-                    {ok, {ecc, Keypair}} ->
-                        Keypair;
-                    {ok, {file, File}} ->
-                        filename:absname(File)
+                        BaseDir = application:get_env(blockchain, base_dir, "data"),
+                        GatewayKey = filename:absname(filename:join([BaseDir, "miner", "gateway_swarm_key"])),
+                        ok = filelib:ensure_dir(GatewayKey),
+                        case filelib:is_file(GatewayKey) of
+                            true ->
+                                GatewayKey;
+                            false ->
+                                SwarmKey = filename:join([BaseDir, "miner", "swarm_key"]),
+                                case filelib:is_file(SwarmKey) of
+                                    true ->
+                                        {ok, KeyMap} = libp2p_crypto:load_keys(SwarmKey),
+                                        {ok, GatewayKeyMap} = miner_keys:libp2p_to_gateway_key(KeyMap),
+                                        ok = libp2p_crypto:save_keys(GatewayKeyMap, GatewayKey),
+                                        GatewayKey;
+                                    false ->
+                                        KeyMap = libp2p_crypto:generate_keys(ecc_compact),
+                                        ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
+                                        {ok, GatewayKeyMap} = miner_keys:libp2p_to_gateway_key(KeyMap),
+                                        ok = libp2p_crypto:save_keys(GatewayKeyMap, GatewayKey),
+                                        GatewayKey
+                                end
+                        end;
+                    {ok, {ecc, Keypair0}} ->
+                        case io_lib:char_list(Keypair0) of
+                            true -> Keypair0;
+                            false -> miner_keys:key_proplist_to_uri(Keypair0)
+                        end
                 end,
 
             GatewayPortOpts = [

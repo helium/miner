@@ -64,9 +64,10 @@ terminate(_, State) ->
 
 open_mux_port(HostTcpPort, ClientTcpPorts) when is_list(ClientTcpPorts) ->
     ClientList = client_address_list(ClientTcpPorts),
-    Args = ["--host", erlang:integer_to_list(HostTcpPort), "--client", ClientList],
+    lager:info("client list ~p", [ClientList]),
+    Args = ["--host", erlang:integer_to_list(HostTcpPort)] ++ ClientList,
+    lager:info("mux args list ~p", [Args]),
     PortOpts = [
-        {packet, 2},
         binary,
         use_stdio,
         exit_status,
@@ -96,4 +97,9 @@ mux_bin() ->
     code:priv_dir(miner) ++ "/semtech_udp/gwmp-mux".
 
 client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
-    string:join([io_lib:format("127.0.0.1:~p", [TcpPort]) || TcpPort <- ClientTcpPorts], ",").
+    lists:flatmap(
+        fun(TcpPort) ->
+            ["--client", lists:flatten(io_lib:format("127.0.0.1:~p", [TcpPort]))]
+        end,
+        ClientTcpPorts
+    ).

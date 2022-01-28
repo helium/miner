@@ -23,7 +23,7 @@
      {network, testnet},
      {api_base_url, "https://testnet-api.helium.wtf/v1"},
      {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
-     {gateway_keypair, ${ECC_KEY}},
+     {gateway_and_mux_enable, ${GW_AND_MUX}},
      {use_ebus, false},
       {radio_device, { {0,0,0,0}, 1680,
         {0,0,0,0}, 31341} }
