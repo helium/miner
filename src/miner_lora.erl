@@ -622,7 +622,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
             );
         {noop, non_longfi} ->
             lager:debug("Miner dropping non-Longfi packet ~p", [Packet]),
-            ok
+            ok;
+        {Type, RoutingInfo} ->
+            lager:notice("Routing ~p", [RoutingInfo]),
+            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -630,7 +633,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
  route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
-            {noop, non_longfi};
+            handle_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
             try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
@@ -639,10 +642,17 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 false ->
                     %% we currently don't expect non-onion packets,
                     %% this is probably a false positive on a LoRaWAN packet
-                      {noop, non_longfi}
+                      handle_non_longfi(Pkt)
             catch _:_ ->
-                      {noop, non_longfi}
+                      handle_non_longfi(Pkt)
             end
+    end.
+
+-spec handle_non_longfi(binary()) -> any().
+handle_non_longfi(Packet) ->
+    case application:get_env(miner, gateway_and_mux_enable) of
+        {ok, true} -> {noop, non_longfi};
+        _ -> route_non_longfi(Packet)
     end.
 
 % Some binary madness going on here
