@@ -217,12 +217,21 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
             %% TODO return the existant position in Buf
             {reply, ok, ignore};
         false ->
-            Fee = normalize_fee(blockchain_txn:type(Txn), blockchain_txn:fee(Txn)),
-            Comparator = fun(OtherSerializedTxn) ->
-                                OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
-                                %% we want to insert before any txn with a lower fee
-                                Fee > blockchain_txn:fee(OtherTxn)
-                         end,
+            %% sort non poc transactions first
+            Comparator = case blockchain_txn:type(Txn) of
+                             X when X == blockchain_txn_poc_request_v1 orelse
+                                    X == blockchain_txn_poc_receipt_v1 ->
+                                 fun(_) -> false end;
+                             _ ->
+                                 fun(OtherSerializedTxn) ->
+                                        case blockchain_txn:type(Txn) of
+                                            X when X == blockchain_txn_poc_request_v1 orelse
+                                                   X == blockchain_txn_poc_receipt_v1 ->
+                                                true;
+                                            _ ->
+                                                false
+                                        end
+                                 end,
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
                 {NewHBBFT, {result, {Position, Length}}} ->
                     {reply, {ok, Position, Length}, [], State#state{hbbft=NewHBBFT}};
