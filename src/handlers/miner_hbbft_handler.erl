@@ -221,15 +221,15 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
             Comparator = case blockchain_txn:type(Txn) of
                              X when X == blockchain_txn_poc_request_v1 orelse
                                     X == blockchain_txn_poc_receipt_v1 ->
-                                 fun(_) -> false end;
+                                 fun(_) -> true end;
                              _ ->
                                  fun(OtherSerializedTxn) ->
                                         case blockchain_txn:type(Txn) of
                                             X when X == blockchain_txn_poc_request_v1 orelse
                                                    X == blockchain_txn_poc_receipt_v1 ->
-                                                true;
+                                                false;
                                             _ ->
-                                                false
+                                                true
                                         end
                                  end,
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
