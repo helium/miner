@@ -10,7 +10,8 @@
     port/0,
     position/0,
     location_ok/0,
-    region/0
+    region/0,
+    route/1
 ]).
 
 -export([
@@ -92,7 +93,6 @@
 -define(MAX_TMST_VAL, 4294967295).
 
 -ifdef(TEST).
--export([route/1]).
 -define(REG_DOMAIN_TIMEOUT, 1000).
 -else.
 -define(REG_DOMAIN_TIMEOUT, 30000).
