@@ -92,6 +92,7 @@
 -define(MAX_TMST_VAL, 4294967295).
 
 -ifdef(TEST).
+-export([route/1]).
 -define(REG_DOMAIN_TIMEOUT, 1000).
 -else.
 -define(REG_DOMAIN_TIMEOUT, 30000).
@@ -599,7 +600,7 @@ handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirm
     State;
 handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, chain = Chain} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    case route(Data) of
+    case ?MODULE:route(Data) of
         error ->
             ok;
         {onion, Payload} ->
@@ -619,9 +620,9 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
-        {Type, RoutingInfo} ->
-            lager:notice("Routing ~p", [RoutingInfo]),
-            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
+        {noop, non_longfi} ->
+            lager:debug("Miner dropping non-Longfi packet ~p", [Packet]),
+            ok
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -629,7 +630,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
  route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
-            route_non_longfi(Pkt);
+            {noop, non_longfi};
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
             try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
@@ -638,9 +639,9 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 false ->
                     %% we currently don't expect non-onion packets,
                     %% this is probably a false positive on a LoRaWAN packet
-                      route_non_longfi(Pkt)
+                      {noop, non_longfi}
             catch _:_ ->
-                      route_non_longfi(Pkt)
+                      {noop, non_longfi}
             end
     end.
 
