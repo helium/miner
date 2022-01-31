@@ -224,20 +224,22 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
                                  fun(_) -> true end;
                              _ ->
                                  fun(OtherSerializedTxn) ->
-                                        case blockchain_txn:type(Txn) of
+                                        OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
+                                        case blockchain_txn:type(OtherTxn) of
                                             X when X == blockchain_txn_poc_request_v1 orelse
                                                    X == blockchain_txn_poc_receipt_v1 ->
                                                 false;
                                             _ ->
                                                 true
                                         end
-                                 end,
+                                 end
+                         end,
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
                 {NewHBBFT, {result, {Position, Length}}} ->
                     {reply, {ok, Position, Length}, [], State#state{hbbft=NewHBBFT}};
                 {_HBBFT, full} ->
                     {reply, {error, full}, ignore};
-                {NewHBBFT, {result_and_send, {Position, Length}, Msgs}} ->
+                {NewHBBFT, {result_and_send, {Position, Length}, {send, Msgs}}} ->
                     {reply, {ok, Position, Length}, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
@@ -818,12 +820,6 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
-
--spec normalize_fee(TxnType :: blockchain_txn:txn(), TxnFee :: non_neg_integer()) -> non_neg_integer().
-normalize_fee(blockchain_txn_state_channel_close_v1_pb = _TxnType, _TxnFee) ->
-    1;
-normalize_fee(_TxnType, TxnFee) ->
-    TxnFee.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
