@@ -86,11 +86,16 @@ if [[ "$BUILD_TYPE" == "miner" ]]; then
         echo "Miner tag update detected; Updating ${UPDATE_TAG} on ${REGISTRY_HOST}..."
 
         UPDATE_TAG="${UPDATE_TAG}-${IMAGE_ARCH}"
-        DOCKER_NAME=$(echo "$DOCKER_NAME" | sed -e 's/_GA//' -e 's/_alpha//' -e 's/_beta//')
+        SEMVER_TAG=$(echo "$DOCKER_NAME" | sed -e 's/_GA//' -e 's/_alpha//' -e 's/_beta//')
 
-        docker pull "$MINER_REGISTRY_NAME:$DOCKER_NAME"
-        docker tag "$MINER_REGISTRY_NAME:$DOCKER_NAME" "$MINER_REGISTRY_NAME:$UPDATE_TAG"
+        docker pull "$MINER_REGISTRY_NAME:$SEMVER_TAG"
+        docker tag "$MINER_REGISTRY_NAME:$SEMVER_TAG" "$MINER_REGISTRY_NAME:$UPDATE_TAG"
         docker push "$MINER_REGISTRY_NAME:$UPDATE_TAG"
+
+        if [["$VERSION_TAG" =~ _GA$]]; then
+            docker tag "$MINER_REGISTRY_NAME:$SEMVER_TAG" "$MINER_REGISTRY_NAME:$DOCKER_NAME"
+            docker push "$MINER_REGISTRY_NAME:$DOCKER_NAME"
+        fi
 
         exit $?
     fi
