@@ -217,11 +217,11 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
             %% TODO return the existant position in Buf
             {reply, ok, ignore};
         false ->
-            Fee = blockchain_txn:fee(Txn),
+            Fee = normalize_fee(blockchain_txn:type(Txn), blockchain_txn:fee(Txn)),
             Comparator = fun(OtherSerializedTxn) ->
-                                 OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
-                                 %% we want to insert before any txn with a lower fee
-                                 blockchain_txn:fee(OtherTxn) > Fee
+                                OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
+                                %% we want to insert before any txn with a lower fee
+                                Fee > blockchain_txn:fee(OtherTxn)
                          end,
             case hbbft:input(State#state.hbbft, blockchain_txn:serialize(Txn), Comparator) of
                 {NewHBBFT, {result, {Position, Length}}} ->
@@ -809,6 +809,12 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
+
+-spec normalize_fee(TxnType :: blockchain_txn:txn(), TxnFee :: non_neg_integer()) -> non_neg_integer().
+normalize_fee(blockchain_txn_state_channel_close_v1_pb = _TxnType, _TxnFee) ->
+    1;
+normalize_fee(_TxnType, TxnFee) ->
+    TxnFee.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
