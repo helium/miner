@@ -115,6 +115,7 @@ define clone_project
 endef
 
 define install_rust_bin
+	@mkdir -p ./priv/$(3)
 	@mv ./external/$(1)/target/$(RUST_TARGET)/release/$(2) ./priv/$(3)/ 2>/dev/null || true
 endef
 
