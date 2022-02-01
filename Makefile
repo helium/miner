@@ -9,9 +9,13 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
-IMAGE_ARCH ?= amd64
+ifndef IMAGE_ARCH
+override IMAGE_ARCH=amd64
+endif
 
-LIBC ?= musl
+ifndef LIBC
+override LIBC=musl
+endif
 
 ifeq ($(IMAGE_ARCH), amd64)
   RUST_TARGET=x86_64-unknown-linux-$(LIBC)
