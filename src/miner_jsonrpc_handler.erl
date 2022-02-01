@@ -33,7 +33,7 @@ handle(_, _, _Req) ->
     {404, [], <<"Not Found">>}.
 
 handle_rpc(Method, Params) ->
-    lager:info("Dispatching method ~p with params: ~p", [Method, Params]),
+    lager:debug("Dispatching method ~p with params: ~p", [Method, Params]),
     handle_rpc_(Method, format_params(Params)).
 
 handle_rpc_(<<"block_", _/binary>> = Method, Params) ->
