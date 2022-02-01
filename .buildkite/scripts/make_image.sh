@@ -25,7 +25,7 @@ if [[ "$IMAGE_ARCH" == "arm64" ]]; then
 fi
 
 VERSION=$(echo $VERSION_TAG | sed -e "s/$BUILD_TYPE//")
-DOCKER_BUILD_ARGS="--build-arg TARGET_ARCH=$IMAGE_ARCH --build-arg VERSION=$VERSION --build-arg BUILD_NET=$BUILD_NET"
+DOCKER_BUILD_ARGS="--build-arg RELEASE_ARCH=$IMAGE_ARCH --build-arg VERSION=$VERSION --build-arg BUILD_NET=$BUILD_NET"
 
 if [[ ! $TEST_BUILD -eq "0" ]]; then
     REGISTRY_NAME="test-builds"
