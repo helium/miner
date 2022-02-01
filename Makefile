@@ -9,15 +9,15 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
-ifndef TARGET_ARCH
-override TARGET_ARCH=amd64
+ifndef RELEASE_ARCH
+override RELEASE_ARCH=amd64
 endif
 
 ifndef LIBC
 override LIBC=musl
 endif
 
-ifeq ($(TARGET_ARCH), amd64)
+ifeq ($(RELEASE_ARCH), amd64)
   RUST_TARGET=x86_64-unknown-linux-$(LIBC)
 else
   RUST_TARGET=aarch64-unknown-linux-$(LIBC)
