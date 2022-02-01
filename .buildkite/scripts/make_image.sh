@@ -92,7 +92,7 @@ if [[ "$BUILD_TYPE" == "miner" ]]; then
         docker tag "$MINER_REGISTRY_NAME:$SEMVER_TAG" "$MINER_REGISTRY_NAME:$UPDATE_TAG"
         docker push "$MINER_REGISTRY_NAME:$UPDATE_TAG"
 
-        if [["$VERSION_TAG" =~ _GA$]]; then
+        if [[ "$VERSION_TAG" =~ _GA$ ]]; then
             docker tag "$MINER_REGISTRY_NAME:$SEMVER_TAG" "$MINER_REGISTRY_NAME:$DOCKER_NAME"
             docker push "$MINER_REGISTRY_NAME:$DOCKER_NAME"
         fi
