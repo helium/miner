@@ -238,11 +238,11 @@ key_proplist_to_uri(Props) ->
     Bus = proplists:get_value(bus, Props, "i2c-1"),
     Address = proplists:get_value(address, Props, 16#60),
     KeySlot = proplists:get_value(key_slot, Props, 0),
-    AddressAndSlot = lists:flatten(io_lib:format(":~p?slot=~p", [Address, KeySlot])),
+    AddressAndSlot = lists:flatten(io_lib:format(":~p&slot=~p", [Address, KeySlot])),
     "ecc://" ++ Bus ++ AddressAndSlot.
 
 key_uri_to_proplist(Uri) ->
-    {ok, MatchPattern} = re:compile("ecc://(?<A>.*):(?<B>[0-9]+)(\\?slot=(?<C>[0-9]+))?"),
+    {ok, MatchPattern} = re:compile("ecc://(?<A>.*):(?<B>[0-9]+)(&slot=(?<C>[0-9]+))?"),
     case re:run(Uri, MatchPattern, [{capture, all_names, list}]) of
         {match, Captures} ->
             ZippedOpts = lists:zip([bus, address, key_slot], Captures),

@@ -66,7 +66,7 @@ init(_Opts) ->
                                         GatewayKey
                                 end
                         end;
-                    {ok, {ecc, Keypair0}} ->
+                    {ecc, Keypair0} ->
                         case io_lib:char_list(Keypair0) of
                             true -> Keypair0;
                             false -> miner_keys:key_proplist_to_uri(Keypair0)
