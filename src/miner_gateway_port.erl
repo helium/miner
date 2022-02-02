@@ -37,11 +37,11 @@ init([Options]) ->
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
-    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
 handle_cast(_Msg, State) ->
-    lager:debug("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
@@ -50,6 +50,16 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     NewState = open_gateway_port(State#state.keypair, State#state.tcp_port),
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
+handle_info({Port, {data, LogMsg}}, #state{port = Port} = State) ->
+    case LogMsg of
+        <<" TRACE", Details/binary>> -> lager:debug("gateway-rs log: ~s", [Details]);
+        <<" DEBUG", Details/binary>> -> lager:debug("gateway-rs log: ~s", [Details]);
+        <<" INFO", Details/binary>> -> lager:info("gateway-rs log: ~s", [Details]);
+        <<" WARN", Details/binary>> -> lager:warning("gateway-rs log: ~s", [Details]);
+        <<" ERROR", Details/binary>> -> lager:error("gateway-rs log: ~s", [Details]);
+        _ -> lager:debug("unhandled info ~p", [LogMsg])
+    end,
+    {noreply, State};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
@@ -57,7 +67,7 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info(_Msg, State) ->
-    lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled info ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_, State) ->

@@ -38,11 +38,11 @@ init([Options]) ->
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
-    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
 handle_cast(_Msg, State) ->
-    lager:debug("unhandled cast ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
@@ -56,7 +56,7 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
     NewState = open_mux_port(State#state.host_port, State#state.client_ports),
     {noreply, NewState};
 handle_info(_Msg, State) ->
-    lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled info ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_, State) ->
