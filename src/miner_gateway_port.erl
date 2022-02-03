@@ -111,15 +111,15 @@ gateway_bin() ->
 
 dispatch_port_logs(Line) ->
     case Line of
-        <<" TRACE", Statement/binary>> ->
+        <<" TRACE ", Statement/binary>> ->
             lager:debug("***gateway-rs*** ~s", [Statement]);
-        <<" DEBUG", Statement/binary>> ->
+        <<" DEBUG ", Statement/binary>> ->
             lager:debug("***gateway-rs*** ~s", [Statement]);
-        <<" INFO", Statement/binary>> ->
+        <<" INFO ", Statement/binary>> ->
             lager:info("***gateway-rs*** ~s", [Statement]);
-        <<" WARN", Statement/binary>> ->
+        <<" WARN ", Statement/binary>> ->
             lager:warning("***gateway-rs*** ~s", [Statement]);
-        <<" ERROR", Statement/binary>> ->
+        <<" ERROR ", Statement/binary>> ->
             lager:error("***gateway-rs*** ~s", [Statement]);
         _ -> lager:debug("unhandled info ~p", [Line])
     end.

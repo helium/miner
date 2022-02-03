@@ -50,6 +50,10 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     ok = cleanup_port(State),
     NewState = open_mux_port(State#state.host_port, State#state.client_ports),
     {noreply, NewState};
+handle_info({Port, {data, LogMsg}}, #state{port = Port} = State) ->
+    Lines = binary:split(LogMsg, <<"\n">>, [global]),
+    [dispatch_port_logs(Line) || Line <- Lines],
+    {noreply, State};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gwmp-mux port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
@@ -103,3 +107,18 @@ client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
         end,
         ClientTcpPorts
     ).
+
+dispatch_port_logs(Line) ->
+    case Line of
+        <<" TRACE ", Statement/binary>> ->
+            lager:debug("***semtech-udp*** ~s", [Statement]);
+        <<" DEBUG ", Statement/binary>> ->
+            lager:debug("***semtech-udp*** ~s", [Statement]);
+        <<" INFO ", Statement/binary>> ->
+            lager:info("***semtech-udp*** ~s", [Statement]);
+        <<" WARN ", Statement/binary>> ->
+            lager:warning("***semtech-udp*** ~s", [Statement]);
+        <<" ERROR ", Statement/binary>> ->
+            lager:error("***semtech-udp*** ~s", [Statememnt]);
+        _ -> lager:debug("unhandled info ~p", [Line])
+    end.
