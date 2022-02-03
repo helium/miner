@@ -153,7 +153,7 @@ grpc_connect(Transport, Host, Port, Tries) ->
         {ok, Connection} ->
             {ok, Connection};
         _ ->
-            timer:sleep(?RETRY_WAIT),
+            timer:sleep(100),
             grpc_connect(Transport, Host, Port, Tries - 1)
     end.
 
