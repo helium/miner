@@ -51,14 +51,8 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info({Port, {data, LogMsg}}, #state{port = Port} = State) ->
-    case LogMsg of
-        <<" TRACE", Details/binary>> -> lager:debug("gateway-rs log: ~s", [Details]);
-        <<" DEBUG", Details/binary>> -> lager:debug("gateway-rs log: ~s", [Details]);
-        <<" INFO", Details/binary>> -> lager:info("gateway-rs log: ~s", [Details]);
-        <<" WARN", Details/binary>> -> lager:warning("gateway-rs log: ~s", [Details]);
-        <<" ERROR", Details/binary>> -> lager:error("gateway-rs log: ~s", [Details]);
-        _ -> lager:debug("unhandled info ~p", [LogMsg])
-    end,
+    Lines = binary:split(LogMsg, <<"\n">>, [global]),
+    [dispatch_port_logs(Line) || Line <- Lines],
     {noreply, State};
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
@@ -114,3 +108,18 @@ gateway_config_dir() ->
     code:priv_dir(miner) ++ "/gateway_rs/".
 gateway_bin() ->
     gateway_config_dir() ++ "helium_gateway".
+
+dispatch_port_logs(Line) ->
+    case Line of
+        <<" TRACE", Statement/binary>> ->
+            lager:debug("***gateway-rs*** ~s", [Statement]);
+        <<" DEBUG", Statement/binary>> ->
+            lager:debug("***gateway-rs*** ~s", [Statement]);
+        <<" INFO", Statement/binary>> ->
+            lager:info("***gateway-rs*** ~s", [Statement]);
+        <<" WARN", Statement/binary>> ->
+            lager:warning("***gateway-rs*** ~s", [Statement]);
+        <<" ERROR", Statement/binary>> ->
+            lager:error("***gateway-rs*** ~s", [Statement]);
+        _ -> lager:debug("unhandled info ~p", [Line])
+    end.
