@@ -119,6 +119,6 @@ dispatch_port_logs(Line) ->
         <<" WARN ", Statement/binary>> ->
             lager:warning("***semtech-udp*** ~s", [Statement]);
         <<" ERROR ", Statement/binary>> ->
-            lager:error("***semtech-udp*** ~s", [Statememnt]);
+            lager:error("***semtech-udp*** ~s", [Statement]);
         _ -> lager:debug("unhandled info ~p", [Line])
     end.
