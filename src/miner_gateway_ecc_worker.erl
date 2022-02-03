@@ -94,7 +94,7 @@ handle_call({ecdh, PubKey}, _From, State = #state{connection = Connection}) ->
         end,
     {reply, {ok, Reply}, State};
 handle_call(_Msg, _From, State) ->
-    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p", [_Msg]),
     {reply, ok, State}.
 
 handle_cast(reconnect, State) ->
@@ -103,11 +103,11 @@ handle_cast(reconnect, State) ->
     {ok, NewConnection} = grpc_connect(State#state.transport, State#state.host, State#state.port),
     {noreply, State#state{connection = NewConnection}};
 handle_cast(_Msg, State) ->
-    lager:debug("unhandled call ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
 handle_info(_Msg, State) ->
-    lager:debug("unhandled info ~p by ~p", [_Msg, ?MODULE]),
+    lager:debug("unhandled info ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_Reason, State) ->
