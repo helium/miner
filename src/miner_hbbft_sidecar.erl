@@ -146,6 +146,8 @@ handle_call({submit, Txn}, From,
                             case blockchain_txn:absorb(Txn, Chain) of
                                 ok ->
                                     spawn(fun() ->
+                                                  %% this will now return {ok, Position, Length}
+                                                  %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
                                                 catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
                                         end),
                                     {reply, {ok, Height}, State};
