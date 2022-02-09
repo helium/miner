@@ -86,13 +86,13 @@ external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
 	$(call clone_project,gateway-rs,$(GATEWAY_RS_VSN))
-	(cd ./external/gateway-rs && cargo build --release)
+	@(cd ./external/gateway-rs && cargo build --release)
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
 	@echo "--- semtech-udp ---"
 	$(call clone_project,semtech-udp,$(SEMTECH_UDP_VSN))
-	(cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux)
+	@(cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux)
 	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
 
 clean_external_svcs:
