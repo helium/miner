@@ -16,7 +16,9 @@ all() ->
     [gateway_signing_test, mux_packet_routing].
 
 init_per_suite(Config) ->
+    ok = application:load(miner),
     ok = application:set_env(miner, gateway_and_mux_enable, true),
+    ok = application:set_env(miner, radio_device, {{127, 0, 0, 1}, 1681, {127, 0, 0, 1}, 31341}),
     application:ensure_all_started(miner),
     Config.
 
