@@ -111,14 +111,14 @@ client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
 dispatch_port_logs(Line) ->
     case Line of
         <<" TRACE ", Statement/binary>> ->
-            lager:debug("***semtech-udp*** ~s", [Statement]);
+            lager:debug("[ semtech-udp ] ~s", [Statement]);
         <<" DEBUG ", Statement/binary>> ->
-            lager:debug("***semtech-udp*** ~s", [Statement]);
+            lager:debug("[ semtech-udp ] ~s", [Statement]);
         <<" INFO ", Statement/binary>> ->
-            lager:info("***semtech-udp*** ~s", [Statement]);
+            lager:info("[ semtech-udp ] ~s", [Statement]);
         <<" WARN ", Statement/binary>> ->
-            lager:warning("***semtech-udp*** ~s", [Statement]);
+            lager:warning("[ semtech-udp ] ~s", [Statement]);
         <<" ERROR ", Statement/binary>> ->
-            lager:error("***semtech-udp*** ~s", [Statement]);
+            lager:error("[ semtech-udp ] ~s", [Statement]);
         _ -> lager:debug("unhandled info ~p", [Line])
     end.

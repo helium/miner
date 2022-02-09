@@ -9,20 +9,6 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
-ifndef RELEASE_ARCH
-override RELEASE_ARCH=amd64
-endif
-
-ifndef LIBC
-override LIBC=musl
-endif
-
-ifeq ($(RELEASE_ARCH), amd64)
-  RUST_TARGET=x86_64-unknown-linux-$(LIBC)
-else
-  RUST_TARGET=aarch64-unknown-linux-$(LIBC)
-endif
-
 GRPC_SERVICES_DIR=src/grpc/autogen
 
 all: compile
@@ -97,13 +83,13 @@ external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
 	$(call clone_project,gateway-rs)
-	cd ./external/gateway-rs && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) && cd ../../
+	cd ./external/gateway-rs && cargo build --release && cd ../../
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
 	@echo "--- semtech-udp ---"
 	$(call clone_project,semtech-udp)
-	cd ./external/semtech-udp && rustup target add $(RUST_TARGET) && cargo build --release --target $(RUST_TARGET) --features client\,server --example gwmp-mux && cd ../../
+	cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux && cd ../../
 	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
 
 clean_external_svcs:
@@ -120,7 +106,7 @@ endef
 
 define install_rust_bin
 	@mkdir -p ./priv/$(3)
-	@mv ./external/$(1)/target/$(RUST_TARGET)/release/$(2) ./priv/$(3)/ 2>/dev/null || true
+	@mv ./external/$(1)/target/release/$(2) ./priv/$(3)/ 2>/dev/null || true
 endef
 
 define remove
