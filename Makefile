@@ -11,7 +11,7 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
-GATEWAY_RS_VSN ?= main
+GATEWAY_RS_VSN ?= 7286444eb5324e4c3bbc433ba79458192f0d97a9
 SEMTECH_UDP_VSN ?= master
 
 all: compile
@@ -104,7 +104,7 @@ clean_external_svcs:
 	$(call remove,./priv/semtech_udp/gwmp-mux)
 
 define clone_project
-	@git clone --quiet --depth 1 --branch $(2) https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true
+	@(git clone --quiet https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true && cd ./external/$(1) && git checkout $(2) 2>/dev/null)
 endef
 
 define install_rust_bin
