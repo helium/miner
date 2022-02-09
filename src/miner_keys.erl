@@ -239,8 +239,7 @@ key_proplist_to_uri(Props) ->
     Address = proplists:get_value(address, Props, 16#60),
     KeySlot = proplists:get_value(key_slot, Props, 0),
     Network = application:get_env(blockchain, network, mainnet),
-    PortAndQuery = lists:flatten(io_lib:format(":~p?slot=~p&network=~s", [Address, KeySlot, Network])),
-    "ecc://" ++ Bus ++ PortAndQuery.
+    lists:flatten(io_lib:format("ecc://~s:~p?slot=~p&network=~s", [Bus, Address, KeySlot, Network])).
 
 key_uri_to_proplist(Uri) ->
     #{host := Bus, port := Address, query := Query} = uri_string:parse(Uri),
