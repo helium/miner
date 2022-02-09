@@ -151,7 +151,7 @@ grpc_connect(Transport, Host, Port) ->
         _ ->
             lager:warning("~s grpc connection to gateway failed; retrying...", [?MODULE]),
             timer:sleep(?CONNECT_RETRY_WAIT),
-            grpc_connect(Transport, Host, Port, Tries - 1)
+            grpc_connect(Transport, Host, Port)
     end.
 
 grpc_disconnect(GrpcConnection) ->

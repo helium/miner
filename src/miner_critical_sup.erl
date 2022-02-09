@@ -102,6 +102,7 @@ init(_Opts) ->
     ChildSpecs = case {GatewayAndMux, application:get_env(blockchain, key)} of
                      {false, {ok, {ecc, _}}} ->
                          [
+                          %% Miner retains full control and responsibility for key access
                           ?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])
                          ] ++ ChildSpecs0;
                      _ ->
