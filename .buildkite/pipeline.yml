@@ -127,3 +127,41 @@ steps:
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
+
+  # Miner ARM64 testnet
+  #
+  # Does not start with "val" but does end with "_testnet"
+  - if: build.tag !~ /^val/ && build.tag =~ /_testnet\$/
+    name: ":whale: ARM64 docker"
+    agents:
+      queue: "arm64"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "arm64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "testnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "testnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner AMD64 testnet
+  #
+  # Does not start with "val" but does end with "_testnet"
+  - if: build.tag !~ /^val/ && build.tag =~ /_testnet\$/
+    name: ":whale: AMD64 docker"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "amd64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "testnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "testnet"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"

@@ -24,7 +24,7 @@ if [[ "$IMAGE_ARCH" == "arm64" ]]; then
     RUN_IMAGE="arm64v8/$RUN_IMAGE"
 fi
 
-VERSION=$(echo $VERSION_TAG | sed -e "s/$BUILD_TYPE//")
+VERSION=$(echo $VERSION_TAG | sed -e "s/$BUILD_TYPE//" | sed -e "s/_$BUILD_NET//")
 DOCKER_BUILD_ARGS="--build-arg VERSION=$VERSION --build-arg BUILD_NET=$BUILD_NET"
 
 if [[ ! $TEST_BUILD -eq "0" ]]; then
@@ -52,12 +52,6 @@ case "$BUILD_TYPE" in
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BUILD_IMAGE} --build-arg RUNNER_IMAGE=${RUN_IMAGE} --build-arg REBAR_BUILD_TARGET=docker ${DOCKER_BUILD_ARGS}"
         BASE_DOCKER_NAME=$(basename $(pwd))
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
-        ;;
-    "miner-testnet")
-        echo "Doing a testnet miner image build for ${IMAGE_ARCH}"
-        DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg BUILDER_IMAGE=${BUILD_IMAGE} --build-arg RUNNER_IMAGE=${RUN_IMAGE} --build-arg REBAR_BUILD_TARGET=docker_testminer ${DOCKER_BUILD_ARGS}"
-        BASE_DOCKER_NAME=$(basename $(pwd))
-        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_testnet_${VERSION}"
         ;;
     *)
         echo "I don't know how to do a build for ${BUILD_TYPE}"
