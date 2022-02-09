@@ -3,7 +3,6 @@ ARG RUNNER_IMAGE=alpine
 FROM ${BUILDER_IMAGE} as deps-compiler
 
 ARG REBAR_DIAGNOSTIC=0
-ARG RELEASE_ARCH=amd64
 ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
 
 ARG REBAR_BUILD_TARGET
@@ -36,7 +35,6 @@ RUN ./rebar3 compile
 FROM deps-compiler as builder
 
 ARG VERSION
-ARG RELEASE_ARCH=amd64
 ARG REBAR_DIAGNOSTIC=0
 # default to building for mainnet
 ARG BUILD_NET=mainnet
