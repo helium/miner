@@ -238,24 +238,23 @@ key_proplist_to_uri(Props) ->
     Bus = proplists:get_value(bus, Props, "i2c-1"),
     Address = proplists:get_value(address, Props, 16#60),
     KeySlot = proplists:get_value(key_slot, Props, 0),
-    AddressAndSlot = lists:flatten(io_lib:format(":~p&slot=~p", [Address, KeySlot])),
-    "ecc://" ++ Bus ++ AddressAndSlot.
+    Network = application:get_env(blockchain, network, mainnet),
+    PortAndQuery = lists:flatten(io_lib:format(":~p?slot=~p&network=~s", [Address, KeySlot, Network])),
+    "ecc://" ++ Bus ++ PortAndQuery.
 
 key_uri_to_proplist(Uri) ->
-    {ok, MatchPattern} = re:compile("ecc://(?<A>.*):(?<B>[0-9]+)(&slot=(?<C>[0-9]+))?"),
-    case re:run(Uri, MatchPattern, [{capture, all_names, list}]) of
-        {match, Captures} ->
-            ZippedOpts = lists:zip([bus, address, key_slot], Captures),
-            lists:filtermap(fun({_, Val}) -> Val =/= [] end, ZippedOpts);
-        nomatch ->
-            []
-    end.
+    #{host := Bus, port := Address, query := Query} = uri_string:parse(Uri),
+    QueryList = lists:foldl(fun({"slot", Slot}, Acc) ->
+                                   [{key_slot, list_to_integer(Slot)} | Acc];
+                               ({"network", Network}, Acc) ->
+                                   [{network, Network} | Acc];
+                               (_, Acc) -> Acc
+                            end, [], uri_string:dissect_query(Query)),
+    [{bus, Bus}, {address, Address}] ++ QueryList.
 %%
 %% Utilities
 %%
 
-%% Helper funtion to retry automatic keyslot key generation and
-%% locking the first time we encounter an empty keyslot.
 key_proplist_to_map(Options) when is_list(Options) ->
     #{
         key_slot => proplists:get_value(key_slot, Options, 0),
@@ -263,6 +262,8 @@ key_proplist_to_map(Options) when is_list(Options) ->
         address => proplists:get_value(address, Options, 16#60)
     }.
 
+%% Helper funtion to retry automatic keyslot key generation and
+%% locking the first time we encounter an empty keyslot.
 get_public_key(ECCPid, Slot) ->
     get_public_key(ECCPid, Slot, 20).
 
