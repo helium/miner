@@ -73,16 +73,13 @@ init(_Opts) ->
                         end
                 end,
 
-            GatewayPortOpts = [
-                {keypair, KeyPair},
-                {port, GatewayTcpPort}
-            ],
-
             GatewayECCWorkerOpts = [
                 {transport, application:get_env(miner, gateway_transport, tcp)},
                 {host, application:get_env(miner, gateway_host, "localhost")},
                 {port, GatewayTcpPort}
             ],
+
+            GatewayPortOpts = [{keypair, KeyPair}] ++ GatewayECCWorkerOpts,
 
             MuxOpts = [
                 {host_port, application:get_env(miner, mux_host_port, 1680)},

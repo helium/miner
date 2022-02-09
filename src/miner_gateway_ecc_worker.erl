@@ -30,6 +30,7 @@
     transport = tcp :: tcp | ssl
 }).
 
+-define(CONNECT_RETRY_WAIT, 100).
 -define(RETRY_WAIT, 10).
 -define(MAX_RETRIES, 10).
 %% Make the call timeout quite long since this worker has to process
@@ -143,17 +144,13 @@ rpc_timeout(Tries) ->
     end.
 
 grpc_connect(Transport, Host, Port) ->
-    grpc_connect(Transport, Host, Port, 10).
-
-grpc_connect(_, _, _, 0) ->
-    lager:error("failed to connect ~p grpc client", [?MODULE]),
-    erlang:error({error, no_connection});
-grpc_connect(Transport, Host, Port, Tries) ->
     case grpc_client:connect(Transport, Host, Port) of
         {ok, Connection} ->
+            lager:debug("~s connected to gateway grpc at ~s://~s:~p", [?MODULE, Transport, Host, Port]),
             {ok, Connection};
         _ ->
-            timer:sleep(100),
+            lager:warning("~s grpc connection to gateway failed; retrying...", [?MODULE]),
+            timer:sleep(?CONNECT_RETRY_WAIT),
             grpc_connect(Transport, Host, Port, Tries - 1)
     end.
 
