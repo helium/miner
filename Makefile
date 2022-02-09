@@ -11,6 +11,9 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
+GATEWAY_RS_VSN ?= main
+SEMTECH_UDP_VSN ?= master
+
 all: compile
 
 deps:
@@ -82,13 +85,13 @@ clean_grpc:
 external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
-	$(call clone_project,gateway-rs)
+	$(call clone_project,gateway-rs,$(GATEWAY_RS_VSN))
 	cd ./external/gateway-rs && cargo build --release && cd ../../
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
 	@echo "--- semtech-udp ---"
-	$(call clone_project,semtech-udp)
+	$(call clone_project,semtech-udp,$(SEMTECH_UDP_VSN))
 	cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux && cd ../../
 	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
 
@@ -101,7 +104,7 @@ clean_external_svcs:
 	$(call remove,./priv/semtech_udp/gwmp-mux)
 
 define clone_project
-	@git clone --quiet --depth 1 https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true
+	@git clone --quiet --depth 1 --branch $(2) https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true
 endef
 
 define install_rust_bin
