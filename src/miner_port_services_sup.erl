@@ -59,7 +59,8 @@ init(_Opts) ->
                                         ok = libp2p_crypto:save_keys(GatewayKeyMap, GatewayKey),
                                         GatewayKey;
                                     false ->
-                                        KeyMap = libp2p_crypto:generate_keys(ecc_compact),
+                                        Network = application:get_env(miner, network, mainnet),
+                                        KeyMap = libp2p_crypto:generate_keys(Network, ecc_compact),
                                         ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
                                         {ok, GatewayKeyMap} = miner_keys:libp2p_to_gateway_key(KeyMap),
                                         ok = libp2p_crypto:save_keys(GatewayKeyMap, GatewayKey),
