@@ -60,7 +60,8 @@ keys({file, BaseDir}) ->
                onboarding_key => get_onboarding_key(FallbackOnboardingKey)
              };
         {error, enoent} ->
-            KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+            Network = application:get_env(miner, network, mainnet),
+            KeyMap = #{secret := PrivKey0, public := PubKey} = libp2p_crypto:generate_keys(Network, ecc_compact),
             ok = libp2p_crypto:save_keys(KeyMap, SwarmKey),
             FallbackOnboardingKey = libp2p_crypto:pubkey_to_b58(PubKey),
             #{ pubkey => PubKey,
