@@ -19,6 +19,7 @@
     connection/0,
     check_target/6,
     send_report/3,
+    send_report/4,
     region_params/0,
     update_config/1
 ]).
@@ -102,7 +103,11 @@ check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, Notifi
 
 -spec send_report(witness | receipt, any(), binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash)->
-    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash}).
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 5}).
+
+-spec send_report(witness | receipt, any(), binary(), non_neg_integer()) -> ok.
+send_report(ReportType, Report, OnionKeyHash, Retries)->
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, Retries}).
 
 -spec update_config([string()]) -> ok.
 update_config(UpdatedKeys)->
@@ -206,9 +211,9 @@ setup(_EventType, _Msg, Data) ->
 
 connected(enter, _OldState, Data)->
     {keep_state, Data};
-connected(cast, {send_report, ReportType, Report, OnionKeyHash}, #data{connection = Connection, self_sig_fun = SelfSigFun} = Data) ->
+connected(cast, {send_report, ReportType, Report, OnionKeyHash, RetryAttempts}, #data{connection = Connection, self_sig_fun = SelfSigFun} = Data) ->
     lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, Report]),
-    ok = send_report(ReportType, Report, OnionKeyHash, SelfSigFun, Connection),
+    ok = send_report(ReportType, Report, OnionKeyHash, SelfSigFun, Connection, RetryAttempts),
     {keep_state, Data};
 connected(cast, {update_config, Keys}, #data{val_public_ip = ValIP, val_grpc_port = ValPort} = Data) ->
     lager:info("update_config for keys ~p", [Keys]),
@@ -302,19 +307,40 @@ connect_stream_config_update(Connection) ->
             Res
     end.
 
--spec send_report(witness | receipt, any(), binary(), function(), grpc_client_custom:connection()) -> ok.
-send_report(receipt = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
+-spec send_report(witness | receipt, any(), binary(), function(), grpc_client_custom:connection(), non_neg_integer()) -> ok.
+send_report(_ReportType, _Report, _OnionKeyHash, _SigFun, _Connection, 0) ->
+    ok;
+send_report(receipt = ReportType, Report, OnionKeyHash, SigFun, Connection, RetryAttempts) ->
     EncodedReceipt = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_receipt_v1_pb),
     SignedReceipt = Report#blockchain_poc_receipt_v1_pb{signature = SigFun(EncodedReceipt)},
     Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedReceipt}},
-    %%TODO: add a retry mechanism ??
-    _ = send_grpc_unary_req(Connection, Req, 'send_report'),
-    ok;
-send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection) ->
+    do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts);
+send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection, RetryAttempts) ->
     EncodedWitness = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_witness_v1_pb),
     SignedWitness = Report#blockchain_poc_witness_v1_pb{signature = SigFun(EncodedWitness)},
     Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedWitness}},
-    _ = send_grpc_unary_req(Connection, Req, 'send_report'),
+    do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts).
+
+-spec do_send_report(binary(), witness | receipt, any(), binary(), grpc_client_custom:connection(), non_neg_integer()) -> ok.
+do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts) ->
+    %% ask validator for public uri of the challenger of this POC
+    case get_uri_for_challenger(OnionKeyHash, Connection) of
+        {ok, {IP, Port}} ->
+            lager:info("*** poc key point 1"),
+            %% send the report to our challenger
+            case send_grpc_unary_req(IP, Port, Req, 'send_report') of
+                {ok, _} ->
+                    lager:info("*** poc key point 2"),
+                    ok;
+                _ ->
+                    lager:info("*** poc key point 3"),
+                    ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+            end;
+        {error, _Reason} ->
+            lager:info("*** poc key point 4"),
+            ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+    end,
+    lager:info("*** poc key point 5"),
     ok.
 
 -spec fetch_config([string()], string(), pos_integer()) -> {error, any()} | ok.
@@ -422,6 +448,10 @@ build_validators_req(Quantity) ->
 build_config_req(Keys) ->
     #gateway_config_req_v1_pb{ keys = Keys}.
 
+-spec build_poc_challenger_req(binary()) -> #gateway_poc_key_routing_data_req_v1_pb{}.
+build_poc_challenger_req(OnionKeyHash) ->
+    #gateway_poc_key_routing_data_req_v1_pb{ key = OnionKeyHash}.
+
 %% TODO: return a better and consistent response
 %%-spec process_unary_response(grpc_client_custom:unary_response()) -> {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 process_unary_response({ok, #{http_status := 200, result := #gateway_resp_v1_pb{msg = {success_resp, _Payload}, height = Height, signature = Sig}}}) ->
@@ -477,6 +507,20 @@ handle_down_event(_CurState, {'DOWN', Ref, process, _, Reason} = Event, Data = #
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
             erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
             {keep_state, Data}
+    end.
+
+-spec get_uri_for_challenger(binary(), grpc_client_custom:connection()) -> {ok, {string(), pos_integer()}} | {error, any()}.
+get_uri_for_challenger(OnionKeyHash, Connection)->
+    Req = build_poc_challenger_req(OnionKeyHash),
+    case send_grpc_unary_req(Connection, Req, 'poc_key_to_public_uri') of
+        {ok, #gateway_public_routing_data_resp_v1_pb{public_uri = URIData}, _Req2Details} ->
+            #routing_address_pb{uri = URI, pub_key = _PubKey} = URIData,
+            #{host := IP, port := Port} = uri_string:parse(URI),
+            {ok, {IP, Port}};
+        {error, Reason, _Details} ->
+            {error, Reason};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -ifdef(TEST).

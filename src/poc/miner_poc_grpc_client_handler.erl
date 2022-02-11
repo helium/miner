@@ -81,7 +81,7 @@ config_update_stream(Connection)->
         {ok, Stream} = grpc_client_stream_custom:new(
             Connection,
             'helium.gateway',
-            stream_config_update,
+            config_update,
             gateway_miner_client_pb,
             [{type, stream}],
             ?MODULE),
