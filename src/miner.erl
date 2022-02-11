@@ -278,7 +278,7 @@ signed_block(Signatures, BinBlock) ->
                 end,
 
             libp2p_group_gossip:send(
-              libp2p_swarm:gossip_group(SwarmTID),
+              SwarmTID,
               ?GOSSIP_PROTOCOL_V1,
               Data
              ),
