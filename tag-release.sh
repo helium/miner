@@ -14,15 +14,19 @@ dep_hash() {
 }
 
 declare -r repos="blockchain libp2p sibyl ecc508 relcast dkg hbbft helium_proto"
+declare NAMED_TAG
 
 TAG_NAME=$(date +%Y.%m.%d)
 TAG_NUMBER=0
 
-while getopts ":h" opt; do
+while getopts ":hn:" opt; do
     case ${opt} in
         h )
             usage
             exit 0
+            ;;
+        n )
+            NAMED_TAG=$OPTARG
             ;;
         \? )
             usage
@@ -30,7 +34,6 @@ while getopts ":h" opt; do
             ;;
     esac
 done
-
 shift $((OPTIND - 1))
 
 if [ $# -ne 1 ]; then
@@ -39,6 +42,15 @@ if [ $# -ne 1 ]; then
 fi
 
 MINER_HASH=$1
+
+if [[ ! -z $NAMED_TAG ]]; then
+    RELEASE_TAG=$NAMED_TAG
+else
+    while git tag -l | grep -q "${TAG_NAME}.${TAG_NUMBER}"; do
+        TAG_NUMBER=`expr $TAG_NUMBER + 1`
+    done
+    RELEASE_TAG=${TAG_NAME}.${TAG_NUMBER}
+fi
 
 if [ ! -d .repos ]; then
     mkdir .repos
@@ -77,19 +89,23 @@ done
 cd ..
 echo -e "done\n"
 
-while git tag -l | grep -q "${TAG_NAME}.${TAG_NUMBER}"; do
-    TAG_NUMBER=`expr $TAG_NUMBER + 1`
-done
-
-RELEASE_TAG=${TAG_NAME}.${TAG_NUMBER}
-
 echo -e "publishing ${RELEASE_TAG} tag\n"
 git tag -a ${RELEASE_TAG} ${MINER_HASH} -m "${RELEASE_TAG} release"
 git push origin "${RELEASE_TAG}"
 
 for repo in $repos; do
     REPO_HASH=$(dep_hash $MINER_HASH $repo)
-    echo -e "tagging ${repo} ${REPO_HASH}"
-    result=$(cd .repos/$repo && git tag -a ${RELEASE_TAG} ${REPO_HASH} -m "${RELEASE_TAG} miner release" && git push origin "${RELEASE_TAG}")
-    echo $result
+
+    cd .repos/$repo
+    TAG_REF=$(git show-ref ${RELEASE_TAG} | awk '{print $1}')
+    if [[ -z $TAG_REF ]]; then
+        echo -e "tagging ${repo} ${REPO_HASH}\n"
+        git tag -a ${RELEASE_TAG} ${REPO_HASH} -m "${RELEASE_TAG} miner release"
+        git push origin "${RELEASE_TAG}"
+    elif [[ $TAG_REF == $REPO_HASH ]]; then
+        echo -e "tag already present on ${repo} at desired hash ${REPO_HASH}\n"
+    else
+        echo -e "tag already present on ${repo} at another hash ${TAG_REF}; skipping"
+    fi
+    cd ../../
 done
