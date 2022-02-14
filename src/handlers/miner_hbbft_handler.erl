@@ -100,13 +100,12 @@ metadata(Version, Meta, Chain) ->
                     {ok, validator} ->
                         %% generate a set of ephemeral keys for POC usage
                         %% the hashes of the public keys are added to metadata
-                        %% the key sets are passed to bc core poc mgr
                         ChallengeRate =
                             case blockchain:config(?poc_challenge_rate, Ledger) of
                                 {ok, CR} -> CR;
                                 _ -> 1
                             end,
-                        lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
+                        lager:debug("poc challenge rate ~p", [ChallengeRate] ),
                         %% if a val is in the ignore list then dont generate poc keys for it
                         %% TODO: this is a temp hack.  remove when testing finished
                         IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
@@ -114,8 +113,8 @@ metadata(Version, Meta, Chain) ->
                         case not lists:member(SelfPubKeyBin, IgnoreVals) of
                             true ->
                                 {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
-                                lager:info("poc ephemeral keys ~p", [EmpKeys]),
-                                lager:info("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
+                                lager:debug("poc ephemeral keys ~p", [EmpKeys]),
+                                lager:debug("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
                                 ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
                                 maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
                             false ->
@@ -837,6 +836,7 @@ bin_to_msg(<<Bin/binary>>) ->
         {error, truncated}
     end.
 
+-spec generate_ephemeral_keys(pos_integer(), pos_integer()) ->{[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
 generate_ephemeral_keys(N, ChallengeRate) ->
     NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
     lists:foldl(

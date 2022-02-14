@@ -45,7 +45,7 @@ connect(PeerP2P) ->
 -spec connect(libp2p_crypto:peer_id(), string(), non_neg_integer()) -> {ok, grpc_client_custom:connection()} | {error, any()}.
 connect(PeerP2P, PeerIP, GRPCPort) ->
     try
-        lager:info("connecting over grpc to peer ~p via IP ~p and port ~p", [PeerP2P, PeerIP, GRPCPort]),
+        lager:debug("connecting over grpc to peer ~p via IP ~p and port ~p", [PeerP2P, PeerIP, GRPCPort]),
         {ok, Connection} = grpc_client_custom:connect(tcp, PeerIP, GRPCPort),
         {ok, Connection}
      catch _Error:_Reason:_Stack ->
@@ -63,7 +63,7 @@ poc_stream(Connection, PubKeyBin, SigFun)->
             gateway_miner_client_pb,
             [{type, stream}],
             ?MODULE),
-        lager:info("*** new poc stream established with pid ~p", [Stream]),
+        lager:debug("*** new poc stream established with pid ~p", [Stream]),
         %% subscribe to poc updates
         Req = #gateway_poc_req_v1_pb{address = PubKeyBin, signature = <<>>},
         ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
@@ -90,17 +90,17 @@ config_update_stream(Connection)->
         ok = grpc_client_custom:send(Stream, Req),
         {ok, Stream}
      catch _Error:_Reason:_Stack ->
-        lager:warning("*** failed to connect to poc stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
+        lager:warning("*** failed to connect to config_update stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
         {error, stream_failed}
      end.
 
 
 %% TODO: handle headers
 handle_msg({headers, _Headers}, StreamState) ->
-    lager:info("*** grpc client ignoring headers ~p", [_Headers]),
+    lager:debug("*** grpc client ignoring headers ~p", [_Headers]),
     StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = Msg, StreamState) ->
-    lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
+    lager:debug("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
     Self = self(),
     F = fun() ->
@@ -120,16 +120,16 @@ handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotifi
     spawn(F),
     StreamState;
 handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
-    lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
+    lager:debug("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
     #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
     miner_poc_grpc_client_statem:update_config(UpdatedKeys),
     StreamState;
 handle_msg({data, _Msg}, StreamState) ->
-    lager:info("grpc client received unexpected msg ~p",[_Msg]),
+    lager:warning("grpc client received unexpected msg ~p",[_Msg]),
     StreamState.
 
 handle_info({retry_check_target, Attempt, Msg}, StreamState)  when Attempt =< 3 ->
-    lager:warning("retry_check_target with attempt ~p for msg: ~p", [Attempt, Msg]),
+    lager:debug("retry_check_target with attempt ~p for msg: ~p", [Attempt, Msg]),
     {data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = Msg,
     #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
     Self = self(),

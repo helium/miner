@@ -142,7 +142,7 @@ reg_domain_data_for_addr() ->
     case miner_poc_grpc_client_statem:region_params() of
         {error, _Reason} ->
             lager:info("failed to get regional params, reason: ~p", [_Reason]),
-            {error, fail_to_get_region_params};
+            {error, failed_to_get_region_params};
         {error, Reason, _Details} ->
             lager:info("failed to get regional params, reason: ~p, details: ~p", [Reason, _Details]),
             {error, Reason};
@@ -219,7 +219,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
             Ledger = blockchain:ledger(Chain),
             case blockchain:config(?poc_challenger_type, Ledger) of
                 {ok, validator} ->
-                    lager:info("poc_challenger_type: ~p", [validator]),
+                    lager:debug("poc_challenger_type: ~p", [validator]),
                     %% we are in validator POC mode, open a socket
                     %% this module will handle lora packets
                     application:set_env(miner, lora_mod, miner_lora_light),
@@ -227,7 +227,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
                     {noreply, State#state{chain = Chain, cur_poc_challenger_type = validator, socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
                 NonValidatorChallenger ->
-                    lager:info("poc_challenger_type: ~p", [NonValidatorChallenger]),
+                    lager:debug("poc_challenger_type: ~p", [NonValidatorChallenger]),
                     %% we are NOT in validator POC mode, dont open a socket
                     %% instead let the alternative module 'miner_lora' take it
                     %% and handle lora packets
@@ -256,7 +256,7 @@ handle_info({blockchain_event, _}, State) ->
     {noreply, State};
 
 handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr} = State) ->
-    lager:info("checking regulatory domain for address ~p", [Addr]),
+    lager:debug("checking regulatory domain for address ~p", [Addr]),
     %% dont crash if any of this goes wrong, just try again in a bit
     try
         TempState = maybe_update_reg_data(State),

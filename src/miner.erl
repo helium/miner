@@ -765,7 +765,6 @@ poc_keys(Ledger, Metadata, BlockHash) ->
             {ok, V} -> V;
             _ -> 1
         end,
-    lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
     PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
     {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
     PocKeys1 = lists:foldl(

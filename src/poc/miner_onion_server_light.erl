@@ -174,13 +174,6 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-%%handle_cast({decrypt_p2p, Onion}, #state{chain = undefined} = State) ->
-%%    %% we have no chain yet, so try and set it, the received packed will be dropped
-%%    lager:warning("received ~p whilst no chain.  Dropping packet...", [Onion]),
-%%    timer:sleep(500),
-%%    ?MODULE:decrypt_p2p(Onion),
-%%    {noreply, State#state{chain = blockchain_worker:blockchain()}};
-
 handle_cast({decrypt_p2p, <<IV:2/binary,
                             OnionCompactKey:33/binary,
                             Tag:4/binary,

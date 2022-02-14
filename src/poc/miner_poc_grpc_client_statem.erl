@@ -287,7 +287,7 @@ connect_validator(ValAddr, ValIP, ValPort) ->
 
 -spec connect_stream_poc(grpc_client_custom:connection(), libp2p_crypto:pubkey_bin(), function()) -> {error, any()} | {ok, pid()}.
 connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
-    lager:info("establishing POC stream on connection ~p", [Connection]),
+    lager:debug("establishing POC stream on connection ~p", [Connection]),
     case miner_poc_grpc_client_handler:poc_stream(Connection, SelfPubKeyBin, SelfSigFun) of
         {error, _Reason} = Error->
             Error;
@@ -298,7 +298,7 @@ connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
 
 -spec connect_stream_config_update(grpc_client_custom:connection()) -> {error, any()} | {ok, pid()}.
 connect_stream_config_update(Connection) ->
-    lager:info("establishing config_update stream on connection ~p", [Connection]),
+    lager:debug("establishing config_update stream on connection ~p", [Connection]),
     case miner_poc_grpc_client_handler:config_update_stream(Connection) of
         {error, _Reason} = Error->
             Error;
@@ -326,21 +326,16 @@ do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts)
     %% ask validator for public uri of the challenger of this POC
     case get_uri_for_challenger(OnionKeyHash, Connection) of
         {ok, {IP, Port}} ->
-            lager:info("*** poc key point 1"),
             %% send the report to our challenger
             case send_grpc_unary_req(IP, Port, Req, 'send_report') of
                 {ok, _} ->
-                    lager:info("*** poc key point 2"),
                     ok;
                 _ ->
-                    lager:info("*** poc key point 3"),
                     ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
             end;
         {error, _Reason} ->
-            lager:info("*** poc key point 4"),
             ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
     end,
-    lager:info("*** poc key point 5"),
     ok.
 
 -spec fetch_config([string()], string(), pos_integer()) -> {error, any()} | ok.
@@ -387,7 +382,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack  ->
-            lager:info("send unary failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
+            lager:warning("send unary failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
             {error, req_failed}
     end.
 
@@ -411,7 +406,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack  ->
-            lager:info("send unary failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
+            lager:warning("send unary failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
             {error, req_failed}
     end.
 
