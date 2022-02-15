@@ -211,9 +211,9 @@ setup(_EventType, _Msg, Data) ->
 
 connected(enter, _OldState, Data)->
     {keep_state, Data};
-connected(cast, {send_report, ReportType, Report, OnionKeyHash, RetryAttempts}, #data{connection = Connection, self_sig_fun = SelfSigFun} = Data) ->
+connected(cast, {send_report, ReportType, Report, OnionKeyHash, RetryAttempts}, #data{connection = Connection, self_sig_fun = SelfSigFun, self_pub_key_bin = SelfPubKeyBin} = Data) ->
     lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, Report]),
-    ok = send_report(ReportType, Report, OnionKeyHash, SelfSigFun, Connection, RetryAttempts),
+    ok = send_report(ReportType, Report, OnionKeyHash, SelfPubKeyBin, SelfSigFun, Connection, RetryAttempts),
     {keep_state, Data};
 connected(cast, {update_config, Keys}, #data{val_public_ip = ValIP, val_grpc_port = ValPort} = Data) ->
     lager:info("update_config for keys ~p", [Keys]),
@@ -307,18 +307,18 @@ connect_stream_config_update(Connection) ->
             Res
     end.
 
--spec send_report(witness | receipt, any(), binary(), function(), grpc_client_custom:connection(), non_neg_integer()) -> ok.
-send_report(_ReportType, _Report, _OnionKeyHash, _SigFun, _Connection, 0) ->
+-spec send_report(witness | receipt, any(), binary(), libp2p_crypto:pubkey_bin(), function(), grpc_client_custom:connection(), non_neg_integer()) -> ok.
+send_report(_ReportType, _Report, _OnionKeyHash, _SelfPubKeyBin, _SigFun, _Connection, 0) ->
     ok;
-send_report(receipt = ReportType, Report, OnionKeyHash, SigFun, Connection, RetryAttempts) ->
+send_report(receipt = ReportType, Report, OnionKeyHash, SelfPubKeyBin, SigFun, Connection, RetryAttempts) ->
     EncodedReceipt = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_receipt_v1_pb),
     SignedReceipt = Report#blockchain_poc_receipt_v1_pb{signature = SigFun(EncodedReceipt)},
-    Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedReceipt}},
+    Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedReceipt}, address = SelfPubKeyBin},
     do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts);
-send_report(witness = ReportType, Report, OnionKeyHash, SigFun, Connection, RetryAttempts) ->
+send_report(witness = ReportType, Report, OnionKeyHash, SelfPubKeyBin, SigFun, Connection, RetryAttempts) ->
     EncodedWitness = gateway_miner_client_pb:encode_msg(Report, blockchain_poc_witness_v1_pb),
     SignedWitness = Report#blockchain_poc_witness_v1_pb{signature = SigFun(EncodedWitness)},
-    Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedWitness}},
+    Req = #gateway_poc_report_req_v1_pb{onion_key_hash = OnionKeyHash,  msg = {ReportType, SignedWitness}, address = SelfPubKeyBin},
     do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts).
 
 -spec do_send_report(binary(), witness | receipt, any(), binary(), grpc_client_custom:connection(), non_neg_integer()) -> ok.
