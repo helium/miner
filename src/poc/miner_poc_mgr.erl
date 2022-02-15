@@ -387,17 +387,18 @@ handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
-    lager:info("got witness ~p", [Witness]),
+    lager:info("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
     case validate_witness(Witness, Ledger) of
         false ->
-            lager:warning("ignoring invalid witness ~p", [Witness]),
+            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: invalid", [Witness, OnionKeyHash]),
             {noreply, State};
         true ->
             %% get the local POC
             case ?MODULE:local_poc(OnionKeyHash) of
                 {error, _} ->
+                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: no local_poc", [Witness, OnionKeyHash]),
                     {noreply, State};
                 {ok, #local_poc{packet_hashes = PacketHashes, responses = Response0} = POC} ->
                     PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
@@ -405,16 +406,17 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
                     %% check this is a known layer of the packet
                     case lists:keyfind(PacketHash, 2, PacketHashes) of
                         false ->
-                            lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                            lager:warning("Saw invalid witness with packet hash ~p and onionkeyhash ~p", [PacketHash, OnionKeyHash]),
                             {noreply, State};
                         {GatewayWitness, PacketHash} ->
-                            lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                            lager:warning("Saw self-witness from ~p for onionkeyhash ~p", [GatewayWitness, OnionKeyHash]),
                             {noreply, State};
                         _ ->
                             Witnesses = maps:get(PacketHash, Response0, []),
                             PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
                             case erlang:length(Witnesses) >= PerHopMaxWitnesses of
                                 true ->
+                                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: exceeded per hop max witnesses", [Witness, OnionKeyHash]),
                                     {noreply, State};
                                 false ->
                                     %% Don't allow putting duplicate response in the witness list resp
@@ -459,12 +461,13 @@ handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = St
     Ledger = blockchain:ledger(Chain),
     case blockchain_poc_receipt_v1:is_valid(Receipt, Ledger) of
         false ->
-            lager:warning("ignoring invalid receipt ~p", [Receipt]),
+            lager:warning("ignoring invalid receipt ~p for onionkeyhash", [Receipt, OnionKeyHash]),
             {noreply, State};
         true ->
             %% get the POC data from the cache
             case ?MODULE:local_poc(OnionKeyHash) of
                 {error, _} ->
+                    lager:warning("ignoring receipt ~p for onionkeyhash ~p. Reason: no local_poc", [Receipt, OnionKeyHash]),
                     {noreply, State};
                 {ok, #local_poc{challengees = Challengees, responses = Response0} = POC} ->
                     case lists:keyfind(Gateway, 1, Challengees) of
@@ -518,14 +521,15 @@ handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = St
                                     {noreply, State}
                             end;
                         {Gateway, OtherData} ->
-                            lager:warning("Got incorrect layer data ~p from ~p (expected ~p)", [
+                            lager:warning("Got incorrect layer data ~p from ~p (expected ~p) for onionkeyhash ~p", [
                                 Gateway,
                                 OtherData,
-                                Receipt
+                                Receipt,
+                                OnionKeyHash
                             ]),
                             {noreply, State};
                         false ->
-                            lager:warning("Got unexpected receipt from ~p", [Gateway]),
+                            lager:warning("Got unexpected receipt from ~p for onionkeyhash", [Gateway, OnionKeyHash]),
                             {noreply, State}
                     end
             end
