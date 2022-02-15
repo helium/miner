@@ -892,7 +892,8 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
 -spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->
     {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
 create_request(Address, BlockHash, Ledger) ->
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+    Network = application:get_env(miner, network, mainnet),
+    Keys = libp2p_crypto:generate_keys(Network, ecc_compact),
     Secret = libp2p_crypto:keys_to_bin(Keys),
     #{public := OnionCompactKey} = Keys,
     Version = blockchain_txn_poc_request_v1:get_version(Ledger),

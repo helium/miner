@@ -299,8 +299,9 @@ genesis_proof_usage() ->
     ].
 
 genesis_key(["genesis", "key" | _], [], []) ->
+    Network = application:get_env(miner, network, mainnet),
     Keys =
-        libp2p_crypto:generate_keys(ecc_compact),
+        libp2p_crypto:generate_keys(Network, ecc_compact),
     Bin = libp2p_crypto:keys_to_bin(Keys),
     B58 = base58:binary_to_base58(Bin),
     [clique_status:text([B58])];
