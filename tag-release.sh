@@ -3,7 +3,7 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [-h] <SHA>"
+    echo "Usage: $0 [-h] [-n <NAMED_TAG>] <SHA>"
 }
 
 dep_hash() {
