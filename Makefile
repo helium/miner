@@ -10,7 +10,6 @@ else
 endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
-
 GATEWAY_RS_VSN ?= main
 SEMTECH_UDP_VSN ?= master
 
@@ -20,14 +19,11 @@ deps:
 	$(REBAR) get-deps
 
 compile:
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
 	$(MAKE) external_svcs
 	$(REBAR) compile
 
-clean:
-	$(MAKE) clean_external_svcs
-	$(MAKE) clean_grpc
-	rm -rf $(GRPC_SERVICES_DIR)
+clean: clean_external_svcs clean_grpc
 	$(REBAR) clean
 
 test: compile
@@ -39,10 +35,10 @@ typecheck:
 ci: compile
 	$(REBAR) do dialyzer,xref && ($(REBAR) do eunit,ct || (mkdir -p artifacts; tar --exclude='./_build/test/lib' --exclude='./_build/test/plugins' -czf artifacts/$(CIBRANCH).tar.gz _build/test; false))
 
-release:
+release: grpc
 	$(REBAR) as prod release -n miner
 
-validator: $(GRPC_SERVICE_DIR)
+validator: grpc
 	$(REBAR) as validator release -n miner -v $(VAL_VERSION)
 
 cover:
@@ -54,7 +50,7 @@ aws:
 seed:
 	$(REBAR) as seed release
 
-docker:
+docker: grpc
 	$(REBAR) as docker release
 
 devrel:
@@ -72,7 +68,7 @@ devrelease:
 
 grpc: $(GRPC_SERVICE_DIR)
 	@echo "generating miner grpc services"
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
 
 
 $(GRPC_SERVICE_DIR):
