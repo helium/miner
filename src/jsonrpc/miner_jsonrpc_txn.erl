@@ -108,5 +108,5 @@ parse_integer(Value) when is_binary(Value) ->
         binary_to_integer(Value)
     catch
         _:_ ->
-            {error, {invalid_integer, Value}}
+            throw({invalid_integer, Value})
     end.
