@@ -201,10 +201,11 @@ key_config() ->
     end.
 
 -spec libp2p_to_gateway_key(libp2p_crypto:key_map()) -> libp2p_crypto:key_map().
-libp2p_to_gateway_key(#{secret := {ecc_compact, PrivKey}}) ->
+libp2p_to_gateway_key(#{secret := {ecc_compact, PrivKey}, network := Network}) ->
     {ok, #{
         secret => {ecc_compact, PrivKey#'ECPrivateKey'{publicKey = <<>>}},
-        public => {ecc_compact, <<>>}
+        public => {ecc_compact, <<>>},
+        network => Network
     }}.
 
 %% @doc prints the public hotspot and onboadring key in a file:consult
@@ -238,7 +239,7 @@ key_proplist_to_uri(Props) ->
     Bus = proplists:get_value(bus, Props, "i2c-1"),
     Address = proplists:get_value(address, Props, 16#60),
     KeySlot = proplists:get_value(key_slot, Props, 0),
-    Network = application:get_env(blockchain, network, mainnet),
+    Network = application:get_env(miner, network, mainnet),
     lists:flatten(io_lib:format("ecc://~s:~p?slot=~p&network=~s", [Bus, Address, KeySlot, Network])).
 
 key_uri_to_proplist(Uri) ->
