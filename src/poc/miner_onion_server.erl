@@ -118,6 +118,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger),
+    %%{ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
     %% check this GW has the capability to send receipts
     %% it not then we are done
     case miner_util:has_valid_local_capability(?GW_CAPABILITY_POC_RECEIPT, Ledger) of
@@ -150,7 +151,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                                 Acc;
                             false ->
                                 P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                                case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
+                                case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, miner_poc_handler, []) of
                                     {error, _Reason} ->
                                         lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
                                         [error|Acc];
@@ -209,6 +210,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     {ok, PoCs} = blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger),
+
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     %% check this GW has the capability to send witnesses
     %% it not then we are done
@@ -238,7 +240,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                         false ->
                             EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
                             P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                            case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
+                            case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, miner_poc_handler, []) of
                                 {error, _Reason} ->
                                     lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
                                     timer:sleep(timer:seconds(30)),
@@ -340,24 +342,24 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
     Ledger = blockchain:ledger(Chain),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) of
-        poc_not_found ->
-            _ = erlang:spawn(fun() ->
-                case wait_for_block(fun() ->
-                    case blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger) of
-                        {ok, _} ->
-                            true;
-                        _ ->
-                            false
-                    end
-                end, 10) of
-                    ok ->
-                        ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream);
-                    {error, _} ->
-                        lager:info([{poc_id, POCID}], "unable to locate POC ID ~p, dropping", [POCID]),
-                        ok
-                end
-            end),
-            State;
+                   poc_not_found ->
+                       _ = erlang:spawn(fun() ->
+                           case wait_for_block(fun() ->
+                               case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+                                   {ok, _} ->
+                                       true;
+                                   _ ->
+                                       false
+                               end
+                                               end, 10) of
+                               ok ->
+                                   ?MODULE:retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream);
+                               {error, _} ->
+                                   lager:info([{poc_id, POCID}], "unable to locate POC ID ~p, dropping", [POCID]),
+                                   ok
+                           end
+                                        end),
+                       State;
         {error, fail_decrypt} ->
             lager:info([{poc_id, POCID}],
                        "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
@@ -459,7 +461,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
 try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     Ledger = blockchain:ledger(Chain),
-    case blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger) of
+    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
         {error, not_found} ->
             poc_not_found;
         {ok, [PoC]} ->
@@ -471,8 +473,8 @@ try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) 
                 {Payload, NextLayer} ->
                     {ok, Payload, NextLayer}
             catch C:E:S ->
-                    lager:warning([{poc_id, POCID}], "crash during decrypt ~p:~p ~p", [C, E, S]),
-                    {error, {C, E}}
+                lager:warning([{poc_id, POCID}], "crash during decrypt ~p:~p ~p", [C, E, S]),
+                {error, {C, E}}
             end;
         {ok, _} ->
             %% TODO we might want to try all the PoCs here

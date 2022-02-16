@@ -30,6 +30,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 COPY ./rebar* ./Makefile ./
 COPY ./config/grpc_client_gen_local.config ./config/
 
+
 RUN ./rebar3 compile
 
 FROM deps-compiler as builder

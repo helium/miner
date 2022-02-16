@@ -61,6 +61,8 @@
 %% TODO No need to pass Meta when tuple. Use sum type: {map, Meta} | tuple
 metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
+    Ledger = blockchain:ledger(Chain),
+    {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     case Version of
         tuple ->
@@ -93,7 +95,38 @@ metadata(Version, Meta, Chain) ->
                                 lager:info("no snapshot interval configured"),
                                 ChainMeta0
                         end,
-            t2b(maps:merge(Meta, ChainMeta))
+            ChainMeta1 =
+                case blockchain:config(?poc_challenger_type, Ledger) of
+                    {ok, validator} ->
+                        %% generate a set of ephemeral keys for POC usage
+                        %% the hashes of the public keys are added to metadata
+                        %% the key sets are passed to bc core poc mgr
+                        ChallengeRate =
+                            case blockchain:config(?poc_challenge_rate, Ledger) of
+                                {ok, CR} -> CR;
+                                _ -> 1
+                            end,
+                        lager:info("*** poc challenge rate ~p", [ChallengeRate] ),
+                        %% if a val is in the ignore list then dont generate poc keys for it
+                        %% TODO: this is a temp hack.  remove when testing finished
+                        IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
+                        SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+                        case not lists:member(SelfPubKeyBin, IgnoreVals) of
+                            true ->
+                                {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
+                                lager:info("poc ephemeral keys ~p", [EmpKeys]),
+                                lager:info("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
+                                ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
+                                maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
+                            false ->
+                                ChainMeta
+                        end;
+                    _ ->
+                        ChainMeta
+
+                 end,
+            lager:info("ChainMeta1 ~p", [ChainMeta1]),
+            t2b(maps:merge(Meta, ChainMeta1))
     end.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
@@ -119,7 +152,8 @@ init([Members, Id, N, F, BatchSize, SK, Chain, Round, Buf]) ->
                 signatures_required = N - F,
                 hbbft = HBBFT,
                 swarm_keys = {MyPubKey, SignFun},  % For re-signing on var-autoskip
-                chain = Chain1}}.
+                chain = Chain1
+                }}.
 
 handle_command(start_acs, State) ->
     case hbbft:start_on_demand(State#state.hbbft) of
@@ -820,6 +854,17 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
+
+generate_ephemeral_keys(N, ChallengeRate) ->
+    NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
+    lists:foldl(
+        fun(_N, {AccKeys, AccHashes})->
+            Keys = libp2p_crypto:generate_keys(ecc_compact),
+            #{public := OnionCompactKey} = Keys,
+            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+            {[Keys | AccKeys], [OnionHash | AccHashes]}
+        end,
+    {[], []}, lists:seq(1, NumKeys)).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
