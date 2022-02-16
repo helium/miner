@@ -34,7 +34,10 @@ handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
             maps:get(<<"payer">>, Params, undefined)
         ),
         Owner = binary_to_list(OwnerB58),
-        {ok, Bin} = blockchain:add_gateway_txn(Owner, Payer),
+        StakingFee = parse_integer(maps:get(<<"staking_fee">>, Params, undefined)),
+        Fee = parse_integer(maps:get(<<"fee">>, Params, undefined)),
+
+        {ok, Bin} = blockchain:add_gateway_txn(Owner, Payer, Fee, StakingFee),
         B64 = base64:encode(Bin),
         #{ <<"result">> => B64 }
     catch
@@ -96,3 +99,14 @@ parse_location(#{ <<"lat">> := LatIn,
             {error, {invalid_location, {LatIn, LonIn}}}
     end;
 parse_location(_Other) -> {error, no_valid_location_found}.
+
+-spec parse_integer(binary() | undefined) -> integer() | undefined.
+parse_integer(undefined) ->
+    undefined;
+parse_integer(Value) when is_binary(Value) ->
+    try 
+        binary_to_integer(Value)
+    catch
+        _:_ ->
+            {error, {invalid_integer, Value}}
+    end.
