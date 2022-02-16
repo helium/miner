@@ -40,42 +40,42 @@ end_per_suite(Config) ->
 init_per_testcase(_TestCase, Config0) ->
     Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
     try
-    Miners = ?config(miners, Config),
-    Addresses = ?config(addresses, Config),
-    InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
-    AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
+        Miners = ?config(miners, Config),
+        Addresses = ?config(addresses, Config),
+        InitialPaymentTransactions = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
+        AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
-    NumConsensusMembers = ?config(num_consensus_members, Config),
-    BlockTime = ?config(block_time, Config),
-    BatchSize = ?config(batch_size, Config),
-    Curve = ?config(dkg_curve, Config),
-    %% VarCommitInterval = ?config(var_commit_interval, Config),
+        NumConsensusMembers = ?config(num_consensus_members, Config),
+        BlockTime = ?config(block_time, Config),
+        BatchSize = ?config(batch_size, Config),
+        Curve = ?config(dkg_curve, Config),
+        %% VarCommitInterval = ?config(var_commit_interval, Config),
 
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+        Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-    InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
-                                                   %% rule out rewards
-                                                   ?election_interval => infinity,
-                                                   ?num_consensus_members => NumConsensusMembers,
-                                                   ?batch_size => BatchSize,
-                                                   ?dkg_curve => Curve,
-                                                   ?allow_zero_amount => false}),
+        InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
+                                                       %% rule out rewards
+                                                       ?election_interval => infinity,
+                                                       ?num_consensus_members => NumConsensusMembers,
+                                                       ?batch_size => BatchSize,
+                                                       ?dkg_curve => Curve,
+                                                       ?allow_zero_amount => false}),
 
-    {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
-                                             Addresses, NumConsensusMembers, Curve),
-    %% integrate genesis block
-    _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
+        {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+                                                 Addresses, NumConsensusMembers, Curve),
+        %% integrate genesis block
+        _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
-    %% Get both consensus and non consensus miners
-    {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
+        %% Get both consensus and non consensus miners
+        {ConsensusMiners, NonConsensusMiners} = miner_ct_utils:miners_by_consensus_state(Miners),
 
-    %% confirm we have a height of 1
-    ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
+        %% confirm we have a height of 1
+        ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
-    [   {consensus_miners, ConsensusMiners},
-        {non_consensus_miners, NonConsensusMiners}
-        | Config]
+        [   {consensus_miners, ConsensusMiners},
+            {non_consensus_miners, NonConsensusMiners}
+            | Config]
     catch
         What:Why ->
             end_per_testcase(_TestCase, Config),
@@ -132,7 +132,7 @@ single_payment_test(Config) ->
 
     Group = ct_rpc:call(Candidate, gen_server, call, [miner, consensus_group, infinity]),
     false = Group == undefined,
-    ok = libp2p_group_relcast:handle_command(Group, {txn, SignedTxn2}),
+    {ok, 1, 1} = libp2p_group_relcast:handle_command(Group, {txn, SignedTxn2}),
     ct_rpc:call(Candidate, sys, suspend, [Group]),
 
     {ok, CurrentHeight2} = ct_rpc:call(Payer, blockchain, height, [Chain]),
@@ -219,7 +219,7 @@ bad_payment_test(Config) ->
     Amount = 0,
     Txn = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount, 1]),
 
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
     SignedTxn = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn, SigFun]),
 
@@ -229,7 +229,7 @@ bad_payment_test(Config) ->
     Amount2 = -100,
     Txn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, Amount2, 1]),
 
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Payer, blockchain_swarm, keys, []),
 
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
 

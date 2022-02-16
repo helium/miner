@@ -116,11 +116,11 @@ txn_in_sequence_nonce_test(Config) ->
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
     PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
 
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
     Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
@@ -165,10 +165,10 @@ txn_out_of_sequence_nonce_test(Config) ->
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
     PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
     Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
@@ -235,10 +235,10 @@ txn_invalid_nonce_test(Config) ->
     PayerAddr = Addr,
     Payee = hd(miner_ct_utils:shuffle(ConMiners)),
     PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
-    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    {ok, Pubkey, SigFun, ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
 
     %% the first txn
     Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
