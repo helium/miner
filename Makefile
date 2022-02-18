@@ -92,6 +92,7 @@ external_svcs:
 
 	@echo "--- semtech-udp ---"
 	$(call clone_project,semtech-udp,$(SEMTECH_UDP_VSN))
+	echo "nightly" > external/semtech-udp/rust-toolchain # remove this when buildkite gets its rust updated to >=1.58
 	@(cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux)
 	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
 
