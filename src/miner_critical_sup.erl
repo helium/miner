@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/4]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,18 +33,26 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link(PublicKey, SigFun, ECDHFun, ECCWorker) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, [PublicKey, SigFun, ECDHFun, ECCWorker]).
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [[]]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
+init(_Opts) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 0,
         period => 1
     },
+
+    #{ pubkey := PublicKey,
+       key_slot := KeySlot,
+       ecdh_fun := ECDHFun,
+       bus := Bus,
+       address := Address,
+       sig_fun := SigFun
+     } = miner_keys:keys(),
 
     %% Blockchain Supervisor Options
     SeedNodes =
@@ -86,10 +94,19 @@ init([PublicKey, SigFun, ECDHFun, ECCWorker]) ->
         end,
 
 
-    ChildSpecs =
-        ECCWorker ++
-        [
-         ?SUP(blockchain_sup, [BlockchainOpts])
-        ] ++
-        ConsensusMgr,
+    ChildSpecs0 = [?SUP(blockchain_sup, [BlockchainOpts])] ++ ConsensusMgr,
+    GatewayAndMux = case application:get_env(miner, gateway_and_mux_enable) of
+                        {ok, true} -> true;
+                        _ -> false
+                    end,
+    ChildSpecs = case {GatewayAndMux, application:get_env(blockchain, key)} of
+                     {false, {ok, {ecc, _}}} ->
+                         [
+                          %% Miner retains full control and responsibility for key access
+                          ?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])
+                         ] ++ ChildSpecs0;
+                     _ ->
+                         ChildSpecs0
+                 end,
+
     {ok, {SupFlags, ChildSpecs}}.
