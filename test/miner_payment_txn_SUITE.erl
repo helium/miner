@@ -19,7 +19,8 @@
          single_payment_test/1,
          self_payment_test/1,
          bad_payment_test/1,
-         dependent_payment_test/1
+         dependent_payment_test/1,
+         block_size_limit_test/1
         ]).
 
 %% common test callbacks
@@ -28,7 +29,8 @@ all() -> [
           single_payment_test,
           self_payment_test,
           bad_payment_test,
-          dependent_payment_test
+          dependent_payment_test,
+          block_size_limit_test
          ].
 
 init_per_suite(Config) ->
@@ -37,8 +39,8 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     Config.
 
-init_per_testcase(_TestCase, Config0) ->
-    Config = miner_ct_utils:init_per_testcase(?MODULE, _TestCase, Config0),
+init_per_testcase(TestCase, Config0) ->
+    Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
     try
         Miners = ?config(miners, Config),
         Addresses = ?config(addresses, Config),
@@ -46,24 +48,45 @@ init_per_testcase(_TestCase, Config0) ->
         AddGwTxns = [blockchain_txn_gen_gateway_v1:new(Addr, Addr, h3:from_geo({37.780586, -122.469470}, 13), 0)
                  || Addr <- Addresses],
 
+        {AuxAccounts, AuxAcctFunds} =
+            case TestCase of
+                block_size_limit_test ->
+                    AuxKeys = [libp2p_crypto:generate_keys(ecc_compact) || _X <- lists:seq(1,50)],
+                    AuxAddrs = [libp2p_crypto:pubkey_to_bin(PubKey) || #{public := PubKey} <- AuxKeys],
+                    AuxSigFuns = [libp2p_crypto:mk_sig_fun(SecKey) || #{secret := SecKey} <- AuxKeys],
+                    AuxAcctFunds0 = [blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- AuxAddrs],
+                    {lists:zip(AuxAddrs, AuxSigFuns), AuxAcctFunds0};
+                _ ->
+                    {[], []}
+            end,
+
         NumConsensusMembers = ?config(num_consensus_members, Config),
         BlockTime = ?config(block_time, Config),
         BatchSize = ?config(batch_size, Config),
         Curve = ?config(dkg_curve, Config),
-        %% VarCommitInterval = ?config(var_commit_interval, Config),
+
+        TestCaseVars =
+            case TestCase of
+                block_size_limit_test ->
+                    #{?block_time => 2000,
+                      ?block_size_limit => 512,
+                      ?max_payments => 25};
+                _ -> #{?block_time => BlockTime}
+            end,
 
         Keys = libp2p_crypto:generate_keys(ecc_compact),
 
-        InitialVars = miner_ct_utils:make_vars(Keys, #{?block_time => BlockTime,
+        InitialVars = miner_ct_utils:make_vars(Keys, maps:merge(
+                                                     #{?num_consensus_members => NumConsensusMembers,
                                                        %% rule out rewards
                                                        ?election_interval => infinity,
-                                                       ?num_consensus_members => NumConsensusMembers,
                                                        ?batch_size => BatchSize,
                                                        ?dkg_curve => Curve,
-                                                       ?allow_zero_amount => false}),
+                                                       ?allow_zero_amount => false}, TestCaseVars)),
 
-        {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns,
+        {ok, DKGCompletedNodes} = miner_ct_utils:initial_dkg(Miners, InitialVars ++ InitialPaymentTransactions ++ AddGwTxns ++ AuxAcctFunds,
                                                  Addresses, NumConsensusMembers, Curve),
+
         %% integrate genesis block
         _GenesisLoadResults = miner_ct_utils:integrate_genesis_block(hd(DKGCompletedNodes), Miners -- DKGCompletedNodes),
 
@@ -74,11 +97,12 @@ init_per_testcase(_TestCase, Config0) ->
         ok = miner_ct_utils:wait_for_gte(height, Miners, 2),
 
         [   {consensus_miners, ConsensusMiners},
-            {non_consensus_miners, NonConsensusMiners}
+            {non_consensus_miners, NonConsensusMiners},
+            {aux_accounts, AuxAccounts}
             | Config]
     catch
         What:Why ->
-            end_per_testcase(_TestCase, Config),
+            end_per_testcase(TestCase, Config),
             erlang:What(Why)
     end.
 
@@ -126,6 +150,7 @@ single_payment_test(Config) ->
 
     SignedTxn2 = ct_rpc:call(Payer, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
 
+    %% NOTE: Is this commented txn submission still necessary?
     %ok = ct_rpc:call(Payer, blockchain_worker, submit_txn, [SignedTxn2]),
 
     Candidate = hd(ConsensusMiners),
@@ -305,7 +330,82 @@ dependent_payment_test(Config) ->
     end,
     ok.
 
+block_size_limit_test(Config) ->
+    [Miner | _] = Miners = ?config(miners, Config),
+    AuxAccounts = ?config(aux_accounts, Config),
+
+    GetMiner = fun() ->
+                   N = rand:uniform(length(Miners)),
+                   lists:nth(N, Miners)
+               end,
+
+    {Accounts1, [{BigTxnAddr, BigTxnSig} | Accounts2]} = lists:split(length(AuxAccounts) div 2, AuxAccounts),
+    SignedTxns1 = generate_txns(Accounts1, 50),
+    lists:foreach(fun(ST1) ->
+                      ct_rpc:call(GetMiner(), blockchain_txn_mgr, submit, [ST1, fun(_) -> ok end]),
+                      timer:sleep(1000)
+                  end, SignedTxns1),
+
+    BigTxnPayments = [blockchain_payment_v2:new(Acct, 10) || {Acct, _SigFun} <- Accounts1],
+    BigTxnUnsigned = blockchain_txn_payment_v2:new(BigTxnAddr, BigTxnPayments, 1),
+    BigTxnSigned = blockchain_txn_payment_v2:sign(BigTxnUnsigned, BigTxnSig),
+    ok = ct_rpc:call(Miner, blockchain_txn_mgr, submit, [BigTxnSigned, fun(_) -> ok end]),
+
+    SignedTxns2 = generate_txns(Accounts2, 50),
+    lists:foreach(fun(ST2) ->
+                      ct_rpc:call(GetMiner(), blockchain_txn_mgr, submit, [ST2, fun(_) -> ok end]),
+                      timer:sleep(1000)
+                  end, SignedTxns2),
+
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 50, 100),
+
+    true = miner_ct_utils:wait_until(
+             fun() ->
+                 BigTxnMinerCache = get_cached_txns_with_exclusions(Miner, [blockchain_txn_poc_request_v1]),
+                 ct:pal("Txn Mgr Cache: ~p", [BigTxnMinerCache]),
+                 true
+             end, 60, 100),
+
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    Blocks0 = [{Height0, ct_rpc:call(Miner, blockchain, get_block, [Height0, Chain])} || Height0 <- lists:seq(3,50)],
+    Blocks1 = [{Height, Block} || {Height, {ok, Block}} <- Blocks0],
+    BlockMap = maps:from_list(Blocks1),
+    TxnsMap = maps:map(fun(_K, V) -> blockchain_block:transactions(V) end, BlockMap),
+    BlockSizes = lists:sort(fun({K1, _}, {K2, _}) -> K1 < K2 end, maps:to_list(maps:map(fun(_K, V) ->
+                            {length(V), lists:foldl(fun(T, Acc) ->
+                                            Acc + byte_size(blockchain_txn:serialize(T))
+                                        end, 0, V)}
+                        end, TxnsMap))),
+    ct:pal("Txn sizes by block: ~p", [BlockSizes]),
+
+
+    ct:fail("Test go boom"),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
+
+generate_txns([Hd | _] = Accounts, Amt) ->
+    generate_txns(Accounts, Hd, Amt, []).
+
+generate_txns([{LastAddr, LastSig} | []], {FirstAddr, _}, Amt, Acc) ->
+    Payment = blockchain_payment_v2:new(FirstAddr, Amt),
+    UnsignedTxn = blockchain_txn_payment_v2:new(LastAddr, [Payment], 1),
+    SignedTxn = blockchain_txn_payment_v2:sign(UnsignedTxn, LastSig),
+    [SignedTxn | Acc];
+generate_txns([{PayerAddr, PayerSig} | [{PayeeAddr, _} | _] = Next], First, Amt, Acc) ->
+    Payment = blockchain_payment_v2:new(PayeeAddr, Amt),
+    UnsignedTxn = blockchain_txn_payment_v2:new(PayerAddr, [Payment], 1),
+    SignedTxn = blockchain_txn_payment_v2:sign(UnsignedTxn, PayerSig),
+    generate_txns(Next, First, Amt, [SignedTxn | Acc]).
+
+get_cached_txns_with_exclusions(Miner, Exclusions) ->
+    case ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []) of
+        TxnMap when map_size(TxnMap) > 0 ->
+            ct:pal("~p txns in txn list", [maps:size(TxnMap)]),
+            maps:filter(fun(Txn, _TxnData) -> not lists:member(blockchain_txn:type(Txn), Exclusions) end, TxnMap);
+        _ ->
+            ct:pal("empty txn map", []),
+            #{}
+    end.

@@ -937,7 +937,7 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
 
     %% set blockchain configuration
-    Key = {PubKey, ECDH, SigFun},
+    Key = #{pubkey => PubKey, ecdh_fun => ECDH, sig_fun => SigFun},
 
     MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
     ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),
