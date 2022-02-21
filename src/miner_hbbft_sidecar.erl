@@ -20,8 +20,15 @@
 
 -define(SERVER, ?MODULE).
 
--define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 75,
+-ifdef(TEST).
+-define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 10000,
+                    blockchain_txn_poc_receipts_v2 => 10000,
                     blockchain_txn_consensus_group_v1 => 30000}).
+-else.
+-define(SlowTxns, #{blockchain_txn_poc_receipts_v1 => 75,
+                    blockchain_txn_poc_receipts_v2 => 75,
+                    blockchain_txn_consensus_group_v1 => 30000}).
+-endif.
 
 %% txns that do not appear naturally
 -define(InvalidTxns, [blockchain_txn_reward_v1, blockchain_txn_reward_v2]).

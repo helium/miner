@@ -74,6 +74,17 @@ init(_Opts) ->
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
 
+    %% if POCs are over grpc and we are a gateway then dont start the chain
+    GatewaysRunChain = application:get_env(miner, gateways_run_chain, true),
+    MinerMode = application:get_env(miner, mode, gateway),
+    case {MinerMode, GatewaysRunChain} of
+        {gateway, false} ->
+            lager:info("grpc gateway, not loading chain"),
+            application:set_env(blockchain, autoload, false);
+        _ ->
+            ok
+    end,
+
     BlockchainOpts = [
         {key, {PublicKey, SigFun, ECDHFun}},
         {seed_nodes, SeedNodes ++ SeedAddresses},

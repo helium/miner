@@ -45,8 +45,9 @@ handle_rpc(<<"info_p2p_status">>, []) ->
             height => ?TO_VALUE(list_to_integer(Height))
         };
 handle_rpc(<<"info_region">>, []) ->
+    LoraMod = application:get_env(miner, lora_mod, miner_lora),
     R =
-        case miner_lora:region() of
+        case LoraMod:region() of
             {ok, undefined} -> null;
             {ok, Region} -> atom_to_binary(Region, utf8)
         end,
