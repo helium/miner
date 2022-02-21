@@ -52,7 +52,8 @@
         seen           => binary(),
         bba_completion => binary(),
         head_hash      => blockchain_block:hash(),
-        snapshot_hash  => binary()
+        snapshot_hash  => binary(),
+        poc_onion_keys => list()
      }.
 
 -type metadata() ::
@@ -329,7 +330,8 @@ version() ->
 %% ------------------------------------------------------------------
 
 init(_Args) ->
-    lager:info("STARTING UP MINER"),
+    Mode = application:get_env(miner, mode),
+    lager:info("STARTING UP MINER with mode ~p", [Mode]),
     ok = blockchain_event:add_handler(self()),
     %% TODO: Maybe put this somewhere else?
     ok = miner_discovery_handler:add_stream_handler(blockchain_swarm:tid()),
@@ -574,6 +576,13 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
+    POCKeys =
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, validator} ->
+                poc_keys(Ledger, Metadata, CurrentBlockHash);
+            _ ->
+                []
+        end,
     SeenBBAs =
         [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
@@ -602,7 +611,8 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
             epoch_start     =>  EpochStart,
             seen_votes      =>  SeenVectors,
             bba_completion  =>  BBA,
-            snapshot_hash   =>  SnapshotHash
+            snapshot_hash   =>  SnapshotHash,
+            poc_keys        =>  POCKeys
         }),
     BinNewBlock = blockchain_block:serialize(NewBlock),
     Signature = SignFun(BinNewBlock),
@@ -738,6 +748,34 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
         _ ->
             <<>>
     end.
+
+-spec poc_keys(L, M, B) -> []
+    when L :: blockchain_ledger_v1:ledger(),
+         M :: metadata(),
+         B :: blockchain_block:hash().
+poc_keys(Ledger, Metadata, BlockHash) ->
+    %% Construct a set of poc keys. Each node will define its own set within the metadata
+    %% We want to take a deterministic random subset of these up to a max of poc challenge rate
+    %% Use the blockhash as the seed
+    RandState = blockchain_utils:rand_state(BlockHash),
+    ChallengeRate =
+        case blockchain:config(?poc_challenge_rate, Ledger) of
+            {ok, V} -> V;
+            _ -> 1
+        end,
+    PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
+    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
+    PocKeys1 = lists:foldl(
+        fun({MinerAddr, PocKeys}, Acc)->
+            Pos = miner_util:index_of(MinerAddr, CGMembers),
+            NormalisedKeys = lists:map(fun(PocKey) -> {Pos, PocKey} end, PocKeys),
+            [NormalisedKeys | Acc]
+        end, [], PocKeys0),
+    sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate, RandState).
+
+sort_and_truncate_poc_keys(L, MaxKeys, RandState) ->
+    {_, TruncList} = blockchain_utils:deterministic_subset(MaxKeys, RandState, L),
+    TruncList.
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
 common_enough_or_default(_, [], Default) ->
