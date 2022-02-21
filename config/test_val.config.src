@@ -51,6 +51,13 @@
    %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'}
+   {region_override, 'US915'},
+   {gateway_and_mux_enable, false},
+   {seed_validators, [
+       {"1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6", "18.223.171.149", 8080},     %% test-val2
+       {"1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL", "3.17.164.253", 8080},       %% test-val3
+       {"1ZAxCrEsigGVbLUM37Jki6p88kyZ5NVqjVC6oHSbqu49t7bQDym", "18.191.60.231", 8080}       %% test-val6
+       ]
+   }
   ]}
 ].
