@@ -223,7 +223,8 @@ info_region_usage() ->
     ].
 
 info_region(["info", "region"], [], []) ->
-    case miner_lora:region() of
+    LoraMod = application:get_env(miner, lora_mod, miner_lora),
+    case LoraMod:region() of
         {ok, undefined} ->
             {exit_status, 1, [clique_status:text("undefined")]};
         {ok, Region} ->
@@ -271,7 +272,7 @@ info_onboarding(["info", "onboarding"], [], Flags) ->
             ProvidedKey
     end,
     PayerOutputOnly = proplists:is_defined(just_payer, Flags),
-    
+
     case OnboardingKey of
         undefined ->
             error_message("This miner has no onboarding key, no onboarding info available.");
@@ -293,7 +294,7 @@ info_onboarding(["info", "onboarding"], [], Flags) ->
 %%
 -spec onboarding_info_for_key(string()) -> {ok, {map(), map()}} | notfound | {error, non_neg_integer()}.
 onboarding_info_for_key(OnboardingKey) ->
-    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ OnboardingKey, 
+    Url = ?ONBOARDING_API_URL_BASE ++ "/hotspots/" ++ OnboardingKey,
     case get_api_json_as_map(Url) of
         {ok, OnboardingResult} ->
             OnboardingData = maps:get(<<"data">>, OnboardingResult),
@@ -308,7 +309,7 @@ onboarding_info_for_key(OnboardingKey) ->
 -spec clique_status_for_onboarding_info({map(), map()}, boolean()) -> list().
 clique_status_for_onboarding_info({MinerData, MakerData}, PayerOutputOnly) ->
     case PayerOutputOnly of
-        true -> 
+        true ->
             PayerAddress = maps:get(<<"address">>, MakerData),
             PayerAddressString = binary_to_list(PayerAddress),
             [ clique_status:text(PayerAddressString) ];

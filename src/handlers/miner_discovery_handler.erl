@@ -70,7 +70,8 @@ handle_data(server, Data, State) ->
                 Sig
             ]);
         true ->
-            case miner_lora:location_ok() of
+            LoraMod = application:get_env(miner, lora_mod, miner_lora),
+            case LoraMod:location_ok() of
                 true ->
                     miner_discovery_worker:start(Packets);
                 false ->
