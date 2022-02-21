@@ -95,16 +95,15 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
         {ok, {{_HttpVersion, 200, "OK"}, Headers, Body}} ->
             try jsx:decode(Body, [{return_maps, true}]) of
                 Json ->
-                    VersionBin = integer_to_binary(Version),
-                    case maps:get(<<"tag_name">>, Json, undefined) of
+                    case maybe_binary_to_integer(maps:get(<<"tag_name">>, Json, undefined)) of
                         undefined ->
                             lager:notice("github release for ~p returning json without \"tag_name\" key"),
                             {noreply, schedule_check(State)};
-                        VersionBin ->
+                        Version ->
                             lager:info("already have version ~p", [Version]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when Version /= undefined andalso NewVersion < Version ->
-                            lager:notice("denylist version has regressed from ~p to ~p", [Version, NewVersion]),
+                            lager:notice("denylist version has regressed from ~p to ~p, ignoring", [Version, NewVersion]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when Version == undefined orelse NewVersion > Version ->
                             lager:info("new denylist version appeared: ~p have ~p", [NewVersion, Version]),
@@ -201,3 +200,9 @@ schedule_check(State, Time) ->
     erlang:send_after(Time, self(), check),
     State.
 
+-spec maybe_binary_to_integer(binary() | undefined) -> integer() | undefined.
+maybe_binary_to_integer(Bin) ->
+    case Bin of
+        undefined -> undefined;
+        _         -> binary_to_integer(Bin)
+    end.
