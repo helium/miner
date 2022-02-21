@@ -214,9 +214,9 @@ to_value(X) -> iolist_to_binary(io_lib:format("~p", [X])).
 
 ensure_binary_map(M) ->
     maps:fold(fun(K, V, Acc) ->
-                      BinK = to_key(K),
-                      BinV = to_value(V),
-                      Acc#{BinK => BinV}
+        BinK = to_key(K),
+        BinV = to_value(V),
+        Acc#{BinK => BinV}
               end, #{}, M).
 
 jsonrpc_maybe(undefined) -> <<"undefined">>;

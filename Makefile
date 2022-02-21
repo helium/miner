@@ -9,6 +9,8 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
+grpc_services_directory=src/grpc/autogen
+
 all: compile
 
 deps:
@@ -18,6 +20,7 @@ compile:
 	$(REBAR) compile
 
 clean:
+	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 test: compile
@@ -60,3 +63,15 @@ devrel:
 devrelease:
 	$(REBAR) as dev release
 
+grpc:
+	@echo "generating miner grpc services"
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+
+$(grpc_services_directory):
+	@echo "miner grpc service directory $(directory) does not exist"
+	$(REBAR) get-deps
+	$(MAKE) grpc
+
+clean_grpc:
+	@echo "cleaning miner grpc services"
+	rm -rf $(grpc_services_directory)

@@ -115,7 +115,7 @@ witness(Address, Data) ->
 %% ------------------------------------------------------------------
 init(Args) ->
     ok = blockchain_event:add_handler(self()),
-    ok = miner_poc:add_stream_handler(blockchain_swarm:tid()),
+    ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_handler),
     ok = miner_onion:add_stream_handler(blockchain_swarm:tid()),
     Address = blockchain_swarm:pubkey_bin(),
     Blockchain = blockchain_worker:blockchain(),
@@ -149,7 +149,7 @@ init(Args) ->
                             {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                  address=Address, poc_interval=Delay, state=requesting})}
                     end;
-                false ->
+                _ ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
                     {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                            address=Address, poc_interval=Delay, state=requesting})}
@@ -185,6 +185,13 @@ requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined
             lager:warning("dropped ~p cause chain is still undefined", [Msg]),
             {keep_state, Data};
         NewChain ->
+            Ledger = blockchain:ledger(NewChain),
+            case blockchain:config(?poc_challenger_type, Ledger) of
+                {ok, validator} ->
+                    ok;
+                _ ->
+                    ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_handler)
+            end,
             {keep_state, Data#data{blockchain=NewChain}, [{next_event, info, Msg}]}
     end;
 requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
@@ -842,34 +849,39 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                 POCInterval0
         end,
     try
-        case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-            {ok, GwInfo} ->
-                GwMode = blockchain_ledger_gateway_v2:mode(GwInfo),
-                case blockchain_ledger_gateway_v2:is_valid_capability(GwMode, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
-                    true ->
-                        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
-                        Height = blockchain_block:height(Block),
-                        ChallengeOK =
-                            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                                undefined ->
-                                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                                    true;
-                                LastChallenge ->
-                                    case (Height - LastChallenge) > POCInterval of
-                                        true -> 1 == rand:uniform(max(10, POCInterval div 10));
-                                        false -> false
-                                    end
-                            end,
-                        LocationOK = true,
-                        LocationOK = miner_lora:location_ok(),
-                        ChallengeOK andalso LocationOK;
-                    _ ->
-                        %% the GW is not allowed to send POC challenges
-                        false
-                end;
-            %% mostly this is going to be unasserted full nodes
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, validator} ->
+                false;
             _ ->
-                false
+                case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+                    {ok, GwInfo} ->
+                        GwMode = blockchain_ledger_gateway_v2:mode(GwInfo),
+                        case blockchain_ledger_gateway_v2:is_valid_capability(GwMode, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                            true ->
+                                {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+                                Height = blockchain_block:height(Block),
+                                ChallengeOK =
+                                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                                        undefined ->
+                                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                                            true;
+                                        LastChallenge ->
+                                            case (Height - LastChallenge) > POCInterval of
+                                                true -> 1 == rand:uniform(max(10, POCInterval div 10));
+                                                false -> false
+                                            end
+                                    end,
+                                LocationOK = true,
+                                LocationOK = miner_lora:location_ok(),
+                                ChallengeOK andalso LocationOK;
+                            _ ->
+                                %% the GW is not allowed to send POC challenges
+                                false
+                        end;
+                    %% mostly this is going to be unasserted full nodes
+                    _ ->
+                        false
+                end
         end
     catch Class:Err:Stack ->
             lager:warning("error determining if request allowed: ~p:~p ~p",
