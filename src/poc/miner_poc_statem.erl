@@ -507,8 +507,8 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                         case blockchain:config(?poc_targeting_version, Ledger) of
                             {ok, 4} ->
                                 blockchain_poc_target_v4:target(ChallengerAddr, Entropy, Ledger, Vars);
-                          _ ->
-                              blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars)
+                            _ ->
+                                blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars)
                         end,
                     lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                     lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
