@@ -128,12 +128,16 @@ download_serialized_region(URL) ->
     PrivDir = filename:join([Dir, "priv"]),
     ok = filelib:ensure_dir(PrivDir ++ "/"),
     ok = ssl:start(),
-    {ok, {{_, 200, "OK"}, _, Body}} = httpc:request(URL),
-    FName = hd(string:tokens(hd(lists:reverse(string:tokens(URL, "/"))), "?")),
-    FPath = filename:join([PrivDir, FName]),
-    ok = file:write_file(FPath, Body),
-    {ok, Data} = file:read_file(FPath),
-    Data.
+    case httpc:request(URL) of
+        {ok, {{_, 200, "OK"}, _, Body}} ->
+            FName = hd(string:tokens(hd(lists:reverse(string:tokens(URL, "/"))), "?")),
+            FPath = filename:join([PrivDir, FName]),
+            ok = file:write_file(FPath, Body),
+            {ok, Data} = file:read_file(FPath),
+            Data;
+        _ ->
+            <<>>
+    end.
 
 make_params(RegionParams) ->
     lists:foldl(

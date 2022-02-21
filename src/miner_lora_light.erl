@@ -1,5 +1,12 @@
--module(miner_lora).
+%%%-------------------------------------------------------------------
+%% @doc
+%% == Miner lora for light gateways ==
+%%          no use of chain or ledger
+%% @end
+%%%-------------------------------------------------------------------
+-module(miner_lora_light).
 
+-include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -behaviour(gen_server).
 
 -export([
@@ -8,10 +15,9 @@
     send/1,
     send_poc/5,
     port/0,
-    position/0,
     location_ok/0,
     region/0,
-    route/1
+    region_params_update/2
 ]).
 
 -export([
@@ -50,7 +56,8 @@
     latlong,
     reg_domain_confirmed = false :: boolean(),
     reg_region :: atom(),
-    reg_freq_list :: [float()],
+    reg_region_params :: blockchain_region_param_v1:region_param_v1(),
+    reg_freq_list :: [float()] | undefined,
     reg_throttle = undefined :: undefined | miner_lora_throttle:handle(),
     last_tmst_us = undefined :: undefined | integer(),  % last concentrator tmst reported by the packet forwarder
     last_mono_us = undefined :: undefined | integer(),  % last local monotonic timestamp taken when packet forwarder reported last tmst
@@ -58,22 +65,12 @@
     radio_udp_bind_ip,
     radio_udp_bind_port,
     cur_poc_challenger_type = undefined :: undefined | validator,
-    following_chain = true :: boolean() | undefined
-}).
-
--record(country, {
-    short_code::binary(),
-    lat::binary(),
-    long::binary(),
-    name::binary(),
-    region::atom(),
-    geo_zone::atom()
+    following_chain = true :: undefined | boolean()
 }).
 
 -type state() :: #state{}.
 -type gateway() :: #gateway{}.
 -type helium_packet() :: #packet_pb{}.
--type freq_data() :: {Region::atom(), Freqs::[float]}.
 
 -define(COUNTRY_FREQ_DATA, country_freq_data).
 
@@ -135,153 +132,37 @@ send_poc(Payload, When, ChannelSelectorFun, DataRate, Power) ->
 port() ->
     gen_server:call(?MODULE, port, 11000).
 
--spec position() -> {ok, {float(), float()}} |
-                    {ok, bad_assert, {float(), float()}} |
-                    {error, any()}.
-position() ->
-    try
-        gen_server:call(?MODULE, position, infinity)
-    catch _:_ ->
-            {error, no_fix}
-    end.
-
 -spec location_ok() -> true | false.
 location_ok() ->
-    %% the below code is tested and working.  we're going to roll
-    %% out the metadata update so app users can see their status
-    %% case position() of
-    %%     {error, _Error} ->
-    %%         lager:debug("pos err ~p", [_Error]),
-    %%         false;
-    %%     {ok, _} ->
-    %%         true;
-    %%     %% fix but too far from assert
-    %%     {ok, _, _} ->
-    %%         false
-    %% end.
-
     %% this terrible thing is to fake out dialyzer
     application:get_env(miner, loc_ok_default, true).
 
--spec reg_domain_data_for_addr(libp2p_crypto:pubkey_bin(), state())-> {error, any()} | {ok, freq_data()}.
-reg_domain_data_for_addr(_Addr, #state{chain=undefined}) ->
-    {error, no_chain};
-reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
-    case blockchain:ledger(Chain) of
-        undefined ->
-            {error, no_ledger};
-        Ledger ->
-            case blockchain:config(?poc_version, Ledger) of
-                {ok, V} when V > 10 ->
-                    %% check if the poc 11 vars are active yet
-                    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
-                        {ok, undefined} ->
-                            {error, no_location};
-                        {ok, Location} ->
-                            case blockchain_region_v1:h3_to_region(Location, Ledger) of
-                                {ok, Region} ->
-                                    case blockchain_region_params_v1:for_region(Region, Ledger) of
-                                        {ok, RegionParams} ->
-                                            {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
-                                        {error, Reason} ->
-                                            {error, Reason}
-                                    end;
-                                {error, region_var_not_set} ->
-                                    %% poc-v11 is partially active
-                                    lookup_via_country_code(Addr);
-                                {error, regulatory_regions_not_set} ->
-                                    %% poc-v11 is partially active
-                                    lookup_via_country_code(Addr);
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end;
-                        {error, Reason} ->
-                            {error, Reason}
-                    end;
-                _ ->
-                    %% before poc-v11
-                    lookup_via_country_code(Addr)
-            end
-    end.
-
-lookup_via_country_code(Addr) ->
-    %% lookup via country code
-    case country_code_for_addr(Addr) of
-        {ok, CC} ->
-            %% use country code to get regulatory domain data
-            reg_domain_data_for_countrycode(CC);
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
--spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
-reg_domain_data_for_countrycode(CC)->
-    case ets:lookup(?COUNTRY_FREQ_DATA, CC) of
-        [{_Key, Res}] ->
-            lager:debug("found countrycode data ~p", [Res]),
-            FreqMap = application:get_env(miner, frequency_data, #{}),
-            freq_data(Res, FreqMap);
-        _ ->
-            lager:warning("Country code ~p not found",[CC]),
-            {error, countrycode_not_found}
-    end.
+-spec region_params_update(atom(), [blockchain_region_param_v1:region_param_v1()]) -> ok.
+region_params_update(Region, RegionParams) ->
+    gen_server:cast(?MODULE, {region_params_update, Region, RegionParams}).
 
 -spec region() -> {ok, atom()}.
 region()->
     %% TODO: recalc region if hotspot re-asserts
     gen_server:call(?MODULE, region, 5000).
 
-
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
-
 init(Args) ->
     lager:info("init with args ~p", [Args]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
-
-    %% cloud/miner pro will never assert location and so we dont  use regulatory domain checks for these miners
-    %% instead they will supply a region value, use this if it exists
-    {RegDomainConfirmed, DefaultRegRegion, DefaultRegFreqList} =
-        case maps:get(region_override, Args, undefined) of
-            undefined ->
-                %% not overriding domain checks, so initialize with source dahandle_info(reg_domain_timeoutta and defaults
-                ets:new(?COUNTRY_FREQ_DATA, [named_table, public]),
-                ok = init_ets(),
-                {false, undefined, undefined};
-            Region ->
-                lager:info("using region specified in config: ~p", [Region]),
-                %% get the freq map from config and use Region to get our required data
-                FreqMap = application:get_env(miner, frequency_data, #{}),
-                case maps:get(Region, FreqMap, undefined) of
-                    undefined ->
-                        lager:warning("specified region ~p not supported", [Region]),
-                        {false, undefined, undefined};
-                    FreqList ->
-                        lager:info("using freq list ~p", [FreqList]),
-                        {true, Region, FreqList}
-                end
-        end,
-
-    S0 = #state{sig_fun = maps:get(sig_fun, Args),
-                pubkey_bin = blockchain_swarm:pubkey_bin(),
-                reg_domain_confirmed = RegDomainConfirmed,
-                reg_region = DefaultRegRegion,
-                reg_freq_list = DefaultRegFreqList,
-                reg_throttle=miner_lora_throttle:new(DefaultRegRegion),
+    GatewaysRunChain = application:get_env(miner, gateways_run_chain, true),
+    lager:info("gateways_run_chain: ~p", [GatewaysRunChain]),
+    S0 = #state{pubkey_bin = blockchain_swarm:pubkey_bin(),
+                reg_domain_confirmed = false,
                 radio_udp_bind_ip = UDPIP,
-                radio_udp_bind_port = UDPPort
+                radio_udp_bind_port = UDPPort,
+                following_chain = GatewaysRunChain
                },
     erlang:send_after(500, self(), init),
     {ok, S0}.
-
--spec update_state_using_chain(Chain :: blockchain_worker:blockchain(),
-                               InputState :: state()) -> state().
-update_state_using_chain(Chain, InputState) ->
-    TempState = maybe_update_reg_data(InputState#state{chain = Chain}),
-    Throttle = miner_lora_throttle:new(reg_region(TempState)),
-    TempState#state{reg_throttle=Throttle}.
 
 handle_call({send, _Payload, _When, _ChannelSelectorFun, _DataRate, _Power, _IPol, _HlmPacket}, _From,
             #state{reg_domain_confirmed = false}=State) ->
@@ -296,123 +177,81 @@ handle_call(port, _From, State = #state{socket = undefined}) ->
     {reply, {error, no_socket}, State};
 handle_call(port, _From, State) ->
     {reply, inet:port(State#state.socket), State};
-handle_call(position, _From, #state{latlong = undefined} = State) ->
-    {reply, {error, no_fix}, State};
-handle_call(position, _From, #state{pubkey_bin = Addr} = State) ->
-    try
-        Chain = blockchain_worker:blockchain(),
-        Ledger = blockchain:ledger(Chain),
-        {ok, Gw} = blockchain_ledger_v1:find_gateway_info(Addr, Ledger),
-        Ret =
-            case blockchain_ledger_gateway_v2:location(Gw) of
-                undefined ->
-                    {error, not_asserted};
-                H3Loc ->
-                    case vincenty:distance(h3:to_geo(H3Loc), State#state.latlong) of
-                        {error, _E} ->
-                            lager:debug("fix error! ~p", [_E]),
-                            {error, bad_calculation};
-                        {ok, Distance} when (Distance * 1000) > ?MAX_WANDER_DIST ->
-                            lager:debug("fix too far! ~p", [Distance]),
-                            {ok, bad_assert, State#state.latlong};
-                        {ok, _D} ->
-                            lager:debug("fix good! ~p", [_D]),
-                            {ok, State#state.latlong}
-                    end
-            end,
-        {reply, Ret, State}
-    catch C:E:S ->
-            lager:warning("error trying to get position: ~p:~p ~p",
-                          [C, E, S]),
-        {reply, {error, position_calc_error}, State}
-    end;
 handle_call(region, _From, #state{reg_region = Region} = State) ->
     {reply, {ok, Region}, State};
-
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p", [_Msg]),
     {reply, ok, State}.
 
+handle_cast({region_params_update, Region, RegionParams}, State) ->
+    lager:info("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
+    Throttle = miner_lora_throttle:new(Region),
+    FreqList = [(blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams],
+    {noreply, State#state{
+            reg_region = Region,
+            reg_region_params = RegionParams,
+            reg_domain_confirmed = true,
+            reg_throttle=Throttle,
+            reg_freq_list = FreqList}};
 handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(init, State = #state{following_chain = false}) ->
-    %% if we are not following chain then assume validators running POC challenges and thus
-    %% the alternative module 'miner_lora_light" will handle lora packets
-    %% just need to set required env vars here
+handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort, following_chain = false}) ->
+    %% if we are not following chain then assume validators are running POC challenges and thus
+    %% this module will handle lora packets and will need to open the port
     application:set_env(miner, lora_mod, miner_lora_light),
     application:set_env(miner, onion_server_mod, miner_onion_server_light),
-    {noreply, State};
+    {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
+    erlang:send_after(500, self(), reg_domain_timeout),
+    {noreply, State#state{socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
 handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort}) ->
     case blockchain_worker:blockchain() of
         undefined ->
+            lager:info("failed to find chain, will retry in a bit",[]),
             erlang:send_after(500, self(), init),
             {noreply, State};
         Chain ->
             ok = blockchain_event:add_handler(self()),
-            erlang:send_after(500, self(), reg_domain_timeout),
             Ledger = blockchain:ledger(Chain),
             case blockchain:config(?poc_challenger_type, Ledger) of
                 {ok, validator} ->
-                    %% we are in validator POC mode, dont open a socket
-                    %% instead let the alternative module 'miner_lora_light' take it
-                    %% and have it handle lora packets
+                    lager:debug("poc_challenger_type: ~p", [validator]),
+                    %% we are in validator POC mode, open a socket
+                    %% this module will handle lora packets
                     application:set_env(miner, lora_mod, miner_lora_light),
                     application:set_env(miner, onion_server_mod, miner_onion_server_light),
-                    {noreply, State#state{cur_poc_challenger_type = validator}};
+                    {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
+                    {noreply, State#state{chain = Chain, cur_poc_challenger_type = validator, socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
                 NonValidatorChallenger ->
-                    %% we are not in validator POC mode, so open a socket as normal
-                    %% this module will handle lora packets
+                    lager:debug("poc_challenger_type: ~p", [NonValidatorChallenger]),
+                    %% we are NOT in validator POC mode, dont open a socket
+                    %% instead let the alternative module 'miner_lora' take it
+                    %% and handle lora packets
                     application:set_env(miner, lora_mod, miner_lora),
                     application:set_env(miner, onion_server_mod, miner_onion_server),
-                    {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
-                    {noreply, update_state_using_chain(Chain, State#state{cur_poc_challenger_type = NonValidatorChallenger, socket=Socket, mirror_socket = {MirrorSocket, undefined}})}
+                    {noreply, State#state{cur_poc_challenger_type = NonValidatorChallenger}}
             end
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
-    {noreply, update_state_using_chain(NC, State)};
-handle_info({blockchain_event, {add_block, Hash, _Sync, Ledger}},
-            #state{chain=Chain, cur_poc_challenger_type = CurPoCChallengerType}=State) when Chain /= undefined ->
-    {ok, Block} = blockchain:get_block(Hash, Chain),
-    Predicate = fun(T) -> blockchain_txn:type(T) == blockchain_txn_vars_v1 end,
-    case blockchain_utils:find_txn(Block, Predicate) of
-        Txs when length(Txs) > 0 ->
-            case blockchain:config(?poc_challenger_type, Ledger) of
-                {ok, V} when V /= CurPoCChallengerType ->
-                    %% the poc challenger chain var has been modified, force this server
-                    %% to restart and recheck if it can still bind to the lora port
-                    %% in addition restart the grpc client so that we start afresh
-                    _ = miner_poc_grpc_client_statem:stop(),
-                    {stop, force_restart, State};
-                _ ->
-                    {noreply, State}
-            end;
+    {noreply, State#state{chain = NC}};
+handle_info(
+    {blockchain_event, {add_block, _BlockHash, _Sync, Ledger} = _Event},
+    #state{cur_poc_challenger_type = CurPoCChallengerType} = State
+)->
+    case blockchain:config(?poc_challenger_type, Ledger) of
+        {ok, V} when V /= CurPoCChallengerType ->
+            %% the poc challenger chain var has been modified, force this server
+            %% to restart.  It will recheck if it can still bind to the lora port
+            %% in addition restart the grpc client so that we start afresh
+            _ = miner_poc_grpc_client_statem:stop(),
+            {stop, force_restart, State};
         _ ->
             {noreply, State}
     end;
-handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
-    %% There is no chain, we cannot lookup regulatory domain data yet
-    %% Keep waiting for chain
-    erlang:send_after(500, self(), init),
+handle_info({blockchain_event, _}, State) ->
     {noreply, State};
-handle_info(reg_domain_timeout, #state{cur_poc_challenger_type=validator} = State) ->
-    %% validators are issuing POCs, so miner_lora_light will be in use...do nothing
-    {noreply, State};
-handle_info(reg_domain_timeout, #state{reg_domain_confirmed=false, pubkey_bin=Addr, chain=Chain} = State) ->
-    lager:info("checking regulatory domain for address ~p", [Addr]),
-    %% dont crash if any of this goes wrong, just try again in a bit
-    try
-        TempState = maybe_update_reg_data(State),
-        Throttle = miner_lora_throttle:new(reg_region(TempState)),
-        NewState = TempState#state{reg_throttle=Throttle},
-        {noreply, NewState}
-    catch
-        _Type:Exception ->
-            lager:warning("error whilst checking regulatory domain: ~p.  chain: ~p. Will try again...", [Exception, Chain]),
-            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
-            {noreply, State}
-    end;
+
 handle_info({tx_timeout, Token}, #state{packet_timers=Timers}=State) ->
     case maps:find(Token, Timers) of
         {ok, {send, _Ref, From, _SentAt, _LocalFreq, _TimeOnAir, _HlmPacket}} ->
@@ -433,7 +272,7 @@ handle_info({udp, Socket, IP, Port, _Packet}, #state{mirror_socket={Socket, _}}=
     lager:info("received mirror port connection from ~p ~p", [IP, Port]),
     {noreply, State#state{mirror_socket={Socket, {IP, Port}}}};
 handle_info(_Msg, State) ->
-    lager:debug("rcvd unknown info msg: ~p", [_Msg]),
+    lager:warning("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -475,6 +314,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     JSON/binary>>, IP, Port, RxInstantLocal_us,
                     #state{socket=Socket, gateways=Gateways,
                            reg_domain_confirmed = RegDomainConfirmed}=State) ->
+    lager:info("PUSH_DATA ~p from ~p on ~p", [jsx:decode(JSON), MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
             {ok, #gateway{received=Received}=G} ->
@@ -498,6 +338,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
     Packet = <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_ACK:8/integer-unsigned>>,
     maybe_mirror(State#state.mirror_socket, Packet),
     maybe_send_udp_ack(Socket, IP, Port, Packet, RegDomainConfirmed),
+    lager:info("PULL_DATA from ~p on ~p", [MAC, Port]),
     Gateway =
         case maps:find(MAC, Gateways) of
             {ok, #gateway{received=Received}=G} ->
@@ -511,6 +352,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     ?TX_ACK:8/integer-unsigned,
                     _MAC:64/integer,
                     MaybeJSON/binary>>, _IP, _Port, _RxInstantLocal_us, #state{packet_timers=Timers, reg_throttle=Throttle}=State0) ->
+    lager:info("TX ack for token ~p ~p", [Token, MaybeJSON]),
     case maps:find(Token, Timers) of
         {ok, {send, Ref, From, SentAt, LocalFreq, TimeOnAir, _HlmPacket}} when MaybeJSON == <<>> -> %% empty string means success, at least with the semtech reference implementation
             _ = erlang:cancel_timer(Ref),
@@ -523,7 +365,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
             State1 = State0#state{packet_timers=maps:remove(Token, Timers)},
             {Reply, NewState} = case kvc:path([<<"txpk_ack">>, <<"error">>], jsx:decode(MaybeJSON)) of
                 <<"NONE">> ->
-                    lager:debug("packet sent ok"),
+                    lager:info("packet sent ok"),
                     Throttle1 = miner_lora_throttle:track_sent(Throttle, SentAt, LocalFreq, TimeOnAir),
                     {ok, State1#state{reg_throttle=Throttle1}};
                 <<"COLLISION_", _/binary>> ->
@@ -567,7 +409,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     end;
                 Error ->
                     %% any other errors are pretty severe
-                    lager:error("Failure enqueuing packet for gateway ~p", [Error]),
+                    lager:error("Failure enqueing packet for gateway ~p", [Error]),
                     {{error, {unknown, Error}}, State1}
             end,
             gen_server:reply(From, Reply),
@@ -622,19 +464,20 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, chain = Chain} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _Region} = State) ->
+    POCVersion = application:get_env(miner, poc_version, 11),
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    case ?MODULE:route(Data) of
+    case route(Data) of
         error ->
             ok;
         {onion, Payload} ->
             Freq = maps:get(<<"freq">>, Packet),
             %% onion server
-            UseRSSIS = case Chain /= undefined andalso blockchain:config(?poc_version, blockchain:ledger(Chain)) of
-                {ok, X} when X > 10 -> true;
+            UseRSSIS = case POCVersion of
+                X when X > 10 -> true;
                 _ -> false
             end,
-            miner_onion_server:decrypt_radio(
+            miner_onion_server_light:decrypt_radio(
                 Payload,
                 erlang:trunc(packet_rssi(Packet, UseRSSIS)),
                 packet_snr(Packet),
@@ -644,12 +487,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
-        {noop, non_longfi} ->
-            lager:debug("Miner dropping non-Longfi packet ~p", [Packet]),
-            ok;
-        {Type, RoutingInfo} ->
-            lager:notice("Routing ~p", [RoutingInfo]),
-            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
+        {_Type, _RoutingInfo} ->
+            %% normally packets here would be send to the router
+            %% but in light mode we can just discard non poc packets
+            noop
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -657,7 +498,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
  route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
-            handle_non_longfi(Pkt);
+            route_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
             try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
@@ -666,17 +507,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 false ->
                     %% we currently don't expect non-onion packets,
                     %% this is probably a false positive on a LoRaWAN packet
-                      handle_non_longfi(Pkt)
+                      route_non_longfi(Pkt)
             catch _:_ ->
-                      handle_non_longfi(Pkt)
+                      route_non_longfi(Pkt)
             end
-    end.
-
--spec handle_non_longfi(binary()) -> any().
-handle_non_longfi(Packet) ->
-    case application:get_env(miner, gateway_and_mux_enable) of
-        {ok, true} -> {noop, non_longfi};
-        _ -> route_non_longfi(Packet)
     end.
 
 % Some binary madness going on here
@@ -684,10 +518,8 @@ handle_non_longfi(Packet) ->
 route_non_longfi(<<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>>) ->
     {lorawan, {eui, DevEUI, AppEUI}};
 route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4,
-                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when (MType == ?UNCONFIRMED_UP orelse MType == ?CONFIRMED_UP) andalso
-                                                                                                          %% MIC is 4 bytes, so the binary must be at least that long
-                                                                                                          byte_size(PayloadAndMIC) >= 4 ->
-    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) - 4}),
+                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when MType == ?UNCONFIRMED_UP; MType == ?CONFIRMED_UP ->
+    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
     {FPort, _FRMPayload} =
         case Body of
             <<>> -> {undefined, <<>>};
@@ -708,74 +540,6 @@ maybe_mirror({_, undefined}, _) ->
     ok;
 maybe_mirror({Sock, Destination}, Packet) ->
     gen_udp:send(Sock, Destination, Packet).
-
--spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
-send_to_router(Type, RoutingInfo, Packet, Region) ->
-    Data = base64:decode(maps:get(<<"data">>, Packet)),
-    %% always ok to use rssis here
-    RSSI = packet_rssi(Packet, true),
-    SNR = packet_snr(Packet),
-    %% TODO we might want to send GPS time here, if available
-    Time = maps:get(<<"tmst">>, Packet),
-    Freq = maps:get(<<"freq">>, Packet),
-    DataRate = maps:get(<<"datr">>, Packet),
-    HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
-    blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
-
--spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
-country_code_for_addr(Addr)->
-    B58Addr = libp2p_crypto:bin_to_b58(Addr),
-    URL = application:get_env(miner, api_base_url, "https://api.helium.io/v1") ++ "/hotspots/" ++ B58Addr,
-    case httpc:request(get, {URL, []}, [{timeout, 5000}],[]) of
-        {ok, {{_HTTPVersion, 200, _RespBody}, _Headers, JSONBody}} = Resp ->
-            lager:debug("hotspot info response: ~p", [Resp]),
-            %% body will be a list of geocode info of which one key will be the country code
-            Body = jsx:decode(list_to_binary(JSONBody), [return_maps]),
-            %% return the country code from the returned response
-            CC = maps:get(<<"short_country">>, maps:get(<<"geocode">>, maps:get(<<"data">>, Body)), undefined),
-            {ok, CC};
-        _ ->
-            {error, failed_to_find_geodata_for_addr}
-    end.
-
--spec freq_data(#country{}, map())-> {ok, freq_data()}.
-freq_data(#country{region = undefined} = _Country, _FreqMap)->
-    {error, region_not_set};
-freq_data(#country{region = Region}= _Country, FreqMap)->
-    case maps:get(Region, FreqMap, undefined) of
-        undefined ->
-            lager:warning("frequency data not found for region ~p",[Region]),
-            {error, frequency_not_found_for_region};
-        F->
-            {ok, {Region, F}}
-    end.
-
--spec init_ets() -> ok.
-init_ets() ->
-    PrivDir = code:priv_dir(miner),
-    File = application:get_env(miner, reg_domains_file, "countries_reg_domains.csv"),
-    lager:debug("loading csv file from ~p", [PrivDir ++ "/" ++ File]),
-    {ok, F} = file:open(PrivDir ++ "/" ++ File, [read, raw, binary, {read_ahead, 8192}]),
-    ok = csv_rows_to_ets(F),
-    ok = file:close(F).
-
--spec csv_rows_to_ets(pid())-> ok | {error, any()}.
-csv_rows_to_ets(F) ->
-  try file:read_line(F) of
-    {ok, Line} ->
-        CP = binary:compile_pattern([<<$,>>, <<$\n>>]),
-        [ShortCode, Lat, Long, Country, Region, GeoZone] = binary:split(Line, CP, [global, trim]),
-        Rec = #country{short_code=ShortCode, lat=Lat, long=Long, name=Country,
-                        region=binary_to_atom(Region, utf8), geo_zone=binary_to_atom(GeoZone, utf8)},
-        ets:insert(?COUNTRY_FREQ_DATA, {ShortCode, Rec}),
-        csv_rows_to_ets(F);
-    eof ->
-        ok
-    catch
-        error:Reason ->
-            lager:warning("failed to read file ~p, error: ~p", [F, Reason]),
-            {error, Reason}
-  end.
 
 channel(Freq, Frequencies) ->
     channel(Freq, Frequencies, 0).
@@ -981,60 +745,6 @@ retry_with_rx2(HlmPacket0, From, State) ->
     ChannelSelectorFun = fun(_FreqList) -> Freq end,
     HlmPacket1 = HlmPacket0#packet_pb{rx2_window=undefined},
     send_packet(Payload, TS, ChannelSelectorFun, DataRate, Power, true, HlmPacket1, From, State).
-
--spec maybe_update_reg_data(State :: state()) -> state().
-maybe_update_reg_data(#state{reg_domain_confirmed=true, chain=undefined} = State) ->
-    %% don't have chain, do nothing
-    State;
-maybe_update_reg_data(#state{reg_domain_confirmed=true, chain=Chain} = State) when Chain /= undefined ->
-    case application:get_env(miner, region_override, undefined) of
-        undefined ->
-            %% region is confirmed without region_override
-            %% do nothing
-            State;
-        Region ->
-            %% region was overridden but we have a chain, pull region params from chain if possible
-            case blockchain_region_params_v1:for_region(Region, blockchain:ledger(Chain)) of
-                {ok, RegionParams} ->
-                    FrequencyList = [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ],
-                    State#state{ reg_freq_list = FrequencyList };
-                {error, {not_set, _}} ->
-                    %% NOTE: region param vars are not set, default frequency data from app env
-                    FreqMap = application:get_env(miner, frequency_data, #{}),
-                    State#state{reg_freq_list=maps:get(Region, FreqMap, undefined)};
-                {error, Reason} ->
-                    lager:error("unable to find params for region: ~p using chain, error: ~p", [
-                        Region, Reason
-                    ]),
-                    %% Some other failure, do nothing
-                    State
-            end
-    end;
-maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
-    case reg_domain_data_for_addr(Addr, State) of
-        {error, Reason} ->
-            %% Despite having a new chain, we cannot get regulatory domain data for this Hotspot,
-            %% just retry after a second
-            lager:error("cannot confirm regulatory domain for miner ~p, reason: ~p", [
-                libp2p_crypto:bin_to_b58(Addr), Reason
-            ]),
-            erlang:send_after(?REG_DOMAIN_TIMEOUT, self(), reg_domain_timeout),
-            State;
-        {ok, {Region, FrequencyList}} ->
-            lager:info(
-                "confirmed regulatory domain for miner ~p. region: ~p, freqlist: ~p",
-                [libp2p_crypto:bin_to_b58(Addr), Region, FrequencyList]
-            ),
-            State#state{
-                reg_domain_confirmed = true,
-                reg_region = Region,
-                reg_freq_list = FrequencyList
-            }
-    end.
-
--spec reg_region(State :: state()) -> atom().
-reg_region(State) ->
-    State#state.reg_region.
 
 -spec open_socket(string(), pos_integer()) -> {ok, port(), port()}.
 open_socket(IP, Port) ->
