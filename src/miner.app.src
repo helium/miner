@@ -30,10 +30,7 @@
     longfi,
     elli,
     jsonrpc2,
-<<<<<<< HEAD
     xorf,
-=======
->>>>>>> 97a18e8a (validator generated POCs over grpc)
     http2_client,
     grpc_lib,
     grpc_client
