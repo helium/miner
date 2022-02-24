@@ -63,6 +63,9 @@ case "$BUILD_TYPE" in
         ;;
 esac
 
+echo "DOCKER_BUILD_ARGS=$DOCKER_BUILD_ARGS"
+echo "BASE_DOCKER_NAME=$BASE_DOCKER_NAME"
+echo "DOCKER_NAME=$DOCKER_NAME"
 
 if [[ ! $TEST_BUILD ]]; then
     docker login -u="${REGISTRY_ORG}+buildkite" -p="${QUAY_BUILDKITE_PASSWORD}" ${REGISTRY_HOST}
