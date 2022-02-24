@@ -132,7 +132,7 @@ steps:
   #
   # Does not start with "val" but does end with "_testnet"
   - if: build.tag !~ /^val/ && build.tag =~ /_testnet\$/
-    name: ":whale: testnet ARM64 docker"
+    name: ":whale: testnet miner ARM64 docker"
     agents:
       queue: "arm64"
     env:
@@ -151,7 +151,7 @@ steps:
   #
   # Does not start with "val" but does end with "_testnet"
   - if: build.tag !~ /^val/ && build.tag =~ /_testnet\$/
-    name: ":whale: testnet AMD64 docker"
+    name: ":whale: testnet miner AMD64 docker"
     env:
       BUILD_TYPE: "miner-testnet"
       IMAGE_ARCH: "amd64"
