@@ -87,8 +87,11 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% we need to construct and submit a heartbeat txn
                             {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
                             {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
+                            {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
+                            lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
+                            ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
                             UnsignedTxn =
-                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback()),
+                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
                             lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
                             Self = self(),
@@ -132,3 +135,53 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec generate_poc_keys(blockchain:ledger()) ->
+    {[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
+generate_poc_keys(Ledger) ->
+    case blockchain_ledger_v1:config(?poc_challenger_type, Ledger) of
+        {ok, validator} ->
+            %% if a val is in the ignore list then dont generate poc keys for it
+            %% TODO: this is a temp hack.  remove when testing finished
+            IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
+            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+            case not lists:member(SelfPubKeyBin, IgnoreVals) of
+                true ->
+                    %% generate a set of ephemeral keys for POC usage
+                    %% count is based on the num of active validators and the
+                    %% target challenge rate
+                    %% we also have to consider that key proposals are
+                    %% submitted by validators as part of their heartbeats
+                    %% which are only submitted periodically
+                    %% so we need to ensure we have sufficient count of
+                    %% key proposals submitted per HB
+                    %% to help with this we reduce the number of val count
+                    %% by 20% so that we have surplus keys being submitted
+                    EphemeralKeyCount =
+                        case sibyl_mgr:validator_count() of
+                            NumVals when NumVals > 0 ->
+                                {ok, ChallengeRate} = blockchain_ledger_v1:config(?poc_challenge_rate, Ledger),
+                                {ok, HBInterval} = blockchain_ledger_v1:config(?validator_liveness_interval, Ledger),
+                                round((ChallengeRate / (NumVals * 0.8 )) * HBInterval);
+                            _ ->
+                                0
+                        end,
+                    lager:info("heartbeat ephemeral key count ~p", [EphemeralKeyCount]),
+                    generate_ephemeral_keys(EphemeralKeyCount);
+                false ->
+                    {[], []}
+            end;
+        _ ->
+            {[], []}
+
+    end.
+
+-spec generate_ephemeral_keys(pos_integer()) -> {[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
+generate_ephemeral_keys(NumKeys) ->
+    lists:foldl(
+        fun(_N, {AccKeys, AccHashes})->
+            Keys = libp2p_crypto:generate_keys(ecc_compact),
+            #{public := OnionCompactKey} = Keys,
+            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+            {[Keys | AccKeys], [OnionHash | AccHashes]}
+        end,
+        {[], []}, lists:seq(1, NumKeys)).

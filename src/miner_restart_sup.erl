@@ -98,10 +98,14 @@ init(_Opts) ->
                 %% NOTE: validators do not require the onion or lora server
                 %% however removing these here breaks tests
                 %% there is no harm done by leaving them running
+
+                %% core and sibyl need to callback to miner_poc_mgr
+                %% and so we need to set an env var to let it know the mod name
+                application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
-                PocMgrTab = miner_poc_mgr:make_ets_table(),
-                POCMgrOpts = #{tab1 => PocMgrTab},
+                [PocMgrTab1, PocMgrTab2] = miner_poc_mgr:make_ets_table(),
+                POCMgrOpts = #{tab1 => PocMgrTab1, tab2 => PocMgrTab2},
                 POCOpts = #{base_dir => BaseDir,
                             cfs => ["default",
                                     "poc_mgr_cf"

@@ -198,8 +198,10 @@ keys(#{pubkey := _PubKey, ecdh_fun := _ECDH, sig_fun := _Sig} = KeyInfo) ->
 key_config() ->
     BaseDir = application:get_env(blockchain, base_dir, "data"),
     case application:get_env(blockchain, key, undefined) of
-        undefined -> {file, BaseDir};
-        KC -> KC
+        undefined ->
+            {file, BaseDir};
+        KC ->
+            KC
     end.
 
 -spec libp2p_to_gateway_key(libp2p_crypto:key_map()) -> libp2p_crypto:key_map().
