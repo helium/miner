@@ -69,12 +69,16 @@ test_cases() ->
 init_per_group(poc_grpc_with_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
-        {num_validators, 5},
+        {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
         {gateways_run_chain, true} | Config];
 init_per_group(poc_grpc_no_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
-        {num_validators, 5},
+        {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
         {gateways_run_chain, false} | Config].
 
 init_per_testcase(TestCase, Config) ->
@@ -141,9 +145,8 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
     case Status of
         %% expect failure and exit
         false ->
-            ?assert(check_validators_are_creating_poc_keys(Validators));
+            ok;
         true ->
-            ?assert(check_validators_are_creating_poc_keys(Validators)),
             %% Check that the receipts are growing
             case maps:get(?poc_version, VarMap, 11) of
                 V when V >= 10 ->
@@ -151,14 +154,15 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
                     %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
+                                     C1 = check_validators_are_creating_poc_keys(Validators),
                                      %% Check if we have some receipts
                                      C2 = maps:size(challenger_receipts_map(find_receipts(Validators))) > 0,
                                      %% Check there are some poc rewards
                                      RewardsMD = get_rewards_md(Config),
                                      ct:pal("RewardsMD: ~p", [RewardsMD]),
                                      C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
-                                     ct:pal("C2: ~p, C3: ~p", [C2, C3]),
-                                     C2 andalso C3
+                                     ct:pal("C1: ~p C2: ~p, C3: ~p", [C1, C2, C3]),
+                                     C1 andalso C2 andalso C3
                              end,
                              25, 5000),
                     FinalRewards = get_rewards(Config),
@@ -538,7 +542,8 @@ extra_vars(grpc) ->
                  ?poc_challenge_rate => 1,
                  ?poc_challenger_type => validator,
                  ?poc_timeout => 4,
-                 ?poc_receipts_absorb_timeout => 2
+                 ?poc_receipts_absorb_timeout => 2,
+                 ?poc_validator_ephemeral_key_timeout => 50
     },
     maps:merge(extra_vars(poc_v11), GrpcVars);
 extra_vars(poc_v11) ->
@@ -557,10 +562,6 @@ extra_vars(poc_v10) ->
                  ?securities_percent => 0.34,
                  ?reward_version => 5,
                  ?rewards_txn_version => 2,
-                 ?poc_challenge_rate => 1,
-                 ?poc_challenger_type => validator,
-                 ?poc_timeout => 4,
-                 ?poc_receipts_absorb_timeout => 2,
                  ?election_interval => 10,
                  ?block_time => 5000
                 });
