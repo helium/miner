@@ -106,24 +106,15 @@ metadata(Version, Meta, Chain) ->
                                 _ -> 1
                             end,
                         lager:debug("poc challenge rate ~p", [ChallengeRate] ),
-                        %% if a val is in the ignore list then dont generate poc keys for it
-                        %% TODO: this is a temp hack.  remove when testing finished
-                        IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
                         SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-                        case not lists:member(SelfPubKeyBin, IgnoreVals) of
-                            true ->
-                                {EmpKeys, EmpKeyHashes} = generate_ephemeral_keys(N, ChallengeRate),
-                                lager:debug("poc ephemeral keys ~p", [EmpKeys]),
-                                lager:debug("node ~p generating poc ephemeral key hashes ~p", [SelfPubKeyBin, EmpKeyHashes]),
-                                ok = miner_poc_mgr:save_poc_keys(Height, EmpKeys),
-                                maps:put(poc_keys, {SelfPubKeyBin, EmpKeyHashes}, ChainMeta);
-                            false ->
-                                ChainMeta
-                        end;
+                        NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
+                        POCEphemeralKeys = miner_poc_mgr:get_random_poc_key_proposals(NumKeys),
+                        lager:debug("node ~p submitting poc ephemeral key hashes ~p", [SelfPubKeyBin, POCEphemeralKeys]),
+                        maps:put(poc_keys, POCEphemeralKeys, ChainMeta);
                     _ ->
                         ChainMeta
 
-                 end,
+                end,
             lager:info("ChainMeta1 ~p", [ChainMeta1]),
             t2b(maps:merge(Meta, ChainMeta1))
     end.
@@ -853,18 +844,6 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
-
--spec generate_ephemeral_keys(pos_integer(), pos_integer()) ->{[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
-generate_ephemeral_keys(N, ChallengeRate) ->
-    NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
-    lists:foldl(
-        fun(_N, {AccKeys, AccHashes})->
-            Keys = libp2p_crypto:generate_keys(ecc_compact),
-            #{public := OnionCompactKey} = Keys,
-            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
-            {[Keys | AccKeys], [OnionHash | AccHashes]}
-        end,
-    {[], []}, lists:seq(1, NumKeys)).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
