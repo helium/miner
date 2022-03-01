@@ -41,7 +41,7 @@
     local_poc/1,
     save_poc_key_proposals/3,
     delete_cached_local_poc_key_proposal/1,
-    get_random_poc_key_proposals/1,
+    get_random_poc_key_proposals/2,
     cached_local_poc_key_proposals/0
 ]).
 %% ------------------------------------------------------------------
@@ -303,15 +303,13 @@ delete_cached_local_poc_key_proposal(KeyProposal) ->
     true = ets:delete(?KEY_PROPOSALS, KeyProposal),
     ok.
 
--spec get_random_poc_key_proposals(pos_integer()) -> [{libp2p_crypto:pubkey_bin(), key_proposal()}].
-get_random_poc_key_proposals(NumKeys) ->
+-spec get_random_poc_key_proposals(pos_integer(), blockchain:ledger()) ->
+    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
+get_random_poc_key_proposals(NumKeys, Ledger) ->
     Keys = cached_local_poc_key_proposals(),
     ShuffledKeys = blockchain_utils:shuffle(Keys),
-    lists:map(
-        fun({_Key, #poc_key_proposal{key = Key, address = Address}}) ->
-            {Address, Key}
-        end, lists:sublist(ShuffledKeys, NumKeys)
-    ).
+    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
+    do_get_random_poc_key_proposals(NumKeys, CGMembers, ShuffledKeys).
 
 %% ------------------------------------------------------------------
 %% gen_server functions
@@ -1043,6 +1041,27 @@ update_addr_hash(Bloom, Element) ->
                 Hash ->
                     bloom:set(Bloom, Hash)
             end
+    end.
+
+-spec do_get_random_poc_key_proposals(pos_integer(), [libp2p_crypto:pubkey_bin()],
+    [cached_key_proposal()]) ->
+    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
+do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys) ->
+    do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys, []).
+-spec do_get_random_poc_key_proposals(pos_integer(), [libp2p_crypto:pubkey_bin()],
+    [cached_key_proposal()], [{libp2p_crypto:pubkey_bin(), key_proposal()}]) ->
+    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
+do_get_random_poc_key_proposals(0, _CGMembers, _Keys, Acc) ->
+    Acc;
+do_get_random_poc_key_proposals(_, _CGMembers, [] = _Keys, Acc) ->
+    Acc;
+do_get_random_poc_key_proposals(NumKeys, CGMembers,
+    [{_, #poc_key_proposal{key = Key, address = Address}} | T] = _Keys, Acc) ->
+    case lists:member(Address, CGMembers) of
+        true ->
+            do_get_random_poc_key_proposals(NumKeys, CGMembers, T, Acc);
+        false ->
+            do_get_random_poc_key_proposals(NumKeys-1, CGMembers, T, [{Address, Key} | Acc])
     end.
 
 %% ------------------------------------------------------------------

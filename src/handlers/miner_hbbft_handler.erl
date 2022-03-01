@@ -108,7 +108,7 @@ metadata(Version, Meta, Chain) ->
                         lager:debug("poc challenge rate ~p", [ChallengeRate] ),
                         SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
                         NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
-                        POCEphemeralKeys = miner_poc_mgr:get_random_poc_key_proposals(NumKeys),
+                        POCEphemeralKeys = miner_poc_mgr:get_random_poc_key_proposals(NumKeys, Ledger),
                         lager:debug("node ~p submitting poc ephemeral key hashes ~p", [SelfPubKeyBin, POCEphemeralKeys]),
                         maps:put(poc_keys, POCEphemeralKeys, ChainMeta);
                     _ ->
