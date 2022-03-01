@@ -787,7 +787,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     TotalMiners =
         case TestCase of
             poc_grpc_dist_v11_test ->
-                11; %% 5 vals, 6 gateways
+                16; %% 10 vals, 6 gateways
             poc_grpc_dist_v11_cn_test ->
                 13; %% 5 vals, 8 gateways
             poc_grpc_dist_v11_partitioned_test ->
@@ -800,13 +800,13 @@ init_per_testcase(Mod, TestCase, Config0) ->
     NumConsensusMembers =
         case TestCase of
             poc_grpc_dist_v11_test ->
-                NumValidators;
+                4;
             poc_grpc_dist_v11_cn_test ->
-                NumValidators;
+                4;
             poc_grpc_dist_v11_partitioned_test ->
-                NumValidators;
+                4;
             poc_grpc_dist_v11_partitioned_lying_test ->
-                NumValidators;
+                4;
             _ ->
                 get_config("N", 7)
         end,
@@ -1165,7 +1165,8 @@ config_node({Miner, {TCPPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun
     ct_rpc:call(Miner, application, set_env, [lager, metadata_whitelist, [poc_id]]),
 
     %% set blockchain configuration
-    Key = {PubKey, ECDH, SigFun},
+%%    Key = {PubKey, ECDH, SigFun},
+    Key = #{pubkey => PubKey, ecdh_fun => ECDH, sig_fun => SigFun},
 
     MinerBaseDir = BaseDir ++ "_" ++ atom_to_list(Miner),
     ct:pal("MinerBaseDir: ~p", [MinerBaseDir]),

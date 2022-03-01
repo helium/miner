@@ -91,8 +91,7 @@
     ledger :: undefined | blockchain:ledger(),
     sig_fun :: undefined | libp2p_crypto:sig_fun(),
     pub_key = undefined :: undefined | libp2p_crypto:pubkey_bin(),
-    addr_hash_filter :: undefined | #addr_hash_filter{},
-    poc_timeout :: pos_integer() | undefined
+    addr_hash_filter :: undefined | #addr_hash_filter{}
 }).
 -type state() :: #state{}.
 -type keys() :: #{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
@@ -309,8 +308,9 @@ get_random_poc_key_proposals(NumKeys) ->
     Keys = cached_local_poc_key_proposals(),
     ShuffledKeys = blockchain_utils:shuffle(Keys),
     lists:map(
-        fun(#poc_key_proposal{key = Key, address = Address}) ->
-            {Address, Key} end, lists:sublist(ShuffledKeys, NumKeys)
+        fun({_Key, #poc_key_proposal{key = Key, address = Address}}) ->
+            {Address, Key}
+        end, lists:sublist(ShuffledKeys, NumKeys)
     ).
 
 %% ------------------------------------------------------------------
@@ -683,17 +683,23 @@ process_block_pocs(
 ) -> ok.
 purge_local_pocs(
     Block,
-    #state{chain = Chain, pub_key = SelfPubKeyBin, sig_fun = SigFun, poc_timeout = POCTimeout} = State
+    #state{chain = Chain, pub_key = SelfPubKeyBin, sig_fun = SigFun} = State
 ) ->
     %% iterate over the local POCs in our rocksdb
     %% end and clean up any which have exceeded their life span
     %% these are active POCs which were initiated by this node
     %% and the data is known only to this node
+    Ledger = blockchain:ledger(Chain),
+    Timeout =
+        case blockchain:config(?poc_timeout, Ledger) of
+            {ok, N} -> N;
+            _ -> ?POC_TIMEOUT
+        end,
     BlockHeight = blockchain_block:height(Block),
     LocalPOCs = local_pocs(State),
     lists:foreach(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
-            case (BlockHeight - POCStartHeight) > POCTimeout of
+            case (BlockHeight - POCStartHeight) > Timeout of
                 true ->
                     lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
