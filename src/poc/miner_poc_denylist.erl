@@ -6,7 +6,7 @@
           type,
           keys,
           url,
-          version,
+          version=0,
           etag
          }).
 
@@ -95,19 +95,18 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
         {ok, {{_HttpVersion, 200, "OK"}, Headers, Body}} ->
             try jsx:decode(Body, [{return_maps, true}]) of
                 Json ->
-                    VersionBin = integer_to_binary(Version),
-                    case maps:get(<<"tag_name">>, Json, undefined) of
+                    case maybe_binary_to_integer(maps:get(<<"tag_name">>, Json, undefined)) of
                         undefined ->
                             lager:notice("github release for ~p returning json without \"tag_name\" key"),
                             {noreply, schedule_check(State)};
-                        VersionBin ->
+                        Version->
                             lager:info("already have version ~p", [Version]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
-                        NewVersion when Version /= undefined andalso NewVersion < Version ->
-                            lager:notice("denylist version has regressed from ~p to ~p", [Version, NewVersion]),
+                        NewVersion when NewVersion < Version->
+                            lager:notice("denylist version has regressed from ~s to ~s, ignoring", [Version, NewVersion]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
-                        NewVersion when Version == undefined orelse NewVersion > Version ->
-                            lager:info("new denylist version appeared: ~p have ~p", [NewVersion, Version]),
+                        NewVersion when NewVersion > Version ->
+                            lager:info("new denylist version appeared: ~s have ~s", [NewVersion, Version]),
                             case maps:get(<<"assets">>, Json, undefined) of
                                 undefined ->
                                     lager:notice("no zipball_url for release ~p", [NewVersion]),
@@ -128,27 +127,32 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
                                                             %% check signature is still valid against our key
                                                             case lists:any(fun(Key) -> catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) end, Keys) of
                                                                 true ->
-                                                                    <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
-                                                                    case xorf:from_bin({exor, 32}, FilterBin) of
-                                                                        {ok, Filter} ->
-                                                                            BaseDir = application:get_env(blockchain, base_dir, "data"),
-                                                                            DenyFile = filename:join([BaseDir, "denylist", "latest"]),
-                                                                            TmpDenyFile = DenyFile ++ "-tmp",
-                                                                            case file:write_file(TmpDenyFile, Bin) of
-                                                                                ok ->
-                                                                                    case file:rename(TmpDenyFile, DenyFile) of
+                                                                    case Rest of
+                                                                        <<NewVersion:32/integer-unsigned-little, FilterBin/binary>> ->
+                                                                            case xorf:from_bin({exor, 32}, FilterBin) of
+                                                                                {ok, Filter} ->
+                                                                                    BaseDir = application:get_env(blockchain, base_dir, "data"),
+                                                                                    DenyFile = filename:join([BaseDir, "denylist", "latest"]),
+                                                                                    TmpDenyFile = DenyFile ++ "-tmp",
+                                                                                    case file:write_file(TmpDenyFile, Bin) of
                                                                                         ok ->
-                                                                                            ok;
-                                                                                        {error, RenameReason} ->
-                                                                                            lager:notice("failed to rename ~p to ~p: ~p", [TmpDenyFile, DenyFile, RenameReason])
-                                                                                    end;
-                                                                                {error, WriteReason} ->
-                                                                                    lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
-                                                                            end,
-                                                                            ok = persistent_term:put(?MODULE, Filter),
-                                                                            {noreply, schedule_check(State#state{version=Serial, etag=proplists:get_value("etag", Headers)})};
-                                                                        {error, Reason} ->
-                                                                            lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
+                                                                                            case file:rename(TmpDenyFile, DenyFile) of
+                                                                                                ok ->
+                                                                                                    ok;
+                                                                                                {error, RenameReason} ->
+                                                                                                    lager:notice("failed to rename ~p to ~p: ~p", [TmpDenyFile, DenyFile, RenameReason])
+                                                                                            end;
+                                                                                        {error, WriteReason} ->
+                                                                                            lager:notice("failed to write denyfile ~p to disk ~p", [TmpDenyFile, WriteReason])
+                                                                                    end,
+                                                                                    ok = persistent_term:put(?MODULE, Filter),
+                                                                                    {noreply, schedule_check(State#state{version=NewVersion, etag=proplists:get_value("etag", Headers)})};
+                                                                                {error, Reason} ->
+                                                                                    lager:notice("failed to deserialize denylist from disk: ~p", [Reason]),
+                                                                                    {noreply, schedule_check(State)}
+                                                                            end;
+                                                                        <<OtherVersion:32/integer-unsigned-little, _/binary>> ->
+                                                                            lager:notice("denylist release ~p contained wrong serial number ~p, rejecting", [NewVersion, OtherVersion]),
                                                                             {noreply, schedule_check(State)}
                                                                     end;
                                                                 _ ->
@@ -201,3 +205,9 @@ schedule_check(State, Time) ->
     erlang:send_after(Time, self(), check),
     State.
 
+-spec maybe_binary_to_integer(binary() | undefined) -> integer() | undefined.
+maybe_binary_to_integer(Bin) ->
+    case Bin of
+        undefined -> undefined;
+        _         -> binary_to_integer(Bin)
+    end.
