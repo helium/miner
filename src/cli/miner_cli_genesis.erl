@@ -22,6 +22,7 @@ register_all_usage() ->
                   [
                    genesis_usage(),
                    genesis_create_usage(),
+                   genesis_recreate_usage(),
                    genesis_forge_usage(),
                    genesis_load_usage(),
                    genesis_export_usage(),
@@ -36,6 +37,7 @@ register_all_cmds() ->
                   [
                    genesis_cmd(),
                    genesis_create_cmd(),
+                   genesis_recreate_cmd(),
                    genesis_forge_cmd(),
                    genesis_load_cmd(),
                    genesis_export_cmd(),
@@ -50,6 +52,7 @@ genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
       "  genesis create <old_genesis_file> <pubkey> <proof> <addrs>  - Create genesis block keeping old ledger transactions.\n",
+      "  genesis recreate <old_genesis_file> <pubkey> <proof>        - ReCreate the specified genesis block, with the txn list populated with all current gateways, validators and chainvars\n",
       "  genesis forge <pubkey> <key_proof> <addrs>                  - Create genesis block from scratch just with the addresses.\n",
       "  genesis load <genesis_file>                                 - Load genesis block from file.\n"
       "  genesis export <path>                                       - Write genesis block to a file.\n"
@@ -323,6 +326,98 @@ genesis_proof(["genesis", "proof", PrivKeyB58], [], []) ->
 genesis_proof(_, [], []) ->
     usage.
 
+
+%%
+%% genesis recreate
+%%
+
+genesis_recreate_cmd() ->
+    [
+        [["genesis", "recreate", '*'], [], [], fun genesis_recreate/3]
+    ].
+
+genesis_recreate_usage() ->
+    [["genesis", "recreate"],
+        ["genesis recreate <old_genesis_file> <pubkey> <proof>\n\n",
+            "  recreate a genesis block from an original genesis block appending.\n"
+            "  txns for all existing ledger chainvars, gateways and validators.\n"
+        ]
+    ].
+
+genesis_recreate(["genesis", "recreate", OldGenesisFile, PubKey, Proof], [], []) ->
+    recreate(OldGenesisFile, PubKey, Proof);
+
+genesis_recreate(_, [], []) ->
+    usage.
+
+recreate(OldGenesisFile, PubKey, Proof) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            [clique_status:alert([clique_status:text("Undefined Blockchain")])];
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            %% load specified genesis block
+            %% this will server as the base of the new genesis block
+            case file:read_file(OldGenesisFile) of
+                {ok, GenesisBlockBin} ->
+                    GenesisBlock = blockchain_block:deserialize(GenesisBlockBin),
+                    %% remove any existing var txns from orig txn list
+                    %% we will replace with current ledger var values
+                    OrigGenesisTxns =
+                        [
+                            T || T <- blockchain_block:transactions(GenesisBlock),
+                            blockchain_txn:type(T) /= blockchain_txn_vars_v1
+                        ],
+                    %% create a new var txn using existing chainvars values
+                    Vars0 = maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger)),
+                    Vars = blockchain_utils:vars_binary_keys_to_atoms(Vars0),
+                    VarTxn1 = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => PubKey}),
+                    VarTxn = blockchain_txn_vars_v1:key_proof(VarTxn1, Proof),
+
+                    %% generate new gen txns for all existing gateways and validators
+                    %% iterate over validators and generate a gen txn for each
+                    ValFun =
+                        fun(V) ->
+                            ValAddr = blockchain_ledger_validator_v1:address(V),
+                            ValOwner = blockchain_ledger_validator_v1:owner_address(V),
+                            ValStake = blockchain_ledger_validator_v1:stake(V),
+                            blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake)
+                        end,
+
+                    NewGenValTxns = blockchain_ledger_v1:fold_validators(ValFun, [], Ledger),
+
+                    %% get all active gateways and generate a gen txn for each
+                    GWs = blockchain_ledger_v1:snapshot_gateways(Ledger),
+                    NewGenGatewayTxns =
+                        lists:map(
+                            fun({GWAddr, GW}) ->
+                                GWAddr = blockchain_ledger_gateway_v2:address(GW),
+                                GWOwnerAddr = blockchain_ledger_gateway_v2:owner_address(GW),
+                                GWLoc = blockchain_ledger_gateway_v2:location(GW),
+                                GWNonce = blockchain_ledger_gateway_v2:nonce(GW),
+                                blockchain_txn_gen_gateway_v1:new(GWAddr, GWOwnerAddr, GWLoc, GWNonce)
+                            end, GWs),
+
+                    %% replace the orig genesis block txn list with the new txns appended to the original txn list
+                    NewGenesisTxns = OrigGenesisTxns ++  [VarTxn] ++ NewGenValTxns ++ NewGenGatewayTxns,
+                    OrigSigs = blockchain_block_v1:signatures(GenesisBlock),
+                    NewGenesisBlock0 = blockchain_block_v1:new_genesis_block(NewGenesisTxns),
+                    NewGenesisBlock = blockchain_block_v1:set_signatures(NewGenesisBlock0, OrigSigs),
+                    NewGenesisFile = output_filename(OldGenesisFile),
+                    case (catch file:write_file(NewGenesisFile, blockchain_block:serialize(NewGenesisBlock))) of
+                        {'EXIT', _} ->
+                            usage;
+                        ok ->
+                            [clique_status:text(io_lib:format("ok, genesis file written to ~p", [NewGenesisFile]))];
+                        {error, Reason} ->
+                            [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])]
+                    end;
+        {error, Reason} ->
+            [clique_status:text(io_lib:format("~p", [Reason]))]
+    end
+end.
+
+
 make_vars() ->
     {ok, BlockTime} = application:get_env(miner, block_time),
     {ok, Interval} = application:get_env(miner, election_interval),
@@ -404,3 +499,9 @@ make_vars() ->
       ?tenure_penalty => 1.0,
       ?penalty_history_limit => 100
      }.
+
+%%TODO: this could be annoying format, relook
+output_filename(Base) ->
+    {MegaSecs,Secs,MicroSecs } = os:timestamp(),
+    {{Y,M,D}, {HH,MM,_SS}} = calendar:now_to_datetime({MegaSecs, Secs, MicroSecs}),
+    lists:flatten(Base, io_lib:format("-~B-~2.10.0B-~2.10.0B-~2.10.0B:~2.10.0B", [Y, M, D,HH,MM])).
