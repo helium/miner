@@ -283,7 +283,7 @@ save_poc_key_proposals(Address, KeyProposals, Height) ->
     %% save_poc_key_proposals/3 is called when absorbing a heartbeat
     %% we add the proposed keys to this local cache
     %% and from this cache a random set of keys will be selected as part of
-    %% block proposals by validators nodes which are in consensus
+    %% block proposals by the consensus group
     [
         begin
             POCKeyProposalRec = #poc_key_proposal{
@@ -291,7 +291,7 @@ save_poc_key_proposals(Address, KeyProposals, Height) ->
                 address = Address,
                 key = KeyProposal
             },
-            lager:info("caching poc key proposal ~p", [KeyProposal]),
+            lager:debug("caching poc key proposal ~p", [KeyProposal]),
             _ = cache_poc_key_proposal(KeyProposal, POCKeyProposalRec)
         end
         || KeyProposal <- KeyProposals
@@ -669,6 +669,7 @@ process_block_pocs(
                     noop
             end,
             %% GC the block key from the key proposals cache
+            %% dont want to have it reused
             _ = delete_cached_local_poc_key_proposal(OnionKeyHash)
         end
         || {_CGPos, OnionKeyHash} <- BlockPocEphemeralKeys
