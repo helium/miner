@@ -348,13 +348,6 @@ block_size_limit_test(Config) ->
 
     ok = miner_ct_utils:wait_for_gte(height, Miners, 50, all, 100),
 
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                 BigTxnMinerCache = get_cached_txns_with_exclusions(Miner, [blockchain_txn_poc_request_v1]),
-                 ct:pal("Txn Mgr Cache: ~p", [BigTxnMinerCache]),
-                 true
-             end, 60, 100),
-
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, BlockSizeLimit} = ct_rpc:call(Miner, blockchain, config, [?block_size_limit, Ledger]),
@@ -369,6 +362,15 @@ block_size_limit_test(Config) ->
                                                  end, 0, Block) =< BlockSizeLimit
                                  end, Blocks),
     ?assertEqual(true, BlocksUnderLimit),
+
+    BigTxnInCache = miner_ct_utils:wait_until(
+             fun() ->
+                 BigTxnMinerCache = get_cached_txns_with_exclusions(Miner, [blockchain_txn_poc_request_v1]),
+                 CachedTxns = maps:keys(BigTxnMinerCache),
+                 ct:pal("Txn Mgr Cache: ~p", [CachedTxns]),
+                 lists:any(fun(CachedTxn) -> CachedTxn == BigTxnSigned end, CachedTxns)
+             end, 60, 100),
+    ?assertEqual(false, BigTxnInCache),
     ok.
 
 %% ------------------------------------------------------------------
