@@ -352,22 +352,22 @@ block_size_limit_test(Config) ->
     Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
     {ok, BlockSizeLimit} = ct_rpc:call(Miner, blockchain, config, [?block_size_limit, Ledger]),
 
-    Blocks0 = [{Height, ct_rpc:call(Miner, blockchain, get_block, [Height, Chain])} || Height <- lists:seq(2,50)],
-    Blocks = [{Height, blockchain_block:transactions(Block0)} || {Height, {ok, Block0}} <- Blocks0],
-    ct:pal("Block txns byte size: ~p", [Blocks]),
+    Blocks = [{Height0, ct_rpc:call(Miner, blockchain, get_block, [Height0, Chain])} || Height0 <- lists:seq(2,50)],
+    BlocksTxns = [{Height, blockchain_block:transactions(Block)} || {Height, {ok, Block}} <- Blocks],
+    ct:pal("Block txns byte size: ~p", [BlocksTxns]),
 
-    BlocksUnderLimit = lists:all(fun({_Height, Block}) ->
+    BlocksUnderLimit = lists:all(fun({_, Txns}) ->
                                      lists:foldl(fun(T, Acc) ->
                                                      Acc + byte_size(blockchain_txn:serialize(T))
-                                                 end, 0, Block) =< BlockSizeLimit
-                                 end, Blocks),
+                                                 end, 0, Txns) =< BlockSizeLimit
+                                 end, BlocksTxns),
     ?assertEqual(true, BlocksUnderLimit),
 
     BigTxnInCache = miner_ct_utils:wait_until(
              fun() ->
                  BigTxnMinerCache = get_cached_txns_with_exclusions(Miner, [blockchain_txn_poc_request_v1]),
                  CachedTxns = maps:keys(BigTxnMinerCache),
-                 ct:pal("Txn Mgr Cache: ~p", [CachedTxns]),
+                 ct:pal("Txn Mgr Cache: ~p", [BigTxnMinerCache]),
                  lists:any(fun(CachedTxn) -> CachedTxn == BigTxnSigned end, CachedTxns)
              end, 60, 100),
     ?assertEqual(false, BigTxnInCache),

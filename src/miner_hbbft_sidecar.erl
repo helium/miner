@@ -358,4 +358,4 @@ oversized_txn(Txn, Ledger) ->
             {ok, SizeLimit} when is_integer(SizeLimit) -> SizeLimit;
             _ -> 50*1024*1024
         end,
-    byte_size(blockchain_txn:serialize(Txn)) =< BlockSizeLimit.
+    byte_size(blockchain_txn:serialize(Txn)) > BlockSizeLimit.
