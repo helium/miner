@@ -334,30 +334,19 @@ block_size_limit_test(Config) ->
     [Miner | _] = Miners = ?config(miners, Config),
     AuxAccounts = ?config(aux_accounts, Config),
 
-    GetMiner = fun() ->
-                   N = rand:uniform(length(Miners)),
-                   lists:nth(N, Miners)
-               end,
-
     {Accounts1, [{BigTxnAddr, BigTxnSig} | Accounts2]} = lists:split(length(AuxAccounts) div 2, AuxAccounts),
-    SignedTxns1 = generate_txns(Accounts1, 50),
-    lists:foreach(fun(ST1) ->
-                      ct_rpc:call(GetMiner(), blockchain_txn_mgr, submit, [ST1, fun(_) -> ok end]),
-                      timer:sleep(1000)
-                  end, SignedTxns1),
+    SignedTxns1 = generate_bulk_txns(Accounts1, 50),
+    submit_bulk_txns(SignedTxns1, Miners),
 
     BigTxnPayments = [blockchain_payment_v2:new(Acct, 10) || {Acct, _SigFun} <- Accounts1],
     BigTxnUnsigned = blockchain_txn_payment_v2:new(BigTxnAddr, BigTxnPayments, 1),
     BigTxnSigned = blockchain_txn_payment_v2:sign(BigTxnUnsigned, BigTxnSig),
     ok = ct_rpc:call(Miner, blockchain_txn_mgr, submit, [BigTxnSigned, fun(_) -> ok end]),
 
-    SignedTxns2 = generate_txns(Accounts2, 50),
-    lists:foreach(fun(ST2) ->
-                      ct_rpc:call(GetMiner(), blockchain_txn_mgr, submit, [ST2, fun(_) -> ok end]),
-                      timer:sleep(1000)
-                  end, SignedTxns2),
+    SignedTxns2 = generate_bulk_txns(Accounts2, 50),
+    submit_bulk_txns(SignedTxns2, Miners),
 
-    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, 50, 100),
+    ok = miner_ct_utils:wait_for_gte(height, Miners, 50, all, 100),
 
     true = miner_ct_utils:wait_until(
              fun() ->
@@ -367,38 +356,48 @@ block_size_limit_test(Config) ->
              end, 60, 100),
 
     Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
-    Blocks0 = [{Height0, ct_rpc:call(Miner, blockchain, get_block, [Height0, Chain])} || Height0 <- lists:seq(3,50)],
-    Blocks1 = [{Height, Block} || {Height, {ok, Block}} <- Blocks0],
-    BlockMap = maps:from_list(Blocks1),
-    TxnsMap = maps:map(fun(_K, V) -> blockchain_block:transactions(V) end, BlockMap),
-    BlockSizes = lists:sort(fun({K1, _}, {K2, _}) -> K1 < K2 end, maps:to_list(maps:map(fun(_K, V) ->
-                            {length(V), lists:foldl(fun(T, Acc) ->
-                                            Acc + byte_size(blockchain_txn:serialize(T))
-                                        end, 0, V)}
-                        end, TxnsMap))),
-    ct:pal("Txn sizes by block: ~p", [BlockSizes]),
+    Ledger = ct_rpc:call(Miner, blockchain, ledger, [Chain]),
+    {ok, BlockSizeLimit} = ct_rpc:call(Miner, blockchain, config, [?block_size_limit, Ledger]),
 
+    Blocks0 = [{Height, ct_rpc:call(Miner, blockchain, get_block, [Height, Chain])} || Height <- lists:seq(2,50)],
+    Blocks = [{Height, blockchain_block:transactions(Block0)} || {Height, {ok, Block0}} <- Blocks0],
+    ct:pal("Block txns byte size: ~p", [Blocks]),
 
-    ct:fail("Test go boom"),
+    BlocksUnderLimit = lists:all(fun({_Height, Block}) ->
+                                     lists:foldl(fun(T, Acc) ->
+                                                     Acc + byte_size(blockchain_txn:serialize(T))
+                                                 end, 0, Block) =< BlockSizeLimit
+                                 end, Blocks),
+    ?assertEqual(true, BlocksUnderLimit),
     ok.
 
 %% ------------------------------------------------------------------
 %% Local Helper functions
 %% ------------------------------------------------------------------
 
-generate_txns([Hd | _] = Accounts, Amt) ->
-    generate_txns(Accounts, Hd, Amt, []).
+random_miner(Miners) ->
+    N = rand:uniform(length(Miners)),
+    lists:nth(N, Miners).
 
-generate_txns([{LastAddr, LastSig} | []], {FirstAddr, _}, Amt, Acc) ->
+generate_bulk_txns([Hd | _] = Accounts, Amt) ->
+    generate_bulk_txns(Accounts, Hd, Amt, []).
+
+generate_bulk_txns([{LastAddr, LastSig} | []], {FirstAddr, _}, Amt, Acc) ->
     Payment = blockchain_payment_v2:new(FirstAddr, Amt),
     UnsignedTxn = blockchain_txn_payment_v2:new(LastAddr, [Payment], 1),
     SignedTxn = blockchain_txn_payment_v2:sign(UnsignedTxn, LastSig),
     [SignedTxn | Acc];
-generate_txns([{PayerAddr, PayerSig} | [{PayeeAddr, _} | _] = Next], First, Amt, Acc) ->
+generate_bulk_txns([{PayerAddr, PayerSig} | [{PayeeAddr, _} | _] = Next], First, Amt, Acc) ->
     Payment = blockchain_payment_v2:new(PayeeAddr, Amt),
     UnsignedTxn = blockchain_txn_payment_v2:new(PayerAddr, [Payment], 1),
     SignedTxn = blockchain_txn_payment_v2:sign(UnsignedTxn, PayerSig),
-    generate_txns(Next, First, Amt, [SignedTxn | Acc]).
+    generate_bulk_txns(Next, First, Amt, [SignedTxn | Acc]).
+
+submit_bulk_txns(Txns, Miners) ->
+    lists:foreach(fun(Txn) ->
+                      ct_rpc:call(random_miner(Miners), blockchain_txn_mgr, submit, [Txn, fun(_) -> ok end]),
+                      timer:sleep(1000)
+                  end, Txns).
 
 get_cached_txns_with_exclusions(Miner, Exclusions) ->
     case ct_rpc:call(Miner, blockchain_txn_mgr, txn_list, []) of
