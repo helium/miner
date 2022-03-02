@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include_lib("blockchain/include/blockchain.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 % API
 -export([
@@ -124,41 +125,47 @@ handle_call({submit, Txn}, From,
                    validations = Validations} = State) ->
     Type = blockchain_txn:type(Txn),
     lager:debug("got submission of txn: ~s", [blockchain_txn:print(Txn)]),
-    {ok, Height} = blockchain_ledger_v1:current_height(blockchain:ledger(Chain)),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
     case lists:member(Type, ?InvalidTxns) of
         true ->
             {reply, {{error, invalid_txn}, Height}, State};
         false ->
-            case maps:find(Type, ?SlowTxns) of
-                {ok, Timeout} ->
-                    Limit = application:get_env(miner, sidecar_parallelism_limit, 3),
-                    case maps:size(Validations) of
-                        N when N >= Limit ->
-                            Queue1 = Queue ++ [{From, Txn, Height}],
-                            {noreply, State#state{queue = Queue1}};
-                        _ ->
-                            {Attempt, V} = start_validation(Txn, Height, From, Timeout, Chain),
-                            {noreply, State#state{validations = Validations#{Attempt => V}}}
-                    end;
-                error ->
-                    case blockchain_txn:is_valid(Txn, Chain) of
-                        ok ->
-                            case blockchain_txn:absorb(Txn, Chain) of
-                                ok ->
-                                    spawn(fun() ->
-                                                  %% this will now return {ok, Position, Length}
-                                                  %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
-                                                catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
-                                        end),
-                                    {reply, {ok, Height}, State};
-                                Error ->
-                                    lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                                    {reply, {Error, Height}, State}
+            case oversized_txn(Txn, Ledger) of
+                true ->
+                    {reply, {{error, oversized_txn}, Height}, State};
+                false ->
+                    case maps:find(Type, ?SlowTxns) of
+                        {ok, Timeout} ->
+                            Limit = application:get_env(miner, sidecar_parallelism_limit, 3),
+                            case maps:size(Validations) of
+                                N when N >= Limit ->
+                                    Queue1 = Queue ++ [{From, Txn, Height}],
+                                    {noreply, State#state{queue = Queue1}};
+                                _ ->
+                                    {Attempt, V} = start_validation(Txn, Height, From, Timeout, Chain),
+                                    {noreply, State#state{validations = Validations#{Attempt => V}}}
                             end;
-                        Error ->
-                            write_txn("failed", Height, Txn),
-                            lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                            {reply, {Error, Height}, State}
+                        error ->
+                            case blockchain_txn:is_valid(Txn, Chain) of
+                                ok ->
+                                    case blockchain_txn:absorb(Txn, Chain) of
+                                        ok ->
+                                            spawn(fun() ->
+                                                      %% this will now return {ok, Position, Length}
+                                                      %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
+                                                      catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
+                                                  end),
+                                            {reply, {ok, Height}, State};
+                                        Error ->
+                                            lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
+                                            {reply, {Error, Height}, State}
+                                    end;
+                                Error ->
+                                    write_txn("failed", Height, Txn),
+                                    lager:debug("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
+                                    {reply, {Error, Height}, State}
+                            end
                     end
             end
     end;
@@ -344,3 +351,11 @@ start_validation(Txn, Height, From, Timeout, Chain) ->
     TRef = erlang:send_after(Timeout, self(), {Attempt, {{error, validation_deadline}, Height}}),
     {Attempt,
      #validation{timer = TRef, monitor = Ref, txn = Txn, pid = Pid, from = From, height=Height}}.
+
+oversized_txn(Txn, Ledger) ->
+    BlockSizeLimit =
+        case blockchain:config(?block_size_limit, Ledger) of
+            {ok, SizeLimit} when is_integer(SizeLimit) -> SizeLimit;
+            _ -> 50*1024*1024
+        end,
+    byte_size(blockchain_txn:serialize(Txn)) > BlockSizeLimit.

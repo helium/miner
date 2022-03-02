@@ -190,7 +190,9 @@ keys({ecc, Options}) when is_list(Options) ->
                 end,
                 onboarding_key => libp2p_crypto:pubkey_to_b58(OnboardingKey)
             }
-    end.
+    end;
+keys(#{pubkey := _PubKey, ecdh_fun := _ECDH, sig_fun := _Sig} = KeyInfo) ->
+    maps:merge(#{key_slot => undefined, bus => undefined, address => undefined}, KeyInfo).
 
 -spec key_config() -> key_configuration().
 key_config() ->
