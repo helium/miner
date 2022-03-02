@@ -70,11 +70,15 @@ init_per_group(poc_grpc_with_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
         {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
         {gateways_run_chain, true} | Config];
 init_per_group(poc_grpc_no_chain, Config) ->
     [
         {split_miners_vals_and_gateways, true},
         {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
         {gateways_run_chain, false} | Config].
 
 init_per_testcase(TestCase, Config) ->
