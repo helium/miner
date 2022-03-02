@@ -22,6 +22,7 @@ register_all_usage() ->
                   [
                    genesis_usage(),
                    genesis_create_usage(),
+                   genesis_recreate_usage(),
                    genesis_forge_usage(),
                    genesis_load_usage(),
                    genesis_export_usage(),
@@ -36,6 +37,7 @@ register_all_cmds() ->
                   [
                    genesis_cmd(),
                    genesis_create_cmd(),
+                   genesis_recreate_cmd(),
                    genesis_forge_cmd(),
                    genesis_load_cmd(),
                    genesis_export_cmd(),
@@ -50,6 +52,7 @@ genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
       "  genesis create <old_genesis_file> <pubkey> <proof> <addrs>  - Create genesis block keeping old ledger transactions.\n",
+      "  genesis recreate <masterkey> <output_path_to_genesis_file>  - ReCreate the specified genesis block, with the txn list populated with all current accounts, gateways, validators and chainvars\n",
       "  genesis forge <pubkey> <key_proof> <addrs>                  - Create genesis block from scratch just with the addresses.\n",
       "  genesis load <genesis_file>                                 - Load genesis block from file.\n"
       "  genesis export <path>                                       - Write genesis block to a file.\n"
@@ -322,6 +325,137 @@ genesis_proof(["genesis", "proof", PrivKeyB58], [], []) ->
 genesis_proof(_, [], []) ->
     usage.
 
+%%
+%% genesis recreate
+%%
+
+genesis_recreate_cmd() ->
+    [
+        [["genesis", "recreate", '*', '*'], [], [], fun genesis_recreate/3]
+    ].
+
+genesis_recreate_usage() ->
+    [["genesis", "recreate"],
+        ["genesis recreate <master_key> <output_path_to_genesis_file>\n\n",
+            "  recreate a genesis block from the existing ledger data\n"
+            "  including txns for all chainvars, gateways, accounts and validators.\n"
+        ]
+    ].
+
+genesis_recreate(["genesis", "recreate", MasterKey, OutputFile], [], []) ->
+    recreate(MasterKey, OutputFile);
+
+genesis_recreate(_, [], []) ->
+    usage.
+
+recreate(MasterKey, OutputFile) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            [clique_status:alert([clique_status:text("Undefined Blockchain")])];
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            %% decode the specified master key to its pub and priv
+            #{public := Pub, secret := PrivKey} = libp2p_crypto:keys_from_bin(base58:base58_to_binary(MasterKey)),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(Pub),
+
+            %% create a new var txn using existing chainvars values
+            Vars0 = maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger)),
+            Vars = blockchain_utils:vars_binary_keys_to_atoms(Vars0),
+            VarTxn0 = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => PubKeyBin}),
+            Proof = blockchain_txn_vars_v1:create_proof(PrivKey, VarTxn0),
+            VarTxn = blockchain_txn_vars_v1:key_proof(VarTxn0, Proof),
+
+            %% get all accounts and generate a blockchain_txn_coinbase_v1 for each
+            %% accounts without a balance are excluded
+            Accounts = blockchain_ledger_v1:snapshot_accounts(Ledger),
+            NewAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], Accounts),
+
+            %% get all dc accounts and generate a blockchain_txn_dc_coinbase_v1 for each
+            %% accounts without a balance are excluded
+            DCAccounts = blockchain_ledger_v1:snapshot_dc_accounts(Ledger),
+            NewDCAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_data_credits_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_dc_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], DCAccounts),
+
+            %% get all security accounts and generate a blockchain_txn_security_coinbase_v1 for each
+            SecurityAccounts = blockchain_ledger_v1:snapshot_security_accounts(Ledger),
+            NewSecurityAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_security_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], SecurityAccounts),
+
+            %% generate new gen txns for all existing gateways and validators
+            %% iterate over validators and generate a gen txn for each
+            ValFun =
+                fun(V, Acc) ->
+                    ValAddr = blockchain_ledger_validator_v1:address(V),
+                    ValOwner = blockchain_ledger_validator_v1:owner_address(V),
+                    ValStake = blockchain_ledger_validator_v1:stake(V),
+                    [blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake) | Acc]
+                end,
+            NewGenValTxns = blockchain_ledger_v1:fold_validators(ValFun, [], Ledger),
+
+            %% get all active gateways and generate a gen txn for each
+            %% GWs without a location are excluded
+            GWs = blockchain_ledger_v1:snapshot_gateways(Ledger),
+            {NewGenGatewayTxns, ValAddrs} =
+                lists:foldl(
+                    fun({GWAddr, GW}, {TxnAcc, AddrAccc} = Acc) ->
+                        GWOwnerAddr = blockchain_ledger_gateway_v2:owner_address(GW),
+                        case blockchain_ledger_gateway_v2:location(GW) of
+                            [] -> Acc;
+                            undefined -> Acc;
+                            GWLoc ->
+                                GWNonce = blockchain_ledger_gateway_v2:nonce(GW),
+                                {[blockchain_txn_gen_gateway_v1:new(GWAddr, GWOwnerAddr, GWLoc, GWNonce) | TxnAcc],
+                                    [GWAddr | AddrAccc]}
+                        end
+                    end, {[], []}, GWs),
+
+            %% create a consensus group txn
+            {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+            Addrs = [Addr || Addr <- ValAddrs ],
+            SortedAddrs = lists:sort(Addrs),
+            ConsensusAddrs = lists:sublist(SortedAddrs, 1, N),
+            NewConsensusGroupTxn = blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<>>, 1, 0),
+
+            %% get current oracle price and save to gen txn
+            {ok, Price} = blockchain_ledger_v1:current_oracle_price(Ledger),
+            OracleTxn = blockchain_txn_gen_price_oracle_v1:new(Price),
+
+            %% final list of gen block txns
+            NewGenesisTxns =   NewAccountTxns ++ NewGenGatewayTxns ++ NewDCAccountTxns ++ NewSecurityAccountTxns ++ NewGenValTxns ++ [VarTxn, NewConsensusGroupTxn, OracleTxn],
+            %% create the gen block and write out
+            NewGenesisBlock = blockchain_block_v1:new_genesis_block(NewGenesisTxns),
+            case (catch file:write_file(OutputFile, blockchain_block:serialize(NewGenesisBlock))) of
+                {'EXIT', _} ->
+                    usage;
+                ok ->
+                    [clique_status:text(io_lib:format("ok, genesis file written to ~p", [OutputFile]))];
+                {error, Reason} ->
+                    [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])]
+            end
+end.
+
 make_vars() ->
     {ok, BlockTime} = application:get_env(miner, block_time),
     {ok, Interval} = application:get_env(miner, election_interval),
@@ -403,3 +537,4 @@ make_vars() ->
       ?tenure_penalty => 1.0,
       ?penalty_history_limit => 100
      }.
+
