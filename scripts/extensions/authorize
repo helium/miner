@@ -4,6 +4,8 @@ if [ -t 0 ] ; then
     export CLIQUE_COLUMNS
 fi
 
+export RELX_RPC_TIMEOUT=${RELX_RPC_TIMEOUT:-900}
+
 j=1
 l=$#
 buf="[[\"authorize\","
