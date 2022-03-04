@@ -76,7 +76,7 @@ terminate(_, State) ->
     ok = cleanup_port(State).
 
 open_gateway_port(KeyPair, Transport, Host, TcpPort) ->
-    Args = ["-c", gateway_config_dir(), "server"],
+    Args = ["-c", gateway_config_dir(), "--stdin", "server"],
     GatewayEnv0 = [{"GW_API", erlang:integer_to_list(TcpPort)}, {"GW_KEYPAIR", KeyPair}],
     GatewayEnv =
         case application:get_env(miner, gateway_env) of
