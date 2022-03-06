@@ -3,7 +3,7 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [-h] [-n <NAMED_TAG>] <SHA>"
+    echo "Usage: $0 [-h] [-f] [-n <NAMED_TAG>] <SHA>"
 }
 
 dep_hash() {
@@ -19,8 +19,11 @@ declare NAMED_TAG
 TAG_NAME=$(date +%Y.%m.%d)
 TAG_NUMBER=0
 
-while getopts ":hn:" opt; do
+while getopts ":hfn:" opt; do
     case ${opt} in
+        f )
+            FORCE="--force"
+            ;;
         h )
             usage
             exit 0
@@ -90,8 +93,8 @@ cd ..
 echo -e "done\n"
 
 echo -e "publishing ${RELEASE_TAG} tag\n"
-git tag -a ${RELEASE_TAG} ${MINER_HASH} -m "${RELEASE_TAG} release"
-git push origin "${RELEASE_TAG}"
+git tag ${FORCE} -a ${RELEASE_TAG} ${MINER_HASH} -m "${RELEASE_TAG} release"
+git push ${FORCE} origin "${RELEASE_TAG}"
 
 for repo in $repos; do
     REPO_HASH=$(dep_hash $MINER_HASH $repo)
