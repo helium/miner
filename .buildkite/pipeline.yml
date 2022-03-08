@@ -172,7 +172,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner ARM64 testnet
-  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
+  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/ && build.tag !~ /^seed/
     name: ":whale: testnet miner ARM64 docker"
     agents:
       queue: "arm64"
@@ -189,7 +189,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner AMD64 testnet
-  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
+  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/ && build.tag !~ /^seed/
     name: ":whale: testnet miner AMD64 docker"
     env:
       BUILD_TYPE: "miner"
@@ -203,5 +203,4 @@ steps:
       queue: "erlang"
     commands:
       - "git tag $BUILDKITE_TAG"
->>>>>>> origin/master
       - ".buildkite/scripts/make_image.sh"
