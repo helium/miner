@@ -117,7 +117,7 @@ send_receipt(_Data, _OnionCompactKey, _Type, _Time, _RSSI, _SNR, _Frequency, _Ch
 send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Stream, Power, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
+    {ok, PoCs} = blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger),
     %% check this GW has the capability to send receipts
     %% it not then we are done
     case miner_util:has_valid_local_capability(?GW_CAPABILITY_POC_RECEIPT, Ledger) of
@@ -208,7 +208,7 @@ send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _Channel, 
 send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, #state{chain=Chain}=State, Retry) ->
     Ledger = blockchain:ledger(Chain),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    {ok, PoCs} = blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger),
+    {ok, PoCs} = blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     %% check this GW has the capability to send witnesses
     %% it not then we are done
@@ -248,6 +248,8 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                                                [RSSI, Frequency, SNR]),
                                     send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State, Retry-1);
                                 {ok, Stream} ->
+                                    lager:info("successfully sent witness to challenger ~p with RSSI: ~p, Frequency: ~p, SNR: ~p",
+                                                  [P2P, RSSI, Frequency, SNR]),
                                     _ = miner_poc_handler:send(Stream, EncodedWitness)
                             end
                     end
@@ -341,7 +343,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
         poc_not_found ->
             _ = erlang:spawn(fun() ->
                 case wait_for_block(fun() ->
-                    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+                    case blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger) of
                         {ok, _} ->
                             true;
                         _ ->
@@ -448,26 +450,29 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             end,
             State;
         {error, Reason} ->
-            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: ~p, discarding", [Type, Reason]),
             State
     end,
     NewState.
 
 -spec try_decrypt(binary(), binary(), binary(), binary(), binary(), function(), blockchain:blockchain()) -> poc_not_found | {ok, binary(), binary()} | {error, any()}.
 try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun, Chain) ->
+    POCID = blockchain_utils:poc_id(OnionCompactKey),
     Ledger = blockchain:ledger(Chain),
-    case blockchain_ledger_v1:find_poc(OnionKeyHash, Ledger) of
+    case blockchain_ledger_v1:find_pocs(OnionKeyHash, Ledger) of
         {error, not_found} ->
             poc_not_found;
         {ok, [PoC]} ->
+            lager:info([{poc_id, POCID}], "found poc. attempting to decrypt", []),
             Blockhash = blockchain_ledger_poc_v2:block_hash(PoC),
             try blockchain_poc_packet:decrypt(<<IV/binary, OnionCompactKey/binary, Tag/binary, CipherText/binary>>, ECDHFun, Blockhash, Ledger) of
                 error ->
                     {error, fail_decrypt};
                 {Payload, NextLayer} ->
                     {ok, Payload, NextLayer}
-            catch _A:_B ->
-                    {error, {_A, _B}}
+            catch C:E:S ->
+                    lager:warning([{poc_id, POCID}], "crash during decrypt ~p:~p ~p", [C, E, S]),
+                    {error, {C, E}}
             end;
         {ok, _} ->
             %% TODO we might want to try all the PoCs here

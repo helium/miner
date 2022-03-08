@@ -108,7 +108,13 @@ receipt(Address, Data, PeerAddr) ->
     gen_statem:cast(?SERVER, {receipt, Address, Data, PeerAddr}).
 
 witness(Address, Data) ->
-    gen_statem:cast(?SERVER, {witness, Address, Data}).
+    case miner_poc_denylist:check(Address) of
+        true ->
+            lager:notice("dropping witness from ~p due to denylist", [libp2p_crypto:bin_to_b58(Address)]),
+            ok;
+        false ->
+            gen_statem:cast(?SERVER, {witness, Address, Data})
+    end.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -149,7 +155,7 @@ init(Args) ->
                             {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                  address=Address, poc_interval=Delay, state=requesting})}
                     end;
-                false ->
+                _ ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
                     {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
                                            address=Address, poc_interval=Delay, state=requesting})}
@@ -297,41 +303,52 @@ receiving(cast, {witness, Address, Witness}, #data{responses=Responses0,
                                                    packet_hashes=PacketHashes,
                                                    blockchain=Chain}=Data) ->
     lager:info("got witness ~p", [Witness]),
-    %% Validate the witness is correct
-    Ledger = blockchain:ledger(Chain),
-    LocationOK = miner_lora:location_ok(),
-    case {LocationOK, validate_witness(Witness, Ledger)} of
-        {false, Valid} ->
-            lager:warning("location is bad, validity: ~p", [Valid]),
+
+    GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
+    %% Check that the receiving `Address` is of the `Witness`
+    case Address == GatewayWitness of
+        false ->
+            lager:warning("witness gw: ~p, recv addr: ~p mismatch!",
+                          [libp2p_crypto:bin_to_b58(GatewayWitness),
+                           libp2p_crypto:bin_to_b58(Address)]),
             {keep_state, Data};
-        {_, false} ->
-            lager:warning("ignoring invalid witness ~p", [Witness]),
-            {keep_state, Data};
-        {_, true} ->
-            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
-            GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
-            %% check this is a known layer of the packet
-            case lists:keyfind(PacketHash, 2, PacketHashes) of
-                false ->
-                    lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+        true ->
+            %% Validate the witness is correct
+            Ledger = blockchain:ledger(Chain),
+            LocationOK = miner_lora:location_ok(),
+            case {LocationOK, validate_witness(Witness, Ledger)} of
+                {false, Valid} ->
+                    lager:warning("location is bad, validity: ~p", [Valid]),
                     {keep_state, Data};
-                {GatewayWitness, PacketHash} ->
-                    lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                {_, false} ->
+                    lager:warning("ignoring invalid witness ~p", [Witness]),
                     {keep_state, Data};
-                _ ->
-                    Witnesses = maps:get(PacketHash, Responses0, []),
-                    %% Don't allow putting duplicate response in the witness list resp
-                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
-                    Responses1 =
-                        case lists:any(Predicate, Witnesses) of
-                            false ->
-                                maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
-                            true ->
-                                Responses0
-                        end,
-                    {keep_state, save_data(Data#data{responses=Responses1})}
+                {_, true} ->
+                    PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+                    %% check this is a known layer of the packet
+                    case lists:keyfind(PacketHash, 2, PacketHashes) of
+                        false ->
+                            lager:warning("Saw invalid witness with packet hash ~p", [PacketHash]),
+                            {keep_state, Data};
+                        {GatewayWitness, PacketHash} ->
+                            lager:warning("Saw self-witness from ~p", [GatewayWitness]),
+                            {keep_state, Data};
+                        _ ->
+                            Witnesses = maps:get(PacketHash, Responses0, []),
+                            %% Don't allow putting duplicate response in the witness list resp
+                            Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                            Responses1 =
+                            case lists:any(Predicate, Witnesses) of
+                                false ->
+                                    maps:put(PacketHash, lists:keystore(Address, 1, Witnesses, {Address, Witness}), Responses0);
+                                true ->
+                                    Responses0
+                            end,
+                            {keep_state, save_data(Data#data{responses=Responses1})}
+                    end
             end
     end;
+
 receiving(cast, {receipt, Address, Receipt, PeerAddr}, #data{responses=Responses0, challengees=Challengees, blockchain=Chain}=Data) ->
     lager:info("got receipt ~p", [Receipt]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
@@ -543,17 +560,23 @@ handle_challenging({Entropy, TargetRandState}, Target, Gateways, Height, Ledger,
             %% no witness will exist for the first layer hash as it is delivered over p2p
             [_|LayerHashes] = [ crypto:hash(sha256, L) || L <- Layers ],
             lager:info("onion of length ~p created ~p", [byte_size(Onion), Onion]),
-            [Start|_] = Path,
-            P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
-            case send_onion(P2P, Onion, 3) of
-                ok ->
-                    {next_state, receiving, save_data(Data#data{state=receiving, challengees=lists:zip(Path, LayerData),
-                        packet_hashes=lists:zip(Path, LayerHashes)})};
+            case lists:filter(fun miner_poc_denylist:check/1, Path) of
+                [] ->
+                    [Start|_] = Path,
+                    P2P = libp2p_crypto:pubkey_bin_to_p2p(Start),
+                    case send_onion(P2P, Onion, 3) of
+                        ok ->
+                            {next_state, receiving, save_data(Data#data{state=receiving, challengees=lists:zip(Path, LayerData),
+                                                                        packet_hashes=lists:zip(Path, LayerHashes)})};
 
-                {error, Reason} ->
-                    lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
-                    lager:info("selecting new target"),
-                    handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
+                        {error, Reason} ->
+                            lager:error("failed to dial 1st hotspot (~p): ~p", [P2P, Reason]),
+                            lager:info("selecting new target"),
+                            handle_targeting(Entropy, Height, Ledger, Data#data{retry=Retry-1})
+                    end;
+                Denied ->
+                    lager:notice("cancelling challenge to ~p due to denylist", [[libp2p_crypto:bin_to_b58(Address) || Address <- Denied]]),
+                    {next_state, requesting, save_data(Data#data{state=requesting})}
             end;
         {'DOWN', Ref, process, _Pid, Reason} ->
             lager:error("blockchain_poc_path went down ~p: ~p", [Reason, {Entropy, Target, Gateways, Height}]),
@@ -796,19 +819,27 @@ check_addr_hash(PeerAddr, #data{addr_hash_filter=#addr_hash_filter{byte_size=Siz
 validate_witness(Witness, Ledger) ->
     Gateway = blockchain_poc_witness_v1:gateway(Witness),
     %% TODO this should be against the ledger at the time the receipt was mined
-    case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
-        {error, _Reason} ->
-            lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
+
+    case blockchain_poc_witness_v1:frequency(Witness) of
+        0.0 ->
+            %% Witnesses with 0.0 frequency are considered invalid
             false;
-        {ok, GwInfo} ->
-            case blockchain_ledger_gateway_v2:location(GwInfo) of
-                undefined ->
-                    lager:warning("ignoring witness ~p location undefined", [Gateway]),
+        _ ->
+            case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
+                {error, _Reason} ->
+                    lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
                     false;
-                _ ->
-                    blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                {ok, GwInfo} ->
+                    case blockchain_ledger_gateway_v2:location(GwInfo) of
+                        undefined ->
+                            lager:warning("ignoring witness ~p location undefined", [Gateway]),
+                            false;
+                        _ ->
+                            blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                    end
             end
     end.
+
 
 -spec allow_request(binary(), data()) -> boolean().
 allow_request(BlockHash, #data{blockchain=Blockchain,
@@ -861,7 +892,8 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
 -spec create_request(libp2p_crypto:pubkey_bin(), binary(), blockchain_ledger_v1:ledger()) ->
     {blockchain_txn_poc_request_v1:txn_poc_request(), keys(), binary()}.
 create_request(Address, BlockHash, Ledger) ->
-    Keys = libp2p_crypto:generate_keys(ecc_compact),
+    Network = application:get_env(miner, network, mainnet),
+    Keys = libp2p_crypto:generate_keys(Network, ecc_compact),
     Secret = libp2p_crypto:keys_to_bin(Keys),
     #{public := OnionCompactKey} = Keys,
     Version = blockchain_txn_poc_request_v1:get_version(Ledger),

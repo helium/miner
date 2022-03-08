@@ -11,8 +11,8 @@ PIDFile=/var/data/miner/miner.pid
 Environment=HOME="/var/data/miner"
 Environment=RUNNER_LOG_DIR="/var/data/log/miner"
 Environment=ERL_CRASH_DUMP="/var/data/log/miner"
-LimitNOFILE=64000
-LimitNPROC=64000
+LimitNOFILE=128000
+LimitNPROC=128000
 Restart=always
 
 [Install]

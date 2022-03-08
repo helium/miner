@@ -1,3 +1,4 @@
+%%% RELOC KEEP - net layer
 -module(miner_router_SUITE).
 
 -export([

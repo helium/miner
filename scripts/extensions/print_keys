@@ -1,5 +1,7 @@
 #!/bin/sh
 
+export RELX_RPC_TIMEOUT=${RELX_RPC_TIMEOUT:-900}
+
 CONFIG=$(find $ROOTDIR/releases -name sys.config)
 LIB_DIR=$ROOTDIR/lib
 

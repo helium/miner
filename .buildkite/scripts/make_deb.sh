@@ -4,7 +4,7 @@ set -euo pipefail
 
 VERSION=$(echo $VERSION_TAG | sed -e s/$1// -e s/_/-/ )
 
-DIAGNOSTIC=1 ./rebar3 as $1 release -v $VERSION -n miner
+./rebar3 as $1 release -v $VERSION -n miner
 
 fpm -n $1 \
     -v "${VERSION}" \

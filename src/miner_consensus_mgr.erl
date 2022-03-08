@@ -181,6 +181,7 @@ init(_Args) ->
     erlang:send_after(timer:seconds(1), self(), monitor_miner),
     case  blockchain_worker:blockchain() of
         undefined ->
+            erlang:send_after(timer:seconds(1), self(), chain_check),
             {ok, #state{}};
         Chain ->
             {ok, #state{chain = Chain}, 0}
@@ -250,8 +251,7 @@ handle_call({rescue_done, _Artifact, _Signatures, Members, PrivKey, _Height, _De
     {ok, BatchSize} = blockchain:config(batch_size, Ledger),
     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), Members),
 
-    {ok, Block} = blockchain:head_block(Chain),
-    Round = blockchain_block:hbbft_round(Block),
+    {ok, #block_info_v2{hbbft_round=Round}} = blockchain:head_block_info(Chain),
 
     Buf = get_buf(State#state.active_group),
 
@@ -348,12 +348,17 @@ handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
 
     %% first we need to add ourselves to the chain for the existing
     %% group to validate
-    %% TODO we should also add this to the buffer of the local chain
     {ok, ElectionHeight} = blockchain_ledger_v1:election_height(blockchain:ledger(Chain)),
     case ElectionHeight < Height of
         true ->
-            ok = blockchain_worker:submit_txn(
-                   blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+            Txn = blockchain_txn_consensus_group_v1:new(Members, Proof, Height, Delay),
+            %% add this to the buffer of the local chain
+            %% catch is because there might not be a sidecar running if
+            %% we are currently not in the group
+            catch miner_hbbft_sidecar:submit(Txn),
+            %% send it to the txn mgr
+            ok = blockchain_txn_mgr:submit(
+                   Txn,
                    fun(Res) ->
                            case Res of
                                ok ->
@@ -578,8 +583,7 @@ handle_info({blockchain_event, {integrate_genesis_block, _Hash}}, State = #state
 %% we had a chain to start with, so check restore state
 handle_info(timeout, State) ->
     try
-        {ok, HeadBlock} = blockchain:head_block(State#state.chain),
-        StartHeight = blockchain_block:height(HeadBlock),
+        {ok, #block_info_v2{height=StartHeight, hbbft_round=Round}} = blockchain:head_block_info(State#state.chain),
 
         lager:info("try cold start consensus group at ~p", [StartHeight]),
 
@@ -611,8 +615,7 @@ handle_info(timeout, State) ->
                     case lists:member(blockchain_swarm:pubkey_bin(), ConsensusAddrs) of
                         true ->
                             lager:info("in group, trying to restore"),
-                            {ok, Block} = blockchain:head_block(Chain),
-                            BlockHeight = blockchain_block:height(Block),
+                            {ok, BlockHeight} = blockchain:height(Chain),
                             Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
                             Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
                             {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
@@ -630,7 +633,6 @@ handle_info(timeout, State) ->
                             {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                                                  Name,
                                                                  libp2p_group_relcast, GroupArg),
-                            Round = blockchain_block:hbbft_round(HeadBlock),
                             case wait_for_group(Group) of
                                 started ->
                                     %% no need for active group to stop
@@ -665,8 +667,7 @@ handle_info(timeout, State) ->
                                                     delay = Delay},
 
                         Election = NextElection + Delay,
-                        {ok, ElectionBlock} = blockchain:get_block(Election, Chain),
-                        Hash = blockchain_block:hash_block(ElectionBlock),
+                        {ok, Hash} = blockchain:get_block_hash(Election, Chain),
                         State2 = initiate_election(Hash, NextElection, State1),
                         {noreply, State2};
                     _ ->
@@ -685,6 +686,17 @@ handle_info({'DOWN', MinerRef, process, _MinerPid, _Reason},
             #state{miner_monitor = MinerRef} = State) ->
     self() ! monitor_miner,
     {noreply, State};
+handle_info(chain_check, State) ->
+    State1 =
+        case blockchain_worker:blockchain() of
+            undefined ->
+                erlang:send_after(timer:seconds(1), self(), chain_check),
+                State;
+            Chain ->
+                self() ! timeout,
+                State#state{chain = Chain}
+        end,
+    {noreply, State1};
 handle_info(monitor_miner, #state{active_group = Group} = State) ->
     %% we've seen cases where the miner will think that it's out of consensus because
     %% miner process has crashed, but the group is still running, just not participating
@@ -719,7 +731,7 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
     #{election_height := ElectionHeight,
       election_delay := ElectionDelay} =
         blockchain_election:election_info(Ledger),
-    {ok, Block} = blockchain:head_block(Chain),
+    {ok, #block_info_v2{hbbft_round=Round}} = blockchain:head_block_info(Chain),
     Pos = miner_util:index_of(blockchain_swarm:pubkey_bin(), ConsensusAddrs),
     Name = consensus_group_name(ElectionHeight, ElectionDelay, ConsensusAddrs),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
@@ -735,7 +747,6 @@ handle_info({'DOWN', OldRef, process, _GroupPid, _Reason},
     {ok, Group} = libp2p_swarm:add_group(blockchain_swarm:tid(),
                                          Name,
                                          libp2p_group_relcast, GroupArg),
-    Round = blockchain_block:hbbft_round(Block),
     case wait_for_group(Group) of
         started ->
             Ref = erlang:monitor(process, Group),
@@ -849,11 +860,9 @@ restart_dkg(Height, Delay, State) ->
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
-    {ok, StartBlock} = blockchain:get_block(Height + Delay, Chain),
-    Hash = blockchain_block:hash_block(StartBlock),
+    {ok, #block_info_v2{hash=Hash}} = blockchain:get_block_info(Height + Delay, Chain),
 
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    Round = blockchain_block:hbbft_round(HeadBlock),
+    {ok, #block_info_v2{hbbft_round=Round}} = blockchain:head_block_info(Chain),
 
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),

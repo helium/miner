@@ -1,6 +1,7 @@
 -module(miner_jsonrpc_info).
 
 -include("miner_jsonrpc.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -behavior(miner_jsonrpc_handler).
 
 %% jsonrpc_handler
@@ -14,10 +15,8 @@
 
 handle_rpc(<<"info_height">>, []) ->
     Chain = blockchain_worker:blockchain(),
-    {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
     Output = #{
         epoch => Epoch,
         height => Height
@@ -71,12 +70,10 @@ handle_rpc(<<"info_summary">>, []) ->
     GWInfo = get_gateway_info(Chain, PubKey),
 
     % get height data
-    {ok, Height} = blockchain:height(Chain),
     {ok, SyncHeight} = blockchain:sync_height(Chain),
 
-    %% get epoch
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    {Epoch, _} = blockchain_block_v1:election_info(HeadBlock),
+    %% get epoch and height
+    {ok, #block_info_v2{height=Height, election_info={Epoch, _}}} = blockchain:head_block_info(Chain),
 
     %% get peerbook count
     Swarm = blockchain_swarm:swarm(),
@@ -94,9 +91,10 @@ handle_rpc(<<"info_summary">>, []) ->
         peer_book_entry_count => PeerBookEntryCount,
         firmware_version => FirmwareVersion,
         gateway_details => GWInfo,
-        version => miner:version()
+        version => ?TO_VALUE(get_miner_version())
     };
-
+handle_rpc(<<"info_version">>, []) ->
+    #{version => ?TO_VALUE(get_miner_version())};
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -109,6 +107,13 @@ get_mac_addrs() ->
 
 get_firmware_version() ->
     iolist_to_binary(os:cmd("cat /etc/lsb_release")).
+
+get_miner_version() ->
+    Releases = release_handler:which_releases(),
+    case erlang:hd(Releases) of
+        {_,ReleaseVersion,_,_} -> ReleaseVersion;
+        {error,_} -> undefined
+    end.
 
 get_uptime() ->
     %% returns seconds of uptime
@@ -138,7 +143,10 @@ get_gateway_location(Chain, PubKey, Dest) when is_binary(PubKey) ->
         _ -> Dest
     end;
 get_gateway_location(_Chain, Gateway, Dest) ->
-    GWLoc = blockchain_ledger_gateway_v2:location(Gateway),
+    GWLoc = case blockchain_ledger_gateway_v2:location(Gateway) of
+        undefined -> undefined;
+        L -> h3:to_string(L)
+    end,
     GWElevation = blockchain_ledger_gateway_v2:elevation(Gateway),
     GWGain = case blockchain_ledger_gateway_v2:gain(Gateway) of
         undefined -> undefined;

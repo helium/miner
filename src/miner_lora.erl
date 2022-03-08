@@ -10,7 +10,8 @@
     port/0,
     position/0,
     location_ok/0,
-    region/0
+    region/0,
+    route/1
 ]).
 
 -export([
@@ -166,31 +167,47 @@ reg_domain_data_for_addr(Addr, #state{chain=Chain}) ->
         undefined ->
             {error, no_ledger};
         Ledger ->
-            %% check if the poc 11 vars are active yet
-            case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
-                {ok, Location} ->
-                    case blockchain_region_v1:h3_to_region(Location, Ledger) of
-                        {ok, Region} ->
-                            case blockchain_region_params_v1:for_region(Region, Ledger) of
-                                {ok, RegionParams} ->
-                                    {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end;
-                        {error, regulatory_regions_not_set} ->
-                            case country_code_for_addr(Addr) of
-                                {ok, CC} ->
-                                    %% use country code to get regulatory domain data
-                                    reg_domain_data_for_countrycode(CC);
+            case blockchain:config(?poc_version, Ledger) of
+                {ok, V} when V > 10 ->
+                    %% check if the poc 11 vars are active yet
+                    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                        {ok, undefined} ->
+                            {error, no_location};
+                        {ok, Location} ->
+                            case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                                {ok, Region} ->
+                                    case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                        {ok, RegionParams} ->
+                                            {ok, {Region, [ (blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams ]}};
+                                        {error, Reason} ->
+                                            {error, Reason}
+                                    end;
+                                {error, region_var_not_set} ->
+                                    %% poc-v11 is partially active
+                                    lookup_via_country_code(Addr);
+                                {error, regulatory_regions_not_set} ->
+                                    %% poc-v11 is partially active
+                                    lookup_via_country_code(Addr);
                                 {error, Reason} ->
                                     {error, Reason}
                             end;
                         {error, Reason} ->
                             {error, Reason}
                     end;
-                {error, Reason} ->
-                    {error, Reason}
+                _ ->
+                    %% before poc-v11
+                    lookup_via_country_code(Addr)
             end
+    end.
+
+lookup_via_country_code(Addr) ->
+    %% lookup via country code
+    case country_code_for_addr(Addr) of
+        {ok, CC} ->
+            %% use country code to get regulatory domain data
+            reg_domain_data_for_countrycode(CC);
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -spec reg_domain_data_for_countrycode(binary()) -> {ok, freq_data() | {error, any()}}.
@@ -341,7 +358,17 @@ handle_info(chain_check, State) ->
     end;
 handle_info({blockchain_event, {new_chain, NC}}, State) ->
     {noreply, update_state_using_chain(NC, State)};
-handle_info({blockchain_event, _}, State) ->
+handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
+            #state{chain=Chain}=State) when Chain /= undefined ->
+    {ok, Block} = blockchain:get_block(Hash, Chain),
+    Predicate = fun(T) -> blockchain_txn:type(T) == blockchain_txn_vars_v1 end,
+    case blockchain_utils:find_txn(Block, Predicate) of
+        Txs when length(Txs) > 0 ->
+            %% Resend the timeout for regulatory domain
+            self() ! reg_domain_timeout;
+        _ ->
+            ok
+    end,
     {noreply, State};
 handle_info(reg_domain_timeout, #state{chain=undefined} = State) ->
     %% There is no chain, we cannot lookup regulatory domain data yet
@@ -573,7 +600,7 @@ handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirm
     State;
 handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region, chain = Chain} = State) ->
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    case route(Data) of
+    case ?MODULE:route(Data) of
         error ->
             ok;
         {onion, Payload} ->
@@ -593,6 +620,9 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
+        {noop, non_longfi} ->
+            lager:debug("Miner dropping non-Longfi packet ~p", [Packet]),
+            ok;
         {Type, RoutingInfo} ->
             lager:notice("Routing ~p", [RoutingInfo]),
             erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
@@ -603,7 +633,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
  route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
-            route_non_longfi(Pkt);
+            handle_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
             try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
@@ -612,10 +642,17 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
                 false ->
                     %% we currently don't expect non-onion packets,
                     %% this is probably a false positive on a LoRaWAN packet
-                      route_non_longfi(Pkt)
+                      handle_non_longfi(Pkt)
             catch _:_ ->
-                      route_non_longfi(Pkt)
+                      handle_non_longfi(Pkt)
             end
+    end.
+
+-spec handle_non_longfi(binary()) -> any().
+handle_non_longfi(Packet) ->
+    case application:get_env(miner, gateway_and_mux_enable) of
+        {ok, true} -> {noop, non_longfi};
+        _ -> route_non_longfi(Packet)
     end.
 
 % Some binary madness going on here
@@ -623,8 +660,10 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
 route_non_longfi(<<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little, DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>>) ->
     {lorawan, {eui, DevEUI, AppEUI}};
 route_non_longfi(<<MType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1, FOptsLen:4,
-                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when MType == ?UNCONFIRMED_UP; MType == ?CONFIRMED_UP ->
-    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) -4}),
+                   _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary, PayloadAndMIC/binary>>) when (MType == ?UNCONFIRMED_UP orelse MType == ?CONFIRMED_UP) andalso
+                                                                                                          %% MIC is 4 bytes, so the binary must be at least that long
+                                                                                                          byte_size(PayloadAndMIC) >= 4 ->
+    Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) - 4}),
     {FPort, _FRMPayload} =
         case Body of
             <<>> -> {undefined, <<>>};
@@ -662,7 +701,7 @@ send_to_router(Type, RoutingInfo, Packet, Region) ->
 -spec country_code_for_addr(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, failed_to_find_geodata_for_addr}.
 country_code_for_addr(Addr)->
     B58Addr = libp2p_crypto:bin_to_b58(Addr),
-    URL = "https://api.helium.io/v1/hotspots/" ++ B58Addr,
+    URL = application:get_env(miner, api_base_url, "https://api.helium.io/v1") ++ "/hotspots/" ++ B58Addr,
     case httpc:request(get, {URL, []}, [{timeout, 5000}],[]) of
         {ok, {{_HTTPVersion, 200, _RespBody}, _Headers, JSONBody}} = Resp ->
             lager:debug("hotspot info response: ~p", [Resp]),
@@ -763,24 +802,37 @@ tmst_to_local_monotonic_time(Tmst_us, PrevTmst_us, PrevMonoTime_us) ->
 %% GWMP JSON V1/V2.
 -spec packet_rssi(map(), boolean()) -> number().
 packet_rssi(Packet, UseRSSIS) ->
-    case maps:get(<<"rssi">>, Packet, undefined) of
-        %% GWMP V2
+    RSSIS = maps:get(<<"rssis">>, Packet, undefined),
+    SingleRSSI = case UseRSSIS andalso RSSIS =/= undefined of
+        true  -> RSSIS;
+        false -> maps:get(<<"rssi">>, Packet, undefined)
+    end,
+    case SingleRSSI of
+        %% No RSSI, perhaps this is a GWMP V2
         undefined ->
             %% `rsig` is a list. It can contain more than one signal
             %% quality object if the packet was received on multiple
             %% antennas/receivers. So let's pick the one with the
-            %% highest RSSI[Channel]
-            Key = case UseRSSIS andalso maps:is_key(<<"rssis">>, Packet) of
+            %% highest RSSI.
+            FetchRSSI = case UseRSSIS of
                 true ->
-                    <<"rssis">>;
-                _ ->
-                    <<"rssic">>
+                    %% Use RSSIS if available, fall back to RSSIC.
+                    fun (Obj) ->
+                        maps:get(<<"rssis">>, Obj,
+                                 maps:get(<<"rssic">>, Obj, undefined))
+                    end;
+                false ->
+                    %% Just use RSSIC.
+                    fun (Obj) ->
+                        maps:get(<<"rssic">>, Obj, undefined)
+                    end
             end,
+            BestRSSISelector =
+                fun (Obj, Best) ->
+                    erlang:max(Best, FetchRSSI(Obj))
+                end, 
             [H|T] = maps:get(<<"rsig">>, Packet),
-            Selector = fun(Obj, Best) ->
-                               erlang:max(Best, maps:get(Key, Obj))
-                       end,
-            lists:foldl(Selector, maps:get(Key, H), T);
+            lists:foldl(BestRSSISelector, FetchRSSI(H), T);
         %% GWMP V1
         RSSI ->
             RSSI
@@ -856,7 +908,7 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
 
 -spec create_packet(
     Payload :: binary(),
-    When :: integer(),
+    When :: atom() | integer(),
     LocalFreq :: integer(),
     DataRate :: string(),
     Power :: float(),
@@ -864,11 +916,18 @@ send_packet(Payload, When, ChannelSelectorFun, DataRate, Power, IPol, HlmPacket,
     Token :: binary()
 ) -> binary().
 create_packet(Payload, When, LocalFreq, DataRate, Power, IPol, Token) ->
+
+    IsImme = When == immediate,
+    Tmst = case IsImme of
+               false -> When;
+               true -> 0
+           end,
+
     DecodedJSX = #{<<"txpk">> => #{
                         <<"ipol">> => IPol, %% IPol for downlink to devices only, not poc packets
-                        <<"imme">> => When == immediate,
+                        <<"imme">> => IsImme,
                         <<"powe">> => trunc(Power),
-                        <<"tmst">> => When, %% TODO gps time?
+                        <<"tmst">> => Tmst,
                         <<"freq">> => LocalFreq,
                         <<"modu">> => <<"LORA">>,
                         <<"datr">> => list_to_binary(DataRate),
@@ -953,3 +1012,39 @@ maybe_update_reg_data(#state{pubkey_bin=Addr} = State) ->
 -spec reg_region(State :: state()) -> atom().
 reg_region(State) ->
     State#state.reg_region.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+rssi_fetch_test() ->
+    PacketWithRSSIS = #{
+        <<"rssis">> => 1,    
+        <<"rssi">> => 2
+    },
+    PacketWithoutRSSIS = #{
+        <<"rssi">> => 2
+    },
+    RSIGPacketWithRSSIS = #{
+        <<"rsig">> => [
+            #{ <<"rssis">> => 1, <<"rssic">> => 2 },
+            #{ <<"rssis">> => 3, <<"rssic">> => 4 },
+            #{ <<"rssis">> => -1, <<"rssic">> => 0 }
+        ]
+    },
+    RSIGPacketWithoutRSSIS = #{
+        <<"rsig">> => [
+            #{ <<"rssic">> => 2 },
+            #{ <<"rssic">> => 4 },
+            #{ <<"rssic">> => 0 }
+        ]
+    },
+    ?assertEqual(packet_rssi(PacketWithRSSIS, true), 1),
+    ?assertEqual(packet_rssi(PacketWithRSSIS, false), 2),
+    ?assertEqual(packet_rssi(PacketWithoutRSSIS, true), 2),
+    ?assertEqual(packet_rssi(PacketWithoutRSSIS, false), 2),
+    ?assertEqual(packet_rssi(RSIGPacketWithRSSIS, true), 3),
+    ?assertEqual(packet_rssi(RSIGPacketWithRSSIS, false), 4),
+    ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, true), 4),
+    ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, false), 4).
+    
+-endif.

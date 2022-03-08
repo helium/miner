@@ -19,8 +19,10 @@ start(_StartType, _StartArgs) ->
     persistent_term:put(ospid, os:getpid()),
 
     GlobalOpts = application:get_env(rocksdb, global_opts, []),
-    {ok, Cache} = rocksdb:new_cache(lru, 4 * 1024 * 1024),
-    {ok, BufferMgr} = rocksdb:new_write_buffer_manager(4 * 1024 * 1024, Cache),
+    RocksDBCacheSize = application:get_env(miner, rocksdb_cache_size, 8),
+    RocksDBWriteBufferSize = application:get_env(miner, rocksdb_write_buffer_size, 8),
+    {ok, Cache} = rocksdb:new_cache(lru, RocksDBCacheSize * 1024 * 1024),
+    {ok, BufferMgr} = rocksdb:new_write_buffer_manager(RocksDBWriteBufferSize * 1024 * 1024, Cache),
     BBOpts = proplists:get_value(block_based_table_options, GlobalOpts, []),
     Opts1 = proplists:delete(block_based_table_options, GlobalOpts),
     Opts = Opts1 ++ [{write_buffer_manager, BufferMgr},
@@ -28,18 +30,38 @@ start(_StartType, _StartArgs) ->
                       BBOpts ++ [{block_cache, Cache}]}],
     application:set_env(rocksdb, global_opts, Opts),
 
+    HotfixDir = application:get_env(miner, hotfix_dir, "hotfix"),
+
+    case filelib:is_dir(HotfixDir) of
+        true ->
+            case code:add_patha(HotfixDir) of
+                true ->
+                    lager:info("added ~p to the code path", [HotfixDir]);
+                {error, bad_directory} ->
+                    lager:info("failed to add ~p to the code path", [HotfixDir])
+            end;
+        false ->
+            lager:info("failed to modify code path; ~p not a directory", [HotfixDir])
+    end,
+
     Follow =
         %% validator as the default here because it's a safer failure mode.
         case application:get_env(miner, mode, validator) of
-            %% follow mode defaults to false
+            %% follow mode defaults to false for miner validator mode
             validator -> false;
             gateway ->
-                %% check touchfile, since some people are using it
-                BaseDir = application:get_env(blockchain, base_dir, "data"),
-                Filename = filename:join([BaseDir, "validate-mode"]),
-                case file:read_file_info(Filename) of
-                    {ok, _} -> false;
-                    _ -> true
+                case application:get_env(blockchain, follow_mode) of
+                    undefined ->
+                        %% check touchfile, since some people are using it
+                        BaseDir = application:get_env(blockchain, base_dir, "data"),
+                        Filename = filename:join([BaseDir, "validate-mode"]),
+                        case file:read_file_info(Filename) of
+                            {ok, _} -> false;
+                            _ -> true
+                        end;
+                    {ok, FollowMode} ->
+                        %% blockchain follow_mode was already set, honor that
+                        FollowMode
                 end
         end,
 

@@ -1,3 +1,4 @@
+%%% RELOC MOVE to core
 -module(miner_reward_SUITE).
 
 -include_lib("common_test/include/ct.hrl").

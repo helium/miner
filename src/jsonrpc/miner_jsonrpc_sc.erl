@@ -7,18 +7,18 @@
 %% jsonrpc_handler
 %%
 handle_rpc(<<"sc_active">>, []) ->
-    case (catch blockchain_state_channels_server:active_sc_ids()) of
-        {'EXIT', _} -> ?jsonrpc_error(timeout);
-        undefined -> #{<<"active">> => []};
-        BinIds -> #{<<"active">> => [ ?TO_VALUE(base64:encode(I)) || I <- BinIds ]}
+    case (catch blockchain_state_channels_server:get_actives()) of
+        {'EXIT', _} ->
+            ?jsonrpc_error(timeout);
+        ActiveScs ->
+            #{<<"active">> => [ ?TO_VALUE(base64:encode(I)) || I <- maps:keys(ActiveScs) ]}
     end;
 handle_rpc(<<"sc_active">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
 handle_rpc(<<"sc_list">>, []) ->
-    case (catch blockchain_state_channels_server:state_channels()) of
+    case (catch blockchain_state_channels_server:get_all()) of
         {'EXIT', _} -> ?jsonrpc_error(timeout);
-        undefined -> #{<<"channels">> => []};
-        SCs -> format_sc_list(SCs)
+        SCs -> format_sc_map(SCs)
     end;
 handle_rpc(<<"sc_list">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
@@ -28,12 +28,20 @@ handle_rpc(_, _) ->
 %%
 %% Internal
 %%
-format_sc_list(SCs) ->
+format_sc_map(SCs) ->
     {ok, Height} = blockchain:height(blockchain_worker:blockchain()),
-    ActiveIds = blockchain_state_channels_server:active_sc_ids(),
-    maps:fold(fun(_SCID, {SC, _Skew}, Acc) ->
-                      #{ expire_at_block := ExpireAt } = Json
-                      = blockchain_state_channel_v1:to_json(SC, []),
-                      [ Json#{ <<"is_active">> => lists:member(SC, ActiveIds),
-                               <<"expired">> => Height >= ExpireAt } | Acc ]
-              end, [], SCs).
+    ActiveSCIDs = maps:keys(blockchain_state_channels_server:get_actives()),
+    maps:fold(
+        fun(SCID, SC, Acc) ->
+            #{expire_at_block := ExpireAt} = Json = blockchain_state_channel_v1:to_json(SC, []),
+            [
+                Json#{
+                    <<"is_active">> => lists:member(SCID, ActiveSCIDs),
+                    <<"expired">> => Height >= ExpireAt
+                }
+                | Acc
+            ]
+        end,
+        [],
+        SCs
+    ).

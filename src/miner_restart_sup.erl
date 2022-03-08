@@ -7,7 +7,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,18 +33,22 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
-start_link(SigFun, ECDHFun) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, [SigFun, ECDHFun]).
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [[]]).
 
 %% ------------------------------------------------------------------
 %% Supervisor callbacks
 %% ------------------------------------------------------------------
-init([SigFun, ECDHFun]) ->
+init(_Opts) ->
     SupFlags = #{
         strategy => rest_for_one,
         intensity => 4,
         period => 10
     },
+
+    #{ ecdh_fun := ECDHFun,
+       sig_fun := SigFun
+     } = miner_keys:keys(),
 
     %% downlink packets from state channels go here
     application:set_env(blockchain, sc_client_handler, miner_lora),
@@ -91,8 +95,7 @@ init([SigFun, ECDHFun]) ->
             _ -> []
         end,
 
-    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
-    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort, JsonRpcIp} = jsonrpc_server_config(),
 
     ChildSpecs =
         [
@@ -100,7 +103,8 @@ init([SigFun, ECDHFun]) ->
          ?WORKER(miner, []),
          ?WORKER(elli, [[{callback, miner_jsonrpc_handler},
                          {ip, JsonRpcIp},
-                         {port, JsonRpcPort}]])
+                         {port, JsonRpcPort}]]),
+         ?WORKER(miner_poc_denylist, [])
          ] ++
         ValServers ++
         EbusServer ++
@@ -123,3 +127,26 @@ check_for_region_override(undefined)->
     end;
 check_for_region_override(SysConfigRegion)->
     SysConfigRegion.
+
+-ifdef(TEST).
+jsonrpc_server_config() ->
+    %% choose a random high port above the grpc port
+    JsonRpcPort = rand:uniform(40000)+10000,
+    %% lookup the port in case it's set
+    JsonRpcPort0 = application:get_env(miner, jsonrpc_port, JsonRpcPort),
+    %% maybe set it so we can easily get the port number during a test if needed
+    %%
+    %% if it's already set, it shouldn't match the random port number, so don't
+    %% do anything in that case.
+    case JsonRpcPort0 of
+        JsonRpcPort -> application:set_env(miner, jsonrpc_port, JsonRpcPort);
+        _ -> ok
+    end,
+    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort0, JsonRpcIp}.
+-else.
+jsonrpc_server_config() ->
+    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
+    JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
+    {JsonRpcPort, JsonRpcIp}.
+-endif.

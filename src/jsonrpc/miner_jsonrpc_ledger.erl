@@ -71,6 +71,18 @@ handle_rpc(<<"ledger_gateways">>, #{<<"verbose">> := Verbose}) ->
         [],
         L
     );
+handle_rpc(<<"ledger_gateways">>, #{ <<"address">> := Address}) ->
+    Ledger = get_ledger(),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    try
+        BinAddr = ?B58_TO_BIN(Address),
+        case blockchain_ledger_v1:find_gateway_info(BinAddr, Ledger) of
+            {error, not_found} -> ?jsonrpc_error({not_found, Address});
+            {ok, GW} -> format_ledger_gateway_entry(BinAddr, GW, Height, true)
+        end
+    catch
+        _:_ -> ?jsonrpc_error({invalid_params, Address})
+    end;
 handle_rpc(<<"ledger_gateways">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
 handle_rpc(<<"ledger_validators">>, []) ->
@@ -121,6 +133,28 @@ handle_rpc(<<"ledger_variables">>, #{ <<"name">> := Name }) ->
     end;
 handle_rpc(<<"ledger_variables">>, Params) ->
     ?jsonrpc_error({invalid_params, Params});
+handle_rpc(<<"ledger_lora_region_parameters">>, #{ <<"region">> := Region}) ->
+    Ledger = get_ledger(),
+    try
+        RegionAtom = binary_to_existing_atom(Region, utf8),
+        case blockchain_region_params_v1:for_region(RegionAtom, Ledger) of
+            {ok, RegionParams} ->
+                format_region_parameters(RegionParams);
+            {error, _Reason} ->
+                ?jsonrpc_error({not_found, Region})
+        end
+    catch
+        %% String-to-atom conversion will fail with this error if there is no
+        %% atom present in the runtime for the given region. This is an
+        %% implicit signal that there are no parameters for the region, and
+        %% thus, the region likely doesn't exist.
+        error:badarg ->
+            ?jsonrpc_error({not_found, Region})
+    end;
+handle_rpc(<<"ledger_lora_region_parameters">>, []) ->
+    ?jsonrpc_error({invalid_params, <<"region required">>});
+handle_rpc(<<"ledger_lora_region_parameters">>, Params) ->
+    ?jsonrpc_error({invalid_params, Params});
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
 
@@ -141,11 +175,15 @@ format_ledger_balance(Addr, Entry) ->
 
 format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
     GWAddr = ?BIN_TO_B58(Addr),
+    GWLoc = case blockchain_ledger_gateway_v2:location(GW) of
+        undefined -> undefined;
+        L -> h3:to_string(L)
+    end,
     O = #{
-        <<"name">> => iolist_to_binary(blockchain_utils:addr2name(GWAddr)),
+        <<"name">> => iolist_to_binary(blockchain_utils:addr2name(Addr)),
         <<"address">> => GWAddr,
         <<"owner_address">> => ?BIN_TO_B58(blockchain_ledger_gateway_v2:owner_address(GW)),
-        <<"location">> => ?MAYBE(blockchain_ledger_gateway_v2:location(GW)),
+        <<"location">> => ?TO_VALUE(GWLoc),
         <<"last_challenge">> => last_challenge(
             Height,
             blockchain_ledger_gateway_v2:last_poc_challenge(GW)
@@ -189,3 +227,40 @@ format_ledger_validator(Addr, Val, Ledger, Height) ->
         <<"performance_penalty">> => Perf,
         <<"total_penalty">> => TotalPenalty
     }.
+
+-spec format_region_parameters([blockchain_region_param_v1:region_param_v1()]) ->
+    [map()].
+format_region_parameters(RegionParameters) ->
+    [ format_region_parameter(RegionParameter) || RegionParameter <- RegionParameters ].
+
+-spec format_region_parameter(blockchain_region_param_v1:region_param_v1()) ->
+    map().
+format_region_parameter(RegionParam) ->
+    ChannelFrequencyHz = blockchain_region_param_v1:channel_frequency(RegionParam),
+    BandwidthHz = blockchain_region_param_v1:bandwidth(RegionParam),
+    MaxEIRPcBm = blockchain_region_param_v1:max_eirp(RegionParam),
+    Spreading = blockchain_region_param_v1:spreading(RegionParam),
+    SpreadingObject = format_spreading(Spreading),
+    #{
+        <<"channel_frequency_hz">> => ChannelFrequencyHz,
+        <<"bandwidth_hz">> => BandwidthHz,
+        <<"max_eirp_dbm">> => MaxEIRPcBm / 10.0,
+        <<"spreading">> => SpreadingObject
+    }.
+
+-spec format_spreading(blockchain_region_spreading_v1:region_spreading_v1()) ->
+    [map()].
+format_spreading(Spreading) ->
+    SpreadingList = blockchain_region_spreading_v1:tagged_spreading(Spreading),
+    [ format_spreading_factor(SF) || SF <- SpreadingList ].
+
+-spec format_spreading_factor(blockchain_region_spreading_v1:tagged_spreading()) ->
+    map().
+format_spreading_factor(SF) ->
+    SFAtom = blockchain_region_spreading_v1:region_spreading(SF),
+    MaxPacketSize = blockchain_region_spreading_v1:max_packet_size(SF),
+    #{
+        <<"factor">> => atom_to_binary(SFAtom, utf8),
+        <<"max_packet_size">> => MaxPacketSize
+    }.
+

@@ -24,6 +24,7 @@
    {max_inbound_connections, 32},
    {snapshot_memory_limit, 300},
    {relay_limit, 100},
+   {blocks_to_protect_from_gc, 100000},
    {base_dir, "data"}
   ]},
  {libp2p,
@@ -37,9 +38,12 @@
   ]},
  {miner,
   [
+   {denylist_keys, undefined},
    {mode, validator},
    {stabilization_period, 8000},
    {network, testnet},
+   {rocksdb_cache_size, 32},
+   {rocksdb_write_buffer_size, 32},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
@@ -47,7 +51,7 @@
    %% we only realy need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'}
-
+   {region_override, 'US915'},
+   {gateway_and_mux_enable, false}
   ]}
 ].

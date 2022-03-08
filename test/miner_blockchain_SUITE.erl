@@ -2,10 +2,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/inet.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
--include("miner_ct_macros.hrl").
 
 -export([
          init_per_suite/1,
@@ -13,28 +11,74 @@
          init_per_testcase/2,
          end_per_testcase/2,
          all/0
-
         ]).
 
--compile([export_all]).
+-export([
+    autoskip_chain_vars_test/1,
+    autoskip_on_timeout_test/1,
+    restart_test/1,
+    dkg_restart_test/1,
+    validator_transition_test/1,
+    election_test/1,
+    election_multi_test/1,
+    group_change_test/1,
+    election_v3_test/1,
 
-%% common test callbacks
+    snapshot_test/1,
+    high_snapshot_test/1
+]).
+
+%% TODO Relocate all helper functions bellow tests.
 
 all() -> [
-          restart_test,
-          dkg_restart_test,
-          validator_transition_test,
-          election_test,
-          election_multi_test,
-          group_change_test,
-          master_key_test,
-          version_change_test,
-          election_v3_test,
-          %% this is an OK smoke test but doesn't hit every time, the
-          %% high test is more reliable
-          %% snapshot_test,
-          high_snapshot_test
-         ].
+    % RELOC NOTE def KEEP testing of DKG
+    % RELOC NOTE def KEEP testing of election
+    % RELOC NOTE def MOVE testing of variable changes
+    % RELOC NOTE may MOVE if raw transactions are being submitted
+
+    autoskip_chain_vars_test,
+    %% RELOC KEEP - tests miner-unique feature
+
+    autoskip_on_timeout_test,
+    %% RELOC KEEP - tests miner-unique feature
+
+    restart_test,
+    %% RELOC KEEP - tests whole miner
+
+    dkg_restart_test,
+    %% RELOC KEEP - tests DKG
+
+    validator_transition_test,
+    %% RELOC TBD:
+    %%   FOR:
+    %%     - submits txns
+    %%     - submits vars
+    %%   AGAINST:
+    %%     - seems to intend to test miner-specific functionality - validators
+
+    election_test,
+    %% RELOC KEEP - tests election
+
+    election_multi_test,
+    %% RELOC KEEP - tests election
+
+    group_change_test,
+    %% RELOC TBD:
+    %%   FOR:
+    %%     - seems to be mostly calling a single miner
+    %%     - submits txns
+    %%   AGAINST:
+    %%     - seems to expect different outcomes in multiple miners
+
+    election_v3_test,
+    %% RELOC KEEP - tests election
+
+    %% snapshot_test is an OK smoke test but doesn't hit every time, the
+    %% high_snapshot_test test is more reliable:
+    %%snapshot_test,
+    high_snapshot_test
+    %% RELOC KEEP - why?
+].
 
 init_per_suite(Config) ->
     Config.
@@ -43,6 +87,9 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(TestCase, Config0) ->
+    %% TODO Describe what global state we intend to setup, besides vals added to config.
+    %% TODO Redefine as a parameterized helper, because some cased need different params.
+
     Config = miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config0),
     try
     Miners = ?config(miners, Config),
@@ -106,14 +153,7 @@ init_per_testcase(TestCase, Config0) ->
     FinalVars = maps:merge(Vars, Extras),
     ct:pal("final vars ~p", [FinalVars]),
 
-    InitialVars =
-        case TestCase of
-            version_change_test ->
-                miner_ct_utils:make_vars(Keys, FinalVars, legacy);
-            _ ->
-                miner_ct_utils:make_vars(Keys, FinalVars)
-        end,
-
+    InitialVars = miner_ct_utils:make_vars(Keys, FinalVars),
     InitialPayment = [ blockchain_txn_coinbase_v1:new(Addr, 5000) || Addr <- Addresses],
     %% create a new account to own validators for staking
     #{public := AuxPub} = AuxKeys = libp2p_crypto:generate_keys(ecc_compact),
@@ -288,6 +328,7 @@ autoskip_on_timeout_test(Config) ->
         Node <- MinersCGBroken
     ],
 
+    %% TODO The following needs better explanation and/or better methods.
     %% send some more skips at broken miner 1 so we're not all on the same round
     Node1 = hd(MinersCGBroken),
     ok = ct_rpc:call(Node1, miner, hbbft_skip, [], 300),
@@ -303,6 +344,18 @@ autoskip_on_timeout_test(Config) ->
     {comment, miner_ct_utils:heights(MinersAll)}.
 
 restart_test(Config) ->
+    %% NOTES:
+    %% restart_test is hitting coinsensus restore pathway
+    %% consesus group is lost but dkg is retained
+    %% 
+    %% finish the dkg,
+    %% crash,
+    %% restart
+    %%
+    %% trying to check restore after crash
+    %%
+    %% the main is to test that group information is not lost after a crash
+    %%
     BaseDir = ?config(base_dir, Config),
     Miners = ?config(miners, Config),
 
@@ -327,6 +380,7 @@ restart_test(Config) ->
 
 
 dkg_restart_test(Config) ->
+    %% TODO Describe main idea and method.
     Miners = ?config(miners, Config),
     Interval = ?config(election_interval, Config),
     AddrList = ?config(tagged_miner_addresses, Config),
@@ -374,6 +428,8 @@ dkg_restart_test(Config) ->
     ?assert(EndHeight < (Height + Interval + 99)).
 
 validator_transition_test(Config) ->
+    %% TODO Describe main idea and method.
+
     %% get all the miners
     Miners = ?config(miners, Config),
     Options = ?config(node_options, Config),
@@ -425,6 +481,9 @@ validator_transition_test(Config) ->
 check_loop(0, _Miners) ->
     error(seen_timeout);
 check_loop(N, Miners) ->
+    %% TODO Describe main idea and method. What will send the mesgs? What is its API?
+    %% TODO Need more transparent API, since the above isn't clear.
+    %% TODO See if this function can be re-used in election_test
     receive
         seen_all ->
             ok;
@@ -448,6 +507,8 @@ check_loop(N, Miners) ->
 
 
 election_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
     BaseDir = ?config(base_dir, Config),
     %% get all the miners
     Miners = ?config(miners, Config),
@@ -456,6 +517,7 @@ election_test(Config) ->
     Me = self(),
     spawn(miner_ct_utils, election_check, [Miners, Miners, AddrList, Me]),
 
+    %% TODO Looks like copy-pasta - see if check_loop/2 can be used instead.
     fun Loop(0) ->
             error(seen_timeout);
         Loop(N) ->
@@ -587,6 +649,8 @@ election_test(Config) ->
     ok = miner_ct_utils:wait_for_gte(epoch, Miners, ElectionEpoch + 1).
 
 election_multi_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
     BaseDir = ?config(base_dir, Config),
     %% get all the miners
     Miners = ?config(miners, Config),
@@ -599,6 +663,14 @@ election_multi_test(Config) ->
 
     ct:pal("starting multisig attempt"),
 
+    %% TODO Looks automatable - 5 unique things that aren't used uniquely:
+    %{Privs, BinPubs} = (fun(N) ->
+    %    Keys = [libp2p_crypto:generate_keys(ecc_compact) || {} <- lists:duplicate(N, {})],
+    %    Privs = [Priv || #{secret := Priv} <- Keys],
+    %    Pubs = [Pub || #{public := Pub} <- Keys],
+    %    BinPubs = lists:map(fun libp2p_crypto:pubkey_to_bin/1, Pubs),
+    %    {Privs, BinPubs}
+    %)(5)
     #{secret := Priv1, public := Pub1} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := Priv2, public := Pub2} = libp2p_crypto:generate_keys(ecc_compact),
     #{secret := Priv3, public := Pub3} = libp2p_crypto:generate_keys(ecc_compact),
@@ -726,6 +798,9 @@ election_multi_test(Config) ->
     end.
 
 group_change_test(Config) ->
+    %% TODO Describe main idea and method.
+    %% TODO Break into subcomponents, it's very long and hard to reason about.
+
     %% get all the miners
     Miners = ?config(miners, Config),
     BaseDir = ?config(base_dir, Config),
@@ -873,251 +948,8 @@ group_change_test(Config) ->
 
     ok.
 
-master_key_test(Config) ->
-    %% get all the miners
-    Miners = ?config(miners, Config),
-
-    %% baseline: chain vars are working
-    {Priv, _Pub} = ?config(master_key, Config),
-
-    Vars = #{garbage_value => totes_goats_garb},
-    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn1_0),
-    Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1]) || Miner <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
-
-    %% bad master key
-
-    #{secret := Priv2, public := Pub2} =
-        libp2p_crypto:generate_keys(ecc_compact),
-
-    BinPub2 = libp2p_crypto:pubkey_to_bin(Pub2),
-
-    Vars2 = #{garbage_value => goats_are_not_garb},
-    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3, #{master_key => BinPub2}),
-    Proof2 = blockchain_txn_vars_v1:create_proof(Priv, Txn2_0),
-    KeyProof2 = blockchain_txn_vars_v1:create_proof(Priv2, Txn2_0),
-    KeyProof2Corrupted = <<Proof2/binary, "asdasdasdas">>,
-    Txn2_1 = blockchain_txn_vars_v1:proof(Txn2_0, Proof2),
-    Txn2_2c = blockchain_txn_vars_v1:key_proof(Txn2_1, KeyProof2Corrupted),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2c]) || Miner <- Miners],
-
-    %% and then confirm the transaction did not apply
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb, 10),
-
-    %% good master key
-
-    Txn2_2 = blockchain_txn_vars_v1:key_proof(Txn2_1, KeyProof2),
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_2])
-         || Miner <- Miners],
-
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
-
-    %% make sure old master key is no longer working
-
-    Vars4 = #{garbage_value => goats_are_too_garb},
-    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 4),
-    Proof4 = blockchain_txn_vars_v1:create_proof(Priv, Txn4_0),
-    Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
-         || Miner <- Miners],
-
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_too_garb, 10),
-
-    %% double check that new master key works
-
-    Vars5 = #{garbage_value => goats_always_win},
-    Txn5_0 = blockchain_txn_vars_v1:new(Vars5, 4),
-    Proof5 = blockchain_txn_vars_v1:create_proof(Priv2, Txn5_0),
-    Txn5_1 = blockchain_txn_vars_v1:proof(Txn5_0, Proof5),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn5_1])
-         || Miner <- Miners],
-
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_always_win),
-
-    %% test all the multikey stuff
-
-    %% first enable them
-    Txn6 = vars(#{?use_multi_keys => true}, 5, Priv2),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn6]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?use_multi_keys, true),
-
-    #{secret := Priv3, public := Pub3} = libp2p_crypto:generate_keys(ecc_compact),
-    #{secret := Priv4, public := Pub4} = libp2p_crypto:generate_keys(ecc_compact),
-    #{secret := Priv5, public := Pub5} = libp2p_crypto:generate_keys(ecc_compact),
-    #{secret := Priv6, public := Pub6} = libp2p_crypto:generate_keys(ecc_compact),
-    #{secret := Priv7, public := Pub7} = libp2p_crypto:generate_keys(ecc_compact),
-    BinPub3 = libp2p_crypto:pubkey_to_bin(Pub3),
-    BinPub4 = libp2p_crypto:pubkey_to_bin(Pub4),
-    BinPub5 = libp2p_crypto:pubkey_to_bin(Pub5),
-    BinPub6 = libp2p_crypto:pubkey_to_bin(Pub6),
-    BinPub7 = libp2p_crypto:pubkey_to_bin(Pub7),
-
-    Txn7_0 = blockchain_txn_vars_v1:new(
-               #{garbage_value => goat_jokes_are_so_single_key}, 6,
-               #{multi_keys => [BinPub2, BinPub3, BinPub4, BinPub5, BinPub6]}),
-    Proofs7 = [blockchain_txn_vars_v1:create_proof(P, Txn7_0)
-               %% shuffle the proofs to make sure we no longer need
-               %% them in the correct order
-               || P <- miner_ct_utils:shuffle([Priv2, Priv3, Priv4, Priv5, Priv6])],
-    Txn7_1 = blockchain_txn_vars_v1:multi_key_proofs(Txn7_0, Proofs7),
-    Proof7 = blockchain_txn_vars_v1:create_proof(Priv2, Txn7_1),
-    Txn7 = blockchain_txn_vars_v1:proof(Txn7_1, Proof7),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn7]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goat_jokes_are_so_single_key),
-
-    %% try with only three keys (and succeed)
-    ct:pal("submitting 8"),
-    Txn8 = mvars(#{garbage_value => but_what_now}, 7, [Priv2, Priv3, Priv6]),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn8]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, but_what_now),
-
-    %% try with only two keys (and fail)
-    Txn9 = mvars(#{garbage_value => sheep_jokes}, 8, [Priv3, Priv6]),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn9]) || M <- Miners],
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn9]) || Miner <- Miners],
-
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, sheep_jokes, 10),
-
-    %% try with two valid and one corrupted key proof (and fail again)
-    Txn10_0 = blockchain_txn_vars_v1:new(#{garbage_value => cmon}, 8),
-    Proofs10_0 = [blockchain_txn_vars_v1:create_proof(P, Txn10_0)
-                || P <- [Priv2, Priv3, Priv4]],
-    [Proof10 | Rem] = Proofs10_0,
-    Proof10Corrupted = <<Proof10/binary, "asdasdasdas">>,
-    Txn10 = blockchain_txn_vars_v1:multi_proofs(Txn10_0, [Proof10Corrupted | Rem]),
-
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn10]) || M <- Miners],
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn9]) || Miner <- Miners],
-
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, cmon, 10),
-
-    %% make sure that we safely ignore bad proofs and keys
-    #{secret := Priv8, public := _Pub8} = libp2p_crypto:generate_keys(ecc_compact),
-
-    Txn11a = mvars(#{garbage_value => sheep_are_inherently_unfunny}, 8,
-                   [Priv2, Priv3, Priv4, Priv5, Priv6, Priv8]),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn11a]) || M <- Miners],
-    false = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, sheep_are_inherently_unfunny, 10),
-
-    Txn11b = mvars(#{garbage_value => sheep_are_inherently_unfunny}, 8,
-                   [Priv2, Priv3, Priv5, Priv6, Priv8]),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn11b]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, sheep_are_inherently_unfunny),
-
-    Txn12_0 = blockchain_txn_vars_v1:new(
-                #{garbage_value => so_true}, 9,
-                #{multi_keys => [BinPub3, BinPub4, BinPub5, BinPub6, BinPub7]}),
-    Proofs12 = [blockchain_txn_vars_v1:create_proof(P, Txn12_0)
-                %% shuffle the proofs to make sure we no longer need
-                %% them in the correct order
-                || P <- miner_ct_utils:shuffle([Priv7])],
-    Txn12_1 = blockchain_txn_vars_v1:multi_key_proofs(Txn12_0, Proofs12),
-    Proofs = [blockchain_txn_vars_v1:create_proof(P, Txn12_1)
-               || P <- [Priv3, Priv4, Priv5]],
-    Txn12 = blockchain_txn_vars_v1:multi_proofs(Txn12_1, Proofs),
-
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn12]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, so_true),
-
-    Txn13 = mvars(#{garbage_value => lets_all_hate_on_sheep}, 10,
-                  [Priv5, Priv6, Priv7]),
-    _ = [ok = ct_rpc:call(M, blockchain_worker, submit_txn, [Txn13]) || M <- Miners],
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, lets_all_hate_on_sheep),
-
-    ok.
-
-mvars(Map, Nonce, Privs) ->
-    Txn0 = blockchain_txn_vars_v1:new(Map, Nonce),
-    Proofs = [blockchain_txn_vars_v1:create_proof(P, Txn0)
-               || P <- Privs],
-    blockchain_txn_vars_v1:multi_proofs(Txn0, Proofs).
-
-vars(Map, Nonce, Priv) ->
-    Txn0 = blockchain_txn_vars_v1:new(Map, Nonce),
-    Proof = blockchain_txn_vars_v1:create_proof(Priv, Txn0),
-    blockchain_txn_vars_v1:proof(Txn0, Proof).
-
-version_change_test(Config) ->
-    %% get all the miners
-    Miners = ?config(miners, Config),
-    ConsensusMiners = ?config(consensus_miners, Config),
-
-
-    ?assertNotEqual([], ConsensusMiners),
-    ?assertEqual(7, length(ConsensusMiners)),
-
-    %% make sure that elections are rolling
-    ok = miner_ct_utils:wait_for_gte(epoch, Miners, 1),
-
-    %% baseline: old-style chain vars are working
-
-    Blockchain1 = ct_rpc:call(hd(Miners), blockchain_worker, blockchain, []),
-    {Priv, _Pub} = ?config(master_key, Config),
-
-    Vars = #{garbage_value => totes_goats_garb},
-    Proof = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars),
-    Txn1_0 = blockchain_txn_vars_v1:new(Vars, 2),
-    Txn1_1 = blockchain_txn_vars_v1:proof(Txn1_0, Proof),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn1_1])
-         || Miner <- Miners],
-
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, totes_goats_garb),
-
-    %% switch chain version
-
-    Vars2 = #{?chain_vars_version => 2},
-    Proof2 = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars2),
-    Txn2_0 = blockchain_txn_vars_v1:new(Vars2, 3),
-    Txn2_1 = blockchain_txn_vars_v1:proof(Txn2_0, Proof2),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn2_1])
-         || Miner <- Miners],
-
-    %% make sure that it has taken effect
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, ?chain_vars_version, 2),
-
-    %% try a new-style txn change
-
-    Vars3 = #{garbage_value => goats_are_not_garb},
-    Txn3_0 = blockchain_txn_vars_v1:new(Vars3, 4),
-    Proof3 = blockchain_txn_vars_v1:create_proof(Priv, Txn3_0),
-    Txn3_1 = blockchain_txn_vars_v1:proof(Txn3_0, Proof3),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn3_1])
-         || Miner <- Miners],
-
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
-
-    %% make sure old style is now closed off.
-
-    Vars4 = #{garbage_value => goats_are_too_garb},
-    Txn4_0 = blockchain_txn_vars_v1:new(Vars4, 5),
-    Proof4 = blockchain_txn_vars_v1:legacy_create_proof(Priv, Vars4),
-    Txn4_1 = blockchain_txn_vars_v1:proof(Txn4_0, Proof4),
-
-    {ok, Start4} = ct_rpc:call(hd(Miners), blockchain, height, [Blockchain1]),
-
-    _ = [ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [Txn4_1])
-         || Miner <- Miners],
-
-    %% wait until height has increased by 15
-    ok = miner_ct_utils:wait_for_gte(height, Miners, Start4 + 15),
-    %% and then confirm the transaction took hold
-    ok = miner_ct_utils:wait_for_chain_var_update(Miners, garbage_value, goats_are_not_garb),
-
-    ok.
-
-
 election_v3_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
@@ -1234,6 +1066,7 @@ election_v3_test(Config) ->
     ok.
 
 snapshot_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners0 = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),
@@ -1285,6 +1118,7 @@ snapshot_test(Config) ->
 
 
 high_snapshot_test(Config) ->
+    %% TODO Describe main idea and method.
     %% get all the miners
     Miners0 = ?config(miners, Config),
     ConsensusMiners = ?config(consensus_miners, Config),

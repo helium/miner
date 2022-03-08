@@ -21,10 +21,8 @@
     "https://github.com/helium/lorawan-h3/blob/main/serialized/AU915.res7.h3idx?raw=true"
 ).
 
-%% NOTE: This is incorrect in the sense that we're using 779 as 470,
-%% we should fix it downstream in lorwawan regions
 -define(region_cn470_url,
-    "https://github.com/helium/lorawan-h3/blob/main/serialized/CN779.res7.h3idx?raw=true"
+    "https://github.com/helium/lorawan-h3/blob/main/serialized/CN470.res7.h3idx?raw=true"
 ).
 
 -define(region_eu433_url,

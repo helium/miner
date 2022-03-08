@@ -47,7 +47,7 @@ hbbft_usage() ->
       "  hbbft status           - Display hbbft status.\n"
       "  hbbft queue            - Display hbbft message queue.\n"
       "  hbbft skip             - Skip current hbbft round.\n"
-      "  hbbft group            - Display current hbbfr group.\n"
+      "  hbbft group            - Display current hbbft group.\n"
       "  hbbft perf             - Show performance of current group members.\n"
      ]
     ].

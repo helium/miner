@@ -133,8 +133,8 @@ start_link() ->
 
 block_age() ->
     Chain = blockchain_worker:blockchain(),
-    {ok, Block} = blockchain:head_block(Chain),
-    erlang:system_time(seconds) - blockchain_block:time(Block).
+    {ok, #block_info_v2{time=BlockTime}} = blockchain:head_block_info(Chain),
+    erlang:system_time(seconds) - BlockTime.
 
 -spec p2p_status() -> [{Check::string(), Result::string()}].
 p2p_status() ->
@@ -273,12 +273,12 @@ signed_block(Signatures, BinBlock) ->
                         blockchain_gossip_handler:gossip_data_v1(SwarmTID, Block);
                     2 ->
                         Height = blockchain_block:height(Block),
-                        {ok, #block_info{hash = Hash}} = blockchain:get_block_info(Height, Chain),
+                        {ok, #block_info_v2{hash = Hash}} = blockchain:get_block_info(Height, Chain),
                         blockchain_gossip_handler:gossip_data_v2(SwarmTID, Hash, Height)
                 end,
 
             libp2p_group_gossip:send(
-              libp2p_swarm:gossip_group(SwarmTID),
+              SwarmTID,
               ?GOSSIP_PROTOCOL_V1,
               Data
              ),
@@ -322,7 +322,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0010040002.
+       0010080003.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -362,10 +362,9 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From,
 handle_call(keys, _From, State) ->
     {reply, {ok, State#state.swarm_keys}, State};
 handle_call(reset_late_block_timer, _From, State) ->
-    %% we do this when the group thinks that it's agreed on a new round, so set the timer extra long
     erlang:cancel_timer(State#state.late_block_timer),
     LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
-    LateTimer = erlang:send_after((LateBlockTimeout * 2) * 1000, self(), late_block_timeout),
+    LateTimer = erlang:send_after(LateBlockTimeout * 1000, self(), late_block_timeout),
 
     {reply, ok, State#state{late_block_timer = LateTimer}};
 handle_call(_Msg, _From, State) ->
@@ -413,10 +412,10 @@ handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
     %% If this miner is in consensus group and lagging on a previous hbbft
     %% round, make it forcefully go to next round
     NewState =
-        case blockchain:get_block(Hash, Chain) of
-            {ok, Block} ->
-                case blockchain_block:height(Block) of
-                    Height when Height > CurrHeight ->
+        case blockchain:get_block_height(Hash, Chain) of
+            {ok, Height} when Height > CurrHeight ->
+                case blockchain:get_block(Hash, Chain) of
+                    {ok, Block} ->
                         erlang:cancel_timer(State#state.block_timer),
                         lager:info("processing block for ~p", [Height]),
                         Round = blockchain_block:hbbft_round(Block),
@@ -427,8 +426,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
                                 NextRound = Round + 1,
                                 libp2p_group_relcast:handle_input(
                                   ConsensusGroup, {next_round, NextRound,
-                                                   blockchain_block:transactions(Block),
-                                                   Sync}),
+                                                   Txns, Sync}),
                                 {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
                                 F = (length(ConsensusAddrs) - 1) div 3,
                                 BBAs = blockchain_utils:bitvector_to_map(length(ConsensusAddrs), blockchain_block_v1:bba_completion(Block)),
@@ -456,13 +454,13 @@ handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
                                 State#state{block_timer = make_ref(),
                                             current_height = Height}
                         end;
-                    _Height ->
-                        lager:debug("skipped re-processing block for ~p", [_Height]),
+                    {error, Reason} ->
+                        lager:error("Error, Reason: ~p", [Reason]),
                         State
                 end;
-            {error, Reason} ->
-                lager:error("Error, Reason: ~p", [Reason]),
-                State
+            {ok, _Height} ->
+                        lager:debug("skipped re-processing block for ~p", [_Height]),
+                        State
         end,
     {noreply, NewState};
 handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
@@ -470,9 +468,8 @@ handle_info({blockchain_event, {add_block, Hash, _Sync, _Ledger}},
                    current_height = CurrHeight,
                    blockchain = Chain} = State) when ConsensusGroup == undefined andalso
                                                      Chain /= undefined ->
-    case blockchain:get_block(Hash, Chain) of
-        {ok, Block} ->
-            Height = blockchain_block:height(Block),
+    case blockchain:get_block_height(Hash, Chain) of
+        {ok, Height} ->
             lager:info("non-consensus block ~p", [Height]),
             case Height of
                 H when H > CurrHeight ->
@@ -573,14 +570,12 @@ hash_check_if_stale(HashCurr, Hashes, VotesNeeded) ->
 ) ->
     create_block_ok().
 create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}) ->
-    {ok, CurrentBlock} = blockchain:head_block(Chain),
-    HeightCurr = blockchain_block:height(CurrentBlock),
+    {ok, #block_info_v2{height=HeightCurr, time=CurrentBlockTime, hash=CurrentBlockHash, election_info=ElectionInfo}} = blockchain:head_block_info(Chain),
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
     SeenBBAs =
         [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
-    {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     %% if we cannot agree on the BBA results, default to flagging everyone as having completed
     VoteDefault =
@@ -594,7 +589,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
 
     BBA = common_enough_or_default(VotesNeeded, BBAs, VoteDefault),
     {ElectionEpoch, EpochStart, TxnsToInsert, InvalidTransactions} =
-        select_transactions(Chain, Txns, CurrentBlock, HeightCurr, HeightNext),
+        select_transactions(Chain, Txns, ElectionInfo, HeightCurr, HeightNext),
     NewBlock =
         blockchain_block_v1:new(#{
             prev_hash       =>  CurrentBlockHash,
@@ -602,7 +597,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
             transactions    =>  TxnsToInsert,
             signatures      =>  [],
             hbbft_round     =>  HBBFTRound,
-            time            =>  block_time(CurrentBlock,  Metadata),
+            time            =>  block_time(CurrentBlockTime,  Metadata),
             election_epoch  =>  ElectionEpoch,
             epoch_start     =>  EpochStart,
             seen_votes      =>  SeenVectors,
@@ -623,12 +618,11 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
         invalid_txns          => InvalidTransactions
     }.
 
--spec block_time(blockchain_block:block(), metadata()) -> pos_integer().
-block_time(Block, Metadata) ->
+-spec block_time(non_neg_integer(), metadata()) -> pos_integer().
+block_time(LastBlockTime, Metadata) ->
     %% Try to rule out invalid values by not allowing timestamps to go
     %% backwards and take the median proposed value.
     {Stamps, _} = meta_to_stamp_hashes(Metadata),
-    LastBlockTime = blockchain_block:time(Block),
     case miner_util:median([S || S <- Stamps, S >= LastBlockTime]) of
         0             -> LastBlockTime + 1;
         LastBlockTime -> LastBlockTime + 1;
@@ -638,7 +632,7 @@ block_time(Block, Metadata) ->
 -spec select_transactions(
     blockchain:blockchain(),
     blockchain_txn:txns(),
-    blockchain_block:block(),
+    {non_neg_integer(), non_neg_integer()},
     non_neg_integer(),
     non_neg_integer()
 ) ->
@@ -648,16 +642,38 @@ block_time(Block, Metadata) ->
         TxsValid   :: blockchain_txn:txns(),
         TxsInvalid :: blockchain_txn:txns()
     }.
-select_transactions(Chain, Txns, BlockCurr, BlockHeightCurr, BlockHeightNext) ->
-    {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(BlockCurr),
+select_transactions(Chain, Txns, {ElectionEpoch0, EpochStart0}, BlockHeightCurr, BlockHeightNext) ->
     SortedTransactions =
         lists:sort(fun blockchain_txn:sort/2, [T || T <- Txns, not txn_is_rewards(T)]),
-    {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
+    {ValidTransactions0, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
     %% InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason}
     %% we dont need the invalid reason here so need to remove the tuple format
     %% and have a regular list of txn items in prep for returning to hbbft.
-    InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
+    InvalidTransactions1 = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
+
     Ledger = blockchain:ledger(Chain),
+
+    SizeLimit = case blockchain:config(?block_size_limit, Ledger) of
+                    {ok, Limit} -> Limit;
+                    _ -> 50*1024*1024 %% 50mb default
+                end,
+    {_, ValidTransactions1} = lists:foldl(fun(_Txn, {done, Acc}) ->
+                                                 %% already full, don't want to skip because
+                                                 %% of possible txn ordering issues so just drop everything
+                                                 {done, Acc};
+                                             (Txn, {Count, Acc}) ->
+                                                 case Count - byte_size(blockchain_txn:serialize(Txn)) of
+                                                     Remainder when Remainder < 0 ->
+                                                         {done, Acc};
+                                                     Remainder ->
+                                                         {Remainder, [Txn|Acc]}
+                                                 end
+                                         end, {SizeLimit, []}, ValidTransactions0),
+
+    ValidTransactions = lists:reverse(ValidTransactions1),
+
+    %% any that overflowed go back into the buffer
+    InvalidTransactions = InvalidTransactions1 ++ (ValidTransactions0 -- ValidTransactions),
     case blockchain_election:has_new_group(ValidTransactions) of
             {true, _, ConsensusGroupTxn, _} ->
                 Epoch = ElectionEpoch0 + 1,
@@ -736,15 +752,14 @@ common_enough_or_default(Threshold, Xs, Default) ->
 set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
+    {ok, #block_info_v2{time=LastBlockTime, height=Height}} = blockchain:head_block_info(Chain),
     BlockTime = BlockTime0 div 1000,
-    {ok, Height} = blockchain:height(Chain),
     LastBlockTimestamp = case Height of
                              1 ->
                                  %% make up a plausible time for the genesis block
                                  Now;
                              _ ->
-                                 blockchain_block:time(HeadBlock)
+                                 LastBlockTime
                          end,
 
     StartHeight0 = application:get_env(miner, stabilization_period, 0),

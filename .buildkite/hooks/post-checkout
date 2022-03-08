@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# The `post-checkout` hook will run after the bootstrap script has checked out
+# your pipelines source code.
+
+set -euo pipefail
+
+git fetch --tags --force # avoid "would clobber existing tags error"
+git tag --points-at $(git rev-list -n 1 $BUILDKITE_TAG) | xargs -n 1 git tag -d || true

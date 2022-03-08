@@ -30,11 +30,14 @@ handle_rpc(<<"txn_queue">>, []) ->
     end;
 handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     try
-        Payer = case maps:get(payer, Params, undefined) of
-                    undefined -> undefined;
-                    PayerB58 -> ?B58_TO_BIN(PayerB58)
-                end,
-        {ok, Bin} = blockchain:add_gateway_txn(?B58_TO_BIN(OwnerB58), Payer),
+        Payer = optional_binary_to_list(
+            maps:get(<<"payer">>, Params, undefined)
+        ),
+        Owner = binary_to_list(OwnerB58),
+        StakingFee = parse_integer(maps:get(<<"staking_fee">>, Params, undefined)),
+        Fee = parse_integer(maps:get(<<"fee">>, Params, undefined)),
+
+        {ok, Bin} = blockchain:add_gateway_txn(Owner, Payer, Fee, StakingFee),
         B64 = base64:encode(Bin),
         #{ <<"result">> => B64 }
     catch
@@ -46,17 +49,16 @@ handle_rpc(<<"txn_add_gateway">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     end;
 handle_rpc(<<"txn_assert_location">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     try
-        Payer = case maps:get(payer, Params, undefined) of
-                    undefined -> undefined;
-                    PayerB58 -> ?B58_TO_BIN(PayerB58)
-                end,
+        Payer = optional_binary_to_list(
+            maps:get(<<"payer">>, Params, undefined)
+        ),
+        Owner = binary_to_list(OwnerB58),
         H3String = case parse_location(Params) of
                        {error, _} = Err -> throw(Err);
                        {ok, S} -> S
                    end,
-        Nonce = maps:get(nonce, Params, 1),
-        {ok, Bin} = blockchain:assert_loc_txn(H3String, ?B58_TO_BIN(OwnerB58),
-                                              Payer, Nonce),
+        Nonce = maps:get(<<"nonce">>, Params, 1),
+        {ok, Bin} = blockchain:assert_loc_txn(H3String, Owner, Payer, Nonce),
         B64 = base64:encode(Bin),
         #{ <<"result">> => B64 }
     catch
@@ -68,6 +70,13 @@ handle_rpc(<<"txn_assert_location">>, #{ <<"owner">> := OwnerB58 } = Params) ->
     end;
 handle_rpc(_, _) ->
     ?jsonrpc_error(method_not_found).
+
+-spec optional_binary_to_list(undefined | binary()) -> undefined | string().
+optional_binary_to_list(PossibleBinary) ->
+    case PossibleBinary of
+        undefined -> undefined;
+        Bin       -> binary_to_list(Bin)
+    end.
 
 parse_location(#{ <<"h3">> := H3 }) ->
     try
@@ -90,3 +99,14 @@ parse_location(#{ <<"lat">> := LatIn,
             {error, {invalid_location, {LatIn, LonIn}}}
     end;
 parse_location(_Other) -> {error, no_valid_location_found}.
+
+-spec parse_integer(binary() | undefined) -> integer() | undefined.
+parse_integer(undefined) ->
+    undefined;
+parse_integer(Value) when is_binary(Value) ->
+    try 
+        binary_to_integer(Value)
+    catch
+        _:_ ->
+            throw({invalid_integer, Value})
+    end.
