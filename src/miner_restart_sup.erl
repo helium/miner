@@ -59,7 +59,12 @@ init(_Opts) ->
 
     OnionOpts =
         case application:get_env(miner, radio_device, undefined) of
-            {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
+            {RadioBindIP, RadioBindPort0, RadioSendIP, RadioSendPort} ->
+                RadioBindPort =
+                    case application:get_env(miner, gateway_and_mux_enable, false) of
+                        false -> RadioBindPort0;
+                        true -> RadioBindPort0 + 1
+                    end,
                 %% check if we are overriding/forcing the region ( for lora )
                 RegionOverRide = check_for_region_override(),
                 #{
