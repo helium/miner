@@ -26,7 +26,9 @@ register_all_usage() ->
                    genesis_load_usage(),
                    genesis_export_usage(),
                    genesis_key_usage(),
-                   genesis_proof_usage()
+                   genesis_proof_usage(),
+                   genesis_export_ledger_usage(),
+                   genesis_recreate_ledger_usage()
                   ]).
 
 register_all_cmds() ->
@@ -40,21 +42,25 @@ register_all_cmds() ->
                    genesis_load_cmd(),
                    genesis_export_cmd(),
                    genesis_key_cmd(),
-                   genesis_proof_cmd()
+                   genesis_proof_cmd(),
+                   genesis_export_ledger_cmd(),
+                   genesis_recreate_ledger_cmd()
                   ]).
 %%
 %% genesis
 %%
-
 genesis_usage() ->
     [["genesis"],
      ["miner genesis commands\n\n",
-      "  genesis create <old_genesis_file> <pubkey> <proof> <addrs>  - Create genesis block keeping old ledger transactions.\n",
-      "  genesis forge <pubkey> <key_proof> <addrs>                  - Create genesis block from scratch just with the addresses.\n",
-      "  genesis load <genesis_file>                                 - Load genesis block from file.\n"
-      "  genesis export <path>                                       - Write genesis block to a file.\n"
-      "  genesis key                                                 - create a keypair for use as a master key\n"
-      "  genesis proof <privkey>                                     - create a key proof for adding a master key to the genesis block\n"
+      "  genesis create <old_genesis_file> <pubkey> <proof> <addrs>         - Create genesis block keeping old ledger transactions.\n"
+      "  genesis forge <pubkey> <key_proof> <addrs>                         - Create genesis block from scratch just with the addresses.\n"
+      "  genesis load <genesis_file>                                        - Load genesis block from file.\n"
+      "  genesis export <path>                                              - Write genesis block to a file.\n"
+      "  genesis key                                                        - create a keypair for use as a master key\n"
+      "  genesis proof <privkey>                                            - create a key proof for adding a master key to the genesis block\n"
+      "  genesis export_ledger <masterkey> <txn_list_output_path>           - export data from ledger as a list of txns including accounts, gateways, validators and chainvars\n"
+      "  genesis recreate_ledger <path_to_txn_list> <addrs> <n> <curve>     - run an initial dkg using a txn list exported via 'export_ledger'\n"
+
      ]
     ].
 
@@ -286,18 +292,6 @@ genesis_key_usage() ->
      ]
     ].
 
-genesis_proof_cmd() ->
-    [
-     [["genesis", "proof", '*'], [], [], fun genesis_proof/3]
-    ].
-
-genesis_proof_usage() ->
-    [["genesis", "proof"],
-     ["genesis proof <privkey>\n\n",
-      "  using <privkey> construct a proof suitable for the genesis block\n\n"
-     ]
-    ].
-
 genesis_key(["genesis", "key" | _], [], []) ->
     Network = application:get_env(miner, network, mainnet),
     Keys =
@@ -307,6 +301,18 @@ genesis_key(["genesis", "key" | _], [], []) ->
     [clique_status:text([B58])];
 genesis_key(_asd, [], []) ->
     usage.
+
+genesis_proof_cmd() ->
+    [
+        [["genesis", "proof", '*'], [], [], fun genesis_proof/3]
+    ].
+
+genesis_proof_usage() ->
+    [["genesis", "proof"],
+        ["genesis proof <privkey>\n\n",
+            "  using <privkey> construct a proof suitable for the genesis block\n\n"
+        ]
+    ].
 
 genesis_proof(["genesis", "proof", PrivKeyB58], [], []) ->
     PrivKeyBin = base58:base58_to_binary(PrivKeyB58),
@@ -322,6 +328,172 @@ genesis_proof(["genesis", "proof", PrivKeyB58], [], []) ->
                                        libp2p_crypto:pubkey_to_b58(Pub)]))];
 genesis_proof(_, [], []) ->
     usage.
+
+
+%%
+%% genesis export_ledger
+%%
+genesis_export_ledger_cmd() ->
+    [
+        [["genesis", "export_ledger", '*', '*'], [], [], fun genesis_export_ledger/3]
+    ].
+
+genesis_export_ledger_usage() ->
+    [["genesis", "export_ledger"],
+        ["genesis export_ledger <masterkey> <txn_list_output_path>\n\n",
+            "  export ledger data as a list of txns for use in an initial dkg\n"
+            "  including txns for all chainvars, gateways, accounts and validators.\n"
+        ]
+    ].
+
+genesis_export_ledger(["genesis", "export_ledger", PrivKeyB58, OutputFile], [], []) ->
+    export_ledger(PrivKeyB58, OutputFile);
+
+genesis_export_ledger(_, [], []) ->
+    usage.
+
+export_ledger(MasterKeyB58, OutputFile) ->
+    case blockchain_worker:blockchain() of
+        undefined ->
+            [clique_status:alert([clique_status:text("Undefined Blockchain")])];
+        Chain ->
+            Ledger = blockchain:ledger(Chain),
+            #{public := Pub, secret := PrivKey} = libp2p_crypto:keys_from_bin(base58:base58_to_binary(MasterKeyB58)),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(Pub),
+
+            %% create a new var txn using existing chainvars values
+            Vars0 = maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger)),
+            Vars = blockchain_utils:vars_binary_keys_to_atoms(Vars0),
+            VarTxn0 = blockchain_txn_vars_v1:new(Vars, 1, #{master_key => PubKeyBin}),
+            Proof = blockchain_txn_vars_v1:create_proof(PrivKey, VarTxn0),
+            VarTxn = blockchain_txn_vars_v1:key_proof(VarTxn0, Proof),
+
+            %% get all accounts and generate a blockchain_txn_coinbase_v1 for each
+            %% accounts without a balance are excluded
+            Accounts = blockchain_ledger_v1:snapshot_accounts(Ledger),
+            NewAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], Accounts),
+
+            %% get all dc accounts and generate a blockchain_txn_dc_coinbase_v1 for each
+            %% accounts without a balance are excluded
+            DCAccounts = blockchain_ledger_v1:snapshot_dc_accounts(Ledger),
+            NewDCAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_data_credits_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_dc_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], DCAccounts),
+
+            %% get all security accounts and generate a blockchain_txn_security_coinbase_v1 for each
+            SecurityAccounts = blockchain_ledger_v1:snapshot_security_accounts(Ledger),
+            NewSecurityAccountTxns =
+                lists:foldl(
+                    fun({Address, Entry}, Acc) ->
+                        case blockchain_ledger_security_entry_v1:balance(Entry) of
+                            0 -> Acc;
+                            undefined -> Acc;
+                            Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
+                        end
+                    end, [], SecurityAccounts),
+
+            %% iterate over validators and generate a gen txn for each
+            ValFun =
+                fun(V, Acc) ->
+                    ValAddr = blockchain_ledger_validator_v1:address(V),
+                    ValOwner = blockchain_ledger_validator_v1:owner_address(V),
+                    ValStake = blockchain_ledger_validator_v1:stake(V),
+                    [blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake) | Acc]
+                end,
+            NewGenValTxns = blockchain_ledger_v1:fold_validators(ValFun, [], Ledger),
+
+            %% get all active gateways and generate a gen txn for each
+            %% GWs without a location are excluded
+            GWs = blockchain_ledger_v1:snapshot_gateways(Ledger),
+            NewGenGatewayTxns =
+                lists:foldl(
+                    fun({GWAddr, GW}, Acc) ->
+                        GWOwnerAddr = blockchain_ledger_gateway_v2:owner_address(GW),
+                        case blockchain_ledger_gateway_v2:location(GW) of
+                            [] -> Acc;
+                            undefined -> Acc;
+                            GWLoc ->
+                                GWNonce = blockchain_ledger_gateway_v2:nonce(GW),
+                                [blockchain_txn_gen_gateway_v1:new(GWAddr, GWOwnerAddr, GWLoc, GWNonce) | Acc]
+                        end
+                    end, [], GWs),
+
+            %% get current oracle price and generate gen txn
+            {ok, Price} = blockchain_ledger_v1:current_oracle_price(Ledger),
+            OracleTxn =
+                case Price of
+                    0 -> [];
+                    undefined -> [];
+                    _ -> blockchain_txn_gen_price_oracle_v1:new(Price)
+                end,
+
+            %% final list of gen block txns
+            NewGenesisTxns =  lists:flatten(NewAccountTxns ++ NewGenGatewayTxns ++ NewDCAccountTxns ++ NewSecurityAccountTxns ++ NewGenValTxns ++ [VarTxn, OracleTxn]),
+            %% write out the txn list
+            case (catch file:write_file(OutputFile, term_to_binary(NewGenesisTxns))) of
+                {'EXIT', _} ->
+                    usage;
+                ok ->
+                    [clique_status:text(io_lib:format("ok, txns written to ~p", [OutputFile]))];
+                {error, Reason} ->
+                    [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])]
+            end
+end.
+
+%%
+%% genesis recreate_ledger
+%%
+genesis_recreate_ledger_cmd() ->
+    [
+        [["genesis", "recreate_ledger", '*', '*'], [], [], fun genesis_recreate_ledger/3],
+        [["genesis", "recreate_ledger", '*', '*', '*', '*'], [], [], fun genesis_recreate_ledger/3]
+    ].
+
+genesis_recreate_ledger_usage() ->
+    [["genesis", "recreate_ledger"],
+        ["genesis recreate_ledger <path_to_txn_list> <addrs> <n> <curve>\n\n",
+            " run an initial dkg using the specified txn list and address set\n"
+        ]
+    ].
+
+genesis_recreate_ledger(["genesis", "recreate_ledger", TxnsFilePath, Addrs], [], []) ->
+    {ok, N} = application:get_env(blockchain, num_consensus_members),
+    {ok, Curve} = application:get_env(miner, curve),
+    recreate_ledger(TxnsFilePath, Addrs, N, Curve);
+
+genesis_recreate_ledger(["genesis", "recreate_ledger", TxnsFilePath, Addrs, N, Curve], [], []) ->
+    recreate_ledger(TxnsFilePath, Addrs, list_to_integer(N), list_to_atom(Curve));
+
+genesis_recreate_ledger(_, [], []) ->
+    usage.
+
+recreate_ledger(TxnsFilePath, Addrs, N, Curve) ->
+    case file:read_file(TxnsFilePath) of
+        {ok, TxnsBin} ->
+            io:format("successfully loaded txns from file...running dkg\n"),
+            Txns = binary_to_term(TxnsBin),
+            Addresses = [libp2p_crypto:p2p_to_pubkey_bin(Addr) || Addr <- string:split(Addrs, ",", all)],
+            Res = miner_consensus_mgr:initial_dkg(Txns, Addresses, N, Curve),
+            io:format("dkg result: ~p", [Res]),
+            [clique_status:text("ok")];
+        {error, Reason} ->
+            io:format("Error, Reason: ~p", [Reason])
+    end.
+
 
 make_vars() ->
     {ok, BlockTime} = application:get_env(miner, block_time),
@@ -404,3 +576,4 @@ make_vars() ->
       ?tenure_penalty => 1.0,
       ?penalty_history_limit => 100
      }.
+
