@@ -68,8 +68,8 @@ start_link(Options) when is_list(Options) ->
 
 init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
-    Host = proplists:get_value(host, Options, "localhost"),
-    Port = proplists:get_value(port, Options, 4468),
+    Host = proplists:get_value(host, Options, "127.0.0.1"),
+    Port = proplists:get_value(api_port, Options, 4468),
     {ok, #{http_connection := ConnPid} = Connection} = grpc_connect(Transport, Host, Port),
     MonRef = erlang:monitor(process, ConnPid),
     {ok, #state{

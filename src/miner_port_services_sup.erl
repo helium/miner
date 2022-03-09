@@ -39,8 +39,6 @@ init(_Opts) ->
                 period => 1
             },
 
-            GatewayTcpPort = application:get_env(miner, gateway_api_port, 4468),
-
             KeyPair =
                 case application:get_env(blockchain, key, undefined) of
                     undefined ->
@@ -74,17 +72,24 @@ init(_Opts) ->
                         end
                 end,
 
+            {ListenAddr, UdpListenPort} =
+                case application:get_env(miner, radio_device, undefined) of
+                    {{Oct1, Oct2, Oct3, Oct4}, ListenPort, _, _} ->
+                        {lists:flatten(io_lib:format("~p.~p.~p.~p", [Oct1, Oct2, Oct3, Oct4])), ListenPort};
+                    _ -> {"127.0.0.1", 1680}
+                end,
+
             GatewayECCWorkerOpts = [
                 {transport, application:get_env(miner, gateway_transport, tcp)},
-                {host, application:get_env(miner, gateway_host, "localhost")},
-                {port, GatewayTcpPort}
+                {host, ListenAddr},
+                {api_port, application:get_env(miner, gateway_api_port, 4468)}
             ],
 
-            GatewayPortOpts = [{keypair, KeyPair}] ++ GatewayECCWorkerOpts,
+            GatewayPortOpts = [{keypair, KeyPair}, {radio_port, UdpListenPort + 2}] ++ GatewayECCWorkerOpts,
 
             MuxOpts = [
-                {host_port, application:get_env(miner, mux_host_port, 1680)},
-                {client_ports, application:get_env(miner, mux_client_ports, [1681, 1682])}
+                {host_port, UdpListenPort},
+                {client_ports, [UdpListenPort + 1, UdpListenPort + 2]}
             ],
 
             ChildSpecs =
