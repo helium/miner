@@ -221,16 +221,18 @@ keys({tpm, Props}) when is_list(Props) ->
     end,
 
     #{ pubkey => PubKey,
-        key_path => KeyPath,
-        ecdh_fun => fun(PublicKey) ->
-            {ok, [X, Y]} = miner_tpm_worker:ecdh(PublicKey),
-            <<X/binary>>
-                    end,
-        sig_fun => fun(Bin) ->
-            {ok, {Sig, _PublicKey,_Cert}} = miner_tpm_worker:sign(Bin),
-            Sig
+       bus => undefined,
+       address => undefined,
+       key_slot => KeyPath,
+       ecdh_fun => fun(PublicKey) ->
+                       {ok, [X, Y]} = miner_tpm_worker:ecdh(PublicKey),
+                       <<X/binary>>
                    end,
-        onboarding_key => libp2p_crypto:pubkey_to_b58(PubKey)
+       sig_fun => fun(Bin) ->
+                      {ok, {Sig, _PublicKey,_Cert}} = miner_tpm_worker:sign(Bin),
+                      Sig
+                  end,
+       onboarding_key => libp2p_crypto:pubkey_to_b58(PubKey)
     };
 keys(#{pubkey := _PubKey, ecdh_fun := _ECDH, sig_fun := _Sig} = KeyInfo) ->
     maps:merge(#{key_slot => undefined, bus => undefined, address => undefined}, KeyInfo).
