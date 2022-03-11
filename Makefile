@@ -11,8 +11,8 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
-GATEWAY_RS_VSN ?= main
-SEMTECH_UDP_VSN ?= master
+GATEWAY_RS_VSN ?= "v1.0.0-alpha.23"
+SEMTECH_UDP_VSN ?= "v0.8.0"
 
 all: compile
 

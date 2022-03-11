@@ -10,10 +10,10 @@
     all/0
 ]).
 
--export([gateway_signing_test/1, mux_packet_routing/1]).
+-export([gateway_signing_test/1, gateway_grpc_reconnect_test/1, mux_packet_routing/1]).
 
 all() ->
-    [gateway_signing_test, mux_packet_routing].
+    [gateway_signing_test, gateway_grpc_reconnect_test, mux_packet_routing].
 
 init_per_suite(Config) ->
     ok = application:load(miner),
@@ -49,6 +49,22 @@ gateway_signing_test(_Config) ->
     VerifyPreseed = VerifyFun(PubKey),
 
     ?assertEqual(GatewayEcdhPreseed, VerifyPreseed),
+    ok.
+
+gateway_grpc_reconnect_test(_Config) ->
+    {ok, PubKey} = miner_gateway_ecc_worker:pubkey(),
+    {state, #{http_connection := ConnectionPid}, _, _, _, _, _} = sys:get_state(miner_gateway_ecc_worker),
+
+    true = erlang:exit(ConnectionPid, shutdown),
+
+    timer:sleep(100),
+
+    {ok, PubKey} = miner_gateway_ecc_worker:pubkey(),
+    {state, #{http_connection := NewConnectionPid}, _, _, _, _, _} = sys:get_state(miner_gateway_ecc_worker),
+
+    ?assert(is_process_alive(whereis(miner_gateway_ecc_worker))),
+    ?assertNot(is_process_alive(ConnectionPid)),
+    ?assert(is_process_alive(NewConnectionPid)),
     ok.
 
 mux_packet_routing(Config) ->
