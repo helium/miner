@@ -2,7 +2,7 @@
 
 ## Changes
 
-This transaction updates the `poc_challenge_interval` from `240` to `480` to reduce the amout of data that needs to be processed by the miners in every block.
+This transaction updates the `poc_challenge_interval` from `240` to `480` to reduce the amount of data that needs to be processed by the miners in every block.
 
 ## Version threshold
 

@@ -53,7 +53,7 @@ sign(Binary) ->
     gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
 %% Pass an ecc public key to the rust gateway and return a point on the
-%% eliptic curve as a binary
+%% elliptic curve as a binary
 -spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed :: binary()} | {error, term()}.
 ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).

@@ -126,7 +126,7 @@ init(Args) ->
     Address = blockchain_swarm:pubkey_bin(),
     Blockchain = blockchain_worker:blockchain(),
     BaseDir = maps:get(base_dir, Args, undefined),
-    %% this should really only be overriden for testing
+    %% this should really only be overridden for testing
     Delay = maps:get(delay, Args, undefined),
     lager:info("init with ~p", [Args]),
     case load_data(BaseDir) of
@@ -232,7 +232,7 @@ requesting(EventType, EventContent, Data) ->
 %%
 %% mining: in mining state we handle blockchain_event of type 'add block'
 %% for each block added we inspect the txn list included in the block
-%% if our POC request is contained in that list then we run the targetting/challenging
+%% if our POC request is contained in that list then we run the targeting/challenging
 %% and transition to receiving state
 %% if we dont see our POC request txn having been mined within the Mining Timeout period ( 5 blocks )
 %% then we give up on the request and transition back to requesting state
@@ -254,7 +254,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% intentionally fast-challenging them before they have the block
             %% Is this timer necessary ??
             timer:sleep(?BLOCK_PROPOGATION_TIME),
-            %% NOTE: if we crash out whilst handling targetting, effectively the POC is abandoned
+            %% NOTE: if we crash out whilst handling targeting, effectively the POC is abandoned
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,

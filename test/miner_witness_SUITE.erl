@@ -93,7 +93,7 @@ exec_dist_test(_, Config, VarMap,     #{secret := Priv, public := _Pub}) ->
             ok;
         _ ->
             %% By this point, we have ensured that every miner
-            %% has a valid request atleast once, we just check
+            %% has a valid request at least once, we just check
             %% that we have N (length(Miners)) receipts.
             ?assert(check_atleast_k_receipts(Miners, length(Miners))),
             ok
@@ -263,7 +263,7 @@ check_all_miners_can_challenge(Miners) ->
             ok = miner_ct_utils:wait_for_gte(height, Miners, NewHeight + 10, all, 30),
             check_all_miners_can_challenge(Miners);
         true ->
-            ct:pal("Got a challenge from each miner atleast once!"),
+            ct:pal("Got a challenge from each miner at least once!"),
             true
     end.
 

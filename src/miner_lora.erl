@@ -256,7 +256,7 @@ init(Args) ->
                 erlang:send_after(5000, self(), reg_domain_timeout),
                 {false, undefined, undefined};
             Region ->
-                lager:info("using region specifed in config: ~p", [Region]),
+                lager:info("using region specified in config: ~p", [Region]),
                 %% get the freq map from config and use Region to get our required data
                 FreqMap = application:get_env(miner, frequency_data, #{}),
                 case maps:get(Region, FreqMap, undefined) of
@@ -543,7 +543,7 @@ handle_udp_packet(<<?PROTOCOL_2:8/integer-unsigned,
                     end;
                 Error ->
                     %% any other errors are pretty severe
-                    lager:error("Failure enqueing packet for gateway ~p", [Error]),
+                    lager:error("Failure enqueuing packet for gateway ~p", [Error]),
                     {{error, {unknown, Error}}, State1}
             end,
             gen_server:reply(From, Reply),

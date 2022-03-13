@@ -48,7 +48,7 @@
    {use_ebus, false},
    {radio_device, undefined},
    %% dont perform regionalised checks in dev envs
-   %% we only realy need the params below if this file is changed to specify a radio device
+   %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
    {region_override, 'US915'},
