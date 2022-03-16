@@ -538,7 +538,12 @@ extra_vars(grpc) ->
                  ?poc_challenge_rate => 1,
                  ?poc_challenger_type => validator,
                  ?poc_timeout => 4,
-                 ?poc_receipts_absorb_timeout => 2
+                 ?poc_receipts_absorb_timeout => 2,
+                 ?h3dex_gc_width => 10,
+                 ?poc_targeting_version => 4,
+                 ?poc_target_pool_size => 2,
+                 ?poc_hexing_type => hex_h3dex,
+                 ?hip17_interactivity_blocks => 20
     },
     maps:merge(extra_vars(poc_v11), GrpcVars);
 extra_vars(poc_v11) ->
