@@ -1,5 +1,5 @@
-ARG BUILDER_IMAGE=erlang:24-alpine
-ARG RUNNER_IMAGE=alpine
+ARG BUILDER_IMAGE=erlang:24-slim
+ARG RUNNER_IMAGE=debian:bullseye-slim
 FROM ${BUILDER_IMAGE} as deps-compiler
 
 ARG REBAR_DIAGNOSTIC=0
@@ -7,24 +7,40 @@ ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
 
 ARG REBAR_BUILD_TARGET
 ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
-ARG EXTRA_BUILD_APK_PACKAGES
+ARG EXTRA_BUILD_APT_PACKAGES
 
-RUN apk add --no-cache --update \
-    autoconf automake bison build-base bzip2 cmake curl \
-    dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 \
-    openssl-dev pkgconfig protoc sed tar wget \
-    ${EXTRA_BUILD_APK_PACKAGES}
+RUN apt update \
+    && apt install -y --no-install-recommends \
+       autoconf \
+       automake \
+       bison \
+       build-essential \
+       bzip2 \
+       ca-certificates \
+       cmake \
+       curl \
+       flex \
+       git \
+       libdbus-1-dev \
+       libgmp-dev \ 
+       libprotobuf-dev \
+       libsodium-dev \
+       libssl-dev \
+       libtool \
+       lz4 \
+       libprotobuf-dev \
+       wget \
+       ${EXTRA_BUILD_APT_PACKAGES} 
 
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 WORKDIR /usr/src/miner
 
-ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
+ENV CC=gcc CXX=g++ CFLAGS="-O2" CXXFLAGS="-O2" \
     ERLANG_ROCKSDB_OPTS="-DWITH_BUNDLE_SNAPPY=ON -DWITH_BUNDLE_LZ4=ON" \
     ERL_COMPILER_OPTIONS="[deterministic]" \
-    PATH="/root/.cargo/bin:$PATH" \
-    RUSTFLAGS="-C target-feature=-crt-static"
+    PATH="/root/.cargo/bin:$PATH" 
 
 # Add and compile the dependencies to cache
 COPY ./rebar* ./Makefile ./
@@ -36,6 +52,7 @@ FROM deps-compiler as builder
 
 ARG VERSION
 ARG REBAR_DIAGNOSTIC=0
+
 # default to building for mainnet
 ARG BUILD_NET=mainnet
 ENV DIAGNOSTIC=${REBAR_DIAGNOSTIC}
@@ -55,12 +72,18 @@ RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.${BU
 FROM ${RUNNER_IMAGE} as runner
 
 ARG VERSION
-ARG EXTRA_RUNNER_APK_PACKAGES
+ARG EXTRA_RUNNER_APT_PACKAGES
 
-RUN apk add --no-cache --update ncurses dbus libsodium libstdc++ \
-                                ${EXTRA_RUNNER_APK_PACKAGES}
-
-RUN ulimit -n 64000
+RUN apt update \
+    && apt install -y \
+       dbus \
+       iproute2 \
+       libncurses6 \
+       libsodium23 \
+       libstdc++6 \
+       ${EXTRA_RUNNER_APT_PACKAGES} \
+    && rm -rf /var/lib/apt/lists \
+    && ln -sf /opt/miner/releases/${VERSION} /config
 
 WORKDIR /opt/miner
 
@@ -71,8 +94,6 @@ ENV COOKIE=miner \
     PATH=$PATH:/opt/miner/bin
 
 COPY --from=builder /opt/docker /opt/miner
-
-RUN ln -sf /opt/miner/releases/${VERSION} /config
 
 VOLUME ["/opt/miner/hotfix", "/var/data"]
 
