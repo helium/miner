@@ -40,14 +40,25 @@
 %%--------------------------------------------------------------------
 
 groups() ->
-    [{poc_grpc_with_chain,
+    [
+     {poc_grpc_with_chain_target_v5,
       [],
       test_cases()
      },
-     {poc_grpc_no_chain,
+     {poc_grpc_no_chain_target_v5,
       [],
       test_cases()
-     }].
+     },
+     {poc_grpc_with_chain_target_v6,
+      [],
+      test_cases()
+     },
+     {poc_grpc_no_chain_target_v6,
+      [],
+      test_cases()
+     }
+
+    ].
 
 %%--------------------------------------------------------------------
 %% @public
@@ -66,15 +77,33 @@ test_cases() ->
      poc_grpc_dist_v11_partitioned_lying_test
     ].
 
-init_per_group(poc_grpc_with_chain, Config) ->
+init_per_group(poc_grpc_with_chain_target_v5, Config) ->
     [
+        {target_version, 5},
         {split_miners_vals_and_gateways, true},
         {num_validators, 10},
         {num_gateways, 6},
         {num_consensus_members, 4},
         {gateways_run_chain, true} | Config];
-init_per_group(poc_grpc_no_chain, Config) ->
+init_per_group(poc_grpc_no_chain_target_v5, Config) ->
     [
+        {target_version, 5},
+        {split_miners_vals_and_gateways, true},
+        {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
+        {gateways_run_chain, false} | Config];
+init_per_group(poc_grpc_with_chain_target_v6, Config) ->
+    [
+        {target_version, 6},
+        {split_miners_vals_and_gateways, true},
+        {num_validators, 10},
+        {num_gateways, 6},
+        {num_consensus_members, 4},
+        {gateways_run_chain, true} | Config];
+init_per_group(poc_grpc_no_chain_target_v6, Config) ->
+    [
+        {target_version, 6},
         {split_miners_vals_and_gateways, true},
         {num_validators, 10},
         {num_gateways, 6},
@@ -94,23 +123,27 @@ end_per_group(_, _Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 poc_grpc_dist_v11_test(Config) ->
+    TargetVersion = ?config(target_version, Config),
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc),
+    ExtraVars = extra_vars(grpc, TargetVersion),
     run_dist_with_params(poc_grpc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_grpc_dist_v11_cn_test(Config) ->
+    TargetVersion = ?config(target_version, Config),
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc),
+    ExtraVars = extra_vars(grpc, TargetVersion),
     run_dist_with_params(poc_grpc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_grpc_dist_v11_partitioned_test(Config) ->
+    TargetVersion = ?config(target_version, Config),
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc),
+    ExtraVars = extra_vars(grpc, TargetVersion),
     run_dist_with_params(poc_grpc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 poc_grpc_dist_v11_partitioned_lying_test(Config) ->
+    TargetVersion = ?config(target_version, Config),
     CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc),
+    ExtraVars = extra_vars(grpc, TargetVersion),
     run_dist_with_params(poc_grpc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 %% ------------------------------------------------------------------
@@ -537,15 +570,20 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
     ?assert(not check_poc_rewards(Rewards)),
     ok.
 
-extra_vars(grpc) ->
+extra_vars(grpc, TargetVersion) ->
     GrpcVars = #{
                  ?poc_challenge_rate => 1,
                  ?poc_challenger_type => validator,
                  ?poc_timeout => 4,
                  ?poc_receipts_absorb_timeout => 2,
-                 ?poc_validator_ephemeral_key_timeout => 50
+                 ?poc_validator_ephemeral_key_timeout => 50,
+                 ?h3dex_gc_width => 10,
+                 ?poc_targeting_version => TargetVersion,
+                 ?poc_target_pool_size => 2,
+                 ?poc_hexing_type => hex_h3dex,
+                 ?hip17_interactivity_blocks => 20
     },
-    maps:merge(extra_vars(poc_v11), GrpcVars);
+    maps:merge(extra_vars(poc_v11), GrpcVars).
 extra_vars(poc_v11) ->
     POCVars = maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars()),
     RewardVars = #{reward_version => 5, rewards_txn_version => 2},

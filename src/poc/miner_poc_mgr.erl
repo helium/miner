@@ -601,7 +601,8 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
     InitTargetRandState = blockchain_utils:rand_state(POCPrivKeyHash),
     lager:info("*** ZoneRandState ~p", [ZoneRandState]),
     lager:info("*** InitTargetRandState ~p", [InitTargetRandState]),
-    case blockchain_poc_target_v5:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
+    TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
+    case TargetMod:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
         {error, Reason}->
             lager:info("*** failed to find a target, reason ~p", [Reason]),
             noop;
