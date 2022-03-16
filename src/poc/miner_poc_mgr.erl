@@ -172,7 +172,7 @@ save_local_poc_keys(CurHeight, KeyList) ->
             OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(PubKey)),
             POCKeyRec = #poc_local_key_data{receive_height = CurHeight, keys = Keys},
             lager:info("caching local poc keys with hash ~p", [OnionKeyHash]),
-            _ = catch cache_poc_key(OnionKeyHash, POCKeyRec)
+            catch cache_poc_key(OnionKeyHash, POCKeyRec)
         end
         || Keys <- KeyList
     ],
@@ -292,7 +292,7 @@ save_poc_key_proposals(Address, KeyProposals, Height) ->
                 key = KeyProposal
             },
             lager:debug("caching poc key proposal ~p", [KeyProposal]),
-            _ = catch cache_poc_key_proposal(KeyProposal, POCKeyProposalRec)
+            catch cache_poc_key_proposal(KeyProposal, POCKeyProposalRec)
         end
         || KeyProposal <- KeyProposals
     ],
