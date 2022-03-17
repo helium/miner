@@ -9,8 +9,6 @@ else
   CIBRANCH=$(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/')
 endif
 
-GRPC_SERVICES_DIR=src/grpc/autogen
-
 GATEWAY_RS_VSN ?= "v1.0.0-alpha.27"
 GWMP_MUX_VSN ?= "v0.9.4"
 
@@ -21,14 +19,11 @@ deps:
 
 compile:
 	$(REBAR) get-deps
-	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 	$(MAKE) external_svcs
 	$(REBAR) compile
 
 clean:
 	$(MAKE) clean_external_svcs
-	$(MAKE) clean_grpc
 	$(REBAR) clean
 
 test: compile
@@ -70,21 +65,6 @@ devrel:
 
 devrelease:
 	$(REBAR) as dev release
-
-grpc:
-	@echo "generating miner grpc services"
-	$(REBAR) get-deps
-	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
-
-$(GRPC_SERVICE_DIR):
-	@echo "miner grpc service directory $(directory) does not exist"
-	$(REBAR) get-deps
-	$(MAKE) grpc
-
-clean_grpc:
-	@echo "cleaning miner grpc services"
-	rm -rf $(GRPC_SERVICES_DIR)
 
 external_svcs:
 	@echo "cloning external dependency projects"
