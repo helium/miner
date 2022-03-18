@@ -19,9 +19,7 @@ all: compile
 deps:
 	$(REBAR) get-deps
 
-compile:
-	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+compile: grpc
 	$(MAKE) external_svcs
 	$(REBAR) compile
 
@@ -70,7 +68,7 @@ devrel:
 devrelease:
 	$(REBAR) as dev release
 
-grpc:
+grpc: $(GRPC_SERVICE_DIR)
 	@echo "generating miner grpc services"
 	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
