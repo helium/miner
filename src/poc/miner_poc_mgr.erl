@@ -233,7 +233,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 false;
                             {ok, #local_poc{block_hash = _OtherBlockHash, target = _Target}} ->
                                 e2qc:evict(local_pocs, OnionKeyHash),
-                                {error, mismatched_block_hash}
+                                {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
                         lager:info("*** ~p is NOT a known key", [OnionKeyHash]),
@@ -244,7 +244,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
                 false;
             {ok, #local_poc{block_hash = _OtherBlockHash, target = _Target}} ->
-                {error, mismatched_block_hash};
+                {error, <<"mismatched_block_hash">>};
             _ ->
                 false
         end,
