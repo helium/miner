@@ -323,7 +323,7 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0010080003.
+       0000010136.
 
 %% ------------------------------------------------------------------
 %% gen_server
@@ -754,7 +754,7 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
          M :: metadata(),
          B :: blockchain_block:hash().
 poc_keys(Ledger, Metadata, BlockHash) ->
-    %% Construct a set of poc keys. Each node will define its own set within the metadata
+    %% Construct a set of poc keys. Each node will pull a random list from a pool of keys
     %% We want to take a deterministic random subset of these up to a max of poc challenge rate
     %% Use the blockhash as the seed
     RandState = blockchain_utils:rand_state(BlockHash),
@@ -763,15 +763,8 @@ poc_keys(Ledger, Metadata, BlockHash) ->
             {ok, V} -> V;
             _ -> 1
         end,
-    PocKeys0 = [{MinerAddr, Keys} || {_, #{poc_keys := {MinerAddr, Keys}}} <- metadata_only_v2(Metadata)],
-    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
-    PocKeys1 = lists:foldl(
-        fun({MinerAddr, PocKeys}, Acc)->
-            Pos = miner_util:index_of(MinerAddr, CGMembers),
-            NormalisedKeys = lists:map(fun(PocKey) -> {Pos, PocKey} end, PocKeys),
-            [NormalisedKeys | Acc]
-        end, [], PocKeys0),
-    sort_and_truncate_poc_keys(lists:flatten(PocKeys1), ChallengeRate, RandState).
+    PocKeys0 = [POCKeys || {_, #{poc_keys := POCKeys}} <- metadata_only_v2(Metadata)],
+    sort_and_truncate_poc_keys(lists:flatten(PocKeys0), ChallengeRate, RandState).
 
 sort_and_truncate_poc_keys(L, MaxKeys, RandState) ->
     {_, TruncList} = blockchain_utils:deterministic_subset(MaxKeys, RandState, L),

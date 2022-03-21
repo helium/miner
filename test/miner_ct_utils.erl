@@ -770,8 +770,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
     LogDir = ?config(log_dir, Config),
     SplitMiners = proplists:get_value(split_miners_vals_and_gateways, Config, false),
     NumValidators = proplists:get_value(num_validators, Config, 0),
+    NumGateways = proplists:get_value(num_gateways, Config, get_config("T", 8)),
+    NumConsensusMembers = proplists:get_value(num_consensus_members, Config, get_config("N", 7)),
     LoadChainOnGateways = proplists:get_value(gateways_run_chain, Config, true),
-
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
     {ok, Hostname} = inet:gethostname(),
@@ -783,33 +784,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
         {error, {{already_started, _},_}} -> ok
     end,
 
-    %% Miner configuration, can be input from os env
-    TotalMiners =
-        case TestCase of
-            poc_grpc_dist_v11_test ->
-                11; %% 5 vals, 6 gateways
-            poc_grpc_dist_v11_cn_test ->
-                13; %% 5 vals, 8 gateways
-            poc_grpc_dist_v11_partitioned_test ->
-                13; %% 5 vals, 8 gateways
-            poc_grpc_dist_v11_partitioned_lying_test ->
-                13; %% 5 vals, 8 gateways
-            _ ->
-                get_config("T", 8)
-        end,
-    NumConsensusMembers =
-        case TestCase of
-            poc_grpc_dist_v11_test ->
-                NumValidators;
-            poc_grpc_dist_v11_cn_test ->
-                NumValidators;
-            poc_grpc_dist_v11_partitioned_test ->
-                NumValidators;
-            poc_grpc_dist_v11_partitioned_lying_test ->
-                NumValidators;
-            _ ->
-                get_config("N", 7)
-        end,
+    TotalMiners = NumValidators + NumGateways,
     SeedNodes = [],
     JsonRpcBase = 4486,
     Port = get_config("PORT", 0),
