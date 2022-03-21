@@ -5,7 +5,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
-    all/0
+    groups/0, all/0, init_per_group/2, end_per_group/2
 ]).
 
 -export([
@@ -62,6 +62,15 @@
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
+groups() ->
+  [ {poc_target_v3,
+    [],
+    all()
+  },
+    {poc_target_v4,
+      [],
+      v11_test_cases()
+    }].
 
 %%--------------------------------------------------------------------
 %% @public
@@ -73,19 +82,6 @@ all() ->
     [
      basic_test,
      basic_test_light_gateway,
-     %% poc_dist_v1_test,
-     %% poc_dist_v2_test,
-     %% poc_dist_v4_test,
-     %% poc_dist_v4_partitioned_test,
-     %% poc_dist_v5_test,
-     %% poc_dist_v5_partitioned_test,
-     %% poc_dist_v5_partitioned_lying_test,
-     %% poc_dist_v6_test,
-     %% poc_dist_v6_partitioned_test,
-     %% poc_dist_v6_partitioned_lying_test,
-     %poc_dist_v7_test,
-     %poc_dist_v7_partitioned_test,
-     %poc_dist_v7_partitioned_lying_test,
      poc_dist_v8_test,
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
@@ -99,6 +95,33 @@ all() ->
      %% uncomment when poc placement enforcement starts.
      %% no_status_v8_test,
      restart_test].
+
+v11_test_cases() ->
+  [
+    basic_test,
+    basic_test_light_gateway,
+    poc_dist_v11_test,
+    poc_dist_v11_cn_test,
+    poc_dist_v11_partitioned_test,
+    poc_dist_v11_partitioned_lying_test,
+    %% uncomment when poc placement enforcement starts.
+    %% no_status_v8_test,
+    restart_test].
+
+init_per_group(poc_target_v3, Config) ->
+  [
+    {poc_targeting_vars, #{}}
+    | Config
+  ];
+init_per_group(poc_target_v4, Config) ->
+  [
+    {poc_targeting_vars, #{h3dex_gc_width => 10,
+                    poc_targeting_version => 4,
+                    poc_target_pool_size => 2,
+                    poc_hexing_type => hex_h3dex,
+                    hip17_interactivity_blocks => 20}}
+    | Config
+  ].
 
 init_per_testcase(basic_test = TestCase, Config) ->
     miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
@@ -137,6 +160,9 @@ end_per_testcase(restart_test, Config) ->
 end_per_testcase(TestCase, Config) ->
     gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
+
+end_per_group(_, _Config) ->
+  ok.
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -233,23 +259,31 @@ poc_dist_v10_partitioned_lying_test(Config) ->
 
 poc_dist_v11_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_cn_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -1171,7 +1205,8 @@ common_poc_vars(Config) ->
       ?poc_v4_target_prob_score_wt => 0.8,
       ?poc_v4_target_score_curve => 5,
       ?poc_target_hex_parent_res => 5,
-      ?poc_v5_target_prob_randomness_wt => 0.0}.
+      ?poc_v5_target_prob_randomness_wt => 0.0,
+      ?poc_witness_consideration_limit => 20}.
 
 do_common_partition_checks(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),

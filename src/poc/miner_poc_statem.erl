@@ -503,7 +503,13 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                     self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                     handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
                 {ok, V} ->
-                    {ok, {TargetPubkeyBin, TargetRandState}} = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
+                    {ok, {TargetPubkeyBin, TargetRandState}} =
+                        case blockchain:config(?poc_targeting_version, Ledger) of
+                            {ok, 4} ->
+                                blockchain_poc_target_v4:target(ChallengerAddr, Entropy, Ledger, Vars);
+                            _ ->
+                                blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars)
+                        end,
                     lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                     lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
                     %% NOTE: We pass in the TargetRandState along with the entropy here
@@ -1017,7 +1023,6 @@ send_onion(P2P, Onion, Retry) ->
             timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
-
 %% ------------------------------------------------------------------
 %% EUNIT Tests
 %% ------------------------------------------------------------------
