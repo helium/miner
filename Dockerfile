@@ -32,6 +32,9 @@ RUN apt update \
        wget \
        ${EXTRA_BUILD_APT_PACKAGES} 
 
+# Strip debug symbols from ERTS binarys to reduce size
+RUN scanelf --nobanner -E ET_DYN -BF '%F' --recursive /usr/local/lib/erlang | xargs -r strip --strip-unneeded
+
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
