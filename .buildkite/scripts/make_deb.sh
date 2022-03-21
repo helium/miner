@@ -3,7 +3,7 @@
 set -euo pipefail
 
 VERSION=$(echo $VERSION_TAG | sed -e 's,validator,,')
-./rebar3 as validator release -n miner -v ${VERSION}
+DIAGNOSTIC=1 ./rebar3 as validator release -n miner -v ${VERSION} || ./rebar3 as validator release -n miner -v ${VERSION}
 
 fpm -n validator \
     -v "${VERSION}" \
