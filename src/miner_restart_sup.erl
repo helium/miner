@@ -127,12 +127,16 @@ init(_Opts) ->
                 POCOpts = #{
                     base_dir => BaseDir
                    },
+                {ok, ClientStateMTab} = miner_poc_grpc_client_statem:make_ets_table(),
+                ClientStateMOpts = #{
+                    tab => ClientStateMTab
+                },
                 [
                     ?WORKER(miner_onion_server_light, [OnionOpts]),
                     ?WORKER(miner_onion_server, [OnionOpts]),
                     ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_lora, [OnionOpts]),
-                    ?WORKER(miner_poc_grpc_client_statem, []),
+                    ?WORKER(miner_poc_grpc_client_statem, [ClientStateMOpts]),
                     ?WORKER(miner_poc_statem, [POCOpts])
 
                 ]

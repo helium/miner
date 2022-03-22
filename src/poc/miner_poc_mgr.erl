@@ -122,6 +122,7 @@ start_link(Args) when is_map(Args) ->
         {ok, Pid} ->
             %% if we have an ETS table reference, give ownership to the new process
             %% we likely are the `heir', so we'll get it back if this process dies
+            %% TODO make table handling better, maybe a list of tables and iterate over
             case maps:find(tab1, Args) of
                 error ->
                     ok;
@@ -396,6 +397,7 @@ terminate(_Reason, _State = #state{}) ->
 handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChallengeType == validator ->
     case blockchain:get_block(BlockHash, Chain) of
         {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
             %% save public data on each POC key found in the block to the ledger
             %% that way all validators have access to this public data
             %% however the validator which is running the POC will be the only node
@@ -403,8 +405,8 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
             ok = process_block_pocs(BlockHash, Block, State),
             %% take care of GC
             ok = purge_local_pocs(Block, State),
-            BlockHeight = blockchain_block:height(Block),
             Ledger = blockchain:ledger(Chain),
+
             %% GC local pocs keys every 50 blocks
             case BlockHeight rem 50 == 0 of
                 true ->
@@ -663,7 +665,7 @@ process_block_pocs(
                     lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                    spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
                     lager:info("failed to find local poc key for ~p", [OnionKeyHash]),
                     noop
@@ -791,6 +793,7 @@ purge_pocs_key_proposals(
         CachedPOCKeyProposals
     ),
     ok.
+
 
 -spec submit_receipts(local_poc(), libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun(), blockchain:blockchain()) -> ok.
 submit_receipts(
@@ -1048,21 +1051,38 @@ update_addr_hash(Bloom, Element) ->
     [cached_key_proposal()]) ->
     [{libp2p_crypto:pubkey_bin(), key_proposal()}].
 do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys) ->
-    do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys, []).
--spec do_get_random_poc_key_proposals(pos_integer(), [libp2p_crypto:pubkey_bin()],
-    [cached_key_proposal()], [{libp2p_crypto:pubkey_bin(), key_proposal()}]) ->
+    %% get a list of currently active validators
+    %% if the val owner of a key is not in this
+    %% list then dont include it in the returned set
+    %% TODO: this list of active vals can be lengthy
+    %%       is it quicker to thow this around & index it
+%%           compared to pulling each val from the ledger ?
+    %%       taking path of least resistance for now
+    ActiveVals = sibyl_mgr:validators(),
+    do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys, ActiveVals, []).
+-spec do_get_random_poc_key_proposals(
+    pos_integer(),
+    [libp2p_crypto:pubkey_bin()],
+    [cached_key_proposal()],
+    [sibyl_mgr:val_data()],
+    [{libp2p_crypto:pubkey_bin(), key_proposal()}]) ->
     [{libp2p_crypto:pubkey_bin(), key_proposal()}].
-do_get_random_poc_key_proposals(0, _CGMembers, _Keys, Acc) ->
+do_get_random_poc_key_proposals(0, _CGMembers, _Keys, _ActiveVals, Acc) ->
     Acc;
-do_get_random_poc_key_proposals(_, _CGMembers, [] = _Keys, Acc) ->
+do_get_random_poc_key_proposals(_, _CGMembers, [] = _Keys, _ActiveVals, Acc) ->
     Acc;
 do_get_random_poc_key_proposals(NumKeys, CGMembers,
-    [{_, #poc_key_proposal{key = Key, address = Address}} | T] = _Keys, Acc) ->
+    [{_, #poc_key_proposal{key = Key, address = Address}} | T] = _Keys, ActiveVals, Acc) ->
     case lists:member(Address, CGMembers) of
         true ->
-            do_get_random_poc_key_proposals(NumKeys, CGMembers, T, Acc);
+            do_get_random_poc_key_proposals(NumKeys, CGMembers, T, ActiveVals, Acc);
         false ->
-            do_get_random_poc_key_proposals(NumKeys-1, CGMembers, T, [{Address, Key} | Acc])
+            case lists:keymember(Address, 1, ActiveVals) of
+                true ->
+                    do_get_random_poc_key_proposals(NumKeys-1, CGMembers, T, ActiveVals, [{Address, Key} | Acc]);
+                false ->
+                    do_get_random_poc_key_proposals(NumKeys, CGMembers, T, ActiveVals, Acc)
+            end
     end.
 
 %% ------------------------------------------------------------------
