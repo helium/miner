@@ -17,7 +17,9 @@
     start_link/0,
     stop/0,
     connection/0,
-    check_target/6,
+    queue_check_target_req/7,
+    is_queued_check_target_req/1,
+    send_check_target_req/6,
     send_report/3,
     send_report/4,
     update_config/1
@@ -49,18 +51,22 @@
     stream_region_params_update_monitor_ref,
     val_p2p_addr,
     val_public_ip,
-    val_grpc_port
+    val_grpc_port,
+    check_target_req_timer
 }).
 
 %% these are config vars the miner is interested in, if they change we
 %% will want to get their latest values
--define(CONFIG_VARS, ["poc_version", "data_aggregation_version"]).
+-define(CONFIG_VARS, ["poc_version", "data_aggregation_version", "poc_timeout"]).
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
 %% delay between stream reconnects attempts
 -define(STREAM_RECONNECT_DELAY, 5000).
-
+%% interval in seconds at which queued check target reqs are processed
+-define(CHECK_TARGET_REQ_DELAY, 60000).
+%% ets table name for check target reqs cache
+-define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
 
 %% ------------------------------------------------------------------
@@ -86,18 +92,6 @@ stop() ->
 connection() ->
     gen_statem:call(?MODULE, connection, infinity).
 
--spec check_target(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), non_neg_integer(), libp2p_crypto:signature()) -> {error, any()} | {error, any(), map()} | {ok, any(), map()}.
-check_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) ->
-    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-    {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
-    %% split the URI into its IP and port parts
-    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
-    TargetIP = maybe_override_ip(IP),
-    %% build the request
-    Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash,
-        BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
-    send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target').
-
 -spec send_report(witness | receipt, any(), binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash)->
     gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 5}).
@@ -109,6 +103,31 @@ send_report(ReportType, Report, OnionKeyHash, Retries)->
 -spec update_config([string()]) -> ok.
 update_config(UpdatedKeys)->
     gen_statem:cast(?MODULE, {update_config, UpdatedKeys}).
+
+-spec queue_check_target_req(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), pos_integer(),
+                    function(), integer())-> ok.
+queue_check_target_req(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+                        ChallengerSig, QueueEntryTSInSecs) ->
+    cache_check_target_req(OnionKeyHash, {ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash,
+                            NotificationHeight, ChallengerSig, QueueEntryTSInSecs}).
+
+-spec is_queued_check_target_req(binary())-> boolean().
+is_queued_check_target_req(OnionKeyHash)->
+    ets:member(?CHECK_TARGET_REQS, OnionKeyHash).
+
+-spec send_check_target_req(string(), libp2p_crypto:pubkey_bin(), binary(), binary(),
+        non_neg_integer(), libp2p_crypto:signature()) -> {error, any()} | {error, any(), map()} | {ok, any(), map()}.
+send_check_target_req(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash,
+        NotificationHeight, ChallengerSig) ->
+    SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+    {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
+    %% split the URI into its IP and port parts
+    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
+    TargetIP = maybe_override_ip(IP),
+    %% build the request
+    Req = build_check_target_req(ChallengerPubKeyBin, OnionKeyHash,
+            BlockHash, NotificationHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun),
+    send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target').
 
 %% ------------------------------------------------------------------
 %% gen_statem Definitions
@@ -219,7 +238,9 @@ setup(_EventType, _Msg, Data) ->
     {keep_state, Data}.
 
 connected(enter, _OldState, Data)->
-    {keep_state, Data};
+    _ = erlang:cancel_timer(Data#data.check_target_req_timer),
+    Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
+    {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(cast, {send_report, ReportType, Report, OnionKeyHash, RetryAttempts}, #data{connection = Connection, self_sig_fun = SelfSigFun, self_pub_key_bin = SelfPubKeyBin} = Data) ->
     lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, Report]),
     ok = send_report(ReportType, Report, OnionKeyHash, SelfPubKeyBin, SelfSigFun, Connection, RetryAttempts),
@@ -234,6 +255,11 @@ connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:info("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
     handle_down_event(connected, Event, Data);
+connected(info, process_queued_check_target_reqs, Data) ->
+    lager:info("processing queued check_target_reqs", []),
+    _ = process_check_target_reqs(),
+    Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
+    {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(_EventType, _Msg, Data)->
     lager:info("unhandled event whilst in ~p state: Type: ~p, Msg: ~p", [connected, _EventType, _Msg]),
     {keep_state, Data}.
@@ -430,6 +456,20 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC)->
             {error, req_failed}
     end.
 
+-spec build_validators_req(Quantity:: pos_integer()) -> #gateway_validators_req_v1_pb{}.
+build_validators_req(Quantity) ->
+    #gateway_validators_req_v1_pb{
+        quantity = Quantity
+    }.
+
+-spec build_config_req([string()]) -> #gateway_config_req_v1_pb{}.
+build_config_req(Keys) ->
+    #gateway_config_req_v1_pb{ keys = Keys}.
+
+-spec build_poc_challenger_req(binary()) -> #gateway_poc_key_routing_data_req_v1_pb{}.
+build_poc_challenger_req(OnionKeyHash) ->
+    #gateway_poc_key_routing_data_req_v1_pb{ key = OnionKeyHash}.
+
 -spec build_check_target_req(libp2p_crypto:pubkey_bin(), binary(), binary(), non_neg_integer(), binary(), libp2p_crypto:pubkey_bin(), function()) -> #gateway_poc_check_challenge_target_req_v1_pb{}.
 build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, ChallengeHeight, ChallengerSig, SelfPubKeyBin, SelfSigFun) ->
     Req = #gateway_poc_check_challenge_target_req_v1_pb{
@@ -444,20 +484,6 @@ build_check_target_req(ChallengerPubKeyBin, OnionKeyHash, BlockHash, ChallengeHe
     },
     ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_check_challenge_target_req_v1_pb),
     Req#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = SelfSigFun(ReqEncoded)}.
-
--spec build_validators_req(Quantity:: pos_integer()) -> #gateway_validators_req_v1_pb{}.
-build_validators_req(Quantity) ->
-    #gateway_validators_req_v1_pb{
-        quantity = Quantity
-    }.
-
--spec build_config_req([string()]) -> #gateway_config_req_v1_pb{}.
-build_config_req(Keys) ->
-    #gateway_config_req_v1_pb{ keys = Keys}.
-
--spec build_poc_challenger_req(binary()) -> #gateway_poc_key_routing_data_req_v1_pb{}.
-build_poc_challenger_req(OnionKeyHash) ->
-    #gateway_poc_key_routing_data_req_v1_pb{ key = OnionKeyHash}.
 
 %% TODO: return a better and consistent response
 %%-spec process_unary_response(grpc_client_custom:unary_response()) -> {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
@@ -529,6 +555,48 @@ get_uri_for_challenger(OnionKeyHash, Connection)->
         {error, Reason} ->
             {error, Reason}
     end.
+
+-spec process_check_target_reqs()-> ok.
+process_check_target_reqs() ->
+    {ok, POCTimeOut} = application:get_env(miner, poc_timeout),
+    %% convert poc timeout in blocks to equiv in seconds
+    %% use to determine when the POC would end
+    %% if the cached request has remained in the cache
+    %% for 80% of the timeout period, then give up on it & remove
+    %% we use 80% as we need to give the POC time to run,
+    %% no point getting the onion and broadcasting if no time
+    %% left for it to complete
+    POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
+    CurTSInSecs = erlang:monontonic_time(second),
+    Reqs = cached_check_target_reqs(),
+    lists:foreach(
+        fun({ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash,
+                NotificationHeight, ChallengerSig, QueueEnterTSInSecs}) ->
+            case CurTSInSecs > (QueueEnterTSInSecs + POCTimeOutSecs) of
+                true ->
+                    %% time to retry the request
+                    _ = miner_poc_grpc_client_handler:check_if_target(ChallengerURI, ChallengerPubKeyBin, OnionKeyHash,
+                            BlockHash, NotificationHeight, ChallengerSig),
+                    ok;
+                false ->
+                    %% past due on this, remove it from cache
+                    _ = delete_cached_check_target_req(OnionKeyHash),
+                    ok
+            end
+        end, Reqs).
+
+-spec cache_check_target_req(binary(), tuple()) -> true.
+cache_check_target_req(ID, ReqData) ->
+    true = ets:insert(?CHECK_TARGET_REQS, {ID, ReqData}).
+
+-spec cached_check_target_reqs() -> [tuple()].
+cached_check_target_reqs() ->
+    ets:tab2list(?CHECK_TARGET_REQS).
+
+-spec delete_cached_check_target_req(binary()) -> ok.
+delete_cached_check_target_req(Key) ->
+    true = ets:delete(?CHECK_TARGET_REQS, Key),
+    ok.
 
 -ifdef(TEST).
 maybe_override_ip(_IP)->
