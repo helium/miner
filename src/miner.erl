@@ -764,7 +764,11 @@ poc_keys(Ledger, Metadata, BlockHash) ->
             _ -> 1
         end,
     PocKeys0 = [POCKeys || {_, #{poc_keys := POCKeys}} <- metadata_only_v2(Metadata)],
-    sort_and_truncate_poc_keys(lists:flatten(PocKeys0), ChallengeRate, RandState).
+    SelectedKeys = sort_and_truncate_poc_keys(lists:flatten(PocKeys0), ChallengeRate, RandState),
+    %% purge the selected keys from key proposals cache
+    %% preventative measure to ensure keys are not reselected
+    [miner_poc_mgr:delete_cached_local_poc_key_proposal(Key) || {_, Key} <- SelectedKeys],
+    SelectedKeys.
 
 sort_and_truncate_poc_keys(L, MaxKeys, RandState) ->
     {_, TruncList} = blockchain_utils:deterministic_subset(MaxKeys, RandState, L),
