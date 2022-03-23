@@ -98,7 +98,7 @@ cleanup_port(#state{port = Port} = State) ->
     ok.
 
 mux_bin() ->
-    code:priv_dir(miner) ++ "/semtech_udp/gwmp-mux".
+    code:priv_dir(miner) ++ "/gwmp_mux/gwmp-mux".
 
 client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
     lists:flatmap(
@@ -111,14 +111,14 @@ client_address_list(ClientTcpPorts) when is_list(ClientTcpPorts) ->
 dispatch_port_logs(Line) ->
     case Line of
         <<" TRACE ", Statement/binary>> ->
-            lager:debug("[ semtech-udp ] ~s", [Statement]);
+            lager:debug("[ gwmp-mux ] ~s", [Statement]);
         <<" DEBUG ", Statement/binary>> ->
-            lager:debug("[ semtech-udp ] ~s", [Statement]);
+            lager:debug("[ gwmp-mux ] ~s", [Statement]);
         <<" INFO ", Statement/binary>> ->
-            lager:info("[ semtech-udp ] ~s", [Statement]);
+            lager:info("[ gwmp-mux ] ~s", [Statement]);
         <<" WARN ", Statement/binary>> ->
-            lager:warning("[ semtech-udp ] ~s", [Statement]);
+            lager:warning("[ gwmp-mux ] ~s", [Statement]);
         <<" ERROR ", Statement/binary>> ->
-            lager:error("[ semtech-udp ] ~s", [Statement]);
+            lager:error("[ gwmp-mux ] ~s", [Statement]);
         _ -> lager:debug("unhandled info ~p", [Line])
     end.
