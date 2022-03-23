@@ -28,8 +28,7 @@
 }).
 
 -define(CONNECT_RETRY_WAIT, 100).
-
--dialyzer({nowarn_function, verify_grpc_connect/3}).
+-define(CONNECT_ATTEMPTS, 5).
 
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
@@ -110,7 +109,7 @@ open_gateway_port(KeyPair, Transport, Host, UdpPort, TcpPort) ->
     Ref = erlang:monitor(port, Port),
     {os_pid, OSPid} = erlang:port_info(Port, os_pid),
 
-    ok = verify_grpc_connect(Transport, Host, TcpPort),
+    ok = verify_grpc_connect(Transport, Host, TcpPort, ?CONNECT_ATTEMPTS),
 
     #state{
         keypair = KeyPair,
@@ -151,7 +150,10 @@ dispatch_port_logs(Line) ->
         _ -> lager:debug("unhandled info ~p", [Line])
     end.
 
-verify_grpc_connect(Transport, Host, TcpPort) ->
+verify_grpc_connect(_Transport, _Host, _TcpPort, 0) ->
+    lager:error("~s failed to connect to gateway ~s://~s:~p", [?MODULE, _Transport, _Host, _TcpPort]),
+    {error, retries_exceeded};
+verify_grpc_connect(Transport, Host, TcpPort, Tries) ->
     case grpc_client:connect(Transport, Host, TcpPort) of
         {ok, Connection} ->
             lager:debug("~s connected to gateway grpc ~s://~s:~p", [?MODULE, Transport, Host, TcpPort]),
@@ -160,5 +162,5 @@ verify_grpc_connect(Transport, Host, TcpPort) ->
         _ ->
             lager:warning("~s grpc connection to gateway failed; retrying...", [?MODULE]),
             timer:sleep(?CONNECT_RETRY_WAIT),
-            verify_grpc_connect(Transport, Host, TcpPort)
+            verify_grpc_connect(Transport, Host, TcpPort, Tries - 1)
     end.
