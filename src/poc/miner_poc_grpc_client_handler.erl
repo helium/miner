@@ -27,8 +27,7 @@
     connect/3,
     poc_stream/3,
     config_update_stream/1,
-    region_params_update_stream/3,
-    check_if_target/6
+    region_params_update_stream/3
 ]).
 
 init()->
@@ -117,74 +116,16 @@ region_params_update_stream(Connection, PubKeyBin, SigFun)->
         {error, stream_failed}
     end.
 
--spec check_if_target(string(), libp2p_crypto:pubkey_bin(), binary(), binary(), pos_integer(),
-                    function()) -> ok.
-check_if_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig) ->
-    F = fun() ->
-            TargetRes = miner_poc_grpc_client_statem:send_check_target_req(URI, PubKeyBin, OnionKeyHash, BlockHash,
-                            NotificationHeight, ChallengerSig),
-            lager:info("check target result for key ~p: ~p",[OnionKeyHash, TargetRes]),
-            case TargetRes of
-                {ok, Result, _Details} ->
-                    handle_check_target_resp(Result);
-                {error, <<"queued_poc">>, #{height := ValRespHeight } = _Details} ->
-                    %% seems the POC key exists but the POC itself may not yet be initialised
-                    %% this can happen if the challenging validator is behind our
-                    %% notifying validator
-                    %% if the challenger is behind the notifier, then add cache the check target req
-                    %% it will then be retried periodically
-                    N = NotificationHeight - ValRespHeight,
-                    IsAlreadyCached = miner_poc_grpc_client_statem:is_queued_check_target_req(OnionKeyHash),
-                    case (N > 0) andalso (not IsAlreadyCached) of
-                        true ->
-                            CurTSInSecs = erlang:monontonic_time(second),
-                            _ = miner_poc_grpc_client_statem:queue_check_target_req(URI, PubKeyBin, OnionKeyHash, BlockHash,
-                               NotificationHeight, ChallengerSig, CurTSInSecs),
-                            lager:info("queued check target request for onionkeyhash ~p with ts ~p", [OnionKeyHash, CurTSInSecs]),
-                            ok;
-                        false ->
-                            %% eh shouldnt hit here but ok
-                            ok
-                    end;
-                {error, _Reason, _Details} ->
-                    ok;
-                {error, _Reason} ->
-                    ok
-            end
-        end,
-    spawn(F).
-
-
-
 %% TODO: handle headers
 handle_msg({headers, _Headers}, StreamState) ->
     lager:debug("*** grpc client ignoring headers ~p", [_Headers]),
     StreamState;
-handle_msg({data, #gateway_resp_v1_pb{msg = {poc_challenge_resp, ChallengeNotification}, height = NotificationHeight, signature = ChallengerSig}} = Msg, StreamState) ->
-    lager:debug("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
-    #gateway_poc_challenge_notification_resp_v1_pb{challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin}, block_hash = BlockHash, onion_key_hash = OnionKeyHash} = ChallengeNotification,
-    _ = check_if_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig),
-    StreamState;
-handle_msg({data, #gateway_resp_v1_pb{msg = {config_update_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
-    lager:debug("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
-    #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
-    _ = miner_poc_grpc_client_statem:update_config(UpdatedKeys),
-    StreamState;
-handle_msg({data, #gateway_resp_v1_pb{msg = {region_params_streamed_resp, Payload}, height = _NotificationHeight, signature = _ChallengerSig}} = _Msg, StreamState) ->
-    lager:debug("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
-    #gateway_region_params_streamed_resp_v1_pb{region = Region, params =Params} = Payload,
-    #blockchain_region_params_v1_pb{region_params = RegionParams} = Params,
-    miner_lora_light:region_params_update(Region, RegionParams),
-    miner_onion_server_light:region_params_update(Region, RegionParams),
-    StreamState;
-handle_msg({data, _Msg}, StreamState) ->
-    lager:warning("grpc client received unexpected msg ~p",[_Msg]),
+%% handle streamed msgs received by this client
+handle_msg({data, Msg}, StreamState) ->
+    lager:debug("grpc client handler received msg ~p", [Msg]),
+    _ = miner_poc_grpc_client_statem:handle_streamed_msg(Msg),
     StreamState.
 
-handle_info({retry_check_target, URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, Attempt}, StreamState)  when Attempt =< 3 ->
-    lager:debug("retry_check_target with attempt ~p for onionkeyhash : ~p", [Attempt, OnionKeyHash]),
-    _ = check_if_target(URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig),
-    StreamState;
 handle_info(_Msg, StreamState) ->
     lager:warning("grpc client unhandled msg: ~p", [_Msg]),
     StreamState.
@@ -192,12 +133,6 @@ handle_info(_Msg, StreamState) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec handle_check_target_resp(#gateway_poc_check_challenge_target_resp_v1_pb{})-> ok.
-handle_check_target_resp(#gateway_poc_check_challenge_target_resp_v1_pb{target = true, onion = Onion} = _ChallengeResp) ->
-    ok = miner_onion_server_light:decrypt_p2p(Onion);
-handle_check_target_resp(#gateway_poc_check_challenge_target_resp_v1_pb{target = false} = _ChallengeResp) ->
-    ok.
-
 -ifdef(TEST).
 p2p_port_to_grpc_port(PeerAddr)->
     SwarmTID = blockchain_swarm:tid(),

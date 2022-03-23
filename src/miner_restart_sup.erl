@@ -104,8 +104,8 @@ init(_Opts) ->
                 application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
-                [PocMgrTab1, PocMgrTab2, PocMgrTab3] = miner_poc_mgr:make_ets_table(),
-                POCMgrOpts = #{tab1 => PocMgrTab1, tab2 => PocMgrTab2, tab3 => PocMgrTab3},
+                [PocMgrTab1, PocMgrTab2] = miner_poc_mgr:make_ets_table(),
+                POCMgrOpts = #{tab1 => PocMgrTab1, tab2 => PocMgrTab2},
                 POCOpts = #{base_dir => BaseDir,
                             cfs => ["default",
                                     "poc_mgr_cf"
@@ -127,12 +127,16 @@ init(_Opts) ->
                 POCOpts = #{
                     base_dir => BaseDir
                    },
+                {ok, ClientStateMTab} = miner_poc_grpc_client_statem:make_ets_table(),
+                ClientStateMOpts = #{
+                    tab => ClientStateMTab
+                },
                 [
                     ?WORKER(miner_onion_server_light, [OnionOpts]),
                     ?WORKER(miner_onion_server, [OnionOpts]),
                     ?WORKER(miner_lora_light, [OnionOpts]),
                     ?WORKER(miner_lora, [OnionOpts]),
-                    ?WORKER(miner_poc_grpc_client_statem, []),
+                    ?WORKER(miner_poc_grpc_client_statem, [ClientStateMOpts]),
                     ?WORKER(miner_poc_statem, [POCOpts])
 
                 ]
