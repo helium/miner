@@ -69,7 +69,7 @@ terminate(_, State) ->
 open_mux_port(HostTcpPort, ClientTcpPorts) when is_list(ClientTcpPorts) ->
     ClientList = client_address_list(ClientTcpPorts),
     lager:info("client list ~p", [ClientList]),
-    Args = ["--host", erlang:integer_to_list(HostTcpPort)] ++ ClientList,
+    Args = ["--disable-timestamp", "--host", erlang:integer_to_list(HostTcpPort)] ++ ClientList,
     lager:info("mux args list ~p", [Args]),
     PortOpts = [
         binary,
