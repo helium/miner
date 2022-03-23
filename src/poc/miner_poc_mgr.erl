@@ -665,7 +665,7 @@ process_block_pocs(
                     lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    spawn_link(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                    spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
                     lager:info("failed to find local poc key for ~p", [OnionKeyHash]),
                     noop
