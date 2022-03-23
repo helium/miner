@@ -794,7 +794,7 @@ process_check_target_reqs() ->
             case CurTSInSecs > (QueueEnterTSInSecs + POCTimeOutSecs) of
                 true ->
                     %% time to retry the request
-                    _ = miner_poc_grpc_client_handler:check_if_target(
+                    _ = check_if_target(
                         ChallengerURI,
                         ChallengerPubKeyBin,
                         OnionKeyHash,
@@ -941,6 +941,8 @@ check_if_target(
                         ok
                 end;
             {error, _Reason, _Details} ->
+                %% we got an non queued response, purge req from queued cache should it exist
+                _ = delete_cached_check_target_req(OnionKeyHash),
                 ok;
             {error, _Reason} ->
                 ok
