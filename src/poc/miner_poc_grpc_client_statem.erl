@@ -756,6 +756,31 @@ handle_down_event(
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
             erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
             {keep_state, Data}
+    end;
+handle_down_event(
+    _CurState,
+    {'DOWN', Ref, process, _, Reason} = Event,
+    Data = #data{
+        stream_region_params_update_monitor_ref = Ref,
+        connection = Connection,
+        self_pub_key_bin = SelfPubKeyBin,
+        self_sig_fun = SelfSigFun
+    }
+) ->
+    %% the region_params stream is meant to be long lived, we always want it up as long as we have a grpc connection
+    %% so if it goes down start it back up again
+    lager:warning("region_params_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
+    case connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) of
+        {ok, StreamPid} ->
+            M = erlang:monitor(process, StreamPid),
+            {keep_state, Data#data{
+                stream_region_params_update_monitor_ref = M, stream_region_params_update_pid = StreamPid
+            }};
+        {error, _} ->
+            %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
+            %% NOTE: not using transition actions below as want a delay before the msgs get processed again
+            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
+            {keep_state, Data}
     end.
 
 -spec get_uri_for_challenger(binary(), grpc_client_custom:connection()) ->
@@ -786,12 +811,13 @@ process_check_target_reqs() ->
     POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
     CurTSInSecs = erlang:system_time(second),
     Reqs = cached_check_target_reqs(),
+    lager:info("Queued Reqs: ~p",[Reqs]),
     lists:foreach(
         fun(
-            {ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                ChallengerSig, QueueEnterTSInSecs}
+            {_Key, {ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+                ChallengerSig, QueueEnterTSInSecs}}
         ) ->
-            case CurTSInSecs > (QueueEnterTSInSecs + POCTimeOutSecs) of
+            case CurTSInSecs < (QueueEnterTSInSecs + POCTimeOutSecs) of
                 true ->
                     %% time to retry the request
                     _ = check_if_target(
@@ -806,6 +832,7 @@ process_check_target_reqs() ->
                     ok;
                 false ->
                     %% past due on this, remove it from cache
+                    lager:info("removed queued poc from cache with onionkeyhash ~p", [OnionKeyHash]),
                     _ = delete_cached_check_target_req(OnionKeyHash),
                     ok
             end
@@ -911,7 +938,7 @@ check_if_target(
                 NotificationHeight,
                 ChallengerSig
             ),
-        lager:info("check target result for key ~p: ~p", [OnionKeyHash, TargetRes]),
+        lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
             {ok, Result, _Details} ->
                 %% we got an expected response, purge req from queued cache should it exist
@@ -932,7 +959,7 @@ check_if_target(
                             {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
                                 ChallengerSig, CurTSInSecs}
                         ),
-                        lager:info("queued check target request for onionkeyhash ~p with ts ~p", [
+                        lager:info("queuing check target request for onionkeyhash ~p with ts ~p", [
                             OnionKeyHash, CurTSInSecs
                         ]),
                         ok;
