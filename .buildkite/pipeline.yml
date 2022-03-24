@@ -33,10 +33,13 @@ steps:
       queue: "erlang"
 
   - if: build.tag =~ /^validator/
-    name: ":whale: validator AMD64 docker"
+    name: ":whale: validator {{matrix}} docker"
+    matrix:
+      - "amd64"
+      - "arm64"
     env:
       BUILD_TYPE: "validator"
-      IMAGE_ARCH: "amd64"
+      IMAGE_ARCH: "{{matrix}}"
       REGISTRY_HOST: "quay.io"
       REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator"
@@ -48,27 +51,14 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag =~ /^validator/
-    name: ":whale: validator ARM64 docker"
-    env:
-      BUILD_TYPE: "validator"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_ORG: "team-helium"
-      REGISTRY_NAME: "validator"
-      VERSION_TAG: $BUILDKITE_TAG
-      BUILD_NET: "mainnet"
-    agents:
-      queue: "arm64"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
   - if: build.tag =~ /^testnet_validator/
-    name: ":whale: testnet validator AMD64 docker"
+    name: ":whale: testnet validator {{matrix}} docker"
+    matrix:
+      - "amd64"
+      - "arm64"
     env:
       BUILD_TYPE: "validator"
-      IMAGE_ARCH: "amd64"
+      IMAGE_ARCH: "{{matrix}}"
       REGISTRY_HOST: "quay.io"
       REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "validator-testnet"
@@ -80,27 +70,14 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag =~ /^testnet_validator/
-    name: ":whale: testnet validator ARM64 docker"
-    env:
-      BUILD_TYPE: "validator"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_ORG: "team-helium"
-      REGISTRY_NAME: "validator-testnet"
-      VERSION_TAG: $BUILDKITE_TAG
-      BUILD_NET: "testnet"
-    agents:
-      queue: "arm64"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
   - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/
-    name: ":whale: AMD64 docker"
+    name: ":whale: {{matrix}} docker"
+    matrix:
+      - "amd64"
+      - "arm64"
     env:
       BUILD_TYPE: "miner"
-      IMAGE_ARCH: "amd64"
+      IMAGE_ARCH: "{{matrix}}"
       REGISTRY_HOST: "quay.io"
       REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "miner"
@@ -112,52 +89,21 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/
-    name: ":whale: ARM64 docker"
-    agents:
-      queue: "arm64"
-    env:
-      BUILD_TYPE: "miner"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_ORG: "team-helium"
-      REGISTRY_NAME: "miner"
-      VERSION_TAG: $BUILDKITE_TAG
-      BUILD_NET: "mainnet"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  # Miner ARM64 testnet
   - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
-    name: ":whale: testnet miner ARM64 docker"
+    name: ":whale: testnet miner {{matrix}} docker"
+    matrix:
+      - "amd64"
+      - "arm64"
     agents:
-      queue: "arm64"
+      queue: "{{matrix}}"
     env:
       BUILD_TYPE: "miner"
-      IMAGE_ARCH: "arm64"
+      IMAGE_ARCH: "{{matrix}}"
       REGISTRY_HOST: "quay.io"
       REGISTRY_ORG: "team-helium"
       REGISTRY_NAME: "miner-testnet"
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  # Miner AMD64 testnet
-  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
-    name: ":whale: testnet miner AMD64 docker"
-    env:
-      BUILD_TYPE: "miner"
-      IMAGE_ARCH: "amd64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_ORG: "team-helium"
-      REGISTRY_NAME: "miner-testnet"
-      VERSION_TAG: $BUILDKITE_TAG
-      BUILD_NET: "testnet"
-    agents:
-      queue: "erlang"
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
