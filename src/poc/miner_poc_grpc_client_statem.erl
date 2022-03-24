@@ -996,7 +996,8 @@ send_check_target_req(
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
     %% split the URI into its IP and port parts
-    #{host := IP, port := Port, scheme := _Scheme} = uri_string:parse(ChallengerURI),
+    #{host := IP, port := Port, scheme := _Scheme} =
+        uri_string:parse(binary_to_list(ChallengerURI)),
     TargetIP = maybe_override_ip(IP),
     %% build the request
     Req = build_check_target_req(
