@@ -11,8 +11,8 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
-GATEWAY_RS_VSN ?= "v1.0.0-alpha.23"
-SEMTECH_UDP_VSN ?= "v0.9.2"
+GATEWAY_RS_VSN ?= "e36e9ffd1fe375a66cdcf46ceafc73519e4e53e0"
+GWMP_MUX_VSN ?= "v0.9.4"
 
 all: compile
 
@@ -89,7 +89,8 @@ clean_grpc:
 external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
-	$(call clone_project,gateway-rs,$(GATEWAY_RS_VSN))
+	@git clone --quiet https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
+	@(cd external/gateway-rs && git checkout $(GATEWAY_RS_VSN) 2>/dev/null)
 	@(cd ./external/gateway-rs && cargo build --release)
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
