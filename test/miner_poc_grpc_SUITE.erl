@@ -171,6 +171,7 @@ exec_dist_test(poc_grpc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
     do_common_partition_checks(poc_grpc_dist_v11_partitioned_test, Config, VarMap);
 exec_dist_test(_TestCase, Config, VarMap, Status) ->
     Validators = ?config(validators, Config),
+    Gateways = ?config(gateway_addrs, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),
@@ -194,8 +195,10 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
                                      RewardsMD = get_rewards_md(Config),
                                      ct:pal("RewardsMD: ~p", [RewardsMD]),
                                      C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
-                                     ct:pal("C1: ~p C2: ~p, C3: ~p", [C1, C2, C3]),
-                                     C1 andalso C2 andalso C3
+                                     %% check gateways activity was updated
+                                     C4 = check_gateway_activity(hd(Validators), Gateways),
+                                     ct:pal("C1: ~p C2: ~p, C3: ~p, C4: ~p", [C1, C2, C3, C4]),
+                                     C1 andalso C2 andalso C3 andalso C4
                              end,
                              25, 5000),
                     FinalRewards = get_rewards(Config),
@@ -206,6 +209,23 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
             end
     end,
     ok.
+
+check_gateway_activity(Val, Gateways) ->
+    Chain = ct_rpc:call(Val, blockchain_worker, blockchain, []),
+    Ledger = ct_rpc:call(Val, blockchain, ledger, [Chain]),
+    {ok, Height} = ct_rpc:call(Val, blockchain_ledger_v1, current_height, [Ledger]),
+    ct:pal("checking activity for gateways ~p", [Gateways]),
+    lists:foldl(
+        fun(GWAddr, Acc)->
+            {ok, GW} = ct_rpc:call(Val, blockchain_ledger_v1, find_gateway_info, [GWAddr, Ledger]),
+            LastChallenge = blockchain_ledger_gateway_v2:last_poc_challenge(GW),
+            ct:pal("last challenge for gateway ~p is : ~p", [GWAddr, LastChallenge]),
+            case (LastChallenge /= undefined) andalso (Height - LastChallenge) < 5 of
+                true -> Acc;
+                false -> false
+            end
+        end,
+        true, Gateways).
 
 setup_dist_test(TestCase, Config, VarMap, Status) ->
     AllMiners = ?config(miners, Config),
@@ -577,6 +597,7 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_timeout => 4,
                  ?poc_receipts_absorb_timeout => 2,
                  ?poc_validator_ephemeral_key_timeout => 50,
+                 ?poc_activity_filter_enabled => true,
                  ?h3dex_gc_width => 10,
                  ?poc_targeting_version => TargetVersion,
                  ?poc_target_pool_size => 2,
