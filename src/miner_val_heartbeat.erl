@@ -91,7 +91,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
                             ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
                             UnsignedTxn =
-                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes),
+                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, []),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
                             lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
                             Self = self(),
