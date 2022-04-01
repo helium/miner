@@ -91,6 +91,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
                             ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
                             ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
+                            _ = sibyl_poc_mgr:clear_reactivated_gws(),
                             UnsignedTxn =
                                 blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
