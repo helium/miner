@@ -837,7 +837,6 @@ init_per_testcase(Mod, TestCase, Config0) ->
             true ->
                 %% if config says to use validators for CG then
                 %% split key sets into validators and miners
-                %% first batch of keys up to NumConsensusMembers will be validators, rest gateways/miners
                 {ValKeys, GatewayKeys} = lists:split(NumValidators, Keys),
                 ct:pal("validator keys: ~p", [ValKeys]),
                 ct:pal("gateway keys: ~p", [GatewayKeys]),
