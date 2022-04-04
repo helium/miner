@@ -578,6 +578,7 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_challenge_rate => 1,
                  ?poc_challenger_type => validator,
                  ?poc_timeout => 4,
+                 ?poc_receipts_absorb_timeout => 2,
                  ?poc_validator_ephemeral_key_timeout => 50,
                  ?poc_targeting_version => TargetVersion,
                  ?poc_activity_filter_enabled => true,

@@ -1,6 +1,2 @@
 ## api listening port override
 api = 4468
-
-[update]
-# disable update checking inside the miner container
-enabled = false
