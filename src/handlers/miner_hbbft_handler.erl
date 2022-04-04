@@ -98,8 +98,10 @@ metadata(Version, Meta, Chain) ->
             ChainMeta1 =
                 case blockchain:config(?poc_challenger_type, Ledger) of
                     {ok, validator} ->
-                        %% generate a set of ephemeral keys for POC usage
-                        %% the hashes of the public keys are added to metadata
+                        %% get a set of ephemeral keys for POC usage
+                        %% keys come from the proposals cache
+                        %% populated by validators via key proposals
+                        %% in their heartbeats
                         ChallengeRate =
                             case blockchain:config(?poc_challenge_rate, Ledger) of
                                 {ok, CR} -> CR;

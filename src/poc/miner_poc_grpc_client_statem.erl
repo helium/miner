@@ -170,7 +170,7 @@ setup(info, find_validator, Data) ->
         {error, _Reason} ->
             {repeat_state, Data};
         {ok, ValIP, ValPort, ValP2P} ->
-            lager:info("*** Found validator with ip: ~p, port: ~p, addr: ~p", [
+            lager:info("*** connecting to validator with ip: ~p, port: ~p, addr: ~p", [
                 ValIP, ValPort, ValP2P
             ]),
             {keep_state,
@@ -234,7 +234,7 @@ setup(
     case connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) of
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
-            lager:info("monitoring stream poc pid ~p with ref ~p", [StreamPid, M]),
+            lager:debug("monitoring stream poc pid ~p with ref ~p", [StreamPid, M]),
             {keep_state,
                 Data#data{
                     stream_poc_monitor_ref = M,
@@ -287,7 +287,7 @@ setup(
             {repeat_state, Data}
     end;
 setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
-    lager:info("got down event ~p", [Event]),
+    lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
     handle_down_event(setup, Event, Data);
 setup({call, From}, _Msg, Data) ->
@@ -295,7 +295,7 @@ setup({call, From}, _Msg, Data) ->
     {keep_state, Data, [{reply, From, {error, grpc_client_not_ready}}]};
 setup(_EventType, _Msg, Data) ->
     %% ignore ev things else whist in setup state
-    lager:info("unhandled event whilst in ~p state: Type: ~p, Msg: ~p", [setup, _EventType, _Msg]),
+    lager:warning("unhandled event whilst in ~p state: Type: ~p, Msg: ~p", [setup, _EventType, _Msg]),
     {keep_state, Data}.
 
 connected(enter, _OldState, Data) ->
@@ -309,7 +309,7 @@ connected(enter, _OldState, Data) ->
     ),
     {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(cast, {handle_streamed_msg, Msg}, #data{} = Data) ->
-    lager:info("handle_streamed_msg for msg ~p", [Msg]),
+    lager:debug("handle_streamed_msg for msg ~p", [Msg]),
     NewData = do_handle_streamed_msg(Msg, Data),
     {keep_state, NewData};
 connected(
@@ -321,7 +321,7 @@ connected(
         self_pub_key_bin = SelfPubKeyBin
     } = Data
 ) ->
-    lager:info(
+    lager:debug(
         "send_report ~p with onionkeyhash ~p: ~p",
         [ReportType, OnionKeyHash, Report]
     ),
@@ -343,22 +343,22 @@ connected(
         val_grpc_port = ValPort
     } = Data
 ) ->
-    lager:info("update_config for keys ~p", [Keys]),
+    lager:debug("update_config for keys ~p", [Keys]),
     _ = fetch_config(Keys, ValIP, ValPort),
     {keep_state, Data};
 connected({call, From}, connection, #data{connection = Connection} = Data) ->
     {keep_state, Data, [{reply, From, {ok, Connection}}]};
 connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
-    lager:info("got down event ~p", [Event]),
+    lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
     handle_down_event(connected, Event, Data);
 connected(info, process_queued_check_target_reqs, Data) ->
-    lager:info("processing queued check_target_reqs", []),
+    lager:debug("processing queued check_target_reqs", []),
     _ = process_check_target_reqs(),
     Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
     {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(_EventType, _Msg, Data) ->
-    lager:info(
+    lager:warning(
         "unhandled event whilst in ~p state: Type: ~p, Msg: ~p",
         [connected, _EventType, _Msg]
     ),
@@ -417,21 +417,25 @@ find_validator() ->
     {error, any()} | {ok, grpc_client_custom:connection()}.
 connect_validator(ValAddr, ValIP, ValPort) ->
     try
-        lager:info(
+        lager:debug(
             "connecting to validator, p2paddr: ~p, ip: ~p, port: ~p",
             [ValAddr, ValIP, ValPort]
         ),
         case miner_poc_grpc_client_handler:connect(ValAddr, maybe_override_ip(ValIP), ValPort) of
-            {error, _} = Error ->
+            {error, _Reason} = Error ->
+                lager:debug(
+                    "failed to connect to validator, will try again in a bit. Reason: ~p",
+                    [_Reason]
+                ),
                 Error;
             {ok, Connection} = Res ->
-                lager:info("successfully connected to validator via connection ~p", [Connection]),
+                lager:debug("successfully connected to validator via connection ~p", [Connection]),
                 Res
         end
     catch
         _Class:_Error:_Stack ->
-            lager:info(
-                "failed to connect to validator, will try again in a bit. Reason: ~p, Details: ~p, Stack: ~p",
+            lager:warning(
+                "error whilst connectting to validator, will try again in a bit. Reason: ~p, Details: ~p, Stack: ~p",
                 [_Class, _Error, _Stack]
             ),
             {error, connect_validator_failed}
@@ -440,24 +444,24 @@ connect_validator(ValAddr, ValIP, ValPort) ->
 -spec connect_stream_poc(grpc_client_custom:connection(), libp2p_crypto:pubkey_bin(), function()) ->
     {error, any()} | {ok, pid()}.
 connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
-    lager:info("establishing POC stream on connection ~p", [Connection]),
     case miner_poc_grpc_client_handler:poc_stream(Connection, SelfPubKeyBin, SelfSigFun) of
         {error, _Reason} = Error ->
+            lager:debug("failed to connect to poc stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:info("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
+            lager:debug("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
             Res
     end.
 
 -spec connect_stream_config_update(grpc_client_custom:connection()) ->
     {error, any()} | {ok, pid()}.
 connect_stream_config_update(Connection) ->
-    lager:info("establishing config_update stream on connection ~p", [Connection]),
-    case miner_poc_grpc_client_handler:config_update_stream(Connection) of
+   case miner_poc_grpc_client_handler:config_update_stream(Connection) of
         {error, _Reason} = Error ->
+            lager:debug("failed to connect to config stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:info("successfully connected config update stream ~p on connection ~p", [
+            lager:debug("successfully connected config update stream ~p on connection ~p", [
                 Stream, Connection
             ]),
             Res
@@ -469,16 +473,16 @@ connect_stream_config_update(Connection) ->
     function()
 ) -> {error, any()} | {ok, pid()}.
 connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
-    lager:info("establishing region_params_update stream on connection ~p", [Connection]),
     case
         miner_poc_grpc_client_handler:region_params_update_stream(
             Connection, SelfPubKeyBin, SelfSigFun
         )
     of
         {error, _Reason} = Error ->
+            lager:debug("failed to connect to region params update stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:info(
+            lager:debug(
                 "successfully connected region params update stream ~p on connection ~p",
                 [Stream, Connection]
             ),
@@ -575,7 +579,7 @@ send_grpc_unary_req(undefined, _Req, _RPC) ->
     {error, no_grpc_connection};
 send_grpc_unary_req(Connection, Req, RPC) ->
     try
-        lager:info("send unary request: ~p", [Req]),
+        lager:debug("send unary request: ~p", [Req]),
         Res = grpc_client_custom:unary(
             Connection,
             Req,
@@ -584,7 +588,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:info("send unary result: ~p", [Res]),
+        lager:debug("send unary result: ~p", [Res]),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -596,7 +600,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
     {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
     try
-        lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
+        lager:debug("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
         {ok, Connection} = grpc_client_custom:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
 
         Res = grpc_client_custom:unary(
@@ -607,7 +611,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:info("New Connection, send unary result: ~p", [Res]),
+        lager:debug("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
         catch _ = grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
@@ -811,7 +815,7 @@ process_check_target_reqs() ->
     POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
     CurTSInSecs = erlang:system_time(second),
     Reqs = cached_check_target_reqs(),
-    lager:info("Queued Reqs: ~p",[Reqs]),
+    lager:debug("Queued Reqs: ~p",[Reqs]),
     lists:foreach(
         fun(
             {_Key, {ChallengerURI, ChallengerPubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
@@ -832,7 +836,7 @@ process_check_target_reqs() ->
                     ok;
                 false ->
                     %% past due on this, remove it from cache
-                    lager:info("removed queued poc from cache with onionkeyhash ~p", [OnionKeyHash]),
+                    lager:debug("removed queued poc from cache with onionkeyhash ~p", [OnionKeyHash]),
                     _ = delete_cached_check_target_req(OnionKeyHash),
                     ok
             end
@@ -864,10 +868,6 @@ delete_cached_check_target_req(Key) ->
     true = ets:delete(?CHECK_TARGET_REQS, Key),
     ok.
 
--spec is_queued_check_target_req(binary()) -> boolean().
-is_queued_check_target_req(OnionKeyHash) ->
-    ets:member(?CHECK_TARGET_REQS, OnionKeyHash).
-
 do_handle_streamed_msg(
     #gateway_resp_v1_pb{
         msg = {poc_challenge_resp, ChallengeNotification},
@@ -876,7 +876,7 @@ do_handle_streamed_msg(
     } = Msg,
     State
 ) ->
-    lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
+    lager:debug("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{
         challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin},
         block_hash = BlockHash,
@@ -894,7 +894,7 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
+    lager:debug("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
     #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
     _ = miner_poc_grpc_client_statem:update_config(UpdatedKeys),
     State;
@@ -906,14 +906,14 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:info("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
+    lager:debug("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
     #gateway_region_params_streamed_resp_v1_pb{region = Region, params = Params} = Payload,
     #blockchain_region_params_v1_pb{region_params = RegionParams} = Params,
     miner_lora_light:region_params_update(Region, RegionParams),
     miner_onion_server_light:region_params_update(Region, RegionParams),
     State;
 do_handle_streamed_msg(_Msg, State) ->
-    lager:info("grpc client received unexpected streamed msg ~p", [_Msg]),
+    lager:warning("grpc client received unexpected streamed msg ~p", [_Msg]),
     State.
 
 -spec check_if_target(
@@ -938,7 +938,7 @@ check_if_target(
                 NotificationHeight,
                 ChallengerSig
             ),
-        lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
+        lager:debug("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
             {ok, Result, _Details} ->
                 %% we got an expected response, purge req from queued cache should it exist
@@ -959,7 +959,7 @@ check_if_target(
                             {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
                                 ChallengerSig, CurTSInSecs}
                         ),
-                        lager:info("queuing check target request for onionkeyhash ~p with ts ~p", [
+                        lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
                             OnionKeyHash, CurTSInSecs
                         ]),
                         ok;
