@@ -825,18 +825,6 @@ bin_to_msg(<<Bin/binary>>) ->
         {error, truncated}
     end.
 
--spec generate_ephemeral_keys(pos_integer(), pos_integer()) ->{[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
-generate_ephemeral_keys(N, ChallengeRate) ->
-    NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
-    lists:foldl(
-        fun(_N, {AccKeys, AccHashes})->
-            Keys = libp2p_crypto:generate_keys(ecc_compact),
-            #{public := OnionCompactKey} = Keys,
-            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
-            {[Keys | AccKeys], [OnionHash | AccHashes]}
-        end,
-    {[], []}, lists:seq(1, NumKeys)).
-
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 

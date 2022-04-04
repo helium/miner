@@ -150,7 +150,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                                 Acc;
                             false ->
                                 P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                                case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, miner_poc_handler, []) of
+                                case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
                                     {error, _Reason} ->
                                         lager:error("failed to dial challenger ~p (~p)", [P2P, _Reason]),
                                         [error|Acc];
@@ -238,7 +238,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
                         false ->
                             EncodedWitness = blockchain_poc_response_v1:encode(Witness1),
                             P2P = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
-                            case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, miner_poc_handler, []) of
+                            case miner_poc:dial_framed_stream(blockchain_swarm:tid(), P2P, []) of
                                 {error, _Reason} ->
                                     lager:warning("failed to dial challenger ~p: ~p", [P2P, _Reason]),
                                     timer:sleep(timer:seconds(30)),
