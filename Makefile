@@ -11,7 +11,11 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
+<<<<<<< HEAD
 GATEWAY_RS_VSN ?= "c273f11ca53fd3b023c7f6bd5af175a76020548f"
+=======
+GATEWAY_RS_VSN ?= "e777f345bd2594fe648c7ae16ccbb735add26292"
+>>>>>>> 4195592d (Adding build net context to the gateway-rs configuration)
 GWMP_MUX_VSN ?= "v0.9.4"
 
 all: compile

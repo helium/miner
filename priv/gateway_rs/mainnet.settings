@@ -1,0 +1,5 @@
+# Override values in default.toml that are specific to the mainnet
+
+[update]
+# disable update checking inside the container
+enabled = false

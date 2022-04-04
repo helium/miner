@@ -121,7 +121,7 @@ witness(Address, Data) ->
 %% ------------------------------------------------------------------
 init(Args) ->
     ok = blockchain_event:add_handler(self()),
-    ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_handler),
+    ok = miner_poc:add_stream_handler(blockchain_swarm:tid()),
     ok = miner_onion:add_stream_handler(blockchain_swarm:tid()),
     Address = blockchain_swarm:pubkey_bin(),
     Blockchain = blockchain_worker:blockchain(),
@@ -191,13 +191,6 @@ requesting(info, Msg, #data{blockchain = Chain} = Data) when Chain =:= undefined
             lager:warning("dropped ~p cause chain is still undefined", [Msg]),
             {keep_state, Data};
         NewChain ->
-            Ledger = blockchain:ledger(NewChain),
-            case blockchain:config(?poc_challenger_type, Ledger) of
-                {ok, validator} ->
-                    ok;
-                _ ->
-                    ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_handler)
-            end,
             {keep_state, Data#data{blockchain=NewChain}, [{next_event, info, Msg}]}
     end;
 requesting(info, {blockchain_event, {add_block, BlockHash, Sync, Ledger}} = Msg,
