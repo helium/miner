@@ -184,7 +184,7 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({region_params_update, Region, RegionParams}, State) ->
-    lager:info("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
+    lager:debug("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
     Throttle = miner_lora_throttle:new(Region),
     FreqList = [(blockchain_region_param_v1:channel_frequency(RP) / ?MHzToHzMultiplier) || RP <- RegionParams],
     {noreply, State#state{
@@ -208,7 +208,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
 handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort}) ->
     case blockchain_worker:blockchain() of
         undefined ->
-            lager:info("failed to find chain, will retry in a bit",[]),
+            lager:debug("failed to find chain, will retry in a bit",[]),
             erlang:send_after(500, self(), init),
             {noreply, State};
         Chain ->

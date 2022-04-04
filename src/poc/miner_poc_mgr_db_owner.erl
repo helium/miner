@@ -112,7 +112,7 @@ handle_info(?TICK, #state{pending=P, write_interval=W}=State) when map_size(P) =
     {noreply, State#state{tref=Tref}};
 handle_info(?TICK, #state{pending=P, db=DB,
                           write_interval=W}=State) ->
-    lager:info("~p pending writes this tick", [map_size(P)]),
+    lager:debug("~p pending writes this tick", [map_size(P)]),
     ok = handle_batch_write(DB, P),
     Tref = schedule_next_tick(W),
     {noreply, State#state{tref=Tref, pending=#{}}};
