@@ -109,7 +109,11 @@ metadata_fun() ->
                                       libp2p_swarm:listen_addrs(blockchain_swarm)) of
                         [] -> #{};
                         [First | _] ->
-                            #{<<"rpc_address">> => lists:nth(2, string:tokens(First, "/"))}
+                            IP = lists:nth(2, string:tokens(First, "/")),
+                            {ok, Port0} = application:get_env(miner, jsonrpc_port),
+                            Port = integer_to_list(Port0),
+                            RPCAddr = iolist_to_binary(["http://", IP, ":", Port]),
+                            #{<<"rpc_address">> => RPCAddr}
                     end,
 
                 Vsn = element(2, hd(release_handler:which_releases(permanent))),
