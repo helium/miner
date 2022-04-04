@@ -246,14 +246,16 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
             %% sort non poc transactions first
             Comparator = case blockchain_txn:type(Txn) of
                              X when X == blockchain_txn_poc_request_v1 orelse
-                                    X == blockchain_txn_poc_receipts_v1 ->
+                                    X == blockchain_txn_poc_receipts_v1 orelse
+                                    X == blockchain_txn_poc_receipts_v2 ->
                                  fun(_) -> true end;
                              _ ->
                                  fun(OtherSerializedTxn) ->
                                         OtherTxn = blockchain_txn:deserialize(OtherSerializedTxn),
                                         case blockchain_txn:type(OtherTxn) of
                                             X when X == blockchain_txn_poc_request_v1 orelse
-                                                   X == blockchain_txn_poc_receipts_v1 ->
+                                                   X == blockchain_txn_poc_receipts_v1 orelse
+                                                   X == blockchain_txn_poc_receipts_v2 ->
                                                 false;
                                             _ ->
                                                 true
