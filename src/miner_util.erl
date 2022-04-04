@@ -104,8 +104,18 @@ metadata_fun() ->
         Map = blockchain_worker:signed_metadata_fun(),
         case application:get_env(miner, mode, gateway) of
             validator ->
+                RPC =
+                    case lists:filter(fun libp2p_transport_tcp:is_public/1,
+                                      libp2p_swarm:listen_addrs(blockchain_swarm)) of
+                        [] -> #{};
+                        [First | _] ->
+                            #{<<"rpc_address">> => lists:nth(2, string:tokens(First, "/"))}
+                    end,
+
                 Vsn = element(2, hd(release_handler:which_releases(permanent))),
-                Map#{<<"release_version">> => list_to_binary(Vsn)};
+                Map#{<<"release_version">> => list_to_binary(Vsn),
+                     <<"node_type">> => <<"validator">>},
+                maps:merge(Map, RPC);
             gateway ->
                 FWRelease = case filelib:is_regular(?LSB_FILE) of
                                 true ->
@@ -113,7 +123,8 @@ metadata_fun() ->
                                 false ->
                                     <<"unknown">>
                             end,
-                Map#{<<"release_info">> => FWRelease};
+                Map#{<<"release_info">> => FWRelease,
+                     <<"node_type">> => <<"gateway">>};
             _ ->
                 Map
         end
