@@ -138,7 +138,7 @@ send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRat
     case miner_lora_light:location_ok() of
         true ->
             POCID = blockchain_utils:poc_id(OnionCompactKey),
-            lager:info([{poc_id, POCID}],
+            lager:debug([{poc_id, POCID}],
                        "sending witness at RSSI: ~p, Frequency: ~p, SNR: ~p",
                        [RSSI, Frequency, SNR]),
             OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
@@ -179,7 +179,7 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({region_params_update, Region, RegionParams}, State) ->
-    lager:info("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
+    lager:debug("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
     {noreply, State#state{region = Region, region_params = RegionParams}};
 handle_cast({decrypt_p2p, _Payload}, #state{region_params = undefined} = State) ->
     lager:warning("dropping p2p challenge packet as no region params data", []),
@@ -221,7 +221,7 @@ handle_info(_Msg, State) ->
 decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, #state{ecdh_fun=ECDHFun, region_params = RegionParams, region = Region}=State) ->
     POCID = blockchain_utils:poc_id(OnionCompactKey),
     OnionKeyHash = crypto:hash(sha256, OnionCompactKey),
-    lager:info("attempting decrypt of type ~p for onion key hash ~p", [Type, OnionKeyHash]),
+    lager:debug("attempting decrypt of type ~p for onion key hash ~p", [Type, OnionKeyHash]),
     NewState = case try_decrypt(IV, OnionCompactKey, OnionKeyHash, Tag, CipherText, ECDHFun) of
         {error, fail_decrypt} ->
             lager:info([{poc_id, POCID}],
@@ -237,7 +237,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: treating as a witness", [Type]),
             State;
         {ok, Data, NextPacket} ->
-            lager:info([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
+            lager:debug([{poc_id, POCID}], "decrypted a layer: ~w received via ~p~n", [Data, Type]),
             %% fingerprint with a blank key
             Packet = longfi:serialize(<<0:128/integer-unsigned-little>>, longfi:new(monolithic, 0, 1, 0, NextPacket, #{})),
             %% deterministally pick a channel based on the layerdata

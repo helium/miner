@@ -172,7 +172,6 @@ save_local_poc_keys(CurHeight, KeyList) ->
             #{public := PubKey} = Keys,
             OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(PubKey)),
             POCKeyRec = #poc_local_key_data{receive_height = CurHeight, keys = Keys},
-            lager:info("caching local poc keys with hash ~p", [OnionKeyHash]),
             catch cache_poc_key(OnionKeyHash, POCKeyRec)
         end
         || Keys <- KeyList
@@ -196,14 +195,12 @@ active_pocs() ->
     OnionKeyHash :: binary()
 ) -> false | {true, binary()} | {error, any()}.
 check_target(Challengee, BlockHash, OnionKeyHash) ->
-    lager:info("*** check target with key ~p", [OnionKeyHash]),
     LocalPOC = e2qc:cache(
                 local_pocs,
                 OnionKeyHash,
                 30,
                 fun() -> ?MODULE:local_poc(OnionKeyHash) end
     ),
-    lager:info("*** e2qc local POC check target result ~p", [LocalPOC]),
     Res =
         case LocalPOC of
             {error, not_found} ->
@@ -221,7 +218,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 case cached_local_poc_key(OnionKeyHash) of
                     {ok, {_KeyHash, _POCData}} ->
                         %% the submitted key is one of this nodes local keys
-                        lager:info("*** ~p is a known key ~p", [OnionKeyHash]),
+                        lager:debug(" ~p is a known key ~p", [OnionKeyHash]),
                         case ?MODULE:local_poc(OnionKeyHash) of
                             {error, _} ->
                                 %% clients should retry after a period of time
@@ -237,7 +234,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
-                        lager:info("*** ~p is NOT a known key", [OnionKeyHash]),
+                        lager:debug("~p is NOT a known key", [OnionKeyHash]),
                         {error, <<"invalid_or_expired_poc">>}
                 end;
             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
@@ -249,7 +246,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:debug("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -292,7 +289,6 @@ save_poc_key_proposals(Address, KeyProposals, Height) ->
                 address = Address,
                 key = KeyProposal
             },
-            lager:debug("caching poc key proposal ~p", [KeyProposal]),
             catch cache_poc_key_proposal(KeyProposal, POCKeyProposalRec)
         end
         || KeyProposal <- KeyProposals
@@ -374,7 +370,7 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:info("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
+    lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
     {noreply, State1};
@@ -436,7 +432,7 @@ handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
-    lager:info("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
+    lager:debug("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
     case validate_witness(Witness, Ledger) of
@@ -504,7 +500,7 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
-    lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
+    lager:debug("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
@@ -594,25 +590,19 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
     #'ECPrivateKey'{privateKey = PrivKeyBin} = POCPrivKey,
     POCPrivKeyHash = crypto:hash(sha256, PrivKeyBin),
     OnionKeyHash = crypto:hash(sha256, POCPubKeyBin),
-    lager:info("*** initializing POC at height ~p for local onion key hash ~p", [POCStartHeight, OnionKeyHash]),
     Entropy = <<OnionKeyHash/binary, BlockHash/binary>>,
-    lager:info("*** entropy constructed using onionkeyhash ~p and blockhash ~p", [OnionKeyHash, BlockHash]),
     ZoneRandState = blockchain_utils:rand_state(Entropy),
     InitTargetRandState = blockchain_utils:rand_state(POCPrivKeyHash),
-    lager:info("*** ZoneRandState ~p", [ZoneRandState]),
-    lager:info("*** InitTargetRandState ~p", [InitTargetRandState]),
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
         {error, Reason}->
-            lager:info("*** failed to find a target, reason ~p", [Reason]),
+            lager:info("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
             noop;
         {ok, {TargetPubkeybin, TargetRandState}}->
-            lager:info("*** found target ~p", [TargetPubkeybin]),
             {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
             {ok, B} = blockchain:get_block(LastChallenge, Chain),
             Time = blockchain_block:time(B),
             Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
-            lager:info("path created ~p", [Path]),
             N = erlang:length(Path),
             [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v2:create_secret_hash(
                 Entropy,
@@ -637,7 +627,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                 start_height = POCStartHeight
             },
             ok = write_local_poc(LocalPOC, State),
-            lager:info("starting poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
+            lager:debug("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
             ok
     end.
 
@@ -663,12 +653,10 @@ process_block_pocs(
             %% if it is one of this local validators POCs, then kick it off
             case cached_local_poc_key(OnionKeyHash) of
                 {ok, {_KeyHash, #poc_local_key_data{keys = Keys}}} ->
-                    lager:info("found local poc key, starting a poc for ~p", [OnionKeyHash]),
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
                     spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
-                    lager:info("failed to find local poc key for ~p", [OnionKeyHash]),
                     noop
             end,
             %% GC the block key from the key proposals cache
@@ -703,14 +691,13 @@ purge_local_pocs(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
             case (BlockHeight - POCStartHeight) > Timeout of
                 true ->
-                    lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
+                    lager:debug("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
                     ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain),
                     %% as receipts have been submitted, we can delete the local poc from the db
                     %% the public poc data will remain until at least the receipt txn is absorbed
                     _ = delete_local_poc(OnionKeyHash, State);
                 _ ->
-                    lager:info("*** not purging local poc with key ~p.  BlockHeight: ~p, POCStartHeight: ~p", [OnionKeyHash, BlockHeight, POCStartHeight]),
                     ok
             end
         end,
@@ -838,13 +825,11 @@ submit_receipts(
                 noop
         end,
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
-    lager:info("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
+    lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
     case miner_consensus_mgr:in_consensus() of
         false ->
-            lager:info("node is not in consensus", []),
             ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
         true ->
-            lager:info("node is in consensus", []),
             _ = miner_hbbft_sidecar:submit(Txn1)
     end,
 
@@ -852,6 +837,7 @@ submit_receipts(
 
 -spec cache_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
 cache_poc_key(ID, Keys) ->
+    lager:debug("caching local poc keys with hash ~p", [ID]),
     true = ets:insert(?KEYS, {ID, Keys}).
 
 -spec cached_local_poc_keys() -> [cached_local_poc_key_type()].
@@ -865,6 +851,7 @@ delete_cached_local_poc_key(Key) ->
 
 -spec cache_poc_key_proposal(key_proposal(), cached_key_proposal()) -> true.
 cache_poc_key_proposal(KeyProposal, Rec) ->
+    lager:debug("caching poc key proposal ~p", [KeyProposal]),
     true = ets:insert(?KEY_PROPOSALS, {KeyProposal, Rec}).
 
 -spec cached_local_poc_key_proposals() -> [cached_key_proposal()].
@@ -1056,8 +1043,8 @@ do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys) ->
     %% if the val owner of a key is not in this
     %% list then dont include it in the returned set
     %% TODO: this list of active vals can be lengthy
-    %%       is it quicker to thow this around & index it
-%%           compared to pulling each val from the ledger ?
+    %%       is it quicker to throw this around & index it
+    %%       compared to pulling each val from the ledger ?
     %%       taking path of least resistance for now
     ActiveVals = sibyl_mgr:validators(),
     do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys, ActiveVals, []).

@@ -167,7 +167,6 @@ generate_poc_keys(Ledger) ->
                             _ ->
                                 0
                         end,
-                    lager:info("heartbeat ephemeral key count ~p", [EphemeralKeyCount]),
                     generate_ephemeral_keys(EphemeralKeyCount);
                 false ->
                     {[], []}
