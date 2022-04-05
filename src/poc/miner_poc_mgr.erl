@@ -347,7 +347,6 @@ handle_info(init, #state{chain = undefined} = State) ->
         Chain ->
             ok = blockchain_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
-            ok = miner_poc:add_stream_handler(blockchain_swarm:tid(), miner_poc_report_handler),
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             {noreply, State#state{
                 chain = Chain,
