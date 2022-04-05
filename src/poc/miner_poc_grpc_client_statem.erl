@@ -59,6 +59,10 @@
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
+%% delay between active check retries
+%% these checks determine where to proceed with
+%% grpc requests...
+-define(ACTIVE_CHECK_DELAY, 30000).
 %% delay between stream reconnects attempts
 -define(STREAM_RECONNECT_DELAY, 5000).
 %% interval in seconds at which queued check target reqs are processed
@@ -157,12 +161,23 @@ setup(enter, _OldState, Data) ->
     %% connection to a durable validators
     %% thus ensure all streams are disconnected
     ok = disconnect(Data),
-    erlang:send_after(?VALIDATOR_RECONNECT_DELAY, self(), find_validator),
+    erlang:send_after(1000, self(), active_check),
     {keep_state, Data#data{
         val_public_ip = undefined,
         val_grpc_port = undefined,
         val_p2p_addr = undefined
     }};
+setup(info, active_check, Data) ->
+    %% env var `enable_grpc_client` will have a value of true
+    %% if validator challenges are enabled
+    %% set from miner lora light
+    case application:get_env(miner, enable_grpc_client, false) of
+        true ->
+            erlang:send_after(?VALIDATOR_RECONNECT_DELAY, self(), find_validator);
+        false ->
+            erlang:send_after(?ACTIVE_CHECK_DELAY, self(), active_check)
+    end,
+    {keep_state, Data};
 setup(info, find_validator, Data) ->
     %% ask a random seed validator for the address of a 'proper' validator
     %% we will then use this as our default durable validator
