@@ -83,7 +83,10 @@
 %% Passed on to the HTTP/2 client. See the documentation of 'http2_client' for the options
 %% that can be specified for the default HTTP2/2 client.
 
--type connection() :: grpc_client_connection:connection().
+-type connection() :: #{http_connection := pid(),
+                        host := binary(),
+                        scheme := binary(),
+                        client := module()}.
 
 -type metadata_key() :: binary().
 -type metadata_value() :: binary().
@@ -106,12 +109,12 @@
 -type unary_response() :: ok_response() | error_response().
 
 -type ok_response() ::
-    {ok, #{result => any(),
-           status_message => binary(),
-           http_status => 200,
-           grpc_status => 0,
-           headers => metadata(),
-           trailers => metadata()}}.
+    {ok, #{result := any(),
+           status_message := binary(),
+           http_status := 200,
+           grpc_status := 0,
+           headers := metadata(),
+           trailers := metadata()}}.
 
 -type error_response() ::
     {error, #{error_type => error_type(),
@@ -183,7 +186,7 @@ connect(Transport, Host, Port, Options) ->
 -spec new_stream(Connection::connection(),
                  Service::atom(),
                  Rpc::atom(),
-                 DecoderModule::module()) -> {ok, client_stream()}.
+                 DecoderModule::module()) -> {ok, Pid::pid()} | {error, Reason::term()}.
 %% @equiv new_stream(Connection, Service, Rpc, DecoderModule, [])
 new_stream(Connection, Service, Rpc, DecoderModule) ->
     new_stream(Connection, Service, Rpc, DecoderModule, []).
@@ -192,7 +195,7 @@ new_stream(Connection, Service, Rpc, DecoderModule) ->
                  Service::atom(),
                  Rpc::atom(),
                  DecoderModule::module(),
-                 Options::[stream_option()]) -> {ok, client_stream()}.
+                 Options::[stream_option()]) -> {ok, Pid::pid()} | {error, Reason::term()}.
 %% @doc Create a new stream to start a new RPC.
 new_stream(Connection, Service, Rpc, DecoderModule, Options) ->
     CBMod = proplists:get_value(callback_mod, Options),
@@ -232,9 +235,9 @@ rcv(Stream, Timeout) ->
 get(Stream) ->
     grpc_client_stream_custom:get(Stream).
 
--spec ping(Connection::connection(),
-           Timeout::timeout()) -> {ok, RoundTripTime::integer()} |
-                                  {error, term()}.
+-spec ping(
+    Connection::connection(),
+    Timeout::timeout()) -> {ok, RoundTripTime::integer()} | {error, term()}.
 %% @doc Send a PING request.
 ping(Connection, Timeout) ->
     grpc_client_connection:ping(Connection, Timeout).
