@@ -10,9 +10,9 @@ ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
 ARG EXTRA_BUILD_APK_PACKAGES
 
 RUN apk add --no-cache --update \
-    autoconf automake bison build-base bzip2 cmake curl \
-    dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 \
-    openssl-dev pkgconfig protoc sed tar wget \
+    git tar build-base linux-headers autoconf automake libtool pkgconfig \
+    dbus-dev bzip2 bison flex gmp-dev cmake lz4 libsodium-dev openssl-dev \
+    sed wget curl \
     ${EXTRA_BUILD_APK_PACKAGES}
 
 # Install Rust toolchain
@@ -57,7 +57,7 @@ FROM ${RUNNER_IMAGE} as runner
 ARG VERSION
 ARG EXTRA_RUNNER_APK_PACKAGES
 
-RUN apk add --no-cache --update ncurses dbus libsodium libstdc++ \
+RUN apk add --no-cache --update ncurses dbus gmp libsodium gcc \
                                 ${EXTRA_RUNNER_APK_PACKAGES}
 
 RUN ulimit -n 64000

@@ -105,6 +105,12 @@ init(_Opts) ->
                           %% Miner retains full control and responsibility for key access
                           ?WORKER(miner_ecc_worker, [KeySlot, Bus, Address])
                          ] ++ ChildSpecs0;
+                     {false, {ok, {tpm, _}}} ->
+                         [
+                          %% Miner still retains full control and responsibility for key access;
+                          %% this time in the tpm worker
+                          ?WORKER(miner_tpm_worker, [KeySlot])
+                         ] ++ ChildSpecs0;
                      _ ->
                          ChildSpecs0
                  end,
