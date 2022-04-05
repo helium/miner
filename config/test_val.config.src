@@ -36,9 +36,12 @@
   [
    {pipeline_depth, 125}
   ]},
+ {sibyl,
+  [
+   {grpc_port, ${GRPC_PORT}}
+  ]},
  {miner,
   [
-   {jsonrpc_port, "${JSONRPC_PORT}"},
    {denylist_keys, undefined},
    {mode, validator},
    {stabilization_period, 8000},

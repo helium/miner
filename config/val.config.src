@@ -35,9 +35,12 @@
   [
    {pipeline_depth, 125}
   ]},
+ {sibyl,
+  [
+   {grpc_port, ${GRPC_PORT}}
+  ]},
  {miner,
   [
-   {jsonrpc_port, "${JSONRPC_PORT}"},
    {denylist_keys, undefined},
    {mode, validator},
    {rocksdb_cache_size, 32},

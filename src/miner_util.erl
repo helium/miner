@@ -110,9 +110,10 @@ metadata_fun() ->
                         [] -> #{};
                         [First | _] ->
                             IP = lists:nth(2, string:tokens(First, "/")),
-                            {ok, Port} = application:get_env(miner, jsonrpc_port),
-                            RPCAddr = iolist_to_binary(["http://", IP, ":", Port]),
-                            #{<<"rpc_address">> => RPCAddr}
+                            {ok, Port} = application:get_env(sibyl, grpc_port),
+                            RPCAddr = iolist_to_binary(["http://", IP, ":",
+                                                        integer_to_list(Port)]),
+                            #{<<"grpc_address">> => RPCAddr}
                     end,
 
                 Vsn = element(2, hd(release_handler:which_releases(permanent))),
