@@ -402,7 +402,7 @@ basic_test(Config) ->
     timer:sleep(100),
 
     ?assertEqual(receiving, erlang:element(6, erlang:element(2, sys:get_state(Statem)))),
-    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem)))) > 0), % Get reponses
+    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem)))) > 0), % Get responses
 
     % Passing receiving_timeout
     lists:foreach(
@@ -703,7 +703,7 @@ restart_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem1))),
     ?assertEqual(receiving, erlang:element(6, erlang:element(2, sys:get_state(Statem1)))),
-    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem1)))) > 0), % Get reponses
+    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem1)))) > 0), % Get responses
 
     % Passing receiving_timeout
     lists:foreach(
@@ -833,7 +833,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                     %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
-                                     %% Check that we have atleast more than one request
+                                     %% Check that we have at least more than one request
                                      %% If we have only one request, there's no guarantee
                                      %% that the paths would eventually grow
                                      C1 = check_multiple_requests(Miners),
@@ -853,7 +853,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                 V when V > 3 ->
                     true = miner_ct_utils:wait_until(
                              fun() ->
-                                     %% Check that we have atleast more than one request
+                                     %% Check that we have at least more than one request
                                      %% If we have only one request, there's no guarantee
                                      %% that the paths would eventually grow
                                      C1 = check_multiple_requests(Miners),
@@ -873,7 +873,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                     ok;
                 _ ->
                     %% By this point, we have ensured that every miner
-                    %% has a valid request atleast once, we just check
+                    %% has a valid request at least once, we just check
                     %% that we have N (length(Miners)) receipts.
                     ?assert(check_atleast_k_receipts(Miners, length(Miners))),
                     ok
@@ -1220,7 +1220,7 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                              %% There is no path to check, so do both poc-v10 and poc-v11 checks here
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1233,7 +1233,7 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                          _ ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1363,7 +1363,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
                          V when V > 10 ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1372,7 +1372,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
                          _ ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),

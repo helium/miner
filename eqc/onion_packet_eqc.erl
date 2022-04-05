@@ -79,5 +79,5 @@ gen_data_and_keys(KeyMap) ->
     ?LET(KeyType, gen_key_type(), {KeyType, ?SUCHTHAT(List, eqc_gen:list(gen_data_and_key(maps:get(KeyType, KeyMap))), length(List) > 2 ) }).
 
 gen_data_and_key(KeyList) ->
-    %% XXX all the layer datas have to be the same size right now
+    %% XXX all the layer data have to be the same size right now
     ?LET(Key, eqc_gen:elements(KeyList), {eqc_gen:binary(4), Key}).

@@ -320,7 +320,7 @@ txn_dependent_test(Config) ->
     {ok, Height} = ct_rpc:call(Miner, blockchain, height, [Chain]),
 
     %% send txns with nonces 2, 3 and 4, all out of sequence
-    %% we wont send txn with nonce 1 yet
+    %% we won't send txn with nonce 1 yet
     %% this means the 3 submitted txns cannot be accepted and will remain in the txn mgr cache
     %% until txn with nonce 1 gets submitted
     ok = ct_rpc:call(Miner, blockchain_worker, submit_txn, [SignedTxn2]),

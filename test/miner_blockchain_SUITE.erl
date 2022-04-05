@@ -28,7 +28,7 @@
     high_snapshot_test/1
 ]).
 
-%% TODO Relocate all helper functions bellow tests.
+%% TODO Relocate all helper functions below tests.
 
 all() -> [
     % RELOC NOTE def KEEP testing of DKG

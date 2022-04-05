@@ -264,7 +264,7 @@ key_proplist_to_map(Options) when is_list(Options) ->
         address => proplists:get_value(address, Options, 16#60)
     }.
 
-%% Helper funtion to retry automatic keyslot key generation and
+%% Helper function to retry automatic keyslot key generation and
 %% locking the first time we encounter an empty keyslot.
 get_public_key(ECCPid, Slot) ->
     get_public_key(ECCPid, Slot, 20).
