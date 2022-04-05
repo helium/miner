@@ -768,7 +768,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = miner_ct_utils:pmap(
         fun(I) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            {start_node(MinerName), {45000, 0, JsonRpcBase + I}}
+            {start_node(MinerName), {45000, 0, integer_to_list(JsonRpcBase + I)}}
         end,
         lists:seq(1, TotalMiners)
     ),
@@ -776,7 +776,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
     case lists:any(fun({{error, _}, _}) -> true; (_) -> false end, MinersAndPorts) of
         true ->
             %% kill any nodes we started and throw error
-            miner_ct_utils:pmap(fun({error, _}) -> ok; (Miner) -> ct_slave:stop(Miner) end, element(1, lists:unzip(MinersAndPorts))),
+            miner_ct_utils:pmap(fun({error, _}) -> ok; (Miner) -> ct_slave:stop(Miner) end,
+                                element(1, lists:unzip(MinersAndPorts))),
             throw(hd([ E || {{error, E}, _} <- MinersAndPorts ]));
         false ->
             ok

@@ -39,6 +39,7 @@
   [
    {denylist_keys, undefined},
    {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
+   {jsonrpc_port, "${JSONRPC_PORT}"},
    {mode, validator},
    {stabilization_period, 8000},
    {network, testnet},

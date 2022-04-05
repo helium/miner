@@ -37,6 +37,7 @@
   ]},
  {miner,
   [
+   {jsonrpc_port, "${JSONRPC_PORT}"},
    {denylist_keys, undefined},
    {mode, validator},
    {rocksdb_cache_size, 32},

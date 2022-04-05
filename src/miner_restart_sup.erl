@@ -136,7 +136,8 @@ check_for_region_override(SysConfigRegion)->
 -ifdef(TEST).
 jsonrpc_server_config() ->
     %% choose a random high port above the grpc port
-    JsonRpcPort = rand:uniform(40000)+10000,
+    JsonRpcPortInt = rand:uniform(40000)+10000,
+    JsonRpcPort = integer_to_list(JsonRpcPortInt),
     %% lookup the port in case it's set
     JsonRpcPort0 = application:get_env(miner, jsonrpc_port, JsonRpcPort),
     %% maybe set it so we can easily get the port number during a test if needed
@@ -148,10 +149,11 @@ jsonrpc_server_config() ->
         _ -> ok
     end,
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
-    {JsonRpcPort0, JsonRpcIp}.
+    {list_to_integer(JsonRpcPort0), JsonRpcIp}.
 -else.
 jsonrpc_server_config() ->
-    JsonRpcPort = application:get_env(miner, jsonrpc_port, 4467),
+    JsonRpcPort0 = application:get_env(miner, jsonrpc_port, "4467"),
+    JsonRpcPort = list_to_integer(JsonRpcPort0),
     JsonRpcIp = application:get_env(miner, jsonrpc_ip, {127,0,0,1}),
     {JsonRpcPort, JsonRpcIp}.
 -endif.

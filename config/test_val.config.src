@@ -38,6 +38,7 @@
   ]},
  {miner,
   [
+   {jsonrpc_port, "${JSONRPC_PORT}"},
    {denylist_keys, undefined},
    {mode, validator},
    {stabilization_period, 8000},

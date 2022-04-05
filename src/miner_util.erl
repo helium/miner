@@ -110,16 +110,15 @@ metadata_fun() ->
                         [] -> #{};
                         [First | _] ->
                             IP = lists:nth(2, string:tokens(First, "/")),
-                            {ok, Port0} = application:get_env(miner, jsonrpc_port),
-                            Port = integer_to_list(Port0),
+                            {ok, Port} = application:get_env(miner, jsonrpc_port),
                             RPCAddr = iolist_to_binary(["http://", IP, ":", Port]),
                             #{<<"rpc_address">> => RPCAddr}
                     end,
 
                 Vsn = element(2, hd(release_handler:which_releases(permanent))),
-                Map#{<<"release_version">> => list_to_binary(Vsn),
-                     <<"node_type">> => <<"validator">>},
-                maps:merge(Map, RPC);
+                Map1 = Map#{<<"release_version">> => list_to_binary(Vsn),
+                            <<"node_type">> => <<"validator">>},
+                maps:merge(Map1, RPC);
             gateway ->
                 FWRelease = case filelib:is_regular(?LSB_FILE) of
                                 true ->
