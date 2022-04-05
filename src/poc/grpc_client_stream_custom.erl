@@ -53,30 +53,30 @@
 %% gen_server behaviors
 -export([code_change/3, handle_call/3, handle_cast/2, handle_info/2, init/1, terminate/2]).
 
-%%-type stream() ::
-%%    #{stream_id := integer(),
-%%      package := string(),
-%%      service := string(),
-%%      rpc := string(),
-%%      queue := queue:queue(),
-%%      response_pending := boolean(),
-%%      state := idle | open | half_closed_local | half_closed_remote | closed,
-%%      encoder := module(),
-%%      connection := grpc_client_custom:connection(),
-%%      headers_sent := boolean(),
-%%      metadata := grpc_client_custom:metadata(),
-%%      compression := grpc_client_custom:compression_method(),
-%%      buffer := binary(),
-%%      handler_callback := undefined,
-%%      handler_state := undefined,
-%%      type := unary | streaming | undefined}.
+-type stream() ::
+    #{stream_id := integer(),
+      package := string(),
+      service := string(),
+      rpc := string(),
+      queue := queue:queue(),
+      response_pending := boolean(),
+      state := idle | open | half_closed_local | half_closed_remote | closed,
+      encoder := module(),
+      connection := grpc_client_custom:connection(),
+      headers_sent := boolean(),
+      metadata := grpc_client_custom:metadata(),
+      compression := grpc_client_custom:compression_method(),
+      buffer := binary(),
+      handler_callback := undefined,
+      handler_state := undefined,
+      type := unary | streaming | undefined}.
 
--spec new(Connection::pid(),
+-spec new(Connection::grpc_client_custom:connection(),
           Service::atom(),
           Rpc::atom(),
           Encoder::module(),
           Options::list(),
-          HandlerMod::atom() ) -> {ok, Pid::pid()} | {error, Reason::term()}.
+          HandlerMod::module() ) -> {ok, Pid::pid()} | {error, Reason::term()}.
 new(Connection, Service, Rpc, Encoder, Options, HandlerMod) ->
     gen_server:start_link(?MODULE,
                           {Connection, Service, Rpc, Encoder, Options, HandlerMod}, []).

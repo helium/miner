@@ -47,8 +47,7 @@ connect(PeerP2P) ->
 connect(PeerP2P, PeerIP, GRPCPort) ->
     try
         lager:debug("connecting over grpc to peer ~p via IP ~p and port ~p", [PeerP2P, PeerIP, GRPCPort]),
-        {ok, Connection} = grpc_client_custom:connect(tcp, PeerIP, GRPCPort),
-        {ok, Connection}
+        grpc_client_custom:connect(tcp, PeerIP, GRPCPort)
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect over grpc to peer ~p.  Reason ~p Stack ~p", [PeerP2P, _Reason, _Stack]),
         {error, failed_to_connect_to_grpc_peer}

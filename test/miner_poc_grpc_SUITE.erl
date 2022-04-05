@@ -598,8 +598,10 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_receipts_absorb_timeout => 2,
                  ?poc_validator_ephemeral_key_timeout => 50,
                  ?poc_activity_filter_enabled => true,
-                 ?h3dex_gc_width => 10,
                  ?poc_targeting_version => TargetVersion,
+                 ?h3dex_gc_width => 10,
+                 ?poc_target_hex_parent_res => 5,
+                 ?poc_target_hex_collection_res => 5,
                  ?poc_target_pool_size => 2,
                  ?poc_hexing_type => hex_h3dex,
                  ?hip17_interactivity_blocks => 20
