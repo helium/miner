@@ -343,6 +343,7 @@ handle_info(init, State = #state{following_chain = false}) ->
     %% just need to set required env vars here
     application:set_env(miner, lora_mod, miner_lora_light),
     application:set_env(miner, onion_server_mod, miner_onion_server_light),
+    application:set_env(miner, enable_grpc_client, true),
     {noreply, State};
 handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort}) ->
     case blockchain_worker:blockchain() of
@@ -360,12 +361,14 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     %% and have it handle lora packets
                     application:set_env(miner, lora_mod, miner_lora_light),
                     application:set_env(miner, onion_server_mod, miner_onion_server_light),
+                    application:set_env(miner, enable_grpc_client, true),
                     {noreply, State#state{cur_poc_challenger_type = validator}};
                 NonValidatorChallenger ->
                     %% we are not in validator POC mode, so open a socket as normal
                     %% this module will handle lora packets
                     application:set_env(miner, lora_mod, miner_lora),
                     application:set_env(miner, onion_server_mod, miner_onion_server),
+                    application:set_env(miner, enable_grpc_client, false),
                     {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
                     {noreply, update_state_using_chain(Chain, State#state{cur_poc_challenger_type = NonValidatorChallenger, socket=Socket, mirror_socket = {MirrorSocket, undefined}})}
             end

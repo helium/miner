@@ -202,6 +202,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
     %% this module will handle lora packets and will need to open the port
     application:set_env(miner, lora_mod, miner_lora_light),
     application:set_env(miner, onion_server_mod, miner_onion_server_light),
+    application:set_env(miner, enable_grpc_client, true),
     {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
     erlang:send_after(500, self(), reg_domain_timeout),
     {noreply, State#state{socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
@@ -221,6 +222,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     %% this module will handle lora packets
                     application:set_env(miner, lora_mod, miner_lora_light),
                     application:set_env(miner, onion_server_mod, miner_onion_server_light),
+                    application:set_env(miner, enable_grpc_client, true),
                     {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
                     {noreply, State#state{chain = Chain, cur_poc_challenger_type = validator, socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
                 NonValidatorChallenger ->
@@ -230,6 +232,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     %% and handle lora packets
                     application:set_env(miner, lora_mod, miner_lora),
                     application:set_env(miner, onion_server_mod, miner_onion_server),
+                    application:set_env(miner, enable_grpc_client, false),
                     {noreply, State#state{cur_poc_challenger_type = NonValidatorChallenger}}
             end
     end;
