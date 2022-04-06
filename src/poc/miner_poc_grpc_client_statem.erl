@@ -1,7 +1,9 @@
 -module(miner_poc_grpc_client_statem).
 -behavior(gen_statem).
 %% tmp disable no match warning from dialyzer
-%%-dialyzer(no_match).
+-dialyzer(no_match).
+-dialyzer(no_unused).
+
 
 -include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
