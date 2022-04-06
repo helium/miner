@@ -158,15 +158,7 @@ generate_poc_keys(Ledger) ->
                     %% key proposals submitted per HB
                     %% to help with this we reduce the number of val count
                     %% by 20% so that we have surplus keys being submitted
-                    EphemeralKeyCount =
-                        case sibyl_mgr:validator_count() of
-                            NumVals when NumVals > 0 ->
-                                {ok, ChallengeRate} = blockchain_ledger_v1:config(?poc_challenge_rate, Ledger),
-                                {ok, HBInterval} = blockchain_ledger_v1:config(?validator_liveness_interval, Ledger),
-                                round((ChallengeRate / (NumVals * 0.8 )) * HBInterval);
-                            _ ->
-                                0
-                        end,
+                    EphemeralKeyCount = blockchain_txn_validator_heartbeat_v1:proposal_length(Ledger),
                     generate_ephemeral_keys(EphemeralKeyCount);
                 false ->
                     {[], []}
