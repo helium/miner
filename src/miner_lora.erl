@@ -246,7 +246,7 @@ init(Args) ->
     {RegDomainConfirmed, DefaultRegRegion, DefaultRegFreqList} =
         case maps:get(region_override, Args, undefined) of
             undefined ->
-                %% not overriding domain checks, so initialize with source dahandle_info(reg_domain_timeoutta and defaults
+                %% not overriding domain checks, so initialize with source data and defaults
                 ets:new(?COUNTRY_FREQ_DATA, [named_table, public]),
                 ok = init_ets(),
                 {false, undefined, undefined};

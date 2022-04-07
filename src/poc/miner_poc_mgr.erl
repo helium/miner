@@ -10,11 +10,11 @@
 -behaviour(gen_server).
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
 -define(ACTIVE_POCS, active_pocs).
 -define(KEYS, keys).
--define(KEY_PROPOSALS, key_proposals).
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
 -define(POC_DB_CF, {?MODULE, poc_db_cf_handle}).
 -ifdef(TEST).
@@ -38,11 +38,7 @@
     report/4,
     active_pocs/0,
     local_poc_key/1,
-    local_poc/1,
-    save_poc_key_proposals/3,
-    delete_cached_local_poc_key_proposal/1,
-    get_random_poc_key_proposals/2,
-    cached_local_poc_key_proposals/0
+    local_poc/1
 ]).
 %% ------------------------------------------------------------------
 %% gen_server exports
@@ -63,12 +59,6 @@
 -record(poc_local_key_data, {
     receive_height :: non_neg_integer(),
     keys :: keys()
-}).
-
--record(poc_key_proposal, {
-    receive_height :: non_neg_integer(),
-    key :: key_proposal(),
-    address :: libp2p_crypto:pubkey_bin()
 }).
 
 -record(local_poc, {
@@ -98,9 +88,6 @@
 -type poc_key() :: binary().
 -type cached_local_poc_local_key_data() :: #poc_local_key_data{}.
 -type cached_local_poc_key_type() :: {POCKey :: poc_key(), POCKeyData :: #poc_local_key_data{}}.
--type key_proposals() :: [key_proposal()].
--type key_proposal() :: binary().
--type cached_key_proposal() :: #poc_key_proposal{}.
 
 -type local_poc() :: #local_poc{}.
 -type local_pocs() :: [local_poc()].
@@ -150,15 +137,7 @@ make_ets_table() ->
             {heir, self(), undefined}
         ]
     ),
-    Tab2 = ets:new(
-        ?KEY_PROPOSALS,
-        [
-            named_table,
-            public,
-            {heir, self(), undefined}
-        ]
-    ),
-    [Tab1, Tab2].
+    [Tab1].
 
 -spec save_local_poc_keys(CurHeight :: non_neg_integer(), [keys()]) -> ok.
 save_local_poc_keys(CurHeight, KeyList) ->
@@ -218,7 +197,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 case cached_local_poc_key(OnionKeyHash) of
                     {ok, {_KeyHash, _POCData}} ->
                         %% the submitted key is one of this nodes local keys
-                        lager:debug(" ~p is a known key ~p", [OnionKeyHash]),
+                        lager:info(" ~p is a known key ~p", [OnionKeyHash]),
                         case ?MODULE:local_poc(OnionKeyHash) of
                             {error, _} ->
                                 %% clients should retry after a period of time
@@ -234,7 +213,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
-                        lager:debug("~p is NOT a known key", [OnionKeyHash]),
+                        lager:info("~p is NOT a known key", [OnionKeyHash]),
                         {error, <<"invalid_or_expired_poc">>}
                 end;
             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
@@ -246,7 +225,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:debug("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -274,39 +253,6 @@ local_poc(OnionKeyHash) ->
                     Error
             end
     end.
-
--spec save_poc_key_proposals(libp2p_crypto:pubkey_bin(), key_proposals(), pos_integer()) -> ok.
-save_poc_key_proposals(Address, KeyProposals, Height) ->
-    %% these are key proposals submitted by *any* validator via their heartbeat
-    %% save_poc_key_proposals/3 is called when absorbing a heartbeat
-    %% we add the proposed keys to this local cache
-    %% and from this cache a random set of keys will be selected as part of
-    %% block proposals by the consensus group
-    [
-        begin
-            POCKeyProposalRec = #poc_key_proposal{
-                receive_height = Height,
-                address = Address,
-                key = KeyProposal
-            },
-            catch cache_poc_key_proposal(KeyProposal, POCKeyProposalRec)
-        end
-        || KeyProposal <- KeyProposals
-    ],
-    ok.
-
--spec delete_cached_local_poc_key_proposal(key_proposal()) -> ok.
-delete_cached_local_poc_key_proposal(KeyProposal) ->
-    true = ets:delete(?KEY_PROPOSALS, KeyProposal),
-    ok.
-
--spec get_random_poc_key_proposals(pos_integer(), blockchain:ledger()) ->
-    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
-get_random_poc_key_proposals(NumKeys, Ledger) ->
-    Keys = cached_local_poc_key_proposals(),
-    ShuffledKeys = blockchain_utils:shuffle(Keys),
-    {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
-    do_get_random_poc_key_proposals(NumKeys, CGMembers, ShuffledKeys).
 
 %% ------------------------------------------------------------------
 %% gen_server functions
@@ -346,6 +292,7 @@ handle_info(init, #state{chain = undefined} = State) ->
             {noreply, State};
         Chain ->
             ok = blockchain_event:add_handler(self()),
+            ok = blockchain_poc_event:add_handler(self()),
             Ledger = blockchain:ledger(Chain),
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             {noreply, State#state{
@@ -369,9 +316,23 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
+    lager:info("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
+    {noreply, State1};
+handle_info(
+    {blockchain_poc_event, {poc_keys, {BlockHeight, BlockHash, _Sync, BlockPOCs}} = _Event},
+    #state{chain = Chain} = State
+)->
+    Ledger = blockchain:ledger(Chain),
+    CurPOCChallengerType =
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, V}  -> V;
+            _ -> undefined
+        end,
+    lager:info("received poc keys event, sync is ~p, poc_challenge_type is ~p", [_Sync, CurPOCChallengerType]),
+    State1 = maybe_init_addr_hash(State),
+    ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Chain, State1),
     {noreply, State1};
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
@@ -393,11 +354,6 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
     case blockchain:get_block(BlockHash, Chain) of
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
-            %% save public data on each POC key found in the block to the ledger
-            %% that way all validators have access to this public data
-            %% however the validator which is running the POC will be the only node
-            %% which has the secret
-            ok = process_block_pocs(BlockHash, Block, State),
             %% take care of GC
             ok = purge_local_pocs(Block, State),
             Ledger = blockchain:ledger(Chain),
@@ -408,15 +364,7 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
                     ok = purge_local_poc_keys(BlockHeight, Ledger);
                 false ->
                     ok
-            end,
-            %% GC pocs key proposals every 60 blocks
-            case BlockHeight rem 60 == 0 of
-                true ->
-                    ok = purge_pocs_key_proposals(BlockHeight, Ledger);
-                false ->
-                    ok
             end;
-
         _ ->
             %% err what?
             ok
@@ -431,7 +379,7 @@ handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
-    lager:debug("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
+    lager:info("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
     case validate_witness(Witness, Ledger) of
@@ -499,7 +447,7 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
-    lager:debug("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
+    lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
@@ -626,27 +574,29 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                 start_height = POCStartHeight
             },
             ok = write_local_poc(LocalPOC, State),
-            lager:debug("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
+            lager:info("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
             ok
     end.
 
--spec process_block_pocs(
-    BlockHash :: blockchain_block:hash(),
-    Block :: blockchain_block:block(),
-    State :: state()
-) -> ok.
+%%-spec process_block_pocs(
+%%    BlockHash :: blockchain_block:hash(),
+%%    Block :: blockchain_block:block(),
+%%    State :: state()
+%%) -> ok.
+
 process_block_pocs(
+    POCChallengeType,
+    BlockHeight,
     BlockHash,
-    Block,
+    BlockPOCs,
+    Chain,
     #state{chain = Chain} = State
-) ->
+)  when POCChallengeType == validator ->
     Ledger = blockchain:ledger(Chain),
-    BlockHeight = blockchain_block:height(Block),
-    %% get the ephemeral keys from the block
-    %% these will be a prop with tuples as {MemberPosInCG, PocKeyHash}
-    BlockPocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
+    lager:info("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
+            OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(POC),
             %% the published key is a hash of the public key, aka the onion key hash
             %% use this to check our local cache containing the keys of POCs owned by this validator
             %% if it is one of this local validators POCs, then kick it off
@@ -657,13 +607,19 @@ process_block_pocs(
                     spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
                     noop
-            end,
-            %% GC the block key from the key proposals cache
-            %% dont want to have it reused
-            _ = delete_cached_local_poc_key_proposal(OnionKeyHash)
+            end
         end
-        || {_CGPos, OnionKeyHash} <- BlockPocEphemeralKeys
+        || {_, POC} <- BlockPOCs
     ],
+    ok;
+process_block_pocs(
+    _POCChallengerType,
+    _BlockHeight,
+    _BlockHash,
+    _BlockPOCs,
+    _Chain,
+    _State
+) ->
     ok.
 
 -spec purge_local_pocs(
@@ -690,7 +646,7 @@ purge_local_pocs(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
             case (BlockHeight - POCStartHeight) > Timeout of
                 true ->
-                    lager:debug("*** purging local poc with key ~p", [OnionKeyHash]),
+                    lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
                     ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain),
                     %% as receipts have been submitted, we can delete the local poc from the db
@@ -742,46 +698,6 @@ purge_local_poc_keys(
     ),
     ok.
 
--spec purge_pocs_key_proposals(
-    BlockHeight :: pos_integer(),
-    Ledger :: blockchain_ledger_v1:ledger()
-) -> ok.
-purge_pocs_key_proposals(
-    BlockHeight,
-    Ledger
-) ->
-    %% iterate over the poc key proposals in our ets cache
-    %% and purge any which are deemed to be passed due
-    %% these proposed keys are those generated by any validator
-    %% and cached on this node when absorbing validator heartbeats
-    %% when blocks are proposed, a random subset of keys
-    %% from this cache will be selected and included
-    %% in the local block proposal ( assuming the node is in the CG )
-    %% one or more of these proposed keys *may* make it into the block
-    %% in order to prevent an unbounded cache we will GC
-    %% keys in this cache periodically
-    %% NOTE: a key will also be removed from the cache should it make it into a block
-    Timeout =
-        case blockchain:config(?poc_validator_ephemeral_key_timeout, Ledger) of
-            {ok, N} -> N;
-            _ -> 200
-        end,
-    CachedPOCKeyProposals = cached_local_poc_key_proposals(),
-    lists:foreach(
-        fun({Key, #poc_key_proposal{receive_height = ReceiveHeight}}) ->
-            case (BlockHeight - ReceiveHeight) > Timeout of
-                true ->
-                    %% the lifespan of any POC for this key has passed, we can GC
-                    ok = delete_cached_local_poc_key_proposal(Key);
-                _ ->
-                    ok
-            end
-        end,
-        CachedPOCKeyProposals
-    ),
-    ok.
-
-
 -spec submit_receipts(local_poc(), libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun(), blockchain:blockchain()) -> ok.
 submit_receipts(
     #local_poc{
@@ -824,7 +740,7 @@ submit_receipts(
                 noop
         end,
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
-    lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
+    lager:info("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
     case miner_consensus_mgr:in_consensus() of
         false ->
             ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
@@ -836,7 +752,7 @@ submit_receipts(
 
 -spec cache_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
 cache_poc_key(ID, Keys) ->
-    lager:debug("caching local poc keys with hash ~p", [ID]),
+    lager:info("caching local poc keys with hash ~p", [ID]),
     true = ets:insert(?KEYS, {ID, Keys}).
 
 -spec cached_local_poc_keys() -> [cached_local_poc_key_type()].
@@ -847,15 +763,6 @@ cached_local_poc_keys() ->
 delete_cached_local_poc_key(Key) ->
     true = ets:delete(?KEYS, Key),
     ok.
-
--spec cache_poc_key_proposal(key_proposal(), cached_key_proposal()) -> true.
-cache_poc_key_proposal(KeyProposal, Rec) ->
-    lager:debug("caching poc key proposal ~p", [KeyProposal]),
-    true = ets:insert(?KEY_PROPOSALS, {KeyProposal, Rec}).
-
--spec cached_local_poc_key_proposals() -> [cached_key_proposal()].
-cached_local_poc_key_proposals() ->
-    ets:tab2list(?KEY_PROPOSALS).
 
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) ->
     boolean().
@@ -1031,44 +938,6 @@ update_addr_hash(Bloom, Element) ->
                     ok;
                 Hash ->
                     bloom:set(Bloom, Hash)
-            end
-    end.
-
--spec do_get_random_poc_key_proposals(pos_integer(), [libp2p_crypto:pubkey_bin()],
-    [cached_key_proposal()]) ->
-    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
-do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys) ->
-    %% get a list of currently active validators
-    %% if the val owner of a key is not in this
-    %% list then dont include it in the returned set
-    %% TODO: this list of active vals can be lengthy
-    %%       is it quicker to throw this around & index it
-    %%       compared to pulling each val from the ledger ?
-    %%       taking path of least resistance for now
-    ActiveVals = sibyl_mgr:validators(),
-    do_get_random_poc_key_proposals(NumKeys, CGMembers, Keys, ActiveVals, []).
--spec do_get_random_poc_key_proposals(
-    pos_integer(),
-    [libp2p_crypto:pubkey_bin()],
-    [cached_key_proposal()],
-    [sibyl_mgr:val_data()],
-    [{libp2p_crypto:pubkey_bin(), key_proposal()}]) ->
-    [{libp2p_crypto:pubkey_bin(), key_proposal()}].
-do_get_random_poc_key_proposals(0, _CGMembers, _Keys, _ActiveVals, Acc) ->
-    Acc;
-do_get_random_poc_key_proposals(_, _CGMembers, [] = _Keys, _ActiveVals, Acc) ->
-    Acc;
-do_get_random_poc_key_proposals(NumKeys, CGMembers,
-    [{_, #poc_key_proposal{key = Key, address = Address}} | T] = _Keys, ActiveVals, Acc) ->
-    case lists:member(Address, CGMembers) of
-        true ->
-            do_get_random_poc_key_proposals(NumKeys, CGMembers, T, ActiveVals, Acc);
-        false ->
-            case lists:keymember(Address, 1, ActiveVals) of
-                true ->
-                    do_get_random_poc_key_proposals(NumKeys-1, CGMembers, T, ActiveVals, [{Address, Key} | Acc]);
-                false ->
-                    do_get_random_poc_key_proposals(NumKeys, CGMembers, T, ActiveVals, Acc)
             end
     end.
 

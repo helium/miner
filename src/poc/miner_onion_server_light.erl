@@ -118,8 +118,6 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                            _ ->
                                blockchain_poc_receipt_v1:new(Address, Time, RSSI, Data, Type)
                        end,
-
-            %% TODO: put retry mechanism back in place
             miner_poc_grpc_client_statem:send_report(receipt, Receipt, OnionKeyHash);
         false ->
             ok
