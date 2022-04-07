@@ -576,13 +576,6 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     HeightNext = HeightCurr + 1,
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
-    POCKeys =
-        case blockchain:config(?poc_challenger_type, Ledger) of
-            {ok, validator} ->
-                poc_keys(Ledger, Metadata, CurrentBlockHash);
-            _ ->
-                []
-        end,
     SeenBBAs =
         [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
@@ -611,8 +604,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
             epoch_start     =>  EpochStart,
             seen_votes      =>  SeenVectors,
             bba_completion  =>  BBA,
-            snapshot_hash   =>  SnapshotHash,
-            poc_keys        =>  POCKeys
+            snapshot_hash   =>  SnapshotHash
         }),
     BinNewBlock = blockchain_block:serialize(NewBlock),
     Signature = SignFun(BinNewBlock),
@@ -748,31 +740,6 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
         _ ->
             <<>>
     end.
-
--spec poc_keys(L, M, B) -> []
-    when L :: blockchain_ledger_v1:ledger(),
-         M :: metadata(),
-         B :: blockchain_block:hash().
-poc_keys(Ledger, Metadata, BlockHash) ->
-    %% Construct a set of poc keys. Each node will pull a random list from a pool of keys
-    %% We want to take a deterministic random subset of these up to a max of poc challenge rate
-    %% Use the blockhash as the seed
-    RandState = blockchain_utils:rand_state(BlockHash),
-    ChallengeRate =
-        case blockchain:config(?poc_challenge_rate, Ledger) of
-            {ok, V} -> V;
-            _ -> 1
-        end,
-    PocKeys0 = [POCKeys || {_, #{poc_keys := POCKeys}} <- metadata_only_v2(Metadata)],
-    SelectedKeys = sort_and_truncate_poc_keys(lists:flatten(PocKeys0), ChallengeRate, RandState),
-    %% purge the selected keys from key proposals cache
-    %% preventative measure to ensure keys are not reselected
-    [miner_poc_mgr:delete_cached_local_poc_key_proposal(Key) || {_, Key} <- SelectedKeys],
-    SelectedKeys.
-
-sort_and_truncate_poc_keys(L, MaxKeys, RandState) ->
-    {_, TruncList} = blockchain_utils:deterministic_subset(MaxKeys, RandState, L),
-    TruncList.
 
 -spec common_enough_or_default(non_neg_integer(), [X], X) -> X.
 common_enough_or_default(_, [], Default) ->
