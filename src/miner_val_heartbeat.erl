@@ -90,8 +90,12 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
                             lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
                             ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
-                            ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
+                            ReactivatedGWs0 = sibyl_poc_mgr:cached_reactivated_gws(),
                             _ = sibyl_poc_mgr:clear_reactivated_gws(),
+                            ReactivatedGWs1 = blockchain_utils:shuffle(ReactivatedGWs0),
+                            {ok, RL} = blockchain_ledger_v1:config(?validator_hb_reactivation_limit, Ledger),
+                            ReactivatedGWs = lists:sublist(ReactivatedGWs1, RL),
+
                             UnsignedTxn =
                                 blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
@@ -148,16 +152,6 @@ generate_poc_keys(Ledger) ->
             SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
             case not lists:member(SelfPubKeyBin, IgnoreVals) of
                 true ->
-                    %% generate a set of ephemeral keys for POC usage
-                    %% count is based on the num of active validators and the
-                    %% target challenge rate
-                    %% we also have to consider that key proposals are
-                    %% submitted by validators as part of their heartbeats
-                    %% which are only submitted periodically
-                    %% so we need to ensure we have sufficient count of
-                    %% key proposals submitted per HB
-                    %% to help with this we reduce the number of val count
-                    %% by 20% so that we have surplus keys being submitted
                     EphemeralKeyCount = blockchain_txn_validator_heartbeat_v1:proposal_length(Ledger),
                     generate_ephemeral_keys(EphemeralKeyCount);
                 false ->
