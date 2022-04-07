@@ -188,17 +188,16 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
                     %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
-                                     C1 = check_validators_are_creating_poc_keys(Validators),
                                      %% Check if we have some receipts
-                                     C2 = maps:size(challenger_receipts_map(find_receipts(Validators))) > 0,
+                                     C1 = maps:size(challenger_receipts_map(find_receipts(Validators))) > 0,
                                      %% Check there are some poc rewards
                                      RewardsMD = get_rewards_md(Config),
                                      ct:pal("RewardsMD: ~p", [RewardsMD]),
-                                     C3 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
+                                     C2 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
                                      %% check gateways activity was updated
-                                     C4 = check_gateway_activity(hd(Validators), Gateways),
-                                     ct:pal("C1: ~p C2: ~p, C3: ~p, C4: ~p", [C1, C2, C3, C4]),
-                                     C1 andalso C2 andalso C3 andalso C4
+                                     C3 = check_gateway_activity(hd(Validators), Gateways),
+                                     ct:pal("C1: ~p C2: ~p, C3: ~p", [C1, C2, C3]),
+                                     C1 andalso C2 andalso C3
                              end,
                              25, 5000),
                     FinalRewards = get_rewards(Config),
@@ -355,16 +354,6 @@ challenger_receipts_map(Receipts) ->
 
     ReceiptMap.
 
-check_validators_are_creating_poc_keys([Val |_] = _Validators) ->
-    Chain = ct_rpc:call(Val, blockchain_worker, blockchain, []),
-    Ledger = ct_rpc:call(Val, blockchain, ledger, [Chain]),
-    {ok, CurHeight} = ct_rpc:call(Val, blockchain_ledger_v1, current_height, [Ledger]),
-    {ok, Block} = ct_rpc:call(Val, blockchain_ledger_v1, get_block, [CurHeight, Ledger]),
-    case blockchain_block_v1:poc_keys(Block) of
-        [] -> false;
-        [_] -> true
-    end.
-
 check_partitioned_lying_path_growth(_TestCase, Miners) ->
     ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
     ct:pal("ReceiptMap: ~p", [ReceiptMap]),
@@ -436,14 +425,12 @@ do_common_partition_checks(_TestCase, Config, VarMap) ->
                      case maps:get(poc_version, VarMap, 1) of
                          V when V >= 10 ->
                              %% There is no path to check, so do both poc-v10 and poc-v11 checks here
-                             %% Check that every miner has issued a challenge
-                             C1 = check_validators_are_creating_poc_keys(Validators),
                              %% Check there are some poc rewards
                              RewardsMD = get_rewards_md(Config),
                              ct:pal("RewardsMD: ~p", [RewardsMD]),
-                             C2 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
-                             ct:pal("C1: ~p, C2: ~p", [C1, C2]),
-                             C1 andalso C2;
+                             C1 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
+                             ct:pal("C1: ~p", [C1]),
+                             C1;
                          _ ->
                              ok
                      end
@@ -562,18 +549,14 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
              fun() ->
                      case maps:get(poc_version, VarMap, 11) of
                          V when V > 10 ->
-                             %% Check that every miner has issued a challenge
-                             C1 = check_validators_are_creating_poc_keys(Validators),
                              %% TODO: What to check when the partitioned nodes are lying about their locations
-                             C1;
+                             true;
                          _ ->
-                             %% Check that every miner has issued a challenge
-                             C1 = check_validators_are_creating_poc_keys(Validators),
                              %% Since we have two static location partitioned networks, where
                              %% both are lying about their distances, the paths should
                              %% never get longer than 1
-                             C2 = check_partitioned_lying_path_growth(TestCase, Validators),
-                             C1 andalso C2
+                             C1 = check_partitioned_lying_path_growth(TestCase, Validators),
+                             C1
                      end
              end,
              40, 5000),
@@ -599,11 +582,11 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_validator_ephemeral_key_timeout => 50,
                  ?poc_activity_filter_enabled => true,
                  ?poc_targeting_version => TargetVersion,
-                 ?h3dex_gc_width => 10,
-                 ?poc_target_hex_parent_res => 5,
-                 ?poc_target_hex_collection_res => 5,
-                 ?poc_target_pool_size => 2,
-                 ?poc_hexing_type => hex_h3dex,
+%%                 ?h3dex_gc_width => 10,
+%%                 ?poc_target_hex_parent_res => 5,
+%%                 ?poc_target_hex_collection_res => 5,
+%%                 ?poc_target_pool_size => 2,
+%%                 ?poc_hexing_type => hex_h3dex,
                  ?hip17_interactivity_blocks => 20
     },
     maps:merge(extra_vars(poc_v11), GrpcVars).

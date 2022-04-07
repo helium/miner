@@ -95,30 +95,7 @@ metadata(Version, Meta, Chain) ->
                                 lager:info("no snapshot interval configured"),
                                 ChainMeta0
                         end,
-            ChainMeta1 =
-                case blockchain:config(?poc_challenger_type, Ledger) of
-                    {ok, validator} ->
-                        %% get a set of ephemeral keys for POC usage
-                        %% keys come from the proposals cache
-                        %% populated by validators via key proposals
-                        %% in their heartbeats
-                        ChallengeRate =
-                            case blockchain:config(?poc_challenge_rate, Ledger) of
-                                {ok, CR} -> CR;
-                                _ -> 1
-                            end,
-                        lager:debug("poc challenge rate ~p", [ChallengeRate] ),
-                        SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-                        NumKeys = max(1, trunc(ChallengeRate / (((N-1)/3) * 2 ))),
-                        POCEphemeralKeys = miner_poc_mgr:get_random_poc_key_proposals(NumKeys, Ledger),
-                        lager:debug("node ~p submitting poc ephemeral key hashes ~p", [SelfPubKeyBin, POCEphemeralKeys]),
-                        maps:put(poc_keys, POCEphemeralKeys, ChainMeta);
-                    _ ->
-                        ChainMeta
-
-                end,
-            lager:info("ChainMeta1 ~p", [ChainMeta1]),
-            t2b(maps:merge(Meta, ChainMeta1))
+            t2b(maps:merge(Meta, ChainMeta))
     end.
 
 init([Members, Id, N, F, BatchSize, SK, Chain]) ->
