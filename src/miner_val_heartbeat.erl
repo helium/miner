@@ -164,16 +164,8 @@ generate_poc_keys(Ledger) ->
                     %% key proposals submitted per HB
                     %% to help with this we reduce the number of val count
                     %% by 20% so that we have surplus keys being submitted
-                    EphemeralKeyCount =
-                        case sibyl_mgr:validator_count() of
-                            NumVals when NumVals > 0 ->
-                                {ok, ChallengeRate} = blockchain_ledger_v1:config(?poc_challenge_rate, Ledger),
-                                {ok, HBInterval} = blockchain_ledger_v1:config(?validator_liveness_interval, Ledger),
-                                round((ChallengeRate / (NumVals * 0.8 )) * HBInterval);
-                            _ ->
-                                0
-                        end,
-                    generate_ephemeral_keys(EphemeralKeyCount);
+                    NumProposals = proposal_length(Ledger),
+                    generate_ephemeral_keys(NumProposals);
                 false ->
                     {[], []}
             end;
@@ -181,6 +173,24 @@ generate_poc_keys(Ledger) ->
             {[], []}
 
     end.
+
+-spec proposal_length(blockchain:ledger()) -> non_neg_integer().
+proposal_length(Ledger) ->
+    %% generate the size for a set of ephemeral keys for POC usage. the count is based on the num of
+    %% active validators and the target challenge rate. we also have to consider that key proposals
+    %% are submitted by validators as part of their heartbeats which are only submitted periodically
+    %% so we need to ensure we have sufficient count of key proposals submitted per HB. to help with
+    %% this we reduce the number of val count by 20% so that we have surplus keys being submitted
+    case blockchain_ledger_v1:validator_count(Ledger) of
+        {ok, NumVals} when NumVals > 0 ->
+            {ok, ChallengeRate} = blockchain_ledger_v1:config(?poc_challenge_rate, Ledger),
+            {ok, ValCtScale} = blockchain_ledger_v1:config(?poc_validator_ct_scale, Ledger),
+            {ok, HBInterval} = blockchain_ledger_v1:config(?validator_liveness_interval, Ledger),
+            round((ChallengeRate / (NumVals * ValCtScale)) * HBInterval);
+        _ ->
+            0
+    end.
+
 
 -spec generate_ephemeral_keys(pos_integer()) -> {[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
 generate_ephemeral_keys(NumKeys) ->
