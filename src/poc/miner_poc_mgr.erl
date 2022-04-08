@@ -151,7 +151,7 @@ save_local_poc_keys(CurHeight, KeyList) ->
             #{public := PubKey} = Keys,
             OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(PubKey)),
             POCKeyRec = #poc_local_key_data{receive_height = CurHeight, keys = Keys},
-            catch cache_poc_key(OnionKeyHash, POCKeyRec)
+            catch cache_local_poc_key(OnionKeyHash, POCKeyRec)
         end
         || Keys <- KeyList
     ],
@@ -578,12 +578,14 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
             ok
     end.
 
-%%-spec process_block_pocs(
-%%    BlockHash :: blockchain_block:hash(),
-%%    Block :: blockchain_block:block(),
-%%    State :: state()
-%%) -> ok.
-
+-spec process_block_pocs(
+    POCChallengeType :: libp2p_crypto:pubkey_bin(),
+    BlockHeight :: pos_integer(),
+    BlockHash :: blockchain_block:hash(),
+    BlockPOCs :: [{binary(), blockchain_ledger_poc_v3:poc()}],
+    Chain :: blockchain:blockchain(),
+    State :: state()
+) -> ok.
 process_block_pocs(
     POCChallengeType,
     BlockHeight,
@@ -596,20 +598,19 @@ process_block_pocs(
     lager:info("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
-            OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(POC),
-            %% the published key is a hash of the public key, aka the onion key hash
-            %% use this to check our local cache containing the keys of POCs owned by this validator
+            %% use onion key hash to check our local cache containing the keys of POCs owned by this validator
             %% if it is one of this local validators POCs, then kick it off
             case cached_local_poc_key(OnionKeyHash) of
-                {ok, {_KeyHash, #poc_local_key_data{keys = Keys}}} ->
+                {ok, {_, #poc_local_key_data{keys = Keys}}} ->
                     %% its a locally owned POC key, so kick off a new POC
-                    Vars = blockchain_utils:vars_binary_keys_to_atoms(maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
+                    Vars = blockchain_utils:vars_binary_keys_to_atoms(
+                        maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
                     spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
                 _ ->
                     noop
             end
         end
-        || {_, POC} <- BlockPOCs
+        || {OnionKeyHash, _POCV3} <- BlockPOCs
     ],
     ok;
 process_block_pocs(
@@ -750,8 +751,8 @@ submit_receipts(
 
     ok.
 
--spec cache_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
-cache_poc_key(ID, Keys) ->
+-spec cache_local_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
+cache_local_poc_key(ID, Keys) ->
     lager:info("caching local poc keys with hash ~p", [ID]),
     true = ets:insert(?KEYS, {ID, Keys}).
 
