@@ -34,6 +34,10 @@
   [
    {pipeline_depth, 125}
   ]},
+ {sibyl,
+  [
+   {grpc_port, ${GRPC_PORT}}
+  ]},
  {miner,
   [
    {denylist_keys, undefined},
