@@ -197,7 +197,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 case cached_local_poc_key(OnionKeyHash) of
                     {ok, {_KeyHash, _POCData}} ->
                         %% the submitted key is one of this nodes local keys
-                        lager:info(" ~p is a known key ~p", [OnionKeyHash]),
+                        lager:debug(" ~p is a known key ~p", [OnionKeyHash]),
                         case ?MODULE:local_poc(OnionKeyHash) of
                             {error, _} ->
                                 %% clients should retry after a period of time
@@ -213,7 +213,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
-                        lager:info("~p is NOT a known key", [OnionKeyHash]),
+                        lager:debug("~p is NOT a known key", [OnionKeyHash]),
                         {error, <<"invalid_or_expired_poc">>}
                 end;
             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
@@ -225,7 +225,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:debug("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -258,7 +258,7 @@ local_poc(OnionKeyHash) ->
 %% gen_server functions
 %% ------------------------------------------------------------------
 init(_Args) ->
-    lager:info("starting ~p", [?MODULE]),
+    lager:debug("starting ~p", [?MODULE]),
     erlang:send_after(500, self(), init),
     {ok, PubKey, SigFun, _ECDHFun} = blockchain_swarm:keys(),
     SelfPubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -316,7 +316,7 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:info("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
+    lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
     {noreply, State1};
@@ -330,7 +330,7 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:info("received poc keys event, sync is ~p, poc_challenge_type is ~p", [_Sync, CurPOCChallengerType]),
+    lager:debug("received poc keys event, sync is ~p, poc_challenge_type is ~p", [_Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Chain, State1),
     {noreply, State1};
@@ -379,7 +379,7 @@ handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
-    lager:info("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
+    lager:debug("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
     %% Validate the witness is correct
     Ledger = blockchain:ledger(Chain),
     case validate_witness(Witness, Ledger) of
@@ -447,7 +447,7 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
-    lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
+    lager:debug("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
@@ -543,7 +543,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
         {error, Reason}->
-            lager:info("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
+            lager:debug("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
             noop;
         {ok, {TargetPubkeybin, TargetRandState}}->
             {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
@@ -574,7 +574,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                 start_height = POCStartHeight
             },
             ok = write_local_poc(LocalPOC, State),
-            lager:info("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
+            lager:debug("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
             ok
     end.
 
@@ -595,7 +595,7 @@ process_block_pocs(
     #state{chain = Chain} = State
 )  when POCChallengeType == validator ->
     Ledger = blockchain:ledger(Chain),
-    lager:info("poc mgr block pocs: ~p", [BlockPOCs]),
+    lager:debug("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
             %% use onion key hash to check our local cache containing the keys of POCs owned by this validator
@@ -647,7 +647,7 @@ purge_local_pocs(
         fun([#local_poc{start_height = POCStartHeight, onion_key_hash = OnionKeyHash} = POC]) ->
             case (BlockHeight - POCStartHeight) > Timeout of
                 true ->
-                    lager:info("*** purging local poc with key ~p", [OnionKeyHash]),
+                    lager:debug("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
                     ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain),
                     %% as receipts have been submitted, we can delete the local poc from the db
@@ -741,7 +741,7 @@ submit_receipts(
                 noop
         end,
     Txn1 = blockchain_txn:sign(Txn0, SigFun),
-    lager:info("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
+    lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
     case miner_consensus_mgr:in_consensus() of
         false ->
             ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
@@ -753,7 +753,7 @@ submit_receipts(
 
 -spec cache_local_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
 cache_local_poc_key(ID, Keys) ->
-    lager:info("caching local poc keys with hash ~p", [ID]),
+    lager:debug("caching local poc keys with hash ~p", [ID]),
     true = ets:insert(?KEYS, {ID, Keys}).
 
 -spec cached_local_poc_keys() -> [cached_local_poc_key_type()].
