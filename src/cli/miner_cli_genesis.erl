@@ -409,13 +409,11 @@ export_ledger(MasterKeyB58, OutputFile) ->
                     end, [], SecurityAccounts),
 
             %% iterate over validators and generate a gen txn for each
-            {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
-            {ok, HBGrace} = blockchain:config(?validator_liveness_grace_period, Ledger),
             ValFun =
                 fun(V, Acc) ->
                     case
                         (blockchain_ledger_validator_v1:last_heartbeat(V) +
-                        HBInterval + HBGrace) >=
+                        7200) >=
                         CurHeight
                     of
                         true ->
