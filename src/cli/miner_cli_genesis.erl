@@ -461,7 +461,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
                 {'EXIT', _} ->
                     usage;
                 ok ->
-                    [clique_status:text(io_lib:format("ok, txns written to ~p", [OutputFile]))];
+                    [clique_status:text(io_lib:format("ok, txns written to ~p. Num Vals: ~p", [OutputFile, length(NewGenValTxns)]))];
                 {error, Reason} ->
                     [clique_status:alert([clique_status:text(io_lib:format("~p", [Reason]))])]
             end
