@@ -380,60 +380,66 @@ handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
 ) -> {noreply, state()}.
 handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     lager:debug("got witness ~p with onionkeyhash ~p", [Witness, OnionKeyHash]),
-    %% Validate the witness is correct
-    Ledger = blockchain:ledger(Chain),
-    case validate_witness(Witness, Ledger) of
-        false ->
-            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: invalid", [Witness, OnionKeyHash]),
-            {noreply, State};
+    GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
+    case miner_poc_denylist:check(GatewayWitness) of
         true ->
-            %% get the local POC
-            case ?MODULE:local_poc(OnionKeyHash) of
-                {error, _} ->
-                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: no local_poc", [Witness, OnionKeyHash]),
+            lager:notice("dropping witness from ~p due to denylist", [libp2p_crypto:bin_to_b58(GatewayWitness)]),
+            {noreply, State};
+        false ->
+            %% Validate the witness is correct
+            Ledger = blockchain:ledger(Chain),
+            case validate_witness(Witness, Ledger) of
+                false ->
+                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: invalid", [Witness, OnionKeyHash]),
                     {noreply, State};
-                {ok, #local_poc{packet_hashes = PacketHashes, responses = Response0} = POC} ->
-                    PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
-                    GatewayWitness = blockchain_poc_witness_v1:gateway(Witness),
-                    %% check this is a known layer of the packet
-                    case lists:keyfind(PacketHash, 2, PacketHashes) of
-                        false ->
-                            lager:warning("Saw invalid witness with packet hash ~p and onionkeyhash ~p", [PacketHash, OnionKeyHash]),
+                true ->
+                    %% get the local POC
+                    case ?MODULE:local_poc(OnionKeyHash) of
+                        {error, _} ->
+                            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: no local_poc", [Witness, OnionKeyHash]),
                             {noreply, State};
-                        {GatewayWitness, PacketHash} ->
-                            lager:warning("Saw self-witness from ~p for onionkeyhash ~p", [GatewayWitness, OnionKeyHash]),
-                            {noreply, State};
-                        _ ->
-                            Witnesses = maps:get(PacketHash, Response0, []),
-                            PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                            case erlang:length(Witnesses) >= PerHopMaxWitnesses of
-                                true ->
-                                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: exceeded per hop max witnesses", [Witness, OnionKeyHash]),
-                                    {noreply, State};
+                        {ok, #local_poc{packet_hashes = PacketHashes, responses = Response0} = POC} ->
+                            PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
+                            %% check this is a known layer of the packet
+                            case lists:keyfind(PacketHash, 2, PacketHashes) of
                                 false ->
-                                    %% Don't allow putting duplicate response in the witness list resp
-                                    Predicate = fun({_, W}) ->
-                                        blockchain_poc_witness_v1:gateway(W) == GatewayWitness
-                                    end,
-                                    Responses1 =
-                                        case lists:any(Predicate, Witnesses) of
-                                            false ->
-                                                maps:put(
-                                                    PacketHash,
-                                                    lists:keystore(
-                                                        Peer,
-                                                        1,
-                                                        Witnesses,
-                                                        {Peer, Witness}
-                                                    ),
-                                                    Response0
-                                                );
-                                            true ->
-                                                Response0
-                                        end,
-                                    UpdatedPOC = POC#local_poc{responses = Responses1},
-                                    ok = write_local_poc(UpdatedPOC, State),
-                                    {noreply, State}
+                                    lager:warning("Saw invalid witness with packet hash ~p and onionkeyhash ~p", [PacketHash, OnionKeyHash]),
+                                    {noreply, State};
+                                {GatewayWitness, PacketHash} ->
+                                    lager:warning("Saw self-witness from ~p for onionkeyhash ~p", [GatewayWitness, OnionKeyHash]),
+                                    {noreply, State};
+                                _ ->
+                                    Witnesses = maps:get(PacketHash, Response0, []),
+                                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
+                                    case erlang:length(Witnesses) >= PerHopMaxWitnesses of
+                                        true ->
+                                            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: exceeded per hop max witnesses", [Witness, OnionKeyHash]),
+                                            {noreply, State};
+                                        false ->
+                                            %% Don't allow putting duplicate response in the witness list resp
+                                            Predicate = fun({_, W}) ->
+                                                blockchain_poc_witness_v1:gateway(W) == GatewayWitness
+                                            end,
+                                            Responses1 =
+                                                case lists:any(Predicate, Witnesses) of
+                                                    false ->
+                                                        maps:put(
+                                                            PacketHash,
+                                                            lists:keystore(
+                                                                Peer,
+                                                                1,
+                                                                Witnesses,
+                                                                {Peer, Witness}
+                                                            ),
+                                                            Response0
+                                                        );
+                                                    true ->
+                                                        Response0
+                                                end,
+                                            UpdatedPOC = POC#local_poc{responses = Responses1},
+                                            ok = write_local_poc(UpdatedPOC, State),
+                                            {noreply, State}
+                                    end
                             end
                     end
             end
@@ -546,36 +552,42 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
             lager:debug("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
             noop;
         {ok, {TargetPubkeybin, TargetRandState}}->
-            {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
-            {ok, B} = blockchain:get_block(LastChallenge, Chain),
-            Time = blockchain_block:time(B),
-            Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
-            N = erlang:length(Path),
-            [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v2:create_secret_hash(
-                Entropy,
-                N + 1
-            ),
-            OnionList = lists:zip([libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
-            {Onion, Layers} = blockchain_poc_packet_v2:build(Keys, IV, OnionList),
-            [_|LayerHashes] = [crypto:hash(sha256, L) || L <- Layers],
-            Challengees = lists:zip(Path, LayerData),
-            PacketHashes = lists:zip(Path, LayerHashes),
-            Secret = libp2p_crypto:keys_to_bin(Keys),
-            %% save the POC data to our local cache
-            LocalPOC = #local_poc{
-                onion_key_hash = OnionKeyHash,
-                block_hash = BlockHash,
-                target = TargetPubkeybin,
-                onion = Onion,
-                secret = Secret,
-                challengees = Challengees,
-                packet_hashes = PacketHashes,
-                keys = Keys,
-                start_height = POCStartHeight
-            },
-            ok = write_local_poc(LocalPOC, State),
-            lager:debug("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
-            ok
+            case miner_poc_denylist:check(TargetPubkeybin) of
+                true ->
+                    lager:notice("cancelling challenge to ~p due to denylist", [libp2p_crypto:bin_to_b58(TargetPubkeybin)]),
+                    noop;
+                false ->
+                    {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
+                    {ok, B} = blockchain:get_block(LastChallenge, Chain),
+                    Time = blockchain_block:time(B),
+                    Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
+                    N = erlang:length(Path),
+                    [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v2:create_secret_hash(
+                        Entropy,
+                        N + 1
+                    ),
+                    OnionList = lists:zip([libp2p_crypto:bin_to_pubkey(P) || P <- Path], LayerData),
+                    {Onion, Layers} = blockchain_poc_packet_v2:build(Keys, IV, OnionList),
+                    [_|LayerHashes] = [crypto:hash(sha256, L) || L <- Layers],
+                    Challengees = lists:zip(Path, LayerData),
+                    PacketHashes = lists:zip(Path, LayerHashes),
+                    Secret = libp2p_crypto:keys_to_bin(Keys),
+                    %% save the POC data to our local cache
+                    LocalPOC = #local_poc{
+                        onion_key_hash = OnionKeyHash,
+                        block_hash = BlockHash,
+                        target = TargetPubkeybin,
+                        onion = Onion,
+                        secret = Secret,
+                        challengees = Challengees,
+                        packet_hashes = PacketHashes,
+                        keys = Keys,
+                        start_height = POCStartHeight
+                    },
+                    ok = write_local_poc(LocalPOC, State),
+                    lager:debug("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
+                    ok
+            end
     end.
 
 -spec process_block_pocs(
