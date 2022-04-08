@@ -104,8 +104,8 @@ init(_Opts) ->
                 application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
-                [PocMgrTab1] = miner_poc_mgr:make_ets_table(),
-                POCMgrOpts = #{tab1 => PocMgrTab1},
+                [PocMgrTab] = miner_poc_mgr:make_ets_table(),
+                POCMgrOpts = #{tab1 => PocMgrTab},
                 POCOpts = #{base_dir => BaseDir,
                             cfs => ["default",
                                     "poc_mgr_cf"
