@@ -358,6 +358,8 @@ export_ledger(MasterKeyB58, OutputFile) ->
             [clique_status:alert([clique_status:text("Undefined Blockchain")])];
         Chain ->
             Ledger = blockchain:ledger(Chain),
+            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+
             #{public := Pub, secret := PrivKey} = libp2p_crypto:keys_from_bin(base58:base58_to_binary(MasterKeyB58)),
             PubKeyBin = libp2p_crypto:pubkey_to_bin(Pub),
 
@@ -407,12 +409,23 @@ export_ledger(MasterKeyB58, OutputFile) ->
                     end, [], SecurityAccounts),
 
             %% iterate over validators and generate a gen txn for each
+            {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
+            {ok, HBGrace} = blockchain:config(?validator_liveness_grace_period, Ledger),
             ValFun =
                 fun(V, Acc) ->
-                    ValAddr = blockchain_ledger_validator_v1:address(V),
-                    ValOwner = blockchain_ledger_validator_v1:owner_address(V),
-                    ValStake = blockchain_ledger_validator_v1:stake(V),
-                    [blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake) | Acc]
+                    case
+                        (blockchain_ledger_validator_v1:last_heartbeat(V) +
+                        HBInterval + HBGrace) >=
+                        CurHeight
+                    of
+                        true ->
+                            ValAddr = blockchain_ledger_validator_v1:address(V),
+                            ValOwner = blockchain_ledger_validator_v1:owner_address(V),
+                            ValStake = blockchain_ledger_validator_v1:stake(V),
+                            [blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake) | Acc];
+                        _ ->
+                            Acc
+                    end
                 end,
             NewGenValTxns = blockchain_ledger_v1:fold_validators(ValFun, [], Ledger),
 
