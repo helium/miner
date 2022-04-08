@@ -87,11 +87,17 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% we need to construct and submit a heartbeat txn
                             {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
                             {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
+                            %% generate a set of ephemeral keys to represent POC
+                            %% key proposals for this heartbeat
+                            %% hashes of the public keys are included in the HB
+                            %% public and private keys are cached locally
                             {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
                             lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
                             ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
-                            ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
-                            _ = sibyl_poc_mgr:clear_reactivated_gws(),
+                            %% include any inactive GWs which have since come active
+                            %% activity here is determined by subscribing to the
+                            %% poc stream
+                            ReactivatedGWs = reactivated_gws(Ledger),
                             UnsignedTxn =
                                 blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
@@ -186,3 +192,17 @@ generate_ephemeral_keys(NumKeys) ->
             {[Keys | AccKeys], [OnionHash | AccHashes]}
         end,
         {[], []}, lists:seq(1, NumKeys)).
+
+reactivated_gws(Ledger)->
+    case blockchain_ledger_v1:config(?poc_activity_filter_enabled, Ledger) of
+        {ok, true} ->
+            ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
+            %% HBs limit the size of this list, so truncate if necessary
+            %% and remove from the cache those included
+            {ok, ReactListMaxSize} = blockchain_ledger_v1:config(?validator_hb_reactivation_limit, Ledger),
+            ReactivatedGWs1 = lists:sublist(ReactivatedGWs, ReactListMaxSize),
+            _ = sibyl_poc_mgr:delete_reactivated_gws(ReactivatedGWs1),
+            ReactivatedGWs1;
+        _ ->
+            []
+    end.
