@@ -1085,5 +1085,4 @@ rssi_fetch_test() ->
     ?assertEqual(packet_rssi(RSIGPacketWithRSSIS, false), 4),
     ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, true), 4),
     ?assertEqual(packet_rssi(RSIGPacketWithoutRSSIS, false), 4).
-
 -endif.

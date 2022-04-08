@@ -76,7 +76,6 @@
          assert_chain_halted/3,
          assert_chain_advanced/1,
          assert_chain_advanced/3,
-
          submit_txn/2,
          wait_for_txn/2, wait_for_txn/3, wait_for_txn/4,
          format_txn_mgr_list/1,
