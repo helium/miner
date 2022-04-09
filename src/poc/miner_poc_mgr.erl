@@ -610,6 +610,7 @@ process_block_pocs(
     lager:debug("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
+            OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(POCV3),
             %% use onion key hash to check our local cache containing the keys of POCs owned by this validator
             %% if it is one of this local validators POCs, then kick it off
             case cached_local_poc_key(OnionKeyHash) of
@@ -622,7 +623,7 @@ process_block_pocs(
                     noop
             end
         end
-        || {OnionKeyHash, _POCV3} <- BlockPOCs
+        || POCV3 <- BlockPOCs
     ],
     ok;
 process_block_pocs(
