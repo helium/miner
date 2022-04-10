@@ -607,7 +607,7 @@ process_block_pocs(
     #state{chain = Chain} = State
 )  when POCChallengeType == validator ->
     Ledger = blockchain:ledger(Chain),
-    lager:debug("poc mgr block pocs: ~p", [BlockPOCs]),
+    lager:info("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
             OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(POCV3),
