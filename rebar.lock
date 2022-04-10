@@ -176,7 +176,7 @@
   3},
  {<<"sibyl">>,
   {git,"https://github.com/helium/sibyl.git",
-       {ref,"2734473c6bab7c65e1340d984d486e6320fe5b13"}},
+       {ref,"1874f94fcda8263144af8346f7ba992b64861428"}},
   0},
  {<<"sidejob">>,{pkg,<<"sidejob">>,<<"2.1.0">>},2},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},4},
