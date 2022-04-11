@@ -536,6 +536,7 @@ connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
     RetryAttempts::non_neg_integer()
 ) -> ok.
 send_report(_ReportType, _Report, _OnionKeyHash, _SelfPubKeyBin, _SigFun, _Connection, 0) ->
+    lager:warning("failed to submit report.  OnionKeyHash: ~p, Report: ~p", [_OnionKeyHash, _Report]),
     ok;
 send_report(
     receipt = ReportType, Report, OnionKeyHash, _SelfPubKeyBin, SigFun, Connection, RetryAttempts
