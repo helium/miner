@@ -318,7 +318,7 @@ handle_info(
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
     {noreply, State1};
 handle_info(
-    {blockchain_poc_event, {poc_keys, {BlockHeight, BlockHash, _Sync, BlockPOCs}} = _Event},
+    {blockchain_poc_event, {poc_keys, {BlockHeight, BlockHash, BlockPOCs}} = _Event},
     #state{chain = Chain} = State
 )->
     Ledger = blockchain:ledger(Chain),
@@ -327,7 +327,7 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:debug("received poc keys event, sync is ~p, poc_challenge_type is ~p", [_Sync, CurPOCChallengerType]),
+    lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Chain, State1),
     {noreply, State1};
