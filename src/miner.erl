@@ -52,8 +52,7 @@
         seen           => binary(),
         bba_completion => binary(),
         head_hash      => blockchain_block:hash(),
-        snapshot_hash  => binary(),
-        poc_onion_keys => list()
+        snapshot_hash  => binary()
      }.
 
 -type metadata() ::

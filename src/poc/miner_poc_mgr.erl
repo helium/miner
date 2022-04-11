@@ -109,7 +109,6 @@ start_link(Args) when is_map(Args) ->
         {ok, Pid} ->
             %% if we have an ETS table reference, give ownership to the new process
             %% we likely are the `heir', so we'll get it back if this process dies
-            %% TODO make table handling better, maybe a list of tables and iterate over
             case maps:find(tab1, Args) of
                 error ->
                     ok;
@@ -192,8 +191,6 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 %% so if we have the key then check rocks again,
                 %% if still not available then its likely the POC hasnt been initialized
                 %% if found then invalidate the e2qc cache
-                %% TODO: do the assumptions above still hold true with the val pool generating challenges
-                %%       rather than the CG generating challenges ?
                 case cached_local_poc_key(OnionKeyHash) of
                     {ok, {_KeyHash, _POCData}} ->
                         %% the submitted key is one of this nodes local keys
@@ -388,17 +385,17 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
         false ->
             %% Validate the witness is correct
             Ledger = blockchain:ledger(Chain),
-            case validate_witness(Witness, Ledger) of
-                false ->
-                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: invalid", [Witness, OnionKeyHash]),
+            %% get the local POC
+            case ?MODULE:local_poc(OnionKeyHash) of
+                {error, _} ->
+                    lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: no local_poc", [Witness, OnionKeyHash]),
                     {noreply, State};
-                true ->
-                    %% get the local POC
-                    case ?MODULE:local_poc(OnionKeyHash) of
-                        {error, _} ->
-                            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: no local_poc", [Witness, OnionKeyHash]),
+                {ok, #local_poc{packet_hashes = PacketHashes, responses = Response0} = POC} ->
+                    case validate_witness(Witness, Ledger) of
+                        false ->
+                            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: invalid", [Witness, OnionKeyHash]),
                             {noreply, State};
-                        {ok, #local_poc{packet_hashes = PacketHashes, responses = Response0} = POC} ->
+                        true ->
                             PacketHash = blockchain_poc_witness_v1:packet_hash(Witness),
                             %% check this is a known layer of the packet
                             case lists:keyfind(PacketHash, 2, PacketHashes) of
@@ -457,17 +454,17 @@ handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = St
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
-    case blockchain_poc_receipt_v1:is_valid(Receipt, Ledger) of
-        false ->
-            lager:warning("ignoring invalid receipt ~p for onionkeyhash", [Receipt, OnionKeyHash]),
+    %% get the POC data from the cache
+    case ?MODULE:local_poc(OnionKeyHash) of
+        {error, _} ->
+            lager:warning("ignoring receipt ~p for onionkeyhash ~p. Reason: no local_poc", [Receipt, OnionKeyHash]),
             {noreply, State};
-        true ->
-            %% get the POC data from the cache
-            case ?MODULE:local_poc(OnionKeyHash) of
-                {error, _} ->
-                    lager:warning("ignoring receipt ~p for onionkeyhash ~p. Reason: no local_poc", [Receipt, OnionKeyHash]),
+        {ok, #local_poc{challengees = Challengees, responses = Response0} = POC} ->
+            case blockchain_poc_receipt_v1:is_valid(Receipt, Ledger) of
+                false ->
+                    lager:warning("ignoring invalid receipt ~p for onionkeyhash", [Receipt, OnionKeyHash]),
                     {noreply, State};
-                {ok, #local_poc{challengees = Challengees, responses = Response0} = POC} ->
+                true ->
                     case lists:keyfind(Gateway, 1, Challengees) of
                         {Gateway, LayerData} ->
                             case maps:get(Gateway, Response0, undefined) of
@@ -480,11 +477,9 @@ handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = St
                                                 false
                                         end,
                                     %% compute address hash and compare to known ones
-                                    %% TODO - This needs refactoring, wont work as is
                                     case check_addr_hash(PeerAddr, State) of
                                         true when IsFirstChallengee ->
                                             %% drop whole challenge because we should always be able to get the first hop's receipt
-                                            %% TODO: delete the cached POC here?
                                             {noreply, State};
                                         true ->
                                             {noreply, State};
@@ -782,7 +777,6 @@ delete_cached_local_poc_key(Key) ->
     boolean().
 validate_witness(Witness, Ledger) ->
     Gateway = blockchain_poc_witness_v1:gateway(Witness),
-    %% TODO this should be against the ledger at the time the receipt was mined
     case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
         {error, _Reason} ->
             lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),

@@ -240,6 +240,7 @@ init(Args) ->
     lager:info("init with args ~p", [Args]),
     UDPIP = maps:get(radio_udp_bind_ip, Args),
     UDPPort = maps:get(radio_udp_bind_port, Args),
+    GatewaysRunChain = application:get_env(miner, gateways_run_chain, true),
 
     %% cloud/miner pro will never assert location and so we dont  use regulatory domain checks for these miners
     %% instead they will supply a region value, use this if it exists
@@ -271,7 +272,8 @@ init(Args) ->
                 reg_freq_list = DefaultRegFreqList,
                 reg_throttle=miner_lora_throttle:new(DefaultRegRegion),
                 radio_udp_bind_ip = UDPIP,
-                radio_udp_bind_port = UDPPort
+                radio_udp_bind_port = UDPPort,
+                following_chain = GatewaysRunChain
                },
     erlang:send_after(500, self(), init),
     {ok, S0}.
