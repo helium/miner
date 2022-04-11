@@ -19,7 +19,6 @@
 -export([start_link/1,
          db/0,
          poc_mgr_cf/0,
-         write/2,
          gc/1
         ]).
 
@@ -57,11 +56,6 @@ db() ->
 poc_mgr_cf() ->
     gen_server:call(?MODULE, poc_mgr_cf).
 
--spec write( POC :: miner_poc_mgr:local_poc(),
-             Skewed :: skewed:skewed()) -> ok.
-write(POC, Skewed) ->
-    gen_server:cast(?MODULE, {write, POC, Skewed}).
-
 -spec gc( [ miner_poc_mgr:local_poc_onion_key_hash() ] ) -> ok.
 gc(IDs) ->
     gen_server:call(?MODULE, {gc, IDs}, infinity).
@@ -94,11 +88,6 @@ handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [_Msg, _From]),
     {reply, ok, State}.
 
-handle_cast({write, POC, Skewed}, #state{pending=P}=State) ->
-    POCID = miner_poc_mgr:local_poc_key(POC),
-    %% defer encoding until write time
-    NewP = maps:put(POCID, {POC, Skewed}, P),
-    {noreply, State#state{pending=NewP}};
 handle_cast(_Msg, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [_Msg]),
     {noreply, State}.
