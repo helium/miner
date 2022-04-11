@@ -61,7 +61,6 @@
 %% TODO No need to pass Meta when tuple. Use sum type: {map, Meta} | tuple
 metadata(Version, Meta, Chain) ->
     {ok, HeadHash} = blockchain:head_hash(Chain),
-    Ledger = blockchain:ledger(Chain),
     %% construct a 2-tuple of the system time and the current head block hash as our stamp data
     case Version of
         tuple ->
