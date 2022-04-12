@@ -36,7 +36,7 @@
   ]},
  {sibyl,
   [
-   {grpc_port, ${GRPC_PORT}}
+   {grpc_port, ${GRPC_PORT:-8080}}
   ]},
  {miner,
   [
