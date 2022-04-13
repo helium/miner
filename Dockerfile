@@ -47,12 +47,12 @@ ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
 # Now add our code
 COPY . .
 
+RUN cat ./priv/gateway_rs/${BUILD_NET}.settings >> ./priv/gateway_rs/settings.toml
 RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 
 RUN mkdir -p /opt/docker/update
 RUN tar -zxvf ${TAR_PATH} -C /opt/docker
 RUN wget -O /opt/docker/update/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
-RUN cat ./priv/gateway_rs/${BUILD_NET}.settings >> ./priv/gateway_rs/settings.toml
 
 FROM ${RUNNER_IMAGE} as runner
 
