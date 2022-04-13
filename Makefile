@@ -20,7 +20,9 @@ deps:
 	$(REBAR) get-deps
 
 compile:
+	$(REBAR) get-deps
 	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 	$(MAKE) external_svcs
 	$(REBAR) compile
 
@@ -71,7 +73,9 @@ devrelease:
 
 grpc:
 	@echo "generating miner grpc services"
+	$(REBAR) get-deps
 	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
 $(GRPC_SERVICE_DIR):
 	@echo "miner grpc service directory $(directory) does not exist"

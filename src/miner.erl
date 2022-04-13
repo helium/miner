@@ -322,14 +322,15 @@ remove_consensus() ->
 version() ->
     %% format:
     %% MMMmmmPPPP
-       0010080004.
+       0000010150.
 
 %% ------------------------------------------------------------------
 %% gen_server
 %% ------------------------------------------------------------------
 
 init(_Args) ->
-    lager:info("STARTING UP MINER"),
+    Mode = application:get_env(miner, mode),
+    lager:info("STARTING UP MINER with mode ~p", [Mode]),
     ok = blockchain_event:add_handler(self()),
     %% TODO: Maybe put this somewhere else?
     ok = miner_discovery_handler:add_stream_handler(blockchain_swarm:tid()),

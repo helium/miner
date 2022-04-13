@@ -38,3 +38,4 @@ add_stream_handler(SwarmTID) ->
         ?POC_VERSION,
         {libp2p_framed_stream, server, [miner_poc_handler, self(), SwarmTID]}
     ).
+

@@ -1,0 +1,22 @@
+# Override values in default.toml that are specific to the testnet
+
+[update]
+# disable update checking inside the miner container
+enabled = false
+channel = "testnet"
+
+[[gateways]]
+pubkey = "1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6"
+uri = "http://18.223.171.149:8080"
+
+[[gateways]]
+pubkey = "1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL"
+uri = "http://3.17.164.253:8080"
+
+[[gateways]]
+pubkey = "1ZAxCrEsigGVbLUM37Jki6p88kyZ5NVqjVC6oHSbqu49t7bQDym"
+uri = "http://18.191.60.231:8080"
+
+[router.testnet]
+pubkey = "1ZLxTAB8Bs7BXySp5HqHhtCos6JtzzV2mfZjofEGT1MQVTKqYQT"
+uri = "http://34.215.110.61:8080"

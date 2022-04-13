@@ -87,8 +87,19 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                             %% we need to construct and submit a heartbeat txn
                             {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
                             {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
+                            %% generate a set of ephemeral keys to represent POC
+                            %% key proposals for this heartbeat
+                            %% hashes of the public keys are included in the HB
+                            %% public and private keys are cached locally
+                            {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
+                            lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
+                            ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
+                            %% include any inactive GWs which have since come active
+                            %% activity here is determined by subscribing to the
+                            %% poc stream
+                            ReactivatedGWs = reactivated_gws(Ledger),
                             UnsignedTxn =
-                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback()),
+                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
                             Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
                             lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
                             Self = self(),
@@ -132,3 +143,76 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec generate_poc_keys(blockchain:ledger()) ->
+    {[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
+generate_poc_keys(Ledger) ->
+    case blockchain_ledger_v1:config(?poc_challenger_type, Ledger) of
+        {ok, validator} ->
+            %% if a val is in the ignore list then dont generate poc keys for it
+            %% TODO: this is a temp hack.  remove when testing finished
+            IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
+            SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
+            case not lists:member(SelfPubKeyBin, IgnoreVals) of
+                true ->
+                    %% generate a set of ephemeral keys for POC usage
+                    %% count is based on the num of active validators and the
+                    %% target challenge rate
+                    %% we also have to consider that key proposals are
+                    %% submitted by validators as part of their heartbeats
+                    %% which are only submitted periodically
+                    %% so we need to ensure we have sufficient count of
+                    %% key proposals submitted per HB
+                    %% to help with this we reduce the number of val count
+                    %% by 20% so that we have surplus keys being submitted
+                    NumProposals = proposal_length(Ledger),
+                    generate_ephemeral_keys(NumProposals);
+                false ->
+                    {[], []}
+            end;
+        _ ->
+            {[], []}
+
+    end.
+
+-spec proposal_length(blockchain:ledger()) -> non_neg_integer().
+proposal_length(Ledger) ->
+    %% generate the size for a set of ephemeral keys for POC usage. the count is based on the num of
+    %% active validators and the target challenge rate. we also have to consider that key proposals
+    %% are submitted by validators as part of their heartbeats which are only submitted periodically
+    %% so we need to ensure we have sufficient count of key proposals submitted per HB. to help with
+    %% this we reduce the number of val count by 20% so that we have surplus keys being submitted
+    case blockchain_ledger_v1:validator_count(Ledger) of
+        {ok, NumVals} when NumVals > 0 ->
+            {ok, ChallengeRate} = blockchain_ledger_v1:config(?poc_challenge_rate, Ledger),
+            {ok, ValCtScale} = blockchain_ledger_v1:config(?poc_validator_ct_scale, Ledger),
+            {ok, HBInterval} = blockchain_ledger_v1:config(?validator_liveness_interval, Ledger),
+            round((ChallengeRate / (NumVals * ValCtScale)) * HBInterval);
+        _ ->
+            0
+    end.
+
+
+-spec generate_ephemeral_keys(pos_integer()) -> {[#{secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}], [binary()]}.
+generate_ephemeral_keys(NumKeys) ->
+    lists:foldl(
+        fun(_N, {AccKeys, AccHashes})->
+            Keys = libp2p_crypto:generate_keys(ecc_compact),
+            #{public := OnionCompactKey} = Keys,
+            OnionHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(OnionCompactKey)),
+            {[Keys | AccKeys], [OnionHash | AccHashes]}
+        end,
+        {[], []}, lists:seq(1, NumKeys)).
+
+reactivated_gws(Ledger)->
+    case blockchain_ledger_v1:config(?poc_activity_filter_enabled, Ledger) of
+        {ok, true} ->
+            ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
+            %% HBs limit the size of this list, so truncate if necessary
+            %% and remove from the cache those included
+            {ok, ReactListMaxSize} = blockchain_ledger_v1:config(?validator_hb_reactivation_limit, Ledger),
+            ReactivatedGWs1 = lists:sublist(ReactivatedGWs, ReactListMaxSize),
+            _ = sibyl_poc_mgr:delete_reactivated_gws(ReactivatedGWs1),
+            ReactivatedGWs1;
+        _ ->
+            []
+    end.
