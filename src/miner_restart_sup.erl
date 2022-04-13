@@ -95,10 +95,6 @@ init(_Opts) ->
     POCServers =
         case MinerMode of
             validator ->
-                %% NOTE: validators do not require the onion or lora server
-                %% however removing these here breaks tests
-                %% there is no harm done by leaving them running
-
                 %% core and sibyl need to callback to miner_poc_mgr
                 %% and so we need to set an env var to let it know the mod name
                 application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
@@ -112,8 +108,6 @@ init(_Opts) ->
                                    ]
                            },
                 [
-                    ?WORKER(miner_onion_server, [OnionOpts]),
-                    ?WORKER(miner_lora, [OnionOpts]),
                     ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
                     ?WORKER(miner_poc_statem, [POCOpts]),
                     ?WORKER(miner_poc_mgr, [POCMgrOpts])
