@@ -807,18 +807,35 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
 %% target block time and the average total time over the target period
 %% output in seconds of adjustment to apply to the block time target
 
-%% the constants here are by feel: currently at 100k target and 5sec
-%% adjustment it takes roughly a day of blocks to make up a tenth of a
-%% second. with the new 50k target we can expect double the adjustment
-%% leverage, so 1s adjustments will take roughly a day to make up the
-%% final 0.04 (twice as much leverage, but 20% of the rate).
+%% the constants here are by feel: block times adjust by 1 second
+%% for each 1/100th of a second of drift over the last 50K blocks. At
+%% this rate, any multuple of 1/100th of a second of drift, up to 10/100ths
+%% will be caught up within 500 blocks or roughly 8 hours
 
 %% when drift is small or 0, let it accumulate for a bit
 catchup_time(N) when N < 0.001 ->
     0;
-%% when it's still relatively small, apply gentle adjustments
-catchup_time(N) when N < 0.01 ->
-    1;
-%% if it's large, jam on the gas
-catchup_time(_) ->
-    10.
+%% ramp up the catchup proportional to drift, max of 10s
+catchup_time(N) ->
+    min(10, ceil(N / 0.01)).
+
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Confirm changes to make catchup_time proportional
+catchup_time_test() ->
+    ?assertEqual(catchup_time(0.0005), 0),
+    ?assertEqual(catchup_time(0.01), 1),
+    ?assertEqual(catchup_time(0.015), 2),
+    ?assertEqual(catchup_time(0.02), 2),
+    ?assertEqual(catchup_time(0.05), 5),
+    ?assertEqual(catchup_time(0.09), 9),
+    ?assertEqual(catchup_time(0.090001), 10),
+    ?assertEqual(catchup_time(0.1), 10),
+    ?assertEqual(catchup_time(1), 10).
+
+-endif.
