@@ -90,7 +90,7 @@ external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
 	@git clone --quiet https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
-	@(cd external/gateway-rs && git checkout $(GATEWAY_RS_VSN) 2>/dev/null)
+	@(cd external/gateway-rs && git fetch && git checkout $(GATEWAY_RS_VSN) 2>/dev/null)
 	@(cd ./external/gateway-rs && cargo build --release)
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
