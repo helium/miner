@@ -40,6 +40,8 @@ handle_rpc(<<"peer_book">>, #{<<"addr">> := <<"self">>}) ->
     peer_book_response(self);
 handle_rpc(<<"peer_book">>, #{<<"addr">> := <<"all">>}) ->
     peer_book_response(all);
+handle_rpc(<<"peer_book">>, #{<<"addr">> := <<"count">>}) ->
+    peer_book_response(count);
 handle_rpc(<<"peer_book">>, #{<<"addr">> := Addr}) ->
     peer_book_response(Addr);
 handle_rpc(<<"peer_book">>, Params) ->
@@ -107,6 +109,9 @@ peer_book_response(Target) ->
                         [format_listen_addrs(TID, libp2p_peer:listen_addrs(Peer)),
                          format_peer_sessions(TID)]
                        ) ];
+        count ->
+            PBLen = length(libp2p_peerbook:keys(Peerbook)),
+            #{ <<"count">> => PBLen };
         Addrs when is_list(Addrs) ->
             [begin
                  {ok, P} = libp2p_peerbook:get(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(binary_to_list(A))),
@@ -185,4 +190,4 @@ do_peer_refresh(Addr) ->
     do_peer_refresh([Addr]).
 
 do_refresh(Peerbook, A) ->
-    libp2p_peerbook:refresh(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(A)).
+    libp2p_peerbook:refresh(Peerbook, libp2p_crypto:p2p_to_pubkey_bin(binary_to_list(A))).
