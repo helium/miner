@@ -306,7 +306,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
             end,
             State;
         {error, Reason} ->
-            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: Reason, discarding", [Type, Reason]),
+            lager:info([{poc_id, POCID}], "could not decrypt packet received via ~p: Reason: ~p, discarding", [Type, Reason]),
             State
     end,
     NewState.
