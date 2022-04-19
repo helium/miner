@@ -3,7 +3,7 @@
  "config/sys.config",
  {lager,
   [
-   {log_root, "log"},
+   {log_root, "${LOG_ROOT:-log}"},
    {handlers,
     [
      {lager_file_backend, [{file, "console.log"}, {size, 52428800}, {level, info}]},
@@ -12,7 +12,7 @@
   ]},
  {blockchain,
   [
-   {listen_addresses, ["/ip4/0.0.0.0/tcp/2154"]},
+   {listen_addresses, ["${LISTEN_ADDRESS:-/ip4/0.0.0.0/tcp/2154}"]},
    {fetch_latest_from_snap_source, false},
    {block_sync_batch_size, 10},
    {block_sync_batch_limit, 100},
@@ -22,7 +22,7 @@
    {key, undefined},
    {relay_limit, 100},
    {blocks_to_protect_from_gc, 100000},
-   {base_dir, "data"}
+   {base_dir, "${BASE_DIR:-data}"}
   ]},
  {libp2p,
   [
@@ -45,6 +45,11 @@
    {mode, validator},
    {rocksdb_cache_size, 32},
    {rocksdb_write_buffer_size, 32},
+   {jsonrpc_ip, {${JSONRPC_IP:-127,0,0,1}}},
+   {jsonrpc_port, ${JSONRPC_PORT:-4467}},
+   {sidecar_parallelism_limit, ${SIDECAR_PARALLELISM_LIMIT:-3}},
+   {hotfix_dir, "${HOTFIX_DIR:-/opt/miner/hotfix}"},
+   {update_dir, "${UPDATE_DIR:-/opt/miner/update}"},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
