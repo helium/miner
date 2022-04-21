@@ -4,13 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/var/helium/miner/bin/miner foreground
-ExecStop=/var/helium/miner/bin/miner stop
-User=ubuntu
-PIDFile=/var/data/miner/miner.pid
-Environment=HOME="/var/data/miner"
-Environment=RUNNER_LOG_DIR="/var/data/log/miner"
-Environment=ERL_CRASH_DUMP="/var/data/log/miner"
+ExecStart=/opt/miner/bin/miner foreground
+ExecStop=/opt/miner/bin/miner stop
+User=helium
+PIDFile=/var/miner/miner.pid
+Environment=HOME="/opt/miner"
+Environment=RUNNER_LOG_DIR="/opt/miner/log"
+Environment=ERL_CRASH_DUMP="/opt/miner/log"
+Environment=RELX_OUT_FILE_PATH="/tmp"
 LimitNOFILE=128000
 LimitNPROC=128000
 Restart=always
