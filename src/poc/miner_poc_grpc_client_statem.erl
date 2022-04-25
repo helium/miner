@@ -941,8 +941,6 @@ handle_check_target_resp(
 ) ->
     ok.
 
-
-
 do_handle_streamed_msg(
     #gateway_resp_v1_pb{
         msg = {poc_challenge_resp, ChallengeNotification},

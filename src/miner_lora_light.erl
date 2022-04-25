@@ -94,8 +94,11 @@
 -define(MAX_TMST_VAL, 4294967295).
 
 -ifdef(TEST).
+-export([route/1]).
+-define(route(Pkt), ?MODULE:route(Pkt)).
 -define(REG_DOMAIN_TIMEOUT, 1000).
 -else.
+-define(route(Pkt), route(Pkt)).
 -define(REG_DOMAIN_TIMEOUT, 30000).
 -endif.
 
@@ -241,7 +244,7 @@ handle_info({blockchain_event, {new_chain, NC}}, State) ->
 handle_info(
     {blockchain_event, {add_block, _BlockHash, _Sync, Ledger} = _Event},
     #state{cur_poc_challenger_type = CurPoCChallengerType} = State
-)->
+) ->
     case blockchain:config(?poc_challenger_type, Ledger) of
         {ok, V} when V /= CurPoCChallengerType ->
             %% the poc challenger chain var has been modified, force this server
@@ -467,10 +470,10 @@ handle_packets([], _Gateway, _RxInstantLocal_us, State) ->
     State;
 handle_packets(_Packets, _Gateway, _RxInstantLocal_us, #state{reg_domain_confirmed = false} = State) ->
     State;
-handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _Region} = State) ->
+handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Region} = State) ->
     POCVersion = application:get_env(miner, poc_version, 11),
     Data = base64:decode(maps:get(<<"data">>, Packet)),
-    case route(Data) of
+    case ?route(Data) of
         error ->
             ok;
         {onion, Payload} ->
@@ -490,10 +493,15 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _R
                 channel(Freq, State#state.reg_freq_list),
                 maps:get(<<"datr">>, Packet)
             );
-        {_Type, _RoutingInfo} ->
-            %% normally packets here would be send to the router
-            %% but in light mode we can just discard non poc packets
-            noop
+        {noop, non_longfi} ->
+            %% operating in light mode and embedded gateway enabled so discard non poc packets
+            lager:debug("Light mode; miner discarding non-Longfi packet ~p", [Packet]),
+            ok;
+        {Type, RoutingInfo} ->
+            %% normally non-Longfi packets in light mode are discarded but this will
+            %% handle when the embedded gateway-rs is disabled and the miner must route the packet
+            lager:debug("Routing ~p", [RoutingInfo]),
+            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region))
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -501,7 +509,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _R
  route(Pkt) ->
     case longfi:deserialize(Pkt) of
         error ->
-            route_non_longfi(Pkt);
+            handle_non_longfi(Pkt);
         {ok, LongFiPkt} ->
             %% hello longfi, my old friend
             try longfi:type(LongFiPkt) == monolithic andalso longfi:oui(LongFiPkt) == 0 andalso longfi:device_id(LongFiPkt) == 1 of
@@ -510,10 +518,17 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = _R
                 false ->
                     %% we currently don't expect non-onion packets,
                     %% this is probably a false positive on a LoRaWAN packet
-                      route_non_longfi(Pkt)
+                      handle_non_longfi(Pkt)
             catch _:_ ->
-                      route_non_longfi(Pkt)
+                      handle_non_longfi(Pkt)
             end
+    end.
+
+-spec handle_non_longfi(binary()) -> any().
+handle_non_longfi(Packet) ->
+    case application:get_env(miner, gateway_and_mux_enable) of
+        {ok, true} -> {noop, non_longfi};
+         -> route_non_longfi(Packet)
     end.
 
 % Some binary madness going on here
@@ -543,6 +558,18 @@ maybe_mirror({_, undefined}, _) ->
     ok;
 maybe_mirror({Sock, Destination}, Packet) ->
     gen_udp:send(Sock, Destination, Packet).
+
+-spec send_to_router(lorawan, blockchain_helium_packet:routing_info(), map(), atom()) -> ok.
+send_to_router(Type, RoutingInfo, Packet, Region) ->
+    Data = base64:decode(maps:get(<<"data">>, Packet)),
+    %% always ok to use rssis here
+    RSSI = packet_rssi(Packet, true),
+    SNR = packet_snr(Packet),
+    Time = maps:get(<<"tmst">>, Packet),
+    Freq = maps:get(<<"freq">>, Packet),
+    DataRate = maps:get(<<"datr">>, Packet),
+    HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
+    blockchain_state_channels_client:packet(HeliumPacket, application:get(miner, default_routers, []), Region).
 
 channel(Freq, Frequencies) ->
     channel(Freq, Frequencies, 0).
