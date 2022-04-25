@@ -584,11 +584,11 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_activity_filter_enabled => true,
                  ?validator_hb_reactivation_limit => 100,
                  ?poc_validator_ct_scale => 0.8,
-%%                 ?h3dex_gc_width => 10,
-%%                 ?poc_target_hex_parent_res => 5,
-%%                 ?poc_target_hex_collection_res => 5,
-%%                 ?poc_target_pool_size => 2,
-%%                 ?poc_hexing_type => hex_h3dex,
+                 ?h3dex_gc_width => 10,
+                 ?poc_target_hex_parent_res => 5,
+                 ?poc_target_hex_collection_res => 5,
+                 ?poc_target_pool_size => 2,
+                 ?poc_hexing_type => hex_h3dex,
                  ?hip17_interactivity_blocks => 20
     },
     maps:merge(extra_vars(poc_v11), GrpcVars).
