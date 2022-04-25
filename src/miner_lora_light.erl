@@ -501,7 +501,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
             %% normally non-Longfi packets in light mode are discarded but this will
             %% handle when the embedded gateway-rs is disabled and the miner must route the packet
             lager:debug("Routing ~p", [RoutingInfo]),
-            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region))
+            erlang:spawn(fun() -> send_to_router(Type, RoutingInfo, Packet, Region) end)
     end,
     handle_packets(Tail, Gateway, RxInstantLocal_us, State#state{last_mono_us = RxInstantLocal_us, last_tmst_us = maps:get(<<"tmst">>, Packet)}).
 
@@ -528,7 +528,7 @@ handle_packets([Packet|Tail], Gateway, RxInstantLocal_us, #state{reg_region = Re
 handle_non_longfi(Packet) ->
     case application:get_env(miner, gateway_and_mux_enable) of
         {ok, true} -> {noop, non_longfi};
-         -> route_non_longfi(Packet)
+        _ -> route_non_longfi(Packet)
     end.
 
 % Some binary madness going on here
