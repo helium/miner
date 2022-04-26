@@ -1,7 +1,7 @@
 # add miner to /usr/local/bin it appears in path
 ln -s /opt/miner/bin/miner /usr/local/bin/miner
 
-# if upgrading from old version with different file location, move miner date files to the new location
+# if upgrading from old version with different file location, move miner data files to the new location
 if [ -e /var/helium/miner/data/miner/swarm_key ] && [ ! -e /opt/miner/data/miner/swarm_key ]; then
     echo "Found existing swarm_key, moving data to /opt/miner/"
     mv /var/helium/miner/data /opt/miner/data
