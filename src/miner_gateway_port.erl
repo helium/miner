@@ -118,7 +118,8 @@ open_gateway_port(KeyPair, Transport, Host, UdpPort, TcpPort) ->
         os_pid = OSPid,
         transport = Transport,
         host = Host,
-        tcp_port = TcpPort
+        tcp_port = TcpPort,
+        udp_port = UdpPort
     }.
 
 cleanup_port(#state{port = Port} = State) ->
