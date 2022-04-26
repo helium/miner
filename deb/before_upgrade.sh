@@ -1,5 +1,5 @@
 # add system user for file ownership and systemd user, if not exists
-useradd --system helium || true
+useradd --system --home-dir /opt/miner helium || true
 
 # add hotfix directory if it doesn't already exist
 if [ ! -d /opt/miner/hotfix ]; then
