@@ -10,10 +10,4 @@ elif [ -e /var/data/miner/miner/swarm_key ] && [ ! -e /opt/miner/data/miner/swar
     echo "Found existing swarm_key, moving data to /opt/miner/"
     mv /var/data/miner /opt/miner/data
     chown -R helium:helium /opt/miner/data
-else
-    mkdir -p /opt/miner/data
-    chown -R helium:helium /opt/miner/data
 fi
-
-mkdir -p /opt/miner/log
-chown -R helium:helium /opt/miner/log
