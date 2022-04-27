@@ -413,7 +413,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
                 fun(V, Acc) ->
                     case
                         (blockchain_ledger_validator_v1:last_heartbeat(V) +
-                        1440) >=
+                        7220) >=
                         CurHeight
                     of
                         true ->
