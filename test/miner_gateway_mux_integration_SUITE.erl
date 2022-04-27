@@ -141,15 +141,15 @@ mux_packet_routing_light(Config) ->
     receive
         {packet_received, PacketType3} -> ?assert(PacketType3 =:= lora_skipped)
     after 2000 ->
-        ct:fail("no lora packets received")
+        ct:fail("no lora packets 1 received")
     end,
 
     ok = miner_fake_radio_backplane:transmit(Lora, 915.5, 16#821fb7fffffffff),
 
     receive
-        {packet_receive, PacketType4} -> ?assert(PacketType4 =:= lora_routed)
+        {packet_received, PacketType4} -> ?assert(PacketType4 =:= lora_routed)
     after 2000 ->
-        ct:fail("no lora packets received")
+        ct:fail("no lora packets 2 received")
     end,
 
     gen_server:stop(RadioPid),

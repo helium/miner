@@ -569,7 +569,7 @@ send_to_router(Type, RoutingInfo, Packet, Region) ->
     Freq = maps:get(<<"freq">>, Packet),
     DataRate = maps:get(<<"datr">>, Packet),
     HeliumPacket = blockchain_helium_packet_v1:new(Type, Data, Time, RSSI, Freq, DataRate, SNR, RoutingInfo),
-    blockchain_state_channels_client:packet(HeliumPacket, application:get(miner, default_routers, []), Region).
+    blockchain_state_channels_client:packet(HeliumPacket, application:get_env(miner, default_routers, []), Region).
 
 channel(Freq, Frequencies) ->
     channel(Freq, Frequencies, 0).
