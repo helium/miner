@@ -22,7 +22,7 @@
     retry_decrypt/11,
     send_receipt/11,
     send_witness/9,
-    region_params_update/2,
+    region_params_update/3,
     region_params/0
 ]).
 
@@ -58,7 +58,8 @@
     sender :: undefined | {pid(), term()},
     packet_id = 0 :: non_neg_integer(),
     region_params = undefined :: undefined | blockchain_region_param_v1:region_param_v1(),
-    region = undefined :: undefined | atom()
+    region = undefined :: undefined | atom(),
+    gain = undefined :: undefined | integer()
 }).
 
 -define(BLOCK_RETRY_COUNT, 10).
@@ -82,9 +83,9 @@ decrypt_radio(Packet, RSSI, SNR, Timestamp, Freq, Channel, Spreading) ->
 retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream) ->
     gen_server:cast(?MODULE, {retry_decrypt, Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channel, DataRate, Stream}).
 
--spec region_params_update(atom(), [blockchain_region_param_v1:region_param_v1()]) -> ok.
-region_params_update(Region, RegionParams) ->
-    gen_server:cast(?MODULE, {region_params_update, Region, RegionParams}).
+-spec region_params_update(atom(), [blockchain_region_param_v1:region_param_v1()], integer()) -> ok.
+region_params_update(Region, RegionParams, Gain) ->
+    gen_server:cast(?MODULE, {region_params_update, Region, RegionParams, Gain}).
 
 -spec region_params() -> ok.
 region_params() ->
@@ -176,9 +177,13 @@ handle_call(compact_key, _From, #state{compact_key=CK}=State) when CK /= undefin
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({region_params_update, Region, RegionParams}, State) ->
-    lager:debug("updating region params. Region: ~p, Params: ~p", [Region, RegionParams]),
-    {noreply, State#state{region = Region, region_params = RegionParams}};
+handle_cast({region_params_update, Region, RegionParams, Gain}, State) ->
+    lager:debug("updating region params. Region: ~p, Params: ~p, Gain: ~p",
+        [Region, RegionParams, Gain]),
+    {noreply, State#state{
+        region = Region,
+        region_params = RegionParams,
+        gain = Gain}};
 handle_cast({decrypt_p2p, _Payload}, #state{region_params = undefined} = State) ->
     lager:warning("dropping p2p challenge packet as no region params data", []),
     {noreply, State};
@@ -325,18 +330,31 @@ try_decrypt(IV, OnionCompactKey, _OnionKeyHash, Tag, CipherText, ECDHFun) ->
 %%    end.
 
 -spec tx_power(Region :: atom(), State :: state()) -> {ok, pos_integer(), pos_integer(), non_neg_integer()} | {error, any()}.
-tx_power(Region, #state{compact_key=_CK, region_params = RegionParams}) ->
+tx_power(Region, #state{compact_key=_CK, region_params = RegionParams, gain = AssertGain}) ->
     try
         MaxEIRP = lists:max([blockchain_region_param_v1:max_eirp(R) || R <- RegionParams]),
         %% if the antenna gain is accounted for in the packet forwarder config file
         %% set this to false
-        %% ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
-        %% TODO - revisit as we are dropping the GW gain from the ledger
-        %%        do we need an API to pull this from a validator ?
-        EIRP = trunc(MaxEIRP/10),
-        lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
-                   [Region, undefined, MaxEIRP/10, EIRP]),
-        {ok, EIRP, EIRP, 0}
+        ConsiderTxGain = application:get_env(miner, consider_tx_gain, true),
+        case AssertGain of
+            X when X == undefined orelse ConsiderTxGain == false ->
+                %% No gain on chain or the gain is accounted for in pkt forwarder,
+                %% EIRP = max allowed in region
+                EIRP = trunc(MaxEIRP/10),
+                lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                           [Region, undefined, MaxEIRP/10, EIRP]),
+                FinalGain = case AssertGain of
+                           undefined -> 0;
+                           _ -> AssertGain
+                       end,
+                {ok, EIRP, EIRP, FinalGain};
+            _ ->
+                %% AssertGain + TxPower cannot be higher than MaxEIRP
+                EIRP = trunc((MaxEIRP - AssertGain)/10),
+                lager:info("Region: ~p, Gain: ~p, MaxEIRP: ~p, EIRP: ~p",
+                           [Region, AssertGain/10, MaxEIRP/10, EIRP]),
+                {ok, EIRP, trunc(MaxEIRP/10), trunc(AssertGain/10)}
+        end
     catch _Class:_Error ->
         {error, failed_to_get_tx_power}
     end.

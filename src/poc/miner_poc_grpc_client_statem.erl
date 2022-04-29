@@ -980,10 +980,13 @@ do_handle_streamed_msg(
     State
 ) ->
     lager:debug("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
-    #gateway_region_params_streamed_resp_v1_pb{region = Region, params = Params} = Payload,
+    #gateway_region_params_streamed_resp_v1_pb{
+        region = Region,
+        params = Params,
+        gain = Gain} = Payload,
     #blockchain_region_params_v1_pb{region_params = RegionParams} = Params,
     miner_lora_light:region_params_update(Region, RegionParams),
-    miner_onion_server_light:region_params_update(Region, RegionParams),
+    miner_onion_server_light:region_params_update(Region, RegionParams, Gain),
     State;
 do_handle_streamed_msg(_Msg, State) ->
     lager:warning("grpc client received unexpected streamed msg ~p", [_Msg]),
