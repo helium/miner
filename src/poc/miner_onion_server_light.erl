@@ -345,7 +345,7 @@ tx_power(Region, #state{compact_key=_CK, region_params = RegionParams, gain = As
                            [Region, undefined, MaxEIRP/10, EIRP]),
                 FinalGain = case AssertGain of
                            undefined -> 0;
-                           _ -> AssertGain
+                           _ -> trunc(AssertGain/10)
                        end,
                 {ok, EIRP, EIRP, FinalGain};
             _ ->
