@@ -203,6 +203,7 @@ handle_cast(_Msg, State) ->
 handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port = UDPPort, following_chain = false}) ->
     %% if we are not following chain then assume validators are running POC challenges and thus
     %% this module will handle lora packets and will need to open the port
+    application:set_env(blockchain, sc_client_handler, miner_lora_light), %% downlink packets from state channels go here
     application:set_env(miner, lora_mod, miner_lora_light),
     application:set_env(miner, onion_server_mod, miner_onion_server_light),
     application:set_env(miner, enable_grpc_client, true),
@@ -223,6 +224,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     lager:debug("poc_challenger_type: ~p", [validator]),
                     %% we are in validator POC mode, open a socket
                     %% this module will handle lora packets
+                    application:set_env(blockchain, sc_client_handler, miner_lora_light), %% downlink packets from state channels go here
                     application:set_env(miner, lora_mod, miner_lora_light),
                     application:set_env(miner, onion_server_mod, miner_onion_server_light),
                     application:set_env(miner, enable_grpc_client, true),
@@ -233,6 +235,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
                     %% we are NOT in validator POC mode, dont open a socket
                     %% instead let the alternative module 'miner_lora' take it
                     %% and handle lora packets
+                    application:set_env(blockchain, sc_client_handler, miner_lora), %% downlink packets from state channels go here
                     application:set_env(miner, lora_mod, miner_lora),
                     application:set_env(miner, onion_server_mod, miner_onion_server),
                     application:set_env(miner, enable_grpc_client, false),
