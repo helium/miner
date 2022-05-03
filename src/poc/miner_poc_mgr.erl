@@ -602,7 +602,7 @@ process_block_pocs(
     #state{chain = Chain} = State
 )  when POCChallengeType == validator ->
     Ledger = blockchain:ledger(Chain),
-    lager:info("poc mgr block pocs: ~p", [BlockPOCs]),
+    lager:debug("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
             OnionKeyHash = blockchain_ledger_poc_v3:onion_key_hash(POCV3),
@@ -720,44 +720,48 @@ submit_receipts(
     SigFun,
     Chain
 ) ->
-    Path1 = lists:foldl(
-        fun({Challengee, LayerHash}, Acc) ->
-            {Address, Receipt} = maps:get(Challengee, Responses0, {make_ref(), undefined}),
-            %% get any witnesses not from the same p2p address and also ignore challengee as a witness (self-witness)
-            Witnesses = [
-                W
-                || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee
-            ],
-            E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
-            [E | Acc]
-        end,
-        [],
-        LayerHashes
-    ),
-    Txn0 =
-        case blockchain:config(?poc_version, blockchain:ledger(Chain)) of
-            {ok, PoCVersion} when PoCVersion >= 10 ->
-                blockchain_txn_poc_receipts_v2:new(
-                    Challenger,
-                    Secret,
-                    OnionKeyHash,
-                    lists:reverse(Path1),
-                    BlockHash
-                );
-            _ ->
-                %% hmm we shouldnt really hit here as this all started with poc version 10
-                noop
-        end,
-    Txn1 = blockchain_txn:sign(Txn0, SigFun),
-    lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
-    case miner_consensus_mgr:in_consensus() of
-        false ->
-            ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
-        true ->
-            _ = miner_hbbft_sidecar:submit(Txn1)
-    end,
-
-    ok.
+    case maps:size(Responses0) of
+        0 ->
+            lager:info("POC timed out with no responses @ ~p", [OnionKeyHash]),
+            ok;
+        _ ->
+            Path1 = lists:foldl(
+                fun({Challengee, LayerHash}, Acc) ->
+                    {Address, Receipt} = maps:get(Challengee, Responses0, {make_ref(), undefined}),
+                    %% get any witnesses not from the same p2p address and also ignore challengee as a witness (self-witness)
+                    Witnesses = [
+                        W
+                        || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee
+                    ],
+                    E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
+                    [E | Acc]
+                end,
+                [],
+                LayerHashes
+            ),
+            Txn0 =
+                case blockchain:config(?poc_version, blockchain:ledger(Chain)) of
+                    {ok, PoCVersion} when PoCVersion >= 10 ->
+                        blockchain_txn_poc_receipts_v2:new(
+                            Challenger,
+                            Secret,
+                            OnionKeyHash,
+                            lists:reverse(Path1),
+                            BlockHash
+                        );
+                    _ ->
+                        %% hmm we shouldnt really hit here as this all started with poc version 10
+                        noop
+                end,
+            Txn1 = blockchain_txn:sign(Txn0, SigFun),
+            lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
+            case miner_consensus_mgr:in_consensus() of
+                false ->
+                    ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
+                true ->
+                    _ = miner_hbbft_sidecar:submit(Txn1)
+            end
+    end.
 
 -spec cache_local_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
 cache_local_poc_key(ID, Keys) ->
