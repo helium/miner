@@ -50,9 +50,6 @@ init(_Opts) ->
        sig_fun := SigFun
      } = miner_keys:keys(),
 
-    %% downlink packets from state channels go here
-    application:set_env(blockchain, sc_client_handler, miner_lora),
-
     BaseDir = application:get_env(blockchain, base_dir, "data"),
 
     %% Miner Options

@@ -71,9 +71,6 @@ init(_Opts) ->
     %% TODO: Remove when cuttlefish
     MaxInboundConnections = application:get_env(blockchain, max_inbound_connections, 10),
 
-    %% downlink packets from state channels go here
-    application:set_env(blockchain, sc_client_handler, miner_lora),
-
     %% if POCs are over grpc and we are a gateway then dont start the chain
     GatewaysRunChain = application:get_env(miner, gateways_run_chain, true),
     MinerMode = application:get_env(miner, mode, gateway),
