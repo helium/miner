@@ -20,9 +20,11 @@
     keys/0,
 
     reset_late_block_timer/0,
+    calculate_next_block_time/1, calculate_next_block_time/2,
 
     start_chain/2,
     install_consensus/1,
+    group_block_time/1,
     remove_consensus/0,
     version/0
 ]).
@@ -55,8 +57,18 @@
         snapshot_hash  => binary()
      }.
 
+-type metadata_v3() ::
+    #{
+        timestamp           => integer(),
+        seen                => binary(),
+        bba_completion      => binary(),
+        head_hash           => blockchain_block:hash(),
+        snapshot_hash       => binary(),
+        target_block_time   => integer()
+     }.
+
 -type metadata() ::
-    [{J :: pos_integer(), M :: metadata_v2() | metadata_v1()}].
+    [{J :: pos_integer(), M :: metadata_v3() | metadata_v2() | metadata_v1()}].
 
 -type swarm_keys() ::
     {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}.
@@ -84,6 +96,7 @@
     blockchain :: undefined | blockchain:blockchain(),
     %% but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
+    target_block_time :: undefined | integer(),
     late_block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
@@ -315,8 +328,13 @@ start_chain(ConsensusGroup, Chain) ->
 install_consensus(ConsensusGroup) ->
     gen_server:cast(?MODULE, {install_consensus, ConsensusGroup}).
 
+-spec group_block_time(integer()) -> ok.
+group_block_time(GroupBlockTime) ->
+    gen_server:cast(?MODULE, {group_block_time, GroupBlockTime}).
+
 remove_consensus() ->
     gen_server:cast(?MODULE, remove_consensus).
+
 
 -spec version() -> integer().
 version() ->
@@ -375,7 +393,8 @@ handle_call(_Msg, _From, State) ->
 handle_cast(remove_consensus, State) ->
     erlang:cancel_timer(State#state.block_timer),
     {noreply, State#state{consensus_group = undefined,
-                          block_timer = make_ref()}};
+                          block_timer = make_ref(),
+                          target_block_time = undefined}};
 handle_cast({install_consensus, NewConsensusGroup},
             #state{consensus_group = Group} = State) when Group == NewConsensusGroup ->
     {noreply, State};
@@ -384,6 +403,20 @@ handle_cast({install_consensus, NewConsensusGroup},
     lager:info("installing consensus ~p after ~p",
                [NewConsensusGroup, State#state.consensus_group]),
     {noreply, set_next_block_timer(State#state{consensus_group = NewConsensusGroup})};
+handle_cast({group_block_time, GroupBlockTime},
+            #state{target_block_time=TargetBlockTime} = State) ->
+    Now = erlang:system_time(seconds),
+    %% the group block time is the next subsequent block time due to BBA
+    %% therefore, the GroupBlockTime should always be >= the current
+    %% TargetBlockTime
+    case Now >= GroupBlockTime orelse TargetBlockTime >= GroupBlockTime of
+        true ->
+            lager:info("Invalid target block time from group, tried ~p when already set at ~p", [GroupBlockTime, TargetBlockTime]),
+            {noreply, State#state{target_block_time = undefined}};
+        false ->
+            lager:info("Setting target block timeout to ~p from group", [GroupBlockTime]),
+            {noreply, State#state{target_block_time = GroupBlockTime}}
+    end;
 handle_cast(_Msg, State) ->
     lager:warning("unhandled cast ~p", [_Msg]),
     {noreply, State}.
@@ -392,17 +425,25 @@ handle_info({'DOWN', Ref, process, _, Reason}, State = #state{blockchain_ref=Ref
     lager:warning("Blockchain worker exited with reason ~p", [Reason]),
     {stop, Reason, State};
 handle_info(block_timeout, State) when State#state.consensus_group == undefined ->
-    {noreply, State};
-handle_info(block_timeout, State) ->
-    lager:info("block timeout"),
+    {noreply, State#state{target_block_time=undefined}};
+handle_info(block_timeout, #state{target_block_time=TargetBlockTime} = State) ->
+    Now = erlang:system_time(seconds),
     libp2p_group_relcast:handle_input(State#state.consensus_group, start_acs),
-    {noreply, State};
+    case Now >= TargetBlockTime of
+        true ->
+            lager:info("block timeout at ~p", [Now]),
+            {noreply, set_next_block_timer(State#state{target_block_time=undefined})};
+        false ->
+            %% target block time came from group keep it to set next block timer
+            lager:info("block timeout at ~p, next set in ~ps", [Now, TargetBlockTime - Now]),
+            {noreply, set_next_block_timer(State)}
+    end;
 handle_info(late_block_timeout, State) ->
     LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120) * 1000,
     lager:info("late block timeout"),
     libp2p_group_relcast:handle_input(State#state.consensus_group, maybe_skip),
     LateTimer = erlang:send_after(LateBlockTimeout, self(), late_block_timeout),
-    {noreply, State#state{late_block_timer = LateTimer}};
+    {noreply, State#state{late_block_timer=LateTimer, target_block_time=undefined}};
 handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
             State=#state{consensus_group = ConsensusGroup,
                          current_height = CurrHeight,
@@ -453,7 +494,8 @@ handle_info({blockchain_event, {add_block, Hash, Sync, Ledger}},
                                 end;
                             {true, _, _, _} ->
                                 State#state{block_timer = make_ref(),
-                                            current_height = Height}
+                                            current_height = Height,
+                                            target_block_time = undefined}
                         end;
                     {error, Reason} ->
                         lager:error("Error, Reason: ~p", [Reason]),
@@ -576,7 +618,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     Ledger = blockchain:ledger(Chain),
     SnapshotHash = snapshot_hash(Ledger, HeightNext, Metadata, VotesNeeded),
     SeenBBAs =
-        [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(Metadata)],
+        [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_is_map(Metadata)],
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     %% if we cannot agree on the BBA results, default to flagging everyone as having completed
     VoteDefault =
@@ -591,6 +633,10 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
     BBA = common_enough_or_default(VotesNeeded, BBAs, VoteDefault),
     {ElectionEpoch, EpochStart, TxnsToInsert, InvalidTransactions} =
         select_transactions(Chain, Txns, ElectionInfo, HeightCurr, HeightNext),
+    
+    GroupBlockTimeout = median_time(CurrentBlockTime, Metadata, target_block_time),
+    group_block_time(GroupBlockTimeout),
+    
     NewBlock =
         blockchain_block_v1:new(#{
             prev_hash       =>  CurrentBlockHash,
@@ -598,7 +644,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
             transactions    =>  TxnsToInsert,
             signatures      =>  [],
             hbbft_round     =>  HBBFTRound,
-            time            =>  block_time(CurrentBlockTime,  Metadata),
+            time            =>  median_time(CurrentBlockTime,  Metadata, timestamp),
             election_epoch  =>  ElectionEpoch,
             epoch_start     =>  EpochStart,
             seen_votes      =>  SeenVectors,
@@ -619,12 +665,13 @@ create_block(Metadata, Txns, HBBFTRound, Chain, VotesNeeded, {MyPubKey, SignFun}
         invalid_txns          => InvalidTransactions
     }.
 
--spec block_time(non_neg_integer(), metadata()) -> pos_integer().
-block_time(LastBlockTime, Metadata) ->
+%% TODO - Check if works with metadata_v1
+-spec median_time(non_neg_integer(), metadata(), atom()) -> pos_integer().
+median_time(LastBlockTime, Metadata, Key) ->
     %% Try to rule out invalid values by not allowing timestamps to go
     %% backwards and take the median proposed value.
-    {Stamps, _} = meta_to_stamp_hashes(Metadata),
-    case miner_util:median([S || S <- Stamps, S >= LastBlockTime]) of
+    Times = meta_key_to_values(Metadata, Key),
+    case miner_util:median([T || T <- Times, T >= LastBlockTime]) of
         0             -> LastBlockTime + 1;
         LastBlockTime -> LastBlockTime + 1;
         NewTime       -> NewTime
@@ -707,10 +754,14 @@ txn_is_rewards(Txn) ->
     Rewards = [blockchain_txn_rewards_v1, blockchain_txn_rewards_v2],
     lists:member(blockchain_txn:type(Txn), Rewards).
 
--spec metadata_only_v2(metadata()) ->
-    [{non_neg_integer(), metadata_v2()}].
-metadata_only_v2(Metadata) ->
+-spec metadata_is_map(metadata()) ->
+    [{non_neg_integer(), metadata_v3() | metadata_v2()}].
+metadata_is_map(Metadata) ->
     lists:filter(fun ({_, M}) -> is_map(M) end, Metadata).
+
+-spec meta_key_to_values(metadata(), atom()) -> [any()].
+meta_key_to_values(Metadata, Key) ->
+    [Value || {_, #{Key := Value}} <- Metadata].
 
 -spec meta_to_stamp_hashes(metadata()) ->
     {
@@ -720,7 +771,7 @@ metadata_only_v2(Metadata) ->
 meta_to_stamp_hashes(Metadata) ->
     lists:unzip([metadata_as_v1(M) || {_, M} <- Metadata]).
 
--spec metadata_as_v1(metadata_v1() | metadata_v2()) -> metadata_v1().
+-spec metadata_as_v1(metadata_v3() | metadata_v2() | metadata_v1()) -> metadata_v1().
 metadata_as_v1(#{head_hash := H, timestamp := S}) -> {S, H}; % v2 -> v1
 metadata_as_v1({S, H})                            -> {S, H}. % v1 -> v1
 
@@ -734,7 +785,7 @@ snapshot_hash(Ledger, BlockHeightNext, Metadata, VotesNeeded) ->
     %% agree on one, just leave it blank, so other nodes can absorb it.
     case blockchain:config(?snapshot_interval, Ledger) of
         {ok, Interval} when (BlockHeightNext - 1) rem Interval == 0 ->
-            Hashes = [H || {_, #{snapshot_hash := H}} <- metadata_only_v2(Metadata)],
+            Hashes = [H || {_, #{snapshot_hash := H}} <- metadata_is_map(Metadata)],
             common_enough_or_default(VotesNeeded, Hashes, <<>>);
         _ ->
             <<>>
@@ -750,11 +801,17 @@ common_enough_or_default(Threshold, Xs, Default) ->
         [{_, _}|_]                     -> Default % Not common-enough.
     end.
 
-set_next_block_timer(State=#state{blockchain=Chain}) ->
+-spec calculate_next_block_time(blockchain:blockchain()) -> integer().
+calculate_next_block_time(Chain) ->
+    calculate_next_block_time(Chain, false).
+
+-spec calculate_next_block_time(blockchain:blockchain(), boolean()) -> integer().
+calculate_next_block_time(Chain, Subsequent) ->
     Now = erlang:system_time(seconds),
-    {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
-    {ok, #block_info_v2{time=LastBlockTime, height=Height}} = blockchain:head_block_info(Chain),
+    Ledger = blockchain:ledger(Chain),
+    {ok, BlockTime0} = blockchain:config(?block_time, Ledger),
     BlockTime = BlockTime0 div 1000,
+    {ok, #block_info_v2{time=LastBlockTime, height=Height}} = blockchain:head_block_info(Chain),
     LastBlockTimestamp = case Height of
                              1 ->
                                  %% make up a plausible time for the genesis block
@@ -762,63 +819,148 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
                              _ ->
                                  LastBlockTime
                          end,
-
-    StartHeight0 = application:get_env(miner, stabilization_period, 0),
-    StartHeight = max(1, Height - StartHeight0),
-    {ActualStartHeight, StartBlockTime} =
-        case Height > StartHeight of
-            true ->
-                case blockchain:find_first_block_after(StartHeight, Chain) of
-                    {ok, Actual, StartBlock} ->
-                        {Actual, blockchain_block:time(StartBlock)};
-                    _ ->
-                        {0, undefined}
-                end;
-            false ->
-                {0, undefined}
+    %% mimic snapshot_take functionality for block range window
+    %% blockchain_core:blockchain_ledger_snapshot_v1
+    #{election_height := ElectionHeight} = blockchain_election:election_info(Ledger),
+    GraceBlocks =
+        case blockchain:config(?sc_grace_blocks, Ledger) of
+            {ok, GBs} ->
+                GBs;
+            {error, not_found} ->
+                0
         end,
+    DLedger = blockchain_ledger_v1:mode(delayed, Ledger),
+    {ok, DHeight0} = blockchain_ledger_v1:current_height(DLedger),
+    {ok, #block_info_v2{election_info={_, DHeight}}} = blockchain:get_block_info(DHeight0, Chain),
+
+    %% mimic snapshot_take functionality for block range window
+    SnapshotStartHeight = max(1, min(DHeight, ElectionHeight - GraceBlocks) - 1),
+    SnapshotResult = get_average_block_time(Height, SnapshotStartHeight, BlockTime, LastBlockTimestamp, Chain),
+    %% original logic for calculationg block range window
+    StabilizationHeight0 = application:get_env(miner, stabilization_period, 0),
+    StabilizationHeight = max(1, Height - StabilizationHeight0 + 1),
+    StabilizationResults = get_average_block_time(Height, StabilizationHeight, BlockTime, LastBlockTimestamp, Chain),
+    %% grab the times with the largest positive amplitude, if amplitudes match grab the longest block history avgtime
+    OrderByHistory = lists:reverse(lists:keysort(2, [StabilizationResults, SnapshotResult])),
+    {_Amplitude, AvgBlockTime0, BlockRange0} = lists:max([{(A - BlockTime), A, R} || {A, R} <- [StabilizationResults, SnapshotResult]]),
+    lager:info("Selected {~p,~p} from ~p", [AvgBlockTime0, BlockRange0, OrderByHistory]),
+    NextBlockTime0 = get_next_block_time({AvgBlockTime0, BlockRange0}, BlockTime, LastBlockTimestamp),
+    NextBlockTime = case Subsequent of
+        true ->
+            BlockRange = BlockRange0 + 1,
+            AvgBlockTime = (AvgBlockTime0 * BlockRange0 + (NextBlockTime0 - Now)) / BlockRange,
+            lager:info("# blocks ~p || average block times ~p difference ~p", [BlockRange, AvgBlockTime, BlockTime - AvgBlockTime]),
+            get_next_block_time({AvgBlockTime, BlockRange}, BlockTime, NextBlockTime0);
+        false ->
+            lager:info("# blocks ~p || average block times ~p difference ~p", [BlockRange0, AvgBlockTime0, BlockTime - AvgBlockTime0]),
+            NextBlockTime0
+    end,
+    lager:info("Next block timeout @ ~p in ~ps", [NextBlockTime, NextBlockTime - Now]),
+    NextBlockTime.
+
+%% set next block timer if not already done, used for backwards compatability assumes if block_timer is
+%% set correctly then late_block_timer is also
+-spec set_next_block_timer(map()) -> map() | ok.
+set_next_block_timer(State=#state{blockchain=Chain, target_block_time=undefined}) ->
+    Now = erlang:system_time(seconds),
+    TargetBlockTime = calculate_next_block_time(Chain),
+    NextBlockTime = max(0, TargetBlockTime - Now),
+    lager:info("Set block timeout to ~p in ~ps", [TargetBlockTime, NextBlockTime]),
+    set_block_timers(State#state{target_block_time = TargetBlockTime}, NextBlockTime);
+set_next_block_timer(State=#state{block_timer=BlockTimer, target_block_time=TargetBlockTime}) ->
+    %% not to block the critical path
+    erlang:read_timer(BlockTimer, [{async, true}]),
+    receive
+        {read_timer, _TimerRef, CurrentTime} ->
+            Now = erlang:system_time(seconds),
+            NextBlockTime = max(0, TargetBlockTime - Now),
+            case CurrentTime of
+                false ->
+                    lager:info("Set block timeout to ~p in ~ps", [TargetBlockTime, NextBlockTime]),
+                    set_block_timers(State, NextBlockTime);
+                _ ->
+                    %% timer is ticking, let it be
+                    lager:info("Current block timer has ~ps remaining", [CurrentTime div 1000]),
+                    ok
+            end
+    end.
+
+%% separate to deduplicate code
+-spec set_block_timers(map(), non_neg_integer()) -> map().
+set_block_timers(State, NextBlockTime)  ->
+    lager:info("Setting next block timer to ~ps", [NextBlockTime]),
+    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
+    erlang:cancel_timer(State#state.late_block_timer),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
+    State#state{block_timer=Timer, late_block_timer=LateTimer}.
+
+%% ------------------------------------------------------------------
+%% Internal Functions
+%% ------------------------------------------------------------------
+
+get_average_block_time(Height, StartHeight, BlockTime, LastBlockTimestamp, Chain) ->
+    {ActualStartHeight, StartBlockTime} = case Height > StartHeight of
+        true ->
+            case blockchain:find_first_block_after(StartHeight, Chain) of
+                {ok, Actual, StartBlock} ->
+                    {Actual, blockchain_block:time(StartBlock)};
+                _ ->
+                    {0, undefined}
+            end;
+        false ->
+            {0, undefined}
+    end,
+    BlockRange = max(Height - ActualStartHeight, 1),
     AvgBlockTime = case StartBlockTime of
-                       undefined ->
-                           BlockTime;
-                       _ ->
-                           (LastBlockTimestamp - StartBlockTime) / max(Height - ActualStartHeight, 1)
-                   end,
-    BlockTimeDeviation0 = BlockTime - AvgBlockTime,
-    lager:info("average ~p block times ~p difference ~p", [Height, AvgBlockTime, BlockTime - AvgBlockTime]),
+        undefined ->
+            BlockTime;
+        _ ->
+            (LastBlockTimestamp - StartBlockTime) / BlockRange
+    end,
+    {AvgBlockTime, BlockRange}.
+
+get_next_block_time({AvgBlockTime, BlockRange}, BlockTime, LastBlockTimestamp) ->
+    Now = erlang:system_time(seconds),
+    DifferenceInTime = (BlockTime - AvgBlockTime) * BlockRange,
     BlockTimeDeviation =
-        case BlockTimeDeviation0 of
+        case DifferenceInTime of
             N when N > 0 ->
                 min(1, catchup_time(abs(N)));
             N ->
                 -1 * catchup_time(abs(N))
         end,
-    NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
-    lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
-
-    %% now figure out the late block timer
-    erlang:cancel_timer(State#state.late_block_timer),
-    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
-    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
-
-    State#state{block_timer=Timer, late_block_timer = LateTimer}.
+    %% if chain has been stopped longer then LastBlockTimeout prevent 0 NextBlockTime
+    max(Now, LastBlockTimestamp) + BlockTime + BlockTimeDeviation.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
 %% output in seconds of adjustment to apply to the block time target
 
-%% the constants here are by feel: currently at 100k target and 5sec
-%% adjustment it takes roughly a day of blocks to make up a tenth of a
-%% second. with the new 50k target we can expect double the adjustment
-%% leverage, so 1s adjustments will take roughly a day to make up the
-%% final 0.04 (twice as much leverage, but 20% of the rate).
-
 %% when drift is small or 0, let it accumulate for a bit
 catchup_time(N) when N < 0.001 ->
     0;
-%% when it's still relatively small, apply gentle adjustments
-catchup_time(N) when N < 0.01 ->
-    1;
-%% if it's large, jam on the gas
-catchup_time(_) ->
-    10.
+%% try and catch up within 10 blocks, max 10 seconds
+catchup_time(N) ->
+    min(10, ceil(N / 10)).
+
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%% Confirm changes to make catchup_time proportional
+catchup_time_test() ->
+    ?assertEqual(catchup_time(0.0005), 0),
+    ?assertEqual(catchup_time(0.01), 1),
+    ?assertEqual(catchup_time(0.015), 2),
+    ?assertEqual(catchup_time(0.02), 2),
+    ?assertEqual(catchup_time(0.05), 5),
+    ?assertEqual(catchup_time(0.09), 9),
+    ?assertEqual(catchup_time(0.090001), 10),
+    ?assertEqual(catchup_time(0.1), 10),
+    ?assertEqual(catchup_time(1), 10).
+
+-endif.

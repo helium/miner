@@ -102,6 +102,10 @@ exported_genesis_file="/tmp/genesis_$(date +%Y%m%d%H%M%S)"
 LOOP=5
 while [ $LOOP -gt 0 ]; do
     for node in ${nodes[@]}; do
+        if [[ ! -e ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node ]]; then
+            exit 1
+        fi
+
         if [[ $(./_build/testdev\+miner$node/rel/miner$node/bin/miner$node info in_consensus) = *true* ]]; then
             ./_build/testdev\+miner$node/rel/miner$node/bin/miner$node genesis export $exported_genesis_file
             if [ $? -eq 0 -a -f $exported_genesis_file ]; then

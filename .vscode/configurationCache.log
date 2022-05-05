@@ -1,0 +1,1 @@
+{"buildTargets":[".PHONY","all","aws","ci","clean","clean_external_svcs","clean_grpc","compile","cover","deps","devrel","devrelease","docker","external_svcs","grpc","release","seed","test","typecheck","validator"],"launchTargets":[],"customConfigurationProvider":{"workspaceBrowse":{"browsePath":[],"compilerArgs":[]},"fileIndex":[]}}

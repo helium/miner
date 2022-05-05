@@ -1,0 +1,26 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory `/Users/anthonyra/Documents/GitHub/miner'
+./rebar3 get-deps
+REBAR_CONFIG="config/grpc_client_gen_local.config" ./rebar3 grpc gen
+REBAR_CONFIG="config/grpc_client_gen.config" ./rebar3 grpc gen
+/Library/Developer/CommandLineTools/usr/bin/make external_svcs
+ 
+make[1]: Entering directory `/Users/anthonyra/Documents/GitHub/miner'
+echo "cloning external dependency projects"
+echo "--- gateway-rs ---"
+git clone --quiet https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
+(cd external/gateway-rs && git fetch && git checkout "v1.0.0-alpha.30" 2>/dev/null)
+(cd ./external/gateway-rs && cargo build --release)
+mkdir -p ./priv/gateway_rs
+mv ./external/gateway-rs/target/release/helium_gateway ./priv/gateway_rs/ 2>/dev/null || true
+cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
+echo "--- gwmp-mux ---"
+git clone --quiet --depth 1 --branch "v0.9.4" https://github.com/helium/gwmp-mux ./external/gwmp-mux 2>/dev/null || true
+(cd ./external/gwmp-mux && cargo build --release)
+mkdir -p ./priv/gwmp_mux
+mv ./external/gwmp-mux/target/release/gwmp-mux ./priv/gwmp_mux/ 2>/dev/null || true
+make[1]: Leaving directory `/Users/anthonyra/Documents/GitHub/miner'
+ 
+./rebar3 compile
+make: Leaving directory `/Users/anthonyra/Documents/GitHub/miner'
+ 
