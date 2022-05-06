@@ -13,25 +13,6 @@
     poc_grpc_dist_v11_test/1
 ]).
 
--define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
--define(NYLOCS, [631243922668565503, 631243922671147007, 631243922895615999, 631243922665907711]).
--define(AUSTINLOCS1, [631781084745290239, 631781089167934463, 631781054839691775, 631781050465723903]).
--define(AUSTINLOCS2, [631781452049762303, 631781453390764543, 631781452924144639, 631781452838965759]).
--define(LALOCS, [631236297173835263, 631236292179769855, 631236329165333503, 631236328049271807]).
--define(CNLOCS1, [
-                 631649369216118271, %% spare-tortilla-raccoon
-                 631649369235022335, %% kind-tangerine-octopus
-                 631649369177018879, %% damp-hemp-pangolin
-                 631649369175419391  %% fierce-lipstick-poodle
-                 ]).
-
--define(CNLOCS2, [
-                 631649369213830655, %% raspy-parchment-pike
-                 631649369205533183, %% fresh-gingham-porpoise
-                 631649369207629311, %% innocent-irish-pheasant
-                 631649368709059071  %% glorious-eggshell-finch
-                ]).
-
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
@@ -51,7 +32,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [{group, poc_grpc_with_chain}, {group, poc_grpc_no_chain}].
+    [{group, poc_grpc_with_chain_target_v5}].
 
 test_cases() ->
     [
@@ -337,11 +318,6 @@ common_poc_vars(Config) ->
       ?poc_target_hex_parent_res => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
-balances(Config) ->
-    [V | _] = ?config(validators, Config),
-    Addresses = ?config(validator_addrs, Config),
-    [miner_ct_utils:get_balance(V, Addr) || Addr <- Addresses].
-
 take_poc_challengee_and_witness_rewards(RewardsMD) ->
     %% only take poc_challengee and poc_witness rewards
     POCRewards = lists:foldl(
@@ -418,19 +394,6 @@ get_rewards(Config, RewardType) ->
               [],
               Blocks).
 
-check_poc_rewards(RewardsTxns) ->
-    %% Get all rewards types
-    RewardTypes = lists:foldl(fun(RewardTxn, Acc) ->
-                                      Types = [blockchain_txn_reward_v1:type(R) || R <- blockchain_txn_rewards_v2:rewards(RewardTxn)],
-                                      lists:flatten([Types | Acc])
-                              end,
-                              [],
-                              RewardsTxns),
-    lists:any(fun(T) ->
-                      T == poc_challengees orelse T == poc_witnesses
-              end,
-              RewardTypes).
-
 extra_vars(grpc, TargetVersion) ->
     GrpcVars = #{
                  ?poc_challenge_rate => 1,
@@ -481,9 +444,3 @@ extra_poc_vars() ->
       ?poc_v4_prob_count_wt => 0.0,
       ?poc_centrality_wt => 0.5,
       ?poc_max_hop_cells => 2000}.
-
-check_subsequent_path_growth(ReceiptMap) ->
-    PathLengths = [ length(blockchain_txn_poc_receipts_v2:path(Txn)) || {_, Txn} <- lists:flatten(maps:values(ReceiptMap)) ],
-    ct:pal("PathLengths: ~p", [PathLengths]),
-    lists:any(fun(L) -> L > 1 end, PathLengths).
-
