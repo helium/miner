@@ -381,6 +381,11 @@ connected({call, From}, connection, #data{connection = Connection} = Data) ->
 connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
+    %% dont handle it right away, instead wait some time first
+    erlang:send_after(5000, self(), {delayed_down_event, Event}),
+    {keep_state, Data};
+%%    handle_down_event(connected, Event, Data);
+connected(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(connected, Event, Data);
 connected(info, process_queued_check_target_reqs, Data) ->
     lager:debug("processing queued check_target_reqs", []),
