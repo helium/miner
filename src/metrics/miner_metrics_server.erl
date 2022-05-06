@@ -58,7 +58,7 @@ init(_Args) ->
             ElliOpts = [
                 {callback, miner_metrics_reporter},
                 {callback_args, #{}},
-                {port, proplists:get_value(port, [], 9090)}
+                {port, application:get_env(miner, metrics_port, 9090)}
             ],
             {ok, ReporterPid} = elli:start_link(ElliOpts),
             {ok, #state{

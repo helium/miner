@@ -46,7 +46,8 @@ init_per_group(poc_grpc_with_chain_target_v5, Config) ->
         {num_validators, 10},
         {num_gateways, 6},
         {num_consensus_members, 4},
-        {gateways_run_chain, true} | Config].
+        {gateways_run_chain, true},
+        {export_metrics, [block_metrics]} | Config].
 
 init_per_testcase(TestCase, Config) ->
     miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config).

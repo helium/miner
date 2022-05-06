@@ -773,6 +773,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     NumConsensusMembers = proplists:get_value(num_consensus_members, Config, get_config("N", 7)),
     LoadChainOnGateways = proplists:get_value(gateways_run_chain, Config, true),
     GwMuxEnable = proplists:get_value(gateway_and_mux_enable, Config, false),
+    ExportMetrics = proplists:get_value(export_metrics, Config, []),
     DefaultKeys = proplists:get_value(default_keys, Config, false),
 
     os:cmd(os:find_executable("epmd")++" -daemon"),
@@ -790,6 +791,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     UdpBase = 1690,
     GwApiBase = 5068,
     JsonRpcBase = 4486,
+    MetricsBase = 19090,
     Port = get_config("PORT", 0),
     Curve = 'SS512',
     BlockTime = get_config("BT", 100),
@@ -799,7 +801,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
     MinersAndPorts = lists:reverse(lists:foldl(
         fun(I, Acc) ->
             MinerName = list_to_atom(integer_to_list(I) ++ miner_ct_utils:randname(5)),
-            [{start_node(MinerName), {GwApiBase + I, UdpBase + (I * 3), JsonRpcBase + I}} | Acc]
+            [{start_node(MinerName), {GwApiBase + I, UdpBase + (I * 3), JsonRpcBase + I, MetricsBase + I}} | Acc]
         end,
         [],
         lists:seq(1, TotalMiners)
@@ -822,7 +824,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     ct:pal("Keys: ~p", [Keys]),
 
-    {_Miner, {_GwApiPort, _UDPPort, _JsonRpcPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
+    {_Miner, {_GwApiPort, _UDPPort, _JsonRpcPort, _MetricsPort}, _ECDH, _PubKey, Addr, _SigFun} = hd(Keys),
     DefaultRouters = libp2p_crypto:pubkey_bin_to_p2p(Addr),
 
     Options = [{mod, Mod},
@@ -834,6 +836,7 @@ init_per_testcase(Mod, TestCase, Config0) ->
                {gateways_run_chain, LoadChainOnGateways},
                {default_keys, DefaultKeys},
                {default_routers, DefaultRouters},
+               {export_metrics, ExportMetrics},
                {port, Port}],
 
     %% config nodes
@@ -1068,8 +1071,8 @@ init_per_testcase(Mod, TestCase, Config0) ->
                 {[], MinersAndPorts}
         end,
 
-    UpdatedValidatorPorts = lists:map(fun({Miner, {_, _, JsonRpcPort}}) ->
-                                          {Miner, {ignore, ignore, JsonRpcPort}}
+    UpdatedValidatorPorts = lists:map(fun({Miner, {_, _, JsonRpcPort, MetricsPort}}) ->
+                                          {Miner, {ignore, ignore, JsonRpcPort, MetricsPort}}
                                   end, ValidatorPorts),
     [
         {miners, Miners},
@@ -1117,7 +1120,7 @@ make_keys(Miner, Ports) ->
     GSigFun = libp2p_crypto:mk_sig_fun(GPriv),
     {Miner, Ports, GECDH, GPub, GAddr, GSigFun}.
 
-config_node({Miner, {GwApiPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigFun}, Options) ->
+config_node({Miner, {GwApiPort, UDPPort, JSONRPCPort, MetricsPort}, ECDH, PubKey, _Addr, SigFun}, Options) ->
     Mod = proplists:get_value(mod, Options),
     LogDir = proplists:get_value(logdir, Options),
     BaseDir = proplists:get_value(basedir, Options),
@@ -1129,6 +1132,7 @@ config_node({Miner, {GwApiPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigF
     Mode = proplists:get_value(mode, Options, gateway),
     GwMuxEnable = proplists:get_value(gateway_and_mux_enable, Options, false),
     LoadChainOnGateways = proplists:get_value(gateways_run_chain, Options, true),
+    ExportMetrics = proplists:get_value(export_metrics, Options, []),
 
     ct:pal("Miner ~p", [Miner]),
     ct_rpc:call(Miner, cover, start, []),
@@ -1169,9 +1173,11 @@ config_node({Miner, {GwApiPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigF
     ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),
     ct_rpc:call(Miner, application, set_env, [miner, gateway_api_port, GwApiPort]),
     ct_rpc:call(Miner, application, set_env, [miner, jsonrpc_port, JSONRPCPort]),
+    ct_rpc:call(Miner, application, set_env, [miner, metrics_port, MetricsPort]),
     ct_rpc:call(Miner, application, set_env, [miner, mode, Mode]),
     ct_rpc:call(Miner, application, set_env, [miner, gateway_and_mux_enable, GwMuxEnable]),
     ct_rpc:call(Miner, application, set_env, [miner, gateways_run_chain, LoadChainOnGateways]),
+    ct_rpc:call(Miner, application, set_env, [miner, metrics, ExportMetrics]),
 
     ct_rpc:call(Miner, application, set_env, [miner, radio_device, {{127,0,0,1}, UDPPort, deprecated, deprecated}]),
     ct_rpc:call(Miner, application, set_env, [miner, stabilization_period_start, 2]),
