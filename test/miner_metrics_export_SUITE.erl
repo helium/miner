@@ -1,4 +1,4 @@
--module(miner_poc_grpc_SUITE).
+-module(miner_metrics_export_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -10,10 +10,7 @@
 ]).
 
 -export([
-    poc_grpc_dist_v11_test/1,
-    poc_grpc_dist_v11_cn_test/1,
-    poc_grpc_dist_v11_partitioned_test/1,
-    poc_grpc_dist_v11_partitioned_lying_test/1
+    poc_grpc_dist_v11_test/1
 ]).
 
 -define(SFLOCS, [631210968910285823, 631210968909003263, 631210968912894463, 631210968907949567]).
@@ -44,20 +41,7 @@ groups() ->
      {poc_grpc_with_chain_target_v5,
       [],
       test_cases()
-     },
-     {poc_grpc_no_chain_target_v5,
-      [],
-      test_cases()
-     },
-     {poc_grpc_with_chain_target_v6,
-      [],
-      test_cases()
-     },
-     {poc_grpc_no_chain_target_v6,
-      [],
-      test_cases()
      }
-
     ].
 
 %%--------------------------------------------------------------------
@@ -71,10 +55,7 @@ all() ->
 
 test_cases() ->
     [
-     poc_grpc_dist_v11_test,
-     poc_grpc_dist_v11_cn_test,
-     poc_grpc_dist_v11_partitioned_test,
-     poc_grpc_dist_v11_partitioned_lying_test
+     poc_grpc_dist_v11_test
     ].
 
 init_per_group(poc_grpc_with_chain_target_v5, Config) ->
@@ -84,31 +65,7 @@ init_per_group(poc_grpc_with_chain_target_v5, Config) ->
         {num_validators, 10},
         {num_gateways, 6},
         {num_consensus_members, 4},
-        {gateways_run_chain, true} | Config];
-init_per_group(poc_grpc_no_chain_target_v5, Config) ->
-    [
-        {target_version, 5},
-        {split_miners_vals_and_gateways, true},
-        {num_validators, 10},
-        {num_gateways, 6},
-        {num_consensus_members, 4},
-        {gateways_run_chain, false} | Config];
-init_per_group(poc_grpc_with_chain_target_v6, Config) ->
-    [
-        {target_version, 6},
-        {split_miners_vals_and_gateways, true},
-        {num_validators, 10},
-        {num_gateways, 6},
-        {num_consensus_members, 4},
-        {gateways_run_chain, true} | Config];
-init_per_group(poc_grpc_no_chain_target_v6, Config) ->
-    [
-        {target_version, 6},
-        {split_miners_vals_and_gateways, true},
-        {num_validators, 10},
-        {num_gateways, 6},
-        {num_consensus_members, 4},
-        {gateways_run_chain, false} | Config].
+        {gateways_run_chain, true} | Config].
 
 init_per_testcase(TestCase, Config) ->
     miner_ct_utils:init_per_testcase(?MODULE, TestCase, Config).
@@ -127,24 +84,6 @@ poc_grpc_dist_v11_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
     ExtraVars = extra_vars(grpc, TargetVersion),
     run_dist_with_params(poc_grpc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
-
-poc_grpc_dist_v11_cn_test(Config) ->
-    TargetVersion = ?config(target_version, Config),
-    CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc, TargetVersion),
-    run_dist_with_params(poc_grpc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
-
-poc_grpc_dist_v11_partitioned_test(Config) ->
-    TargetVersion = ?config(target_version, Config),
-    CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc, TargetVersion),
-    run_dist_with_params(poc_grpc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
-
-poc_grpc_dist_v11_partitioned_lying_test(Config) ->
-    TargetVersion = ?config(target_version, Config),
-    CommonPOCVars = common_poc_vars(Config),
-    ExtraVars = extra_vars(grpc, TargetVersion),
-    run_dist_with_params(poc_grpc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -165,10 +104,6 @@ run_dist_with_params(TestCase, Config, VarMap, Status) ->
     %% The test endeth here
     ok.
 
-exec_dist_test(poc_grpc_dist_v11_partitioned_lying_test, Config, VarMap, _Status) ->
-    do_common_partition_lying_checks(poc_grpc_dist_v11_partitioned_lying_test, Config, VarMap);
-exec_dist_test(poc_grpc_dist_v11_partitioned_test, Config, VarMap, _Status) ->
-    do_common_partition_checks(poc_grpc_dist_v11_partitioned_test, Config, VarMap);
 exec_dist_test(_TestCase, Config, VarMap, Status) ->
     Validators = ?config(validators, Config),
     Gateways = ?config(gateway_addrs, Config),
@@ -265,14 +200,6 @@ setup_dist_test(TestCase, Config, VarMap, Status) ->
     end,
     ok.
 
-gen_locations(poc_grpc_dist_v11_partitioned_lying_test, _, _) ->
-    {?AUSTINLOCS1 ++ ?LALOCS, lists:duplicate(4, hd(?AUSTINLOCS1)) ++ lists:duplicate(4, hd(?LALOCS))};
-gen_locations(poc_grpc_dist_v11_partitioned_test, _, _) ->
-    %% These are taken from the ledger
-    {?AUSTINLOCS1 ++ ?LALOCS, ?AUSTINLOCS1 ++ ?LALOCS};
-gen_locations(poc_grpc_dist_v11_cn_test, _, _) ->
-    %% Actual locations are the same as the claimed locations for the dist test
-    {?CNLOCS1 ++ ?CNLOCS2, ?CNLOCS1 ++ ?CNLOCS2};
 gen_locations(_TestCase, Addresses, VarMap) ->
     LocationJitter = case maps:get(?poc_version, VarMap, 1) of
                          V when V > 3 ->
@@ -354,11 +281,6 @@ challenger_receipts_map(Receipts) ->
 
     ReceiptMap.
 
-check_partitioned_lying_path_growth(_TestCase, Miners) ->
-    ReceiptMap = challenger_receipts_map(find_receipts(Miners)),
-    ct:pal("ReceiptMap: ~p", [ReceiptMap]),
-    not check_subsequent_path_growth(ReceiptMap).
-
 receipt_counter(ReceiptMap) ->
     lists:foldl(fun({Name, ReceiptList}, Acc) ->
                         Counts = lists:map(fun({Height, ReceiptTxn}) ->
@@ -414,32 +336,6 @@ common_poc_vars(Config) ->
       ?poc_v4_target_score_curve => 5,
       ?poc_target_hex_parent_res => 5,
       ?poc_v5_target_prob_randomness_wt => 0.0}.
-
-do_common_partition_checks(_TestCase, Config, VarMap) ->
-    %% Print scores before we begin the test
-    InitialScores = gateway_scores(Config),
-    ct:pal("InitialScores: ~p", [InitialScores]),
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     case maps:get(poc_version, VarMap, 1) of
-                         V when V >= 10 ->
-                             %% There is no path to check, so do both poc-v10 and poc-v11 checks here
-                             %% Check there are some poc rewards
-                             RewardsMD = get_rewards_md(Config),
-                             ct:pal("RewardsMD: ~p", [RewardsMD]),
-                             C1 = check_non_empty_poc_rewards(take_poc_challengee_and_witness_rewards(RewardsMD)),
-                             ct:pal("C1: ~p", [C1]),
-                             C1;
-                         _ ->
-                             ok
-                     end
-             end, 60, 5000),
-    %% Print scores after execution
-    FinalScores = gateway_scores(Config),
-    ct:pal("FinalScores: ~p", [FinalScores]),
-    FinalRewards = get_rewards(Config),
-    ct:pal("FinalRewards: ~p", [FinalRewards]),
-    ok.
 
 balances(Config) ->
     [V | _] = ?config(validators, Config),
@@ -535,43 +431,6 @@ check_poc_rewards(RewardsTxns) ->
               end,
               RewardTypes).
 
-do_common_partition_lying_checks(TestCase, Config, VarMap) ->
-    Validators = ?config(validators, Config),
-    %% Print scores before we begin the test
-    InitialScores = gateway_scores(Config),
-    ct:pal("InitialScores: ~p", [InitialScores]),
-    %% Print scores before we begin the test
-    InitialBalances = balances(Config),
-    ct:pal("InitialBalances: ~p", [InitialBalances]),
-
-    true = miner_ct_utils:wait_until(
-             fun() ->
-                     case maps:get(poc_version, VarMap, 11) of
-                         V when V > 10 ->
-                             %% TODO: What to check when the partitioned nodes are lying about their locations
-                             true;
-                         _ ->
-                             %% Since we have two static location partitioned networks, where
-                             %% both are lying about their distances, the paths should
-                             %% never get longer than 1
-                             C1 = check_partitioned_lying_path_growth(TestCase, Validators),
-                             C1
-                     end
-             end,
-             40, 5000),
-    %% Print scores after execution
-    FinalScores = gateway_scores(Config),
-    ct:pal("FinalScores: ~p", [FinalScores]),
-    %% Print rewards
-    Rewards = get_rewards(Config),
-    ct:pal("Rewards: ~p", [Rewards]),
-    %% Print balances after execution
-    FinalBalances = balances(Config),
-    ct:pal("FinalBalances: ~p", [FinalBalances]),
-    %% There should be no poc_witness or poc_challengees rewards
-    ?assert(not check_poc_rewards(Rewards)),
-    ok.
-
 extra_vars(grpc, TargetVersion) ->
     GrpcVars = #{
                  ?poc_challenge_rate => 1,
@@ -583,11 +442,6 @@ extra_vars(grpc, TargetVersion) ->
                  ?poc_activity_filter_enabled => true,
                  ?validator_hb_reactivation_limit => 100,
                  ?poc_validator_ct_scale => 0.8,
-                 ?h3dex_gc_width => 10,
-                 ?poc_target_hex_parent_res => 5,
-                 ?poc_target_hex_collection_res => 7,
-                 ?poc_target_pool_size => 2,
-                 ?poc_hexing_type => hex_h3dex,
                  ?hip17_interactivity_blocks => 20
     },
     maps:merge(extra_vars(poc_v11), GrpcVars).
@@ -626,8 +480,7 @@ extra_poc_vars() ->
       ?poc_v4_randomness_wt => 0.5,
       ?poc_v4_prob_count_wt => 0.0,
       ?poc_centrality_wt => 0.5,
-      ?poc_max_hop_cells => 2000,
-      ?poc_witness_consideration_limit => 2}.
+      ?poc_max_hop_cells => 2000}.
 
 check_subsequent_path_growth(ReceiptMap) ->
     PathLengths = [ length(blockchain_txn_poc_receipts_v2:path(Txn)) || {_, Txn} <- lists:flatten(maps:values(ReceiptMap)) ],
