@@ -50,7 +50,9 @@
     val_p2p_addr,
     val_public_ip,
     val_grpc_port,
-    check_target_req_timer
+    check_target_req_timer,
+    down_events_in_period = 0,
+    stability_check_timer
 }).
 
 %% these are config vars the miner is interested in, if they change we
@@ -71,7 +73,14 @@
 -define(CHECK_TARGET_REQ_DELAY, 60000).
 -endif.
 %% delay between stream reconnects attempts
--define(STREAM_RECONNECT_DELAY, 5000).
+-define(RECONNECT_DELAY, 5000).
+%% Periodic timer to check the stability of our validator connection
+%% if we get too many stream disconnects during this period
+%% we assume the val is unstable and will connect to a new val
+-define(STREAM_STABILITY_CHECK_TIMEOUT, 90000).
+%% max number of stream down events  within the STREAM_STABILITY_CHECK_TIMEOUT period
+%% after which we will select a new validator
+-define(MAX_DOWN_EVENTS_IN_PERIOD, (?STREAM_STABILITY_CHECK_TIMEOUT / ?RECONNECT_DELAY) - 2).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
@@ -225,11 +234,17 @@ setup(
         {ok, Connection} ->
             #{http_connection := ConnectionPid} = Connection,
             M = erlang:monitor(process, ConnectionPid),
+            %% once we have a validator connection established
+            %% fire a timer to check how stable the streams are behaving
+            catch erlang:cancel_timer(Data#data.stability_check_timer),
+            TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
             {keep_state,
                 Data#data{
                     connection = Connection,
                     connection_pid = ConnectionPid,
-                    conn_monitor_ref = M
+                    conn_monitor_ref = M,
+                    stability_check_timer = TRef,
+                    down_events_in_period = 0
                 },
                 [{next_event, info, fetch_config}]};
         {error, _} ->
@@ -319,7 +334,14 @@ setup(
 setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
-    handle_down_event(setup, Event, Data);
+    %% dont handle it right away, instead wait some time first
+    erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
+    {keep_state, Data};
+setup(info, {delayed_down_event, Event}, Data) ->
+    handle_down_event(connected, Event, Data);
+setup(info, stability_check, Data) ->
+    handle_stability_check(setup, Data);
+
 setup({call, From}, _Msg, Data) ->
     %% return an error for any call msgs whilst in setup state
     {keep_state, Data, [{reply, From, {error, grpc_client_not_ready}}]};
@@ -382,9 +404,8 @@ connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
     %% dont handle it right away, instead wait some time first
-    erlang:send_after(5000, self(), {delayed_down_event, Event}),
+    erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
     {keep_state, Data};
-%%    handle_down_event(connected, Event, Data);
 connected(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(connected, Event, Data);
 connected(info, process_queued_check_target_reqs, Data) ->
@@ -392,6 +413,8 @@ connected(info, process_queued_check_target_reqs, Data) ->
     _ = process_check_target_reqs(),
     Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
     {keep_state, Data#data{check_target_req_timer = Ref}};
+connected(info, stability_check, Data) ->
+    handle_stability_check(info, Data);
 connected(_EventType, _Msg, Data) ->
     lager:warning(
         "unhandled event whilst in ~p state: Type: ~p, Msg: ~p",
@@ -1010,7 +1033,8 @@ handle_down_event(
         stream_poc_monitor_ref = Ref,
         connection = Connection,
         self_pub_key_bin = SelfPubKeyBin,
-        self_sig_fun = SelfSigFun
+        self_sig_fun = SelfSigFun,
+        down_events_in_period = NumDownEvents
     }
 ) ->
     %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
@@ -1019,19 +1043,23 @@ handle_down_event(
     case connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) of
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
-            {keep_state, Data#data{stream_poc_monitor_ref = M, stream_poc_pid = StreamPid}};
+            {keep_state, Data#data{
+                stream_poc_monitor_ref = M,
+                stream_poc_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1}};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
     end;
 handle_down_event(
     _CurState,
     {'DOWN', Ref, process, _, Reason} = Event,
     Data = #data{
         stream_config_update_monitor_ref = Ref,
-        connection = Connection
+        connection = Connection,
+        down_events_in_period = NumDownEvents
     }
 ) ->
     %% the config_update stream is meant to be long lived, we always want it up as long as we have a grpc connection
@@ -1041,13 +1069,15 @@ handle_down_event(
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
             {keep_state, Data#data{
-                stream_config_update_monitor_ref = M, stream_config_update_pid = StreamPid
+                stream_config_update_monitor_ref = M,
+                stream_config_update_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1
             }};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
     end;
 handle_down_event(
     _CurState,
@@ -1056,7 +1086,8 @@ handle_down_event(
         stream_region_params_update_monitor_ref = Ref,
         connection = Connection,
         self_pub_key_bin = SelfPubKeyBin,
-        self_sig_fun = SelfSigFun
+        self_sig_fun = SelfSigFun,
+        down_events_in_period = NumDownEvents
     }
 ) ->
     %% the region_params stream is meant to be long lived, we always want it up as long as we have a grpc connection
@@ -1066,14 +1097,40 @@ handle_down_event(
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
             {keep_state, Data#data{
-                stream_region_params_update_monitor_ref = M, stream_region_params_update_pid = StreamPid
+                stream_region_params_update_monitor_ref = M,
+                stream_region_params_update_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1
             }};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
+    end;
+handle_down_event(_CurState, _Event, Data ) ->
+    %% fallback handler, if we dont recognise it then ignore it
+    %% shouldnt really hit here, but you never know
+    lager:warning("unhandled down event: ~p", [_Event]),
+    {keep_state, Data}.
+
+handle_stability_check(CurState, Data = #data{down_events_in_period = NumDownEventsThisPeriod}) ->
+    case NumDownEventsThisPeriod > ?MAX_DOWN_EVENTS_IN_PERIOD of
+        true ->
+            Data1 = Data#data{down_events_in_period = 0},
+            %% restart the setup state
+            case CurState of
+                setup ->
+                    {repeat_state, Data1};
+                _ ->
+                    {next_state, setup, Data1}
+            end;
+        false ->
+            %% we have been stable this period, so reset the num of down events
+            %% and refire our stability check timer
+            TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
+            {keep_state, Data#data{down_events_in_period = 0, stability_check_timer = TRef}}
     end.
+
 
 -ifdef(TEST).
 maybe_override_ip(_IP) ->
