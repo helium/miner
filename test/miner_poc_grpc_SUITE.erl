@@ -197,7 +197,6 @@ exec_dist_test(_TestCase, Config, VarMap, Status) ->
                                      %% check gateways activity was updated
                                      C3 = check_gateway_activity(hd(Validators), Gateways),
                                      ct:pal("C1: ~p C2: ~p, C3: ~p", [C1, C2, C3]),
-                                     ct:pal("process count: ~p", [erlang:length(erlang:processes())]),
                                      C1 andalso C2 andalso C3
                              end,
                              25, 5000),
