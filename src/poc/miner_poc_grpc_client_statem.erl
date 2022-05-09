@@ -373,7 +373,7 @@ connected(
         self_pub_key_bin = SelfPubKeyBin
     } = Data
 ) ->
-    lager:debug(
+    lager:info(
         "send_report ~p with onionkeyhash ~p: ~p",
         [ReportType, OnionKeyHash, Report]
     ),
@@ -490,7 +490,7 @@ connect_validator(ValAddr, ValIP, ValPort) ->
                 ),
                 Error;
             {ok, Connection} = Res ->
-                lager:debug("successfully connected to validator via connection ~p", [Connection]),
+                lager:info("successfully connected to validator via connection ~p", [Connection]),
                 Res
         end
     catch
@@ -656,7 +656,7 @@ send_grpc_unary_req(undefined, _Req, _RPC) ->
     {error, no_grpc_connection};
 send_grpc_unary_req(Connection, Req, RPC) ->
     try
-        lager:debug("send unary request: ~p", [Req]),
+        lager:info("send unary request: ~p", [Req]),
         Res = grpc_client_custom:unary(
             Connection,
             Req,
@@ -665,7 +665,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:debug("send unary result: ~p", [Res]),
+        lager:info("send unary result: ~p", [Res]),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -680,7 +680,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
     RPC :: atom()) -> unary_result().
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
     try
-        lager:debug("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
+        lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
         {ok, Connection} = grpc_client_custom:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
 
         Res = grpc_client_custom:unary(
@@ -691,7 +691,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:debug("New Connection, send unary result: ~p", [Res]),
+        lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
         _ = grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
@@ -883,7 +883,7 @@ check_if_target(
                 NotificationHeight,
                 ChallengerSig
             ),
-        lager:debug("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
+        lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
             {ok, Result, _Details} ->
                 %% we got an expected response, purge req from queued cache should it exist
@@ -977,7 +977,7 @@ do_handle_streamed_msg(
     } = Msg,
     State
 ) ->
-    lager:debug("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
+    lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{
         challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin},
         block_hash = BlockHash,
@@ -1130,7 +1130,6 @@ handle_stability_check(CurState, Data = #data{down_events_in_period = NumDownEve
             TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
             {keep_state, Data#data{down_events_in_period = 0, stability_check_timer = TRef}}
     end.
-
 
 -ifdef(TEST).
 maybe_override_ip(_IP) ->
