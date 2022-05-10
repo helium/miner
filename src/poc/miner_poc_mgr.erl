@@ -613,7 +613,13 @@ process_block_pocs(
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(
                         maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                    %% confirm the POC exists on the ledger, if not then drop the POC
+                    case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
+                        {ok, _} ->
+                            spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                        _ ->
+                            ok
+                    end;
                 _ ->
                     noop
             end
@@ -753,14 +759,9 @@ submit_receipts(
                         %% hmm we shouldnt really hit here as this all started with poc version 10
                         noop
                 end,
-            Txn1 = blockchain_txn:sign(Txn0, SigFun),
             lager:debug("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
-            case miner_consensus_mgr:in_consensus() of
-                false ->
-                    ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end);
-                true ->
-                    _ = miner_hbbft_sidecar:submit(Txn1)
-            end
+            Txn1 = blockchain_txn:sign(Txn0, SigFun),
+            ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end)
     end.
 
 -spec cache_local_poc_key(poc_key(), cached_local_poc_local_key_data()) -> true.
