@@ -61,18 +61,9 @@ metrics_export_test(Config) ->
 %% ------------------------------------------------------------------
 
 setup_test(Config, VarMap) ->
-    AllMiners = ?config(miners, Config),
     Validators = ?config(validators, Config),
     Gateways = ?config(gateways, Config),
-    RunChainOnGateways = proplists:get_value(gateways_run_chain, Config, true),
     {_, Locations} = lists:unzip(initialize_chain(Validators, Config, VarMap)),
-
-    case RunChainOnGateways of
-        true ->
-            _ = miner_ct_utils:integrate_genesis_block(hd(Validators), Gateways);
-        false ->
-            ok
-    end,
 
     %% the radio ports used to be fetched from miner lora as part of init_per_testcase
     %% but the port is only opened now after a chain is up and been consulted to
@@ -91,13 +82,7 @@ setup_test(Config, VarMap) ->
                                                                 lists:zip(RadioPorts, Locations), true),
     miner_fake_radio_backplane ! go,
     %% wait till height 2
-    case RunChainOnGateways of
-        true ->
-            ok = miner_ct_utils:wait_for_gte(height, AllMiners, 2, all, 30);
-        false ->
-            ok = miner_ct_utils:wait_for_gte(height, Validators, 2, all, 30)
-    end,
-    ok.
+    ok = miner_ct_utils:wait_for_gte(height, Validators, 2, all, 30).
 
 scrape_metrics(Port) ->
     Url = "http://localhost:" ++ integer_to_list(Port) ++ "/metrics",
