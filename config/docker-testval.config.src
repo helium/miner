@@ -56,7 +56,9 @@
    %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'}
+   {region_override, 'US915'},
+   {metrics, [block_metrics, grpc_metrics]},
+   {metrics_port, ${METRICS_PORT:-9090}}
   ]},
  {grpcbox,
   [

@@ -50,6 +50,8 @@
    {sidecar_parallelism_limit, ${SIDECAR_PARALLELISM_LIMIT:-3}},
    {hotfix_dir, "${HOTFIX_DIR:-/opt/miner/hotfix}"},
    {update_dir, "${UPDATE_DIR:-/opt/miner/update}"},
+   {metrics, [block_metrics, grpc_metrics]},
+   {metrics_port, ${METRICS_PORT:-9090}},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
