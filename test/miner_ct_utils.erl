@@ -947,8 +947,9 @@ init_per_testcase(Mod, TestCase, Config0) ->
 
     GRPCServerConfigFun = fun(PeerPort)->
          [#{grpc_opts => #{service_protos => [gateway_pb],
-                           services => #{'helium.gateway' => helium_gateway_service}
-                            },
+                           services => #{'helium.gateway' => helium_gateway_service},
+                           stats_handler => grpcbox_telemetry_stats_handler
+                         },
 
             transport_opts => #{ssl => false},
 

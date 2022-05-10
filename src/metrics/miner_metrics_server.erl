@@ -49,8 +49,8 @@ start_link() ->
 
 init(_Args) ->
     case get_configs() of
-        [] -> ignore;
-        Metrics ->
+        {[], []} -> ignore;
+        {[_ | _], [_ | _]} = Metrics ->
             erlang:process_flag(trap_exit, true),
 
             ok = setup_metrics(Metrics),
@@ -95,41 +95,33 @@ terminate(Reason, #state{metrics = Metrics, reporter_pid = Reporter}) ->
         Metrics
     ).
 
-setup_metrics(Metrics) ->
-    lager:warning("METRICS ~p", [Metrics]),
+setup_metrics({EventNames, EventSpecs}) ->
+    lager:warning("METRICS ~p", [EventSpecs]),
     lists:foreach(
-        fun({Metric, Event, Module, Meta, Description}) ->
+        fun({Metric, Module, Meta, Description}) ->
             lager:info("Declaring metric ~p as ~p meta=~p", [Metric, Module, Meta]),
+            MetricOpts = [{name, Metric}, {help, Description}, {labels, Meta}],
             case Module of
                 prometheus_histogram ->
-                    Module:declare([
-                        {name, Metric},
-                        {help, Description},
-                        {labels, Meta},
-                        {buckets, ?METRICS_HISTOGRAM_BUCKETS}
-                    ]);
+                    Module:declare(MetricOpts ++ [{buckets, ?METRICS_HISTOGRAM_BUCKETS}]);
                 _ ->
-                    Module:declare([
-                        {name, Metric},
-                        {help, Description},
-                        {labels, Meta}
-                    ])
-            end,
-
-            ok = telemetry:attach(list_to_binary(Metric), Event, fun miner_metrics_server:handle_metric/4, [])
+                    Module:declare(MetricOpts)
+            end
         end,
-        Metrics
-    ).
+        EventSpecs
+    ),
+
+    ok = telemetry:attach_many(<<"miner-metrics-handler">>, EventNames, fun miner_metrics_server:handle_metric/4, []).
 
 get_configs() ->
     lists:foldl(
-        fun(Metric, Acc) ->
+        fun(Metric, {Names, Specs} = Acc) ->
             case maps:get(Metric, ?METRICS, undefined) of
                 undefined -> Acc;
-                Result -> Acc ++ Result
+                {N, S} -> {Names ++ N, Specs ++ S}
             end
         end,
-        [],
+        {[], []},
         application:get_env(miner, metrics, [])
     ).
 
@@ -138,4 +130,12 @@ handle_metric_event([blockchain, block, absorb], #{duration := Duration}, #{stag
     ok;
 handle_metric_event([blockchain, block, height], #{height := Height}, #{time := Time}) ->
     prometheus_gauge:set(?METRICS_BLOCK_HEIGHT, [Time], Height),
+    ok;
+handle_metric_event([grpcbox, server, rpc_end], #{server_latency := Latency},
+                                                #{grpc_server_method := Method, grpc_server_status := Status}) ->
+    prometheus_gauge:dec(?METRICS_GRPC_SESSIONS, [Method]),
+    prometheus_histogram:observe(?METRICS_GRPC_LATENCY, [Method, Status], Latency),
+    ok;
+handle_metric_event([grpcbox, server, rpc_begin], _Measurements, #{grpc_server_method := Method}) ->
+    prometheus_gauge:inc(?METRICS_GRPC_SESSIONS, [Method]),
     ok.
