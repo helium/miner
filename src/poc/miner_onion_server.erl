@@ -499,7 +499,7 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
                                [Region, undefined, MaxEIRP/10, EIRP]),
                     Gain = case AssertGain of
                                undefined -> 0;
-                               _ -> AssertGain
+                               _ -> trunc(AssertGain/10)
                            end,
                     {ok, EIRP, EIRP, Gain};
                 AssertGain ->
