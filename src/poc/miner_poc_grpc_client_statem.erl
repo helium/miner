@@ -416,7 +416,7 @@ connected(info, process_queued_check_target_reqs, Data) ->
 connected(info, stability_check, Data) ->
     handle_stability_check(info, Data);
 connected(_EventType, _Msg, Data) ->
-    lager:warning(
+    lager:debug(
         "unhandled event whilst in ~p state: Type: ~p, Msg: ~p",
         [connected, _EventType, _Msg]
     ),
@@ -513,7 +513,7 @@ connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
             lager:debug("failed to connect to poc stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
+            lager:info("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
             Res
     end.
 
@@ -526,7 +526,7 @@ connect_stream_config_update(Connection) ->
             lager:debug("failed to connect to config stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug("successfully connected config update stream ~p on connection ~p", [
+            lager:info("successfully connected config update stream ~p on connection ~p", [
                 Stream, Connection
             ]),
             Res
@@ -547,7 +547,7 @@ connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
             lager:debug("failed to connect to region params update stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug(
+            lager:info(
                 "successfully connected region params update stream ~p on connection ~p",
                 [Stream, Connection]
             ),
@@ -995,7 +995,7 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:debug("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
+    lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
     #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
     _ = miner_poc_grpc_client_statem:update_config(UpdatedKeys),
     State;
@@ -1007,7 +1007,7 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:debug("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
+    lager:info("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
     #gateway_region_params_streamed_resp_v1_pb{
         region = Region,
         params = Params,
