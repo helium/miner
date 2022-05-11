@@ -438,7 +438,7 @@ find_validator() ->
         {ok, SeedValidators} ->
             {_SeedP2PAddr, SeedValIP, SeedValGRPCPort} =
                 case lists:nth(rand:uniform(length(SeedValidators)), SeedValidators) of
-                    {_SeedP2PAddr0, SeedValIP0, SeedValGRPCPort} = AddrAndPort when is_integer(SeedValGRPCPort) -> AddrAndPort;
+                    {_SeedP2PAddr0, _SeedValIP0, SeedValGRPCPort0} = AddrAndPort when is_integer(SeedValGRPCPort0) -> AddrAndPort;
                     {_SeedP2PAddr0, SeedValIP0} -> {_SeedP2PAddr0, SeedValIP0, 8080}
                 end,
             Req = build_validators_req(1),
