@@ -102,10 +102,7 @@ init(_Opts) ->
         end,
 
 
-    ChildSpecs0 = [
-                    ?SUP(blockchain_sup, [BlockchainOpts]),
-                    ?WORKER(miner_metrics_server, [])
-                  ] ++ ConsensusMgr,
+    ChildSpecs0 = [?SUP(blockchain_sup, [BlockchainOpts])] ++ ConsensusMgr,
     GatewayAndMux = case application:get_env(miner, gateway_and_mux_enable) of
                         {ok, true} -> true;
                         _ -> false
