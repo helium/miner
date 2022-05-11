@@ -437,7 +437,10 @@ find_validator() ->
     case application:get_env(miner, seed_validators) of
         {ok, SeedValidators} ->
             {_SeedP2PAddr, SeedValIP, SeedValGRPCPort} =
-                lists:nth(rand:uniform(length(SeedValidators)), SeedValidators),
+                case lists:nth(rand:uniform(length(SeedValidators)), SeedValidators) of
+                    {_SeedP2PAddr0, SeedValIP0, SeedValGRPCPort} = AddrAndPort when is_integer(SeedValGRPCPort) -> AddrAndPort;
+                    {_SeedP2PAddr0, SeedValIP0} -> {_SeedP2PAddr0, SeedValIP0, 8080}
+                end,
             Req = build_validators_req(1),
             case send_grpc_unary_req(SeedValIP, SeedValGRPCPort, Req, 'validators') of
                 {ok, #gateway_validators_resp_v1_pb{result = []}, _ReqDetails} ->
