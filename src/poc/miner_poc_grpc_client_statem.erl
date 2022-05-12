@@ -61,6 +61,8 @@
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
+-define(DEFAULT_GRPC_SEND_REPORT_RETRY_DELAY, 30000).
+-define(DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS, 20).
 -ifdef(TEST).
 %% delay between active check retries
 %% these checks determine where to proceed with
@@ -128,7 +130,9 @@ connection() ->
     Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
     OnionKeyHash :: binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash) ->
-    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 5}).
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 
+            application:get_env(miner, poc_send_report_retry_attempts, 
+                                ?DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS)}).
 
 -spec send_report(
     ReportType :: witness | receipt,
@@ -365,14 +369,16 @@ connected(cast, {handle_streamed_msg, Msg}, #data{} = Data) ->
     NewData = do_handle_streamed_msg(Msg, Data),
     {keep_state, NewData};
 connected(
-    cast,
+    %% Type will be 'cast' when coming from gen_cast
+    %% or 'info' when coming from send_after
+    Type,
     {send_report, ReportType, Report, OnionKeyHash, RetryAttempts},
     #data{
         connection = Connection,
         self_sig_fun = SelfSigFun,
         self_pub_key_bin = SelfPubKeyBin
     } = Data
-) ->
+) when Type =:= cast; Type =:= info ->
     lager:info(
         "send_report ~p with onionkeyhash ~p: ~p",
         [ReportType, OnionKeyHash, Report]
@@ -610,13 +616,21 @@ do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts)
             case send_grpc_unary_req(IP, Port, Req, 'send_report') of
                 {ok, _} ->
                     ok;
-                _ ->
-                    ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+                _Error ->
+                    lager:debug("send_grpc_unary_req(~p, ~p, ~p, 'send_report') failed with: ~p",
+                                [IP,Port,Req,_Error]),
+                    retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
             end;
         {error, _Reason} ->
-            ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+            lager:debug("get_uri_for_challenger(~p, ~p) failed with reason: ~p",
+                        [OnionKeyHash, Connection, _Reason]),
+            retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
     end,
     ok.
+
+retry_report(Msg) ->
+    RetryDelay = application:get_env(miner, poc_send_report_retry_delay, ?DEFAULT_GRPC_SEND_REPORT_RETRY_DELAY),
+    erlang:send_after(RetryDelay, ?MODULE, Msg).
 
 -spec fetch_config(
     UpdatedKeys::[string()],
