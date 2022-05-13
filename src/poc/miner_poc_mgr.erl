@@ -12,6 +12,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("blockchain/include/blockchain_json.hrl").
 
 -define(ACTIVE_POCS, active_pocs).
 -define(KEYS, keys).
@@ -613,11 +614,23 @@ process_block_pocs(
                     %% its a locally owned POC key, so kick off a new POC
                     Vars = blockchain_utils:vars_binary_keys_to_atoms(
                         maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
-                    %% confirm the POC exists on the ledger, if not then drop the POC
+                    %% confirm the POC exists on the ledger &
+                    %% the ledger block hash matches that from the event
+                    %% if not then drop the POC
                     case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
-                        {ok, _} ->
-                            spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                        {ok, PoC} ->
+                            SavedPoCBlockHash = blockchain_ledger_poc_v3:block_hash(PoC),
+                            case SavedPoCBlockHash =:= BlockHash of
+                                true ->
+                                    spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                                false ->
+                                    lager:warning("ignoring poc with key ~p, block hash mismatch ~p, ~p",
+                                        [OnionKeyHash, ?BIN_TO_B64(BlockHash), ?BIN_TO_B64(SavedPoCBlockHash)]),
+                                    ok
+                            end;
                         _ ->
+                            lager:warning("ignoring poc with key ~p, missing from ledger. block hash ~p",
+                                [OnionKeyHash, ?BIN_TO_B64(BlockHash)]),
                             ok
                     end;
                 _ ->
