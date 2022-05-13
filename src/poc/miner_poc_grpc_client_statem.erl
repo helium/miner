@@ -1201,7 +1201,7 @@ send_block_age_req(Connection) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ) of
-            {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} where is_integer(BlockAge) ->
+            {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} when is_integer(BlockAge) ->
                 {ok, BlockAge};
             {error, _} ->
                 lager:warning("grpc client error requesting current block age"),
