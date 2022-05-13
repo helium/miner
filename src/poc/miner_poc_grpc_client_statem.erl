@@ -52,7 +52,8 @@
     val_grpc_port,
     check_target_req_timer,
     down_events_in_period = 0,
-    stability_check_timer
+    stability_check_timer,
+    block_age_timer
 }).
 
 %% these are config vars the miner is interested in, if they change we
@@ -83,6 +84,9 @@
 %% max number of stream down events  within the STREAM_STABILITY_CHECK_TIMEOUT period
 %% after which we will select a new validator
 -define(MAX_DOWN_EVENTS_IN_PERIOD, (?STREAM_STABILITY_CHECK_TIMEOUT / ?RECONNECT_DELAY) - 2).
+-define(BLOCK_AGE_TIMEOUT, 300000).
+%% Maximum block age returned by a connected validator before triggering an instability reconnect
+-define(MAX_BLOCK_AGE, 900000).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
@@ -241,13 +245,16 @@ setup(
             %% once we have a validator connection established
             %% fire a timer to check how stable the streams are behaving
             catch erlang:cancel_timer(Data#data.stability_check_timer),
-            TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
+            catch erlang:cancel_timer(Data#data.block_age_timer),
+            SCTRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
+            BACTRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
             {keep_state,
                 Data#data{
                     connection = Connection,
                     connection_pid = ConnectionPid,
                     conn_monitor_ref = M,
-                    stability_check_timer = TRef,
+                    stability_check_timer = SCTRef,
+                    block_age_timer = BACTRef,
                     down_events_in_period = 0
                 },
                 [{next_event, info, fetch_config}]};
@@ -345,6 +352,8 @@ setup(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(connected, Event, Data);
 setup(info, stability_check, Data) ->
     handle_stability_check(setup, Data);
+setup(info, block_age_check, Data) ->
+    handle_block_age_check(setup, Data);
 
 setup({call, From}, _Msg, Data) ->
     %% return an error for any call msgs whilst in setup state
@@ -420,7 +429,9 @@ connected(info, process_queued_check_target_reqs, Data) ->
     Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
     {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(info, stability_check, Data) ->
-    handle_stability_check(info, Data);
+    handle_stability_check(connected, Data);
+connected(info, block_age_check, Data) ->
+    handle_block_age_check(connected, Data);
 connected(_EventType, _Msg, Data) ->
     lager:debug(
         "unhandled event whilst in ~p state: Type: ~p, Msg: ~p",
@@ -1149,6 +1160,48 @@ handle_stability_check(CurState, Data = #data{down_events_in_period = NumDownEve
             %% and refire our stability check timer
             TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
             {keep_state, Data#data{down_events_in_period = 0, stability_check_timer = TRef}}
+    end.
+
+handle_block_age_check(_CurState, #data{connection = undefined} = Data) ->
+    %% your request for block age cannot be completed at this time; please try again later
+    TRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
+    {keep_state, Data#data{block_age_timer = TRef}};
+handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
+    case send_block_age_req(Connection) of
+        {ok, BlockAge} when BlockAge >= ?MAX_BLOCK_AGE ->
+            %% we're bailing from this validator so reset the down events to start fresh
+            Data1 = Data#data{down_events_in_period = 0},
+            case CurState of
+                setup -> {repeat_state, Data1};
+                _ -> {next_state, setup, Data1}
+            end;
+        _ ->
+            %% connected validator seems to be keeping up; once more around the loop
+            TRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
+            {keep_state, Data#data{block_age_timer = TRef}}
+    end.
+
+send_block_age_req(Connection) ->
+    try
+        lager:info("Send block age unary request", []),
+        case grpc_client_custom:unary(
+            Connection,
+            build_config_req([]),
+            'helium.gateway',
+            config,
+            gateway_miner_client_pb,
+            [{callback_mod, miner_poc_grpc_client_handler}]
+        ) of
+            {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} where is_integer(BlockAge) ->
+                {ok, BlockAge};
+            {error, _} ->
+                lager:warning("grpc client error requesting current block age"),
+                {error, grpc_request_failed}
+        end
+    catch
+        _Class:_Error:_Stack ->
+            lager:warning("send block age unary request failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
+            {error, req_failed}
     end.
 
 -ifdef(TEST).
