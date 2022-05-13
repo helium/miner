@@ -1171,6 +1171,15 @@ handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
         {ok, BlockAge} when BlockAge >= ?MAX_BLOCK_AGE ->
             %% we're bailing from this validator so reset the down events to start fresh
             Data1 = Data#data{down_events_in_period = 0},
+            lager:warning("validator block age ~p exceeded maximum allowed; switching validators", [BlockAge]),
+            case CurState of
+                setup -> {repeat_state, Data1};
+                _ -> {next_state, setup, Data1}
+            end;
+        {error, _Reason} ->
+            %% validator, you had one job...
+            Data1 = Data#data{down_events_in_period = 0},
+            lager:warning("validator block age request failed; switching validators", [_Reason]),
             case CurState of
                 setup -> {repeat_state, Data1};
                 _ -> {next_state, setup, Data1}
