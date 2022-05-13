@@ -306,7 +306,7 @@ handle_info({blockchain_event, _Event}, #state{chain = undefined} = State)->
     {noreply, State};
 handle_info(
     {blockchain_event, {add_block, BlockHash, Sync, Ledger} = _Event},
-    #state{chain = Chain} = State
+    State
 )->
     CurPOCChallengerType =
         case blockchain:config(?poc_challenger_type, Ledger) of
@@ -315,13 +315,12 @@ handle_info(
         end,
     lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
-    ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Chain, State1),
+    ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Ledger, State1),
     {noreply, State1};
 handle_info(
-    {blockchain_poc_event, {poc_keys, {BlockHeight, BlockHash, BlockPOCs}} = _Event},
-    #state{chain = Chain} = State
+    {blockchain_poc_event, {poc_keys, {BlockHeight, BlockHash, BlockPOCs, Ledger}} = _Event},
+    State
 )->
-    Ledger = blockchain:ledger(Chain),
     CurPOCChallengerType =
         case blockchain:config(?poc_challenger_type, Ledger) of
             {ok, V}  -> V;
@@ -329,7 +328,7 @@ handle_info(
         end,
     lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(State),
-    ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Chain, State1),
+    ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Ledger, State1),
     {noreply, State1};
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
@@ -344,16 +343,15 @@ terminate(_Reason, _State = #state{}) ->
 -spec handle_add_block_event(
     POCChallengeType :: validator | undefined,
     BlockHash :: binary(),
-    Chain :: blockchain:blockchain(),
+    Ledger :: blockchain:ledger(),
     State :: state()
 ) -> ok.
-handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChallengeType == validator ->
-    case blockchain:get_block(BlockHash, Chain) of
+handle_add_block_event(POCChallengeType, BlockHash, Ledger, State) when POCChallengeType == validator ->
+    case blockchain_ledger_v1:get_block(BlockHash, Ledger) of
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
             %% take care of GC
             ok = purge_local_pocs(Block, State),
-            Ledger = blockchain:ledger(Chain),
 
             %% GC local pocs keys every 50 blocks
             case BlockHeight rem 50 == 0 of
@@ -366,7 +364,7 @@ handle_add_block_event(POCChallengeType, BlockHash, Chain, State) when POCChalle
             %% err what?
             ok
     end;
-handle_add_block_event(_POCChallengeType, _BlockHash, _Chain, _State) ->
+handle_add_block_event(_POCChallengeType, _BlockHash, _Ledger, _State) ->
     ok.
 
 -spec handle_witness(
@@ -531,8 +529,7 @@ handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = St
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_key = Challenger} = State) ->
-    Ledger = blockchain:ledger(Chain),
+initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = Challenger} = State) ->
     #{public := OnionCompactKey, secret := {ecc_compact, POCPrivKey}} = Keys,
     POCPubKeyBin = libp2p_crypto:pubkey_to_bin(OnionCompactKey),
     #'ECPrivateKey'{privateKey = PrivKeyBin} = POCPrivKey,
@@ -553,7 +550,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
                     noop;
                 false ->
                     {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
-                    {ok, B} = blockchain:get_block(LastChallenge, Chain),
+                    {ok, B} = blockchain_ledger_v1:get_block(LastChallenge, Ledger),
                     Time = blockchain_block:time(B),
                     Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
                     N = erlang:length(Path),
@@ -590,7 +587,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, #state{chain = Chain, pub_
     BlockHeight :: pos_integer(),
     BlockHash :: blockchain_block:hash(),
     BlockPOCs :: [{binary(), blockchain_ledger_poc_v3:poc()}],
-    Chain :: blockchain:blockchain(),
+    Ledger :: blockchain:ledger(),
     State :: state()
 ) -> ok.
 process_block_pocs(
@@ -598,10 +595,9 @@ process_block_pocs(
     BlockHeight,
     BlockHash,
     BlockPOCs,
-    Chain,
-    #state{chain = Chain} = State
+    Ledger,
+    State
 )  when POCChallengeType == validator ->
-    Ledger = blockchain:ledger(Chain),
     lager:debug("poc mgr block pocs: ~p", [BlockPOCs]),
     [
         begin
@@ -616,7 +612,7 @@ process_block_pocs(
                     %% confirm the POC exists on the ledger, if not then drop the POC
                     case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
                         {ok, _} ->
-                            spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, State) end);
+                            spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, Ledger, State) end);
                         _ ->
                             ok
                     end;
@@ -632,7 +628,7 @@ process_block_pocs(
     _BlockHeight,
     _BlockHash,
     _BlockPOCs,
-    _Chain,
+    _Ledger,
     _State
 ) ->
     ok.
