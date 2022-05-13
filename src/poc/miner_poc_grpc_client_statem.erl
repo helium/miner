@@ -1192,7 +1192,7 @@ handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
 
 send_block_age_req(Connection) ->
     try
-        lager:info("Send block age unary request", []),
+        lager:debug("Send block age unary request", []),
         case grpc_client_custom:unary(
             Connection,
             build_config_req([]),
