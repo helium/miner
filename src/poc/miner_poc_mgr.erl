@@ -314,7 +314,7 @@ handle_info(
             _ -> undefined
         end,
     lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
-    State1 = maybe_init_addr_hash(State),
+    State1 = maybe_init_addr_hash(Ledger, State),
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Ledger, State1),
     {noreply, State1};
 handle_info(
@@ -327,7 +327,7 @@ handle_info(
             _ -> undefined
         end,
     lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
-    State1 = maybe_init_addr_hash(State),
+    State1 = maybe_init_addr_hash(Ledger, State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Ledger, State1),
     {noreply, State1};
 handle_info(_Info, State = #state{}) ->
@@ -817,21 +817,20 @@ check_addr_hash(PeerAddr, #state{
             undefined
     end.
 
--spec maybe_init_addr_hash(#state{}) -> #state{}.
-maybe_init_addr_hash(#state{chain = undefined} = State) ->
+-spec maybe_init_addr_hash(blockchain:ledger(), #state{}) -> #state{}.
+maybe_init_addr_hash(_Ledger, #state{chain = undefined} = State) ->
     %% no chain
     State;
-maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State) ->
+maybe_init_addr_hash(Ledger, #state{chain = Chain, addr_hash_filter = undefined} = State) ->
     %% check if we have the block we need
-    Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
             case blockchain:config(?poc_challenge_interval, Ledger) of
                 {ok, Interval} ->
-                    {ok, Height} = blockchain:height(Chain),
+                    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
                     StartHeight = max(Height - (Height rem Interval), 1),
                     %% check if we have this block
-                    case blockchain:get_block(StartHeight, Chain) of
+                    case blockchain_ledger_v1:get_block(StartHeight, Ledger) of
                         {ok, Block} ->
                             Hash = blockchain_block:hash_block(Block),
                             %% ok, now we can build the filter
@@ -857,6 +856,7 @@ maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State
             State
     end;
 maybe_init_addr_hash(
+    Ledger,
     #state{
         chain = Chain,
         addr_hash_filter = #addr_hash_filter{
@@ -868,12 +868,11 @@ maybe_init_addr_hash(
         }
     } = State
 ) ->
-    Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
             case blockchain:config(?poc_challenge_interval, Ledger) of
                 {ok, Interval} ->
-                    {ok, CurHeight} = blockchain:height(Chain),
+                    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
                     case max(Height - (Height rem Interval), 1) of
                         StartHeight ->
                             case CurHeight of
@@ -881,7 +880,7 @@ maybe_init_addr_hash(
                                     %% ok, everything lines up
                                     State;
                                 _ ->
-                                    case blockchain:get_block(Height + 1, Chain) of
+                                    case blockchain_ledger_v1:get_block(Height + 1, Ledger) of
                                         {ok, Block} ->
                                             sync_filter(Block, Bloom, Chain),
                                             State#state{
@@ -899,7 +898,7 @@ maybe_init_addr_hash(
                             end;
                         _NewStart ->
                             %% filter is stale
-                            maybe_init_addr_hash(State#state{addr_hash_filter = undefined})
+                            maybe_init_addr_hash(Ledger, State#state{addr_hash_filter = undefined})
                     end;
                 _ ->
                     State
