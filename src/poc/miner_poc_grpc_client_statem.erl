@@ -922,10 +922,11 @@ check_if_target(
                 %% seems the POC key exists but the POC itself may not yet be initialised
                 %% this can happen if the challenging validator is behind our
                 %% notifying validator
-                %% if the challenger is behind the notifier, then add cache the check target req
-                %% it will then be retried periodically
+                %% if the challenger height is behind or equal
+                %% to the notifier, then cache the check target req
+                %% and retry it periodically
                 N = NotificationHeight - ValRespHeight,
-                case (N > 0) andalso (not IsRetry) of
+                case (N >= 0) andalso (not IsRetry) of
                     true ->
                         CurTSInSecs = erlang:system_time(second),
                         _ = cache_check_target_req(
