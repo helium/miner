@@ -84,9 +84,10 @@
 %% max number of stream down events  within the STREAM_STABILITY_CHECK_TIMEOUT period
 %% after which we will select a new validator
 -define(MAX_DOWN_EVENTS_IN_PERIOD, (?STREAM_STABILITY_CHECK_TIMEOUT / ?RECONNECT_DELAY) - 2).
--define(BLOCK_AGE_TIMEOUT, 300000).
+-define(BLOCK_AGE_TIMEOUT, 450000).
 %% Maximum block age returned by a connected validator before triggering an instability reconnect
--define(MAX_BLOCK_AGE, 900000).
+%% Measured in seconds as this is the unit of time returned by the validator for block_age
+-define(MAX_BLOCK_AGE, 900).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
@@ -247,7 +248,7 @@ setup(
             catch erlang:cancel_timer(Data#data.stability_check_timer),
             catch erlang:cancel_timer(Data#data.block_age_timer),
             SCTRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
-            BACTRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
+            BACTRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
             {keep_state,
                 Data#data{
                     connection = Connection,
@@ -1164,7 +1165,7 @@ handle_stability_check(CurState, Data = #data{down_events_in_period = NumDownEve
 
 handle_block_age_check(_CurState, #data{connection = undefined} = Data) ->
     %% your request for block age cannot be completed at this time; please try again later
-    TRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
+    TRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
     {keep_state, Data#data{block_age_timer = TRef}};
 handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
     case send_block_age_req(Connection) of
@@ -1186,7 +1187,7 @@ handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
             end;
         _ ->
             %% connected validator seems to be keeping up; once more around the loop
-            TRef = erlang:send_after(?BLOCK_AGE_TIMEOUT, self(), block_age_check),
+            TRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
             {keep_state, Data#data{block_age_timer = TRef}}
     end.
 
@@ -1212,6 +1213,9 @@ send_block_age_req(Connection) ->
             lager:warning("send block age unary request failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
             {error, req_failed}
     end.
+
+block_age_timeout() ->
+    ?BLOCK_AGE_TIMEOUT + rand:uniform(?BLOCK_AGE_TIMEOUT).
 
 -ifdef(TEST).
 maybe_override_ip(_IP) ->
