@@ -36,7 +36,8 @@
     report/4,
     active_pocs/0,
     local_poc/1,
-    local_poc_key/1
+    local_poc_key/1,
+    local_poc_keys/1
 ]).
 %% ------------------------------------------------------------------
 %% gen_server exports
