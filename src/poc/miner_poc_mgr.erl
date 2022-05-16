@@ -670,16 +670,17 @@ purge_local_poc_keys(
     %% for that block is one of our own
     %% if it is then we initiate a new local POC
     %% the keys are purged periodically
-    Timeout =
+    POCTimeout =
         case blockchain:config(?poc_timeout, Ledger) of
             {ok, N} -> N;
             _ -> ?POC_TIMEOUT
         end,
+    {ok, POCEphemeralKeyTimeout} = blockchain:config(?poc_validator_ephemeral_key_timeout, Ledger),
     %% iterate over the cached POC keys, delete any which are beyond the lifespan of when the active POC would have ended
     CachedPOCKeys = local_poc_keys(State),
     lists:foreach(
         fun(#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}) ->
-            case (BlockHeight - ReceiveHeight) > Timeout of
+            case (BlockHeight - ReceiveHeight) > (POCEphemeralKeyTimeout + POCTimeout) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     ok = delete_local_poc_keys(Key, DB, CF);
