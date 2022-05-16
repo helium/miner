@@ -12,6 +12,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
 -define(LOCAL_POC_DB_CF, {?MODULE, local_poc_db_cf_handle}).
@@ -155,7 +156,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 case ?MODULE:local_poc_key(OnionKeyHash) of
                     {ok, _LocalKey} ->
                         %% the submitted key is one of this nodes local keys
-                        lager:debug(" ~p is a known key ~p", [OnionKeyHash]),
+                        lager:debug(" ~p is a known key", [OnionKeyHash]),
                         case ?MODULE:local_poc(OnionKeyHash) of
                             {error, _} ->
                                 %% clients should retry after a period of time
@@ -183,7 +184,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:debug("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -411,7 +412,7 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
-    lager:debug("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
+    lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
@@ -504,7 +505,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
         {error, Reason}->
-            lager:notice("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
+            lager:warning("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
             noop;
         {ok, {TargetPubkeybin, TargetRandState}}->
             case miner_poc_denylist:check(TargetPubkeybin) of
@@ -540,7 +541,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                         start_height = POCStartHeight
                     },
                     ok = write_local_poc(LocalPOC, State),
-                    lager:info("started poc with onionhash ~p", [OnionKeyHash]),
+                    lager:info("started poc for challengeraddr ~p, onionhash ~p", [?TO_ANIMAL_NAME(Challenger), OnionKeyHash]),
                     ok
             end
     end.
