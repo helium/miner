@@ -731,18 +731,25 @@ submit_receipts(
 -spec validate_witness(blockchain_poc_witness_v1:witness(), blockchain_ledger_v1:ledger()) ->
     boolean().
 validate_witness(Witness, Ledger) ->
-    Gateway = blockchain_poc_witness_v1:gateway(Witness),
-    case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
-        {error, _Reason} ->
-            lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
+    %% TODO this should be against the ledger at the time the receipt was mined
+    case blockchain_poc_witness_v1:frequency(Witness) of
+        0.0 ->
+            %% Witnesses with 0.0 frequency are considered invalid
             false;
-        {ok, GwInfo} ->
-            case blockchain_ledger_gateway_v2:location(GwInfo) of
-                undefined ->
-                    lager:warning("ignoring witness ~p location undefined", [Gateway]),
+        _ ->
+            Gateway = blockchain_poc_witness_v1:gateway(Witness),
+            case blockchain_ledger_v1:find_gateway_info(Gateway, Ledger) of
+                {error, _Reason} ->
+                    lager:warning("failed to get witness ~p info ~p", [Gateway, _Reason]),
                     false;
-                _ ->
-                    blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                {ok, GwInfo} ->
+                    case blockchain_ledger_gateway_v2:location(GwInfo) of
+                        undefined ->
+                            lager:warning("ignoring witness ~p location undefined", [Gateway]),
+                            false;
+                        _ ->
+                            blockchain_poc_witness_v1:is_valid(Witness, Ledger)
+                    end
             end
     end.
 
