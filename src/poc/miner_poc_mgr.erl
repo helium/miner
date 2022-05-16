@@ -155,7 +155,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                 case ?MODULE:local_poc_key(OnionKeyHash) of
                     {ok, _LocalKey} ->
                         %% the submitted key is one of this nodes local keys
-                        lager:debug(" ~p is a known key ~p", [OnionKeyHash]),
+                        lager:debug(" ~p is a known key", [OnionKeyHash]),
                         case ?MODULE:local_poc(OnionKeyHash) of
                             {error, _} ->
                                 %% clients should retry after a period of time
