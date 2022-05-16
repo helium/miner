@@ -17,8 +17,7 @@
 
 %% api exports
 -export([start_link/1,
-         db/0,
-         poc_mgr_cf/0,
+         handles/0,
          gc/1
         ]).
 
@@ -38,7 +37,8 @@
 -record(state, {
           db :: rocksdb:db_handle(),
           default :: rocksdb:cf_handle(),
-          poc_mgr_cf :: rocksdb:cf_handle(),
+          local_poc_cf :: rocksdb:cf_handle(),
+          local_poc_keys_cf :: rocksdb:cf_handle(),
           write_interval = 1000 :: pos_integer(),
           tref :: reference(),
           pending = #{} :: maps:map()
@@ -48,13 +48,9 @@
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
--spec db() -> rocksdb:db_handle().
-db() ->
-    gen_server:call(?MODULE, db).
-
--spec poc_mgr_cf() -> rocksdb:cf_handle().
-poc_mgr_cf() ->
-    gen_server:call(?MODULE, poc_mgr_cf).
+-spec handles() -> {ok, {rocksdb:db_handle(), rocksdb:cf_handle(), rocksdb:cf_handle()}}.
+handles() ->
+    gen_server:call(?MODULE, handles).
 
 -spec gc( [ miner_poc_mgr:local_poc_onion_key_hash() ] ) -> ok.
 gc(IDs) ->
@@ -65,17 +61,16 @@ init(Args) ->
     lager:info("~p init with ~p", [?MODULE, Args]),
     erlang:process_flag(trap_exit, true),
     BaseDir = maps:get(base_dir, Args),
-    CFs = maps:get(cfs, Args, ["default", "poc_mgr_cf"]),
-    {ok, DB, [DefaultCF, POCMgrCF]} = open_db(BaseDir, CFs),
+    CFs = maps:get(cfs, Args, ["default", "local_poc_cf", "local_poc_keys_cf"]),
+    {ok, DB, [DefaultCF, POCMgrCF, POCKeysCF]} = open_db(BaseDir, CFs),
     WriteInterval = get_env(poc_mgr_write_interval, 100),
     Tref = schedule_next_tick(WriteInterval),
-    {ok, #state{db=DB, default=DefaultCF, poc_mgr_cf=POCMgrCF,
+    {ok, #state{db=DB, default=DefaultCF, local_poc_cf=POCMgrCF,
+                local_poc_keys_cf = POCKeysCF,
                 tref=Tref, write_interval=WriteInterval}}.
 
-handle_call(db, _From, #state{db=DB}=State) ->
-    {reply, DB, State};
-handle_call(poc_mgr_cf, _From, #state{poc_mgr_cf=CF}=State) ->
-    {reply, CF, State};
+handle_call(handles, _From, #state{db=DB, local_poc_cf = POCCF, local_poc_keys_cf = KeysCF}=State) ->
+    {reply, {ok, {DB, POCCF, KeysCF}}, State};
 handle_call({gc, IDs}, _From, #state{pending=P, db=DB}=State)->
     {ok, Batch} = rocksdb:batch(),
     ok = lists:foreach(fun(POCID) ->

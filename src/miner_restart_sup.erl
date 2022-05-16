@@ -97,17 +97,16 @@ init(_Opts) ->
                 application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
                 application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
-                [PocMgrTab] = miner_poc_mgr:make_ets_table(),
-                POCMgrOpts = #{tab1 => PocMgrTab},
                 POCOpts = #{base_dir => BaseDir,
                             cfs => ["default",
-                                    "poc_mgr_cf"
+                                    "local_poc_cf",
+                                    "local_poc_keys_cf"
                                    ]
                            },
                 [
                     ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
                     ?WORKER(miner_poc_statem, [POCOpts]),
-                    ?WORKER(miner_poc_mgr, [POCMgrOpts])
+                    ?WORKER(miner_poc_mgr, [])
                 ];
             gateway ->
                 %% running as a gateway
