@@ -294,7 +294,7 @@ handle_info(
             _ -> undefined
         end,
     lager:debug("received add block event, sync is ~p, poc_challenge_type is ~p", [Sync, CurPOCChallengerType]),
-    State1 = maybe_init_addr_hash(State),
+    State1 = maybe_init_addr_hash(Ledger, State),
     ok = handle_add_block_event(CurPOCChallengerType, BlockHash, Ledger, State1),
     {noreply, State1};
 handle_info(
@@ -306,7 +306,8 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    State1 = maybe_init_addr_hash(State),
+    lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
+    State1 = maybe_init_addr_hash(Ledger, State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Ledger, State1),
     {noreply, State1};
 handle_info(_Info, State = #state{}) ->
@@ -331,7 +332,7 @@ handle_add_block_event(POCChallengeType, BlockHash, Ledger, State) when POCChall
         {ok, Block} ->
             BlockHeight = blockchain_block:height(Block),
             %% take care of GC
-            ok = purge_local_pocs(Block, State),
+            ok = purge_local_pocs(Block, Ledger, State),
 
             %% GC local pocs keys every 50 blocks
             case BlockHeight rem 50 == 0 of
@@ -597,17 +598,18 @@ process_block_pocs(
 
 -spec purge_local_pocs(
     Block :: blockchain_block:block(),
+    Ledger :: blockchain_ledger_v1:ledger(),
     State :: state()
 ) -> ok.
 purge_local_pocs(
     Block,
-    #state{chain = Chain, pub_key = SelfPubKeyBin, sig_fun = SigFun} = State
+    Ledger,
+    #state{pub_key = SelfPubKeyBin, sig_fun = SigFun} = State
 ) ->
     %% iterate over the local POCs in our rocksdb
     %% end and clean up any which have exceeded their life span
     %% these are active POCs which were initiated by this node
     %% and the data is known only to this node
-    Ledger = blockchain:ledger(Chain),
     Timeout =
         case blockchain:config(?poc_timeout, Ledger) of
             {ok, N} -> N;
@@ -621,7 +623,7 @@ purge_local_pocs(
                 true ->
                     lager:debug("*** purging local poc with key ~p", [OnionKeyHash]),
                     %% this POC's time is up, submit receipts we have received
-                    ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Chain),
+                    ok = submit_receipts(POC, SelfPubKeyBin, SigFun, Ledger),
                     %% as receipts have been submitted, we can delete the local poc from the db
                     %% the public poc data will remain until at least the receipt txn is absorbed
                     _ = delete_local_poc(OnionKeyHash, State);
@@ -674,7 +676,8 @@ purge_local_poc_keys(
     ),
     ok.
 
--spec submit_receipts(local_poc(), libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun(), blockchain:blockchain()) -> ok.
+-spec submit_receipts(local_poc(), libp2p_crypto:pubkey_bin(),
+    libp2p_crypto:sig_fun(), blockchain_ledger_v1:ledger()) -> ok.
 submit_receipts(
     #local_poc{
         onion_key_hash = OnionKeyHash,
@@ -685,7 +688,7 @@ submit_receipts(
     } = _Data,
     Challenger,
     SigFun,
-    Chain
+    Ledger
 ) ->
     case maps:size(Responses0) of
         0 ->
@@ -710,7 +713,7 @@ submit_receipts(
                 LayerHashes
             ),
             Txn0 =
-                case blockchain:config(?poc_version, blockchain:ledger(Chain)) of
+                case blockchain:config(?poc_version, Ledger) of
                     {ok, PoCVersion} when PoCVersion >= 10 ->
                         blockchain_txn_poc_receipts_v2:new(
                             Challenger,
@@ -778,21 +781,20 @@ check_addr_hash(PeerAddr, #state{
             undefined
     end.
 
--spec maybe_init_addr_hash(#state{}) -> #state{}.
-maybe_init_addr_hash(#state{chain = undefined} = State) ->
+-spec maybe_init_addr_hash(blockchain_ledger_v1:ledger(), #state{}) -> #state{}.
+maybe_init_addr_hash(_Ledger, #state{chain = undefined} = State) ->
     %% no chain
     State;
-maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State) ->
+maybe_init_addr_hash(Ledger, #state{chain = Chain, addr_hash_filter=undefined} = State) ->
     %% check if we have the block we need
-    Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
             case blockchain:config(?poc_challenge_interval, Ledger) of
                 {ok, Interval} ->
-                    {ok, Height} = blockchain:height(Chain),
+                    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
                     StartHeight = max(Height - (Height rem Interval), 1),
                     %% check if we have this block
-                    case blockchain:get_block(StartHeight, Chain) of
+                    case blockchain_ledger_v1:get_block(StartHeight, Ledger) of
                         {ok, Block} ->
                             Hash = blockchain_block:hash_block(Block),
                             %% ok, now we can build the filter
@@ -818,6 +820,7 @@ maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State
             State
     end;
 maybe_init_addr_hash(
+    Ledger,
     #state{
         chain = Chain,
         addr_hash_filter = #addr_hash_filter{
@@ -829,12 +832,11 @@ maybe_init_addr_hash(
         }
     } = State
 ) ->
-    Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
             case blockchain:config(?poc_challenge_interval, Ledger) of
                 {ok, Interval} ->
-                    {ok, CurHeight} = blockchain:height(Chain),
+                    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
                     case max(Height - (Height rem Interval), 1) of
                         StartHeight ->
                             case CurHeight of
@@ -842,7 +844,7 @@ maybe_init_addr_hash(
                                     %% ok, everything lines up
                                     State;
                                 _ ->
-                                    case blockchain:get_block(Height + 1, Chain) of
+                                    case blockchain_ledger_v1:get_block(Height + 1, Ledger) of
                                         {ok, Block} ->
                                             sync_filter(Block, Bloom, Chain),
                                             State#state{
@@ -860,7 +862,7 @@ maybe_init_addr_hash(
                             end;
                         _NewStart ->
                             %% filter is stale
-                            maybe_init_addr_hash(State#state{addr_hash_filter = undefined})
+                            maybe_init_addr_hash(Ledger, State#state{addr_hash_filter = undefined})
                     end;
                 _ ->
                     State
