@@ -407,36 +407,18 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
                                     {noreply, State};
                                 _ ->
                                     Witnesses = maps:get(PacketHash, Response0, []),
-                                    PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
-                                    case erlang:length(Witnesses) >= PerHopMaxWitnesses of
-                                        true ->
-                                            lager:warning("ignoring witness ~p for onionkeyhash ~p. Reason: exceeded per hop max witnesses", [Witness, OnionKeyHash]),
-                                            {noreply, State};
-                                        false ->
-                                            %% Don't allow putting duplicate response in the witness list resp
-                                            Predicate = fun({_, W}) ->
-                                                blockchain_poc_witness_v1:gateway(W) == GatewayWitness
-                                            end,
-                                            Responses1 =
-                                                case lists:any(Predicate, Witnesses) of
-                                                    false ->
-                                                        maps:put(
-                                                            PacketHash,
-                                                            lists:keystore(
-                                                                Peer,
-                                                                1,
-                                                                Witnesses,
-                                                                {Peer, Witness}
-                                                            ),
-                                                            Response0
-                                                        );
-                                                    true ->
-                                                        Response0
-                                                end,
-                                            UpdatedPOC = POC#local_poc{responses = Responses1},
-                                            ok = write_local_poc(UpdatedPOC, State),
-                                            {noreply, State}
-                                    end
+                                    %% Don't allow putting duplicate response in the witness list resp
+                                    Predicate = fun({_, W}) -> blockchain_poc_witness_v1:gateway(W) == GatewayWitness end,
+                                    Responses1 =
+                                        case lists:any(Predicate, Witnesses) of
+                                            false ->
+                                                maps:put(PacketHash, lists:keystore(Peer, 1, Witnesses, {Peer, Witness}), Response0);
+                                            true ->
+                                                Response0
+                                        end,
+                                    UpdatedPOC = POC#local_poc{responses = Responses1},
+                                    ok = write_local_poc(UpdatedPOC, State),
+                                    {noreply, State}
                             end
                     end
             end
@@ -725,15 +707,18 @@ submit_receipts(
             lager:info("POC timed out with no responses @ ~p", [OnionKeyHash]),
             ok;
         _ ->
+            Ledger = blockchain:ledger(Chain),
+            PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
             Path1 = lists:foldl(
                 fun({Challengee, LayerHash}, Acc) ->
                     {Address, Receipt} = maps:get(Challengee, Responses0, {make_ref(), undefined}),
                     %% get any witnesses not from the same p2p address and also ignore challengee as a witness (self-witness)
-                    Witnesses = [
-                        W
-                        || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee
-                    ],
-                    E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses),
+                    Witnesses = [W || {A, W} <- maps:get(LayerHash, Responses0, []), A /= Address, A /= Challengee],
+                    %% randomize the ordering of the witness list
+                    Witnesses1 = blockchain_utils:shuffle(Witnesses),
+                    %% take only the limit
+                    Witnesses2 = lists:sublist(Witnesses1, PerHopMaxWitnesses),
+                    E = blockchain_poc_path_element_v1:new(Challengee, Receipt, Witnesses2),
                     [E | Acc]
                 end,
                 [],
