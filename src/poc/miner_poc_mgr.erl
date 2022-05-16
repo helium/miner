@@ -48,6 +48,7 @@
 -record(addr_hash_filter, {
     start :: pos_integer(),
     height :: pos_integer(),
+    interval :: pos_integer(),
     byte_size :: pos_integer(),
     salt :: binary(),
     bloom :: bloom_nif:bloom()
@@ -795,8 +796,10 @@ maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State
     Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
-            case blockchain:config(?poc_challenge_interval, Ledger) of
-                {ok, Interval} ->
+            case blockchain:config(?poc_challenge_rate, Ledger) of
+                {ok, Rate} ->
+                    Gateways = blockchain_ledger_v1:gateway_count(Ledger),
+                    Interval = floor(Gateways div Rate),
                     {ok, Height} = blockchain:height(Chain),
                     StartHeight = max(Height - (Height rem Interval), 1),
                     %% check if we have this block
@@ -804,13 +807,13 @@ maybe_init_addr_hash(#state{chain = Chain, addr_hash_filter = undefined} = State
                         {ok, Block} ->
                             Hash = blockchain_block:hash_block(Block),
                             %% ok, now we can build the filter
-                            Gateways = blockchain_ledger_v1:gateway_count(Ledger),
                             {ok, Bloom} = bloom:new_optimal(Gateways, ?ADDR_HASH_FP_RATE),
                             sync_filter(Block, Bloom, Chain),
                             State#state{
                                 addr_hash_filter = #addr_hash_filter{
                                     start = StartHeight,
                                     height = Height,
+                                    interval = Interval,
                                     byte_size = Bytes,
                                     salt = Hash,
                                     bloom = Bloom
@@ -831,6 +834,7 @@ maybe_init_addr_hash(
         addr_hash_filter = #addr_hash_filter{
             start = StartHeight,
             height = Height,
+            interval = Interval,
             byte_size = Bytes,
             salt = Hash,
             bloom = Bloom
@@ -840,38 +844,34 @@ maybe_init_addr_hash(
     Ledger = blockchain:ledger(Chain),
     case blockchain:config(?poc_addr_hash_byte_count, Ledger) of
         {ok, Bytes} when is_integer(Bytes), Bytes > 0 ->
-            case blockchain:config(?poc_challenge_interval, Ledger) of
-                {ok, Interval} ->
-                    {ok, CurHeight} = blockchain:height(Chain),
-                    case max(Height - (Height rem Interval), 1) of
-                        StartHeight ->
-                            case CurHeight of
-                                Height ->
-                                    %% ok, everything lines up
-                                    State;
+            {ok, CurHeight} = blockchain:height(Chain),
+            case max(Height - (Height rem Interval), 1) of
+                StartHeight ->
+                    case CurHeight of
+                        Height ->
+                            %% ok, everything lines up
+                            State;
+                        _ ->
+                            case blockchain:get_block(Height + 1, Chain) of
+                                {ok, Block} ->
+                                    sync_filter(Block, Bloom, Chain),
+                                    State#state{
+                                        addr_hash_filter = #addr_hash_filter{
+                                            start = StartHeight,
+                                            height = CurHeight,
+                                            interval = Interval,
+                                            byte_size = Bytes,
+                                            salt = Hash,
+                                            bloom = Bloom
+                                        }
+                                    };
                                 _ ->
-                                    case blockchain:get_block(Height + 1, Chain) of
-                                        {ok, Block} ->
-                                            sync_filter(Block, Bloom, Chain),
-                                            State#state{
-                                                addr_hash_filter = #addr_hash_filter{
-                                                    start = StartHeight,
-                                                    height = CurHeight,
-                                                    byte_size = Bytes,
-                                                    salt = Hash,
-                                                    bloom = Bloom
-                                                }
-                                            };
-                                        _ ->
-                                            State
-                                    end
-                            end;
-                        _NewStart ->
-                            %% filter is stale
-                            maybe_init_addr_hash(State#state{addr_hash_filter = undefined})
+                                    State
+                            end
                     end;
-                _ ->
-                    State
+                _NewStart ->
+                    %% filter is stale
+                    maybe_init_addr_hash(State#state{addr_hash_filter = undefined})
             end;
         _ ->
             State#state{addr_hash_filter = undefined}
