@@ -12,6 +12,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 -define(ADDR_HASH_FP_RATE, 1.0e-9).
 -define(LOCAL_POC_DB_CF, {?MODULE, local_poc_db_cf_handle}).
@@ -557,7 +558,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                         start_height = POCStartHeight
                     },
                     ok = write_local_poc(LocalPOC, State),
-                    lager:info("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
+                    lager:info("started poc for challengeraddr ~p, onionhash ~p", [?TO_ANIMAL_NAME(Challenger), OnionKeyHash]),
                     ok
             end
     end.
