@@ -24,6 +24,13 @@
          chain :: undefined | blockchain:blockchain()
         }).
 
+-ifdef(TEST).
+-define(BYPASS_IP_CHECK,true).
+-else.
+-define(BYPASS_IP_CHECK,false).
+-endif.
+
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -84,27 +91,39 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                     case blockchain_ledger_validator_v1:last_heartbeat(Val) of
                         N when (N + HBInterval) =< Height
                                andalso ((not Sync) orelse TimeAgo =< (60 * 30)) ->
-                            %% we need to construct and submit a heartbeat txn
-                            {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
-                            {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
-                            %% generate a set of ephemeral keys to represent POC
-                            %% key proposals for this heartbeat
-                            %% hashes of the public keys are included in the HB
-                            %% public and private keys are cached locally
-                            {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
-                            lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
-                            ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
-                            %% include any inactive GWs which have since come active
-                            %% activity here is determined by subscribing to the
-                            %% poc stream
-                            ReactivatedGWs = reactivated_gws(Ledger),
-                            UnsignedTxn =
-                                blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
-                            Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
-                            lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
-                            Self = self(),
-                            blockchain_worker:submit_txn(Txn, fun(Res) -> Self ! {sub, Res} end),
-                            {noreply, State#state{txn_status = waiting}};
+                            %% it is time to heartbeat, check for a public listening address
+                            SwarmTID = blockchain_swarm:tid(),
+                            PeerBook = libp2p_swarm:peerbook(SwarmTID),
+                            {ok, Peer} = libp2p_peerbook:get(PeerBook, blockchain_swarm:pubkey_bin()),
+                            ListenAddresses = libp2p_peer:listen_addrs(Peer),
+                            case ?BYPASS_IP_CHECK orelse lists:any(fun libp2p_transport_tcp:is_public/1, ListenAddresses) of
+                                true ->
+                                    %% we need to construct and submit a heartbeat txn
+                                    {ok, CBMod} = blockchain_ledger_v1:config(?predicate_callback_mod, Ledger),
+                                    {ok, Callback} = blockchain_ledger_v1:config(?predicate_callback_fun, Ledger),
+                                    %% generate a set of ephemeral keys to represent POC
+                                    %% key proposals for this heartbeat
+                                    %% hashes of the public keys are included in the HB
+                                    %% public and private keys are cached locally
+                                    {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
+                                    lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
+                                    ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
+                                    %% include any inactive GWs which have since come active
+                                    %% activity here is determined by subscribing to the
+                                    %% poc stream
+                                    ReactivatedGWs = reactivated_gws(Ledger),
+                                    UnsignedTxn =
+                                        blockchain_txn_validator_heartbeat_v1:new(Address, Height, CBMod:Callback(), EmpKeyHashes, ReactivatedGWs),
+                                    Txn = blockchain_txn_validator_heartbeat_v1:sign(UnsignedTxn, SigFun),
+                                    lager:info("submitting txn ~p for val ~p ~p ~p", [Txn, Val, N, HBInterval]),
+                                    Self = self(),
+                                    blockchain_worker:submit_txn(Txn, fun(Res) -> Self ! {sub, Res} end),
+                                    {noreply, State#state{txn_status = waiting}};
+                                false ->
+                                    lager:warning("skipping heartbeat, validator has no public listen address in peerbook:",
+                                        [ListenAddresses]),
+                                    {noreply, State}
+                            end;
                         _ -> {noreply, State}
                     end;
                 {error, not_found} ->
