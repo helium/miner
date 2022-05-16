@@ -183,7 +183,7 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:debug("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -428,7 +428,7 @@ handle_witness(Witness, OnionKeyHash, Peer, #state{chain = Chain} = State) ->
     State :: #state{}
 ) -> {noreply, state()}.
 handle_receipt(Receipt, OnionKeyHash, Peer, PeerAddr, #state{chain = Chain} = State) ->
-    lager:debug("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
+    lager:info("got receipt ~p with onionkeyhash ~p", [Receipt, OnionKeyHash]),
     Gateway = blockchain_poc_receipt_v1:gateway(Receipt),
     LayerData = blockchain_poc_receipt_v1:data(Receipt),
     Ledger = blockchain:ledger(Chain),
@@ -521,7 +521,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target(Challenger, InitTargetRandState, ZoneRandState, Ledger, Vars) of
         {error, Reason}->
-            lager:notice("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
+            lager:warning("failed to find a target for poc key ~p, reason ~p", [OnionKeyHash, Reason]),
             noop;
         {ok, {TargetPubkeybin, TargetRandState}}->
             case miner_poc_denylist:check(TargetPubkeybin) of
@@ -557,7 +557,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                         start_height = POCStartHeight
                     },
                     ok = write_local_poc(LocalPOC, State),
-                    lager:info("started poc with onionhash ~p", [OnionKeyHash]),
+                    lager:info("started poc for challengeraddr ~p, onionhash ~p", [Challenger, OnionKeyHash]),
                     ok
             end
     end.
