@@ -696,7 +696,6 @@ submit_receipts(
             lager:info("POC timed out with no responses @ ~p", [OnionKeyHash]),
             ok;
         _ ->
-            Ledger = blockchain:ledger(Chain),
             PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
             Path1 = lists:foldl(
                 fun({Challengee, LayerHash}, Acc) ->
