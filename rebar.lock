@@ -13,7 +13,7 @@
  {<<"certifi">>,{pkg,<<"certifi">>,<<"2.8.0">>},2},
  {<<"chatterbox">>,
   {git,"https://github.com/novalabsxyz/chatterbox",
-       {ref,"9055e611d509eec2f182bbf52a54ec821b17ac59"}},
+       {ref,"8acc65b76628c2adcd15257bf17ee2a95c8c41db"}},
   2},
  {<<"clique">>,
   {git,"https://github.com/helium/clique.git",
