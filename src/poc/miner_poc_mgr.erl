@@ -686,7 +686,8 @@ submit_receipts(
         responses = Responses0,
         secret = Secret,
         packet_hashes = LayerHashes,
-        block_hash = BlockHash
+        block_hash = BlockHash,
+        target = _Target
     } = _Data,
     Challenger,
     SigFun,
@@ -694,7 +695,7 @@ submit_receipts(
 ) ->
     case maps:size(Responses0) of
         0 ->
-            lager:info("POC timed out with no responses @ ~p", [OnionKeyHash]),
+            lager:info("POC timed out with no responses for key ~p & target ~p", [OnionKeyHash, _Target]),
             ok;
         _ ->
             PerHopMaxWitnesses = blockchain_utils:poc_per_hop_max_witnesses(Ledger),
