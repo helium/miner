@@ -902,7 +902,7 @@ delete_cached_check_target_req(Key) ->
 check_if_target(
     URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, IsRetry
 ) ->
-    F = fun() ->
+%%    F = fun() ->
         try
             lager:info("about to check target result for key ~p, uri: ~p", [OnionKeyHash, URI]),
             TargetRes =
@@ -956,9 +956,9 @@ check_if_target(
         catch _What:_Why:_Stack ->
             lager:warning("check_if_target failed. What: ~p, Why: ~p, Stack: ~p", [_What, _Why, _Stack]),
             ok
-        end
-    end,
-    spawn(F),
+        end,
+%%    end,
+%%    spawn(F),
     ok.
 
 -spec send_check_target_req(
