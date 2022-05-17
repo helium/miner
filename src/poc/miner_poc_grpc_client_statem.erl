@@ -136,8 +136,8 @@ connection() ->
     Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
     OnionKeyHash :: binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash) ->
-    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 
-            application:get_env(miner, poc_send_report_retry_attempts, 
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash,
+            application:get_env(miner, poc_send_report_retry_attempts,
                                 ?DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS)}).
 
 -spec send_report(
