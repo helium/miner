@@ -33,6 +33,11 @@
 %% txns that do not appear naturally
 -define(InvalidTxns, [blockchain_txn_reward_v1, blockchain_txn_reward_v2]).
 
+-define(VALID_TXNS, valid_txns).
+-define(INVALID_TXNS, invalid_txns).
+-define(TIMEDOUT_TXNS, timedout_txns).
+-define(VALIDATION_METRICS, [?VALID_TXNS, ?INVALID_TXNS, ?TIMEDOUT_TXNS]).
+
 -record(validation,
         {
          timer :: reference(),
@@ -186,6 +191,7 @@ handle_call({new_round, Buf, RemoveTxns}, _From, #state{chain = Chain} = State) 
     blockchain_ledger_v1:reset_context(Ledger),
     Buf1 = Buf -- RemoveTxns,
     Buf2 = filter_txn_buffer(Buf1, Chain),
+    log_and_reset_validation_metrics(),
     {reply, Buf2, State};
 handle_call({prefilter_round, _Buf, _RemoveTxns}, _From, #state{chain = undefined} = State) ->
     {reply, [], State};
@@ -220,15 +226,18 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
             case Res of
                 {error, validation_deadline} ->
                     %% these are expected from the validation timer below
+                    ok = update_validation_metric(?TIMEDOUT_TXNS, unknown_type),
                     ok;
                 _ ->
                     lager:warning("response for unknown ref [~p]: ~p", [Ref, Res])
             end,
             {noreply, State};
         #validation{from = From, pid = Pid, txn = Txn, monitor = MRef} ->
+            Type = blockchain_txn:type(Txn),
             Result =
                 case Res of
                     ok ->
+                        ok = update_validation_metric(?VALID_TXNS, Type),
                         case blockchain_txn:absorb(Txn, Chain) of
                             ok ->
                                 %% avoid deadlock by not waiting for this.
@@ -243,10 +252,12 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                     {error, validation_deadline}=Error ->
                         erlang:exit(Pid, kill),
                         write_txn("timed out", Height, Txn),
+                        ok = update_validation_metric(?TIMEDOUT_TXNS, Type),
                         lager:warning("validation timed out for ~s", [blockchain_txn:print(Txn)]),
                         Error;
                     {error, Error} ->
                         write_txn("failed", Height, Txn),
+                        ok = update_validation_metric(?INVALID_TXNS, Type),
                         lager:warning("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                         Error
                 end,
@@ -264,10 +275,11 @@ handle_info(
                         fun(_K, #validation{monitor = MRef}) when Ref == MRef -> true;
                            (_, _) -> false end,
                         Validations)) of
-        [{Attempt, #validation{from = From}}] ->
+        [{Attempt, #validation{from = From, txn = Txn}}] ->
             Result = {error, validation_crashed},
             gen_server:reply(From, {Result, Height}),
             Validations1 = maps:remove(Attempt, Validations),
+            ok = update_validation_metric(?INVALID_TXNS, blockchain_txn:type(Txn)),
             {noreply, maybe_start_validation(State#state{validations = Validations1})};
         _ ->
             lager:warning("DOWN msg for unknown ref. pid = ~p reason = ", [_Pid, Reason]),
@@ -375,3 +387,21 @@ get_config(Var, Default, Ledger) ->
         {ok, V} -> V;
         _ -> Default
     end.
+
+update_validation_metric(ResultType, TxnType) ->
+    case get(ResultType) of
+        undefined ->
+            put(ResultType, #{TxnType => 1});
+        TxnMap when is_map(TxnMap) ->
+            put(ResultType, maps:update_with(TxnType, fun(Count) -> Count + 1 end, 1, TxnMap))
+    end,
+    ok.
+
+log_and_reset_validation_metrics() ->
+    [
+      begin
+          TypeResult = erase(Type),
+          lager:info("~p txns for the current round: ~p", [Type, TypeResult])
+      end || Type <- ?VALIDATION_METRICS
+    ],
+    ok.
