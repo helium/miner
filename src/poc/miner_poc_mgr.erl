@@ -728,7 +728,7 @@ submit_receipts(
                         %% hmm we shouldnt really hit here as this all started with poc version 10
                         noop
                 end,
-            lager:info("submitting blockchain_txn_poc_receipts_v2 for onion key hash ~p: ~p", [OnionKeyHash, Txn0]),
+            lager:info("submitting blockchain_txn_poc_receipts_v2. challenger: ~p, target: ~p, onionkeyhash ~p: txn: ~p", [?TO_ANIMAL_NAME(Challenger), ?TO_ANIMAL_NAME(Target), OnionKeyHash, Txn0]),
             Txn1 = blockchain_txn:sign(Txn0, SigFun),
             ok = blockchain_txn_mgr:submit(Txn1, fun(_Result) -> noop end)
     end.
