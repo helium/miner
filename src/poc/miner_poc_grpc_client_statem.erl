@@ -511,7 +511,7 @@ connect_validator(ValAddr, ValIP, ValPort) ->
                 ),
                 Error;
             {ok, Connection} = Res ->
-                lager:info("successfully connected to validator via connection ~p", [Connection]),
+                lager:info("successfully connected to validator ~p via connection ~p", [ValAddr, Connection]),
                 Res
         end
     catch
@@ -903,53 +903,59 @@ check_if_target(
     URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, IsRetry
 ) ->
     F = fun() ->
-        TargetRes =
-            send_check_target_req(
-                URI,
-                PubKeyBin,
-                OnionKeyHash,
-                BlockHash,
-                NotificationHeight,
-                ChallengerSig
-            ),
-        lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
-        case TargetRes of
-            {ok, Result, _Details} ->
-                %% we got an expected response, purge req from queued cache should it exist
-                _ = delete_cached_check_target_req(OnionKeyHash),
-                handle_check_target_resp(Result);
-            {error, <<"queued_poc">>, _Details = #{height := ValRespHeight}} ->
-                %% seems the POC key exists but the POC itself may not yet be initialised
-                %% this can happen if the challenging validator is behind our
-                %% notifying validator
-                %% if the challenger height is behind or equal
-                %% to the notifier, then cache the check target req
-                %% and retry it periodically
-                N = NotificationHeight - ValRespHeight,
-                case (N >= 0) andalso (not IsRetry) of
-                    true ->
-                        CurTSInSecs = erlang:system_time(second),
-                        _ = cache_check_target_req(
-                            OnionKeyHash,
-                            {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                                ChallengerSig, CurTSInSecs}
-                        ),
-                        lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
-                            OnionKeyHash, CurTSInSecs
-                        ]),
-                        ok;
-                    false ->
-                        %% eh shouldnt hit here but ok
-                        ok
-                end;
-            {error, _Reason, _Details} ->
-                %% we got an non queued response, purge req from queued cache should it exist
-                _ = delete_cached_check_target_req(OnionKeyHash),
-                ok;
-            {error, _Reason} ->
-                %% we got an non queued response, purge req from queued cache should it exist
-                _ = delete_cached_check_target_req(OnionKeyHash),
-                ok
+        try
+            lager:info("about to check target result for key ~p, uri: ~p", [OnionKeyHash, URI]),
+            TargetRes =
+                send_check_target_req(
+                    URI,
+                    PubKeyBin,
+                    OnionKeyHash,
+                    BlockHash,
+                    NotificationHeight,
+                    ChallengerSig
+                ),
+            lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
+            case TargetRes of
+                {ok, Result, _Details} ->
+                    %% we got an expected response, purge req from queued cache should it exist
+                    _ = delete_cached_check_target_req(OnionKeyHash),
+                    handle_check_target_resp(Result);
+                {error, <<"queued_poc">>, _Details = #{height := ValRespHeight}} ->
+                    %% seems the POC key exists but the POC itself may not yet be initialised
+                    %% this can happen if the challenging validator is behind our
+                    %% notifying validator
+                    %% if the challenger height is behind or equal
+                    %% to the notifier, then cache the check target req
+                    %% and retry it periodically
+                    N = NotificationHeight - ValRespHeight,
+                    case (N >= 0) andalso (not IsRetry) of
+                        true ->
+                            CurTSInSecs = erlang:system_time(second),
+                            _ = cache_check_target_req(
+                                OnionKeyHash,
+                                {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+                                    ChallengerSig, CurTSInSecs}
+                            ),
+                            lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
+                                OnionKeyHash, CurTSInSecs
+                            ]),
+                            ok;
+                        false ->
+                            %% eh shouldnt hit here but ok
+                            ok
+                    end;
+                {error, _Reason, _Details} ->
+                    %% we got an non queued response, purge req from queued cache should it exist
+                    _ = delete_cached_check_target_req(OnionKeyHash),
+                    ok;
+                {error, _Reason} ->
+                    %% we got an non queued response, purge req from queued cache should it exist
+                    _ = delete_cached_check_target_req(OnionKeyHash),
+                    ok
+            end
+        catch _What:_Why:_Stack ->
+            lager:warning("check_if_target failed. What: ~p, Why: ~p, Stack: ~p", [_What, _Why, _Stack]),
+            ok
         end
     end,
     spawn(F),
