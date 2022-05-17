@@ -8,6 +8,7 @@
 -include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -135,8 +136,8 @@ connection() ->
     Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
     OnionKeyHash :: binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash) ->
-    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 
-            application:get_env(miner, poc_send_report_retry_attempts, 
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash,
+            application:get_env(miner, poc_send_report_retry_attempts,
                                 ?DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS)}).
 
 -spec send_report(
@@ -511,7 +512,8 @@ connect_validator(ValAddr, ValIP, ValPort) ->
                 ),
                 Error;
             {ok, Connection} = Res ->
-                lager:info("successfully connected to validator ~p via connection ~p", [ValAddr, Connection]),
+                Animal = ?TO_ANIMAL_NAME(libp2p_crypto:p2p_to_pubkey_bin(ValAddr)),
+                lager:info("successfully connected to validator ~p via connection ~p", [Animal, Connection]),
                 Res
         end
     catch
@@ -906,8 +908,6 @@ check_if_target(
     URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
     ChallengerSig, SelfSigFun, IsRetry
 ) ->
-%%    try
-        lager:info("about to check target result for key ~p, uri: ~p", [OnionKeyHash, URI]),
         TargetRes =
             send_check_target_req(
                 URI,
@@ -934,52 +934,35 @@ check_if_target(
                 N = NotificationHeight - ValRespHeight,
                 case (N >= 0) andalso (not IsRetry) of
                     true ->
-                        CurTSInSecs = erlang:system_time(second),
-                        _ = cache_check_target_req(
-                            OnionKeyHash,
-                            {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                                ChallengerSig, CurTSInSecs}
-                        ),
-                        lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
-                            OnionKeyHash, CurTSInSecs
-                        ]),
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
                         ok;
                     false ->
                         %% eh shouldnt hit here but ok
                         ok
                 end;
             {error, _Reason, _Details} ->
-                %% we got an non queued response, purge req from queued cache should it exist
-                %% these are valid errors, which should not be retried
+                %% we got a non queued response, purge req from queued cache should it exist
+                %% these are valid errors, which should not be retried, like mismatched block hash
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok;
             {error, req_failed} ->
-                %% req failed, queue it and try again later
+                %% the grpc req failed, queue it and try again later
                 case (not IsRetry) of
                     true ->
-                        CurTSInSecs = erlang:system_time(second),
-                        _ = cache_check_target_req(
-                            OnionKeyHash,
-                            {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                                ChallengerSig, CurTSInSecs}
-                        ),
-                        lager:debug("queuing failed check target request for onionkeyhash ~p with ts ~p", [
-                            OnionKeyHash, CurTSInSecs
-                        ]),
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
                         ok;
                     false ->
                         %% eh shouldnt hit here but ok
                         ok
                 end;
             {error, _Reason} ->
-                %% we got an non queued response, purge req from queued cache should it exist
+                %% got an error we are not sure what about,
+                %% purge req from queued cache should it exist
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok
         end.
-%%    catch _What:_Why:_Stack ->
-%%        lager:warning("check_if_target failed. What: ~p, Why: ~p, Stack: ~p", [_What, _Why, _Stack]),
-%%        ok
-%%    end.
 
 -spec send_check_target_req(
     ChallengerURI :: string(),
@@ -1024,6 +1007,26 @@ handle_check_target_resp(
 handle_check_target_resp(
     #gateway_poc_check_challenge_target_resp_v1_pb{target = false} = _ChallengeResp
 ) ->
+    ok.
+
+-spec queue_check_target_req(
+    OnionKeyHash :: binary(),
+    ChallengerURI :: string(),
+    PubKeyBin :: binary(),
+    BlockHash :: binary(),
+    NotificationHeight :: non_neg_integer(),
+    ChallengerSig :: binary()
+) -> ok.
+queue_check_target_req(OnionKeyHash, URI, PubKeyBin, BlockHash, NotificationHeight, ChallengerSig) ->
+    CurTSInSecs = erlang:system_time(second),
+    _ = cache_check_target_req(
+        OnionKeyHash,
+        {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+            ChallengerSig, CurTSInSecs}
+    ),
+    lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
+        OnionKeyHash, CurTSInSecs
+    ]),
     ok.
 
 do_handle_streamed_msg(
