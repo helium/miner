@@ -36,7 +36,8 @@
     report/4,
     active_pocs/0,
     local_poc/1,
-    local_poc_key/1
+    local_poc_key/1,
+    local_poc_keys/1
 ]).
 %% ------------------------------------------------------------------
 %% gen_server exports
@@ -664,7 +665,7 @@ purge_local_poc_keys(
     %% iterate over the cached POC keys, delete any which are beyond the lifespan of when the active POC would have ended
     CachedPOCKeys = local_poc_keys(State),
     lists:foreach(
-        fun(#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}) ->
+        fun([#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}]) ->
             case (BlockHeight - ReceiveHeight) > (POCEphemeralKeyTimeout + POCTimeout) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
