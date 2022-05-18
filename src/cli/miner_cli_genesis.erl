@@ -358,7 +358,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
             [clique_status:alert([clique_status:text("Undefined Blockchain")])];
         Chain ->
             Ledger = blockchain:ledger(Chain),
-            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+%%            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
 
             #{public := Pub, secret := PrivKey} = libp2p_crypto:keys_from_bin(base58:base58_to_binary(MasterKeyB58)),
             PubKeyBin = libp2p_crypto:pubkey_to_bin(Pub),
@@ -409,15 +409,22 @@ export_ledger(MasterKeyB58, OutputFile) ->
                     end, [], SecurityAccounts),
 
             %% iterate over validators and generate a gen txn for each
+            ValidVals = [
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YdBWwpRimEoPZ5WDxgv9ZBUfxhXyVFTkpX1oRLwmncWRvqj7Vh"), %% testval1
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6"), %% testval2
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL"), %% testval3
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1Zmw2S5ksj4oxDMYFz3vQxFNnQsE7Sc3Mv9YrkiWktLznwng935"), %% testval4
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YqV6er1KDWBR9zRcXm3ktqY2Gi3r7QZRD8mDPq6yz5JNxt2zxy"), %% testval5
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZAxCrEsigGVbLUM37Jki6p88kyZ5NVqjVC6oHSbqu49t7bQDym")  %% testval6
+            ],
+
             ValFun =
                 fun(V, Acc) ->
+                    ValAddr = blockchain_ledger_validator_v1:address(V),
                     case
-                        (blockchain_ledger_validator_v1:last_heartbeat(V) +
-                        1440) >=
-                        CurHeight
+                        lists:member(ValAddr, ValidVals)
                     of
                         true ->
-                            ValAddr = blockchain_ledger_validator_v1:address(V),
                             ValOwner = blockchain_ledger_validator_v1:owner_address(V),
                             ValStake = blockchain_ledger_validator_v1:stake(V),
                             [blockchain_txn_gen_validator_v1:new(ValAddr, ValOwner, ValStake) | Acc];
@@ -429,18 +436,34 @@ export_ledger(MasterKeyB58, OutputFile) ->
 
             %% get all active gateways and generate a gen txn for each
             %% GWs without a location are excluded
+            ValidGWs = [
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YGBNd5mgbPbk5A2PQ8CUkEBf1JfQ5jYoy4kwUNpuuk4Y63NiSo"), %% small-ruby-moth
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZdRHnr1ji5X6KFF7Znob6eLGTqtdWgNiYpfprKikn6S65qHdXa"), %% faithful-ebony-lion
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YVf4GUC3ZNZ3jAPXy6xTPKNBShbKzsks33fcRGjYRxmkS3kf12"), %% prehistoric-mulberry-orca
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZohUEys8pSzkRgSDzJDJwg6YDtbBk5JRVBGPmLipCwFGjpuLuE"), %% bitter-indigo-gerbil
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YbHBFEWgApM8D9NPMeziUmqDjVF2J7UDf8xCSxGc9R6bWgeSwF"), %% radiant basil whale
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1YRgoMNf8bjf9Y4DQzmWSM6U5j4UJAdvv6icTuy7gs2ssiwgveU"), %% Nutty Carob Frog
+                libp2p_crypto:p2p_to_pubkey_bin("/p2p/1ZEphpPd86AtmukjvFCXDFnDaqvo8sLvtEZC7Gk4i7EN17Q31pL") %% Raspy Wool Starfish
+            ],
             GWs = blockchain_ledger_v1:snapshot_gateways(Ledger),
             NewGenGatewayTxns =
                 lists:foldl(
                     fun({GWAddr, GW}, Acc) ->
-                        GWOwnerAddr = blockchain_ledger_gateway_v2:owner_address(GW),
-                        case blockchain_ledger_gateway_v2:location(GW) of
-                            [] -> Acc;
-                            undefined -> Acc;
-                            GWLoc ->
-                                GWNonce = blockchain_ledger_gateway_v2:nonce(GW),
-                                [blockchain_txn_gen_gateway_v1:new(GWAddr, GWOwnerAddr, GWLoc, GWNonce) | Acc]
-                        end
+                    case
+                        lists:member(GWAddr, ValidGWs)
+                    of
+                        true ->
+                            GWOwnerAddr = blockchain_ledger_gateway_v2:owner_address(GW),
+                            case blockchain_ledger_gateway_v2:location(GW) of
+                                [] -> Acc;
+                                undefined -> Acc;
+                                GWLoc ->
+                                    GWNonce = blockchain_ledger_gateway_v2:nonce(GW),
+                                    [blockchain_txn_gen_gateway_v1:new(GWAddr, GWOwnerAddr, GWLoc, GWNonce) | Acc]
+                            end;
+                        false ->
+                            Acc
+                    end
                     end, [], GWs),
 
             %% get current oracle price and generate gen txn
