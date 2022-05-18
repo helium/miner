@@ -193,11 +193,16 @@ setup(enter, _OldState, Data) ->
     %% connection to a durable validators
     %% thus ensure all streams are disconnected
     ok = disconnect(Data),
-    erlang:send_after(1000, self(), active_check),
+    catch erlang:cancel_timer(Data#data.stability_check_timer),
+    catch erlang:cancel_timer(Data#data.block_age_timer),
+    erlang:send_after(5000, self(), active_check),
     {keep_state, Data#data{
         val_public_ip = undefined,
         val_grpc_port = undefined,
-        val_p2p_addr = undefined
+        val_p2p_addr = undefined,
+        connection = undefined,
+        connection_pid = undefined,
+        conn_monitor_ref = undefined
     }};
 setup(info, active_check, Data) ->
     %% env var `enable_grpc_client` will have a value of true
@@ -246,8 +251,6 @@ setup(
             M = erlang:monitor(process, ConnectionPid),
             %% once we have a validator connection established
             %% fire a timer to check how stable the streams are behaving
-            catch erlang:cancel_timer(Data#data.stability_check_timer),
-            catch erlang:cancel_timer(Data#data.block_age_timer),
             SCTRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
             BACTRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
             {keep_state,
@@ -351,7 +354,7 @@ setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
     {keep_state, Data};
 setup(info, {delayed_down_event, Event}, Data) ->
-    handle_down_event(connected, Event, Data);
+    handle_down_event(setup, Event, Data);
 setup(info, stability_check, Data) ->
     handle_stability_check(setup, Data);
 setup(info, block_age_check, Data) ->
@@ -1088,7 +1091,7 @@ handle_down_event(
     lager:warning("GRPC connection to validator is down, reconnecting.  Reason: ~p", [Reason]),
     catch grpc_client_custom:stop_connection(Connection),
     %% if the connection goes down, enter setup state to reconnect
-    {next_state, setup, Data};
+    {next_state, setup, Data#data{connection = undefined}};
 handle_down_event(
     _CurState,
     {'DOWN', Ref, process, _, Reason} = Event,
@@ -1099,7 +1102,7 @@ handle_down_event(
         self_sig_fun = SelfSigFun,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("poc stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1124,7 +1127,7 @@ handle_down_event(
         connection = Connection,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the config_update stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("config_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1152,7 +1155,7 @@ handle_down_event(
         self_sig_fun = SelfSigFun,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the region_params stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("region_params_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
