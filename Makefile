@@ -11,7 +11,7 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
-GATEWAY_RS_VSN ?= "v1.0.0-alpha.24"
+GATEWAY_RS_VSN ?= "72fc301c895e33d30d1cb9207fe7e9c591602371"
 GWMP_MUX_VSN ?= "v0.9.4"
 
 all: compile
