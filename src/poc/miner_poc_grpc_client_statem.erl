@@ -1021,7 +1021,14 @@ handle_check_target_resp(
     ChallengerSig :: binary()
 ) -> ok.
 queue_check_target_req(OnionKeyHash, URI, PubKeyBin, BlockHash, NotificationHeight, ChallengerSig) ->
-    CurTSInSecs = erlang:system_time(second),
+    CurTSInSecs = case ets:match(?CHECK_TARGET_REQS, {OnionKeyHash, $1}) of
+        %% should only match one
+        [[Match]] ->
+            {_ChallengerURI, _ChallengerPubKeyBin, _OnionKeyHash, _BlockHash, _NotificationHeight, _ChallengerSig, QueueEnterTSInSecs} = Match,
+            QueueEnterTSInSecs;
+        [] ->
+            erlang:system_time(second)
+    end,
     _ = cache_check_target_req(
         OnionKeyHash,
         {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
