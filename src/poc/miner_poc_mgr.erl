@@ -667,7 +667,7 @@ purge_local_poc_keys(
     CachedPOCKeys = local_poc_keys(State),
     lists:foreach(
         fun([#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}]) ->
-            case (BlockHeight - ReceiveHeight) > (POCEphemeralKeyTimeout + POCTimeout) of
+            case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     ok = delete_local_poc_keys(Key, DB, CF);
