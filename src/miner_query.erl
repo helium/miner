@@ -13,7 +13,8 @@
          txns/2, txns/3,
          blocks/2,
          lookup_txns_by_hash/2,
-         lookup_txns_by_type/2]).
+         lookup_txns_by_type/2,
+         lookup_txns_by_onion/2]).
 
 poc_analyze(_Start, _End) ->
     ok.
@@ -84,6 +85,28 @@ lookup_txns_by_hash(LastXBlocks, TxnHash) ->
                 case lists:filter(fun(T) ->
                                           blockchain_txn:hash(T) == TxnHash
                                   end, blockchain_block:transactions(B)) of
+                    [] -> Acc;
+                    R -> [{I, R} | Acc]
+                end
+        end,
+        Current - LastXBlocks, Current, C,
+        [])).
+
+lookup_txns_by_onion(LastXBlocks, OnionHash) ->
+    C = blockchain_worker:blockchain(),
+    {ok, Current} = blockchain:height(C),
+    lists:reverse(
+      fold_blocks(
+        fun(B, Acc) ->
+                I = blockchain_block:height(B),
+                case lists:filter(fun(T) ->
+                        case blockchain_txn:type(T) == 'blockchain_txn_poc_receipts_v2' of
+                            true ->
+                                blockchain_txn_poc_receipts_v2:onion_key_hash(T) == OnionHash;
+                            _ ->
+                                false
+                        end
+                    end, blockchain_block:transactions(B)) of
                     [] -> Acc;
                     R -> [{I, R} | Acc]
                 end

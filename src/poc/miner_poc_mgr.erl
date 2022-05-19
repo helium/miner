@@ -308,7 +308,7 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
+    lager:info("received poc keys event at height: ~p: ~p", [BlockHeight, BlockPOCs]),
     State1 = maybe_init_addr_hash(Ledger, State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Ledger, State1),
     {noreply, State1};
