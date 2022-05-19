@@ -546,7 +546,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                     },
                     ok = write_local_poc(LocalPOC, State),
                     lager:info("started poc at blockheight ~p for challengeraddr ~p, onionhash ~p, target: ~p",
-                        [BlockHeight, ?TO_ANIMAL_NAME(Challenger), OnionKeyHash, ?TO_ANIMAL_NAME(TargetPubkeybin]),
+                        [BlockHeight, ?TO_ANIMAL_NAME(Challenger), OnionKeyHash, ?TO_ANIMAL_NAME(TargetPubkeybin)]),
                     ok
             end
     end.
