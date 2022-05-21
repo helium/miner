@@ -8,6 +8,7 @@
 -include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -50,7 +51,10 @@
     val_p2p_addr,
     val_public_ip,
     val_grpc_port,
-    check_target_req_timer
+    check_target_req_timer,
+    down_events_in_period = 0,
+    stability_check_timer,
+    block_age_timer
 }).
 
 %% these are config vars the miner is interested in, if they change we
@@ -59,6 +63,8 @@
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
+-define(DEFAULT_GRPC_SEND_REPORT_RETRY_DELAY, 30000).
+-define(DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS, 20).
 -ifdef(TEST).
 %% delay between active check retries
 %% these checks determine where to proceed with
@@ -71,7 +77,18 @@
 -define(CHECK_TARGET_REQ_DELAY, 60000).
 -endif.
 %% delay between stream reconnects attempts
--define(STREAM_RECONNECT_DELAY, 5000).
+-define(RECONNECT_DELAY, 5000).
+%% Periodic timer to check the stability of our validator connection
+%% if we get too many stream disconnects during this period
+%% we assume the val is unstable and will connect to a new val
+-define(STREAM_STABILITY_CHECK_TIMEOUT, 90000).
+%% max number of stream down events  within the STREAM_STABILITY_CHECK_TIMEOUT period
+%% after which we will select a new validator
+-define(MAX_DOWN_EVENTS_IN_PERIOD, (?STREAM_STABILITY_CHECK_TIMEOUT / ?RECONNECT_DELAY) - 2).
+-define(BLOCK_AGE_TIMEOUT, 450000).
+%% Maximum block age returned by a connected validator before triggering an instability reconnect
+%% Measured in seconds as this is the unit of time returned by the validator for block_age
+-define(MAX_BLOCK_AGE, 900).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
@@ -119,7 +136,9 @@ connection() ->
     Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
     OnionKeyHash :: binary()) -> ok.
 send_report(ReportType, Report, OnionKeyHash) ->
-    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 5}).
+    gen_statem:cast(?MODULE, {send_report, ReportType, Report, OnionKeyHash, 
+            application:get_env(miner, poc_send_report_retry_attempts, 
+                                ?DEFAULT_GRPC_SEND_REPORT_RETRY_ATTEMPTS)}).
 
 -spec send_report(
     ReportType :: witness | receipt,
@@ -174,11 +193,16 @@ setup(enter, _OldState, Data) ->
     %% connection to a durable validators
     %% thus ensure all streams are disconnected
     ok = disconnect(Data),
-    erlang:send_after(1000, self(), active_check),
+    catch erlang:cancel_timer(Data#data.stability_check_timer),
+    catch erlang:cancel_timer(Data#data.block_age_timer),
+    erlang:send_after(5000, self(), active_check),
     {keep_state, Data#data{
         val_public_ip = undefined,
         val_grpc_port = undefined,
-        val_p2p_addr = undefined
+        val_p2p_addr = undefined,
+        connection = undefined,
+        connection_pid = undefined,
+        conn_monitor_ref = undefined
     }};
 setup(info, active_check, Data) ->
     %% env var `enable_grpc_client` will have a value of true
@@ -225,11 +249,18 @@ setup(
         {ok, Connection} ->
             #{http_connection := ConnectionPid} = Connection,
             M = erlang:monitor(process, ConnectionPid),
+            %% once we have a validator connection established
+            %% fire a timer to check how stable the streams are behaving
+            SCTRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
+            BACTRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
             {keep_state,
                 Data#data{
                     connection = Connection,
                     connection_pid = ConnectionPid,
-                    conn_monitor_ref = M
+                    conn_monitor_ref = M,
+                    stability_check_timer = SCTRef,
+                    block_age_timer = BACTRef,
+                    down_events_in_period = 0
                 },
                 [{next_event, info, fetch_config}]};
         {error, _} ->
@@ -319,7 +350,16 @@ setup(
 setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
+    %% dont handle it right away, instead wait some time first
+    erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
+    {keep_state, Data};
+setup(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(setup, Event, Data);
+setup(info, stability_check, Data) ->
+    handle_stability_check(setup, Data);
+setup(info, block_age_check, Data) ->
+    handle_block_age_check(setup, Data);
+
 setup({call, From}, _Msg, Data) ->
     %% return an error for any call msgs whilst in setup state
     {keep_state, Data, [{reply, From, {error, grpc_client_not_ready}}]};
@@ -343,15 +383,17 @@ connected(cast, {handle_streamed_msg, Msg}, #data{} = Data) ->
     NewData = do_handle_streamed_msg(Msg, Data),
     {keep_state, NewData};
 connected(
-    cast,
+    %% Type will be 'cast' when coming from gen_cast
+    %% or 'info' when coming from send_after
+    Type,
     {send_report, ReportType, Report, OnionKeyHash, RetryAttempts},
     #data{
         connection = Connection,
         self_sig_fun = SelfSigFun,
         self_pub_key_bin = SelfPubKeyBin
     } = Data
-) ->
-    lager:debug(
+) when Type =:= cast; Type =:= info ->
+    lager:info(
         "send_report ~p with onionkeyhash ~p: ~p",
         [ReportType, OnionKeyHash, Report]
     ),
@@ -381,14 +423,22 @@ connected({call, From}, connection, #data{connection = Connection} = Data) ->
 connected(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     lager:warning("got down event ~p", [Event]),
     %% handle down msgs, such as from our streams or validator connection
+    %% dont handle it right away, instead wait some time first
+    erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
+    {keep_state, Data};
+connected(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(connected, Event, Data);
 connected(info, process_queued_check_target_reqs, Data) ->
     lager:debug("processing queued check_target_reqs", []),
-    _ = process_check_target_reqs(),
+    _ = process_check_target_reqs(Data),
     Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
     {keep_state, Data#data{check_target_req_timer = Ref}};
+connected(info, stability_check, Data) ->
+    handle_stability_check(connected, Data);
+connected(info, block_age_check, Data) ->
+    handle_block_age_check(connected, Data);
 connected(_EventType, _Msg, Data) ->
-    lager:warning(
+    lager:debug(
         "unhandled event whilst in ~p state: Type: ~p, Msg: ~p",
         [connected, _EventType, _Msg]
     ),
@@ -409,7 +459,10 @@ find_validator() ->
     case application:get_env(miner, seed_validators) of
         {ok, SeedValidators} ->
             {_SeedP2PAddr, SeedValIP, SeedValGRPCPort} =
-                lists:nth(rand:uniform(length(SeedValidators)), SeedValidators),
+                case lists:nth(rand:uniform(length(SeedValidators)), SeedValidators) of
+                    {_SeedP2PAddr0, _SeedValIP0, SeedValGRPCPort0} = AddrAndPort when is_integer(SeedValGRPCPort0) -> AddrAndPort;
+                    {_SeedP2PAddr0, SeedValIP0} -> {_SeedP2PAddr0, SeedValIP0, 8080}
+                end,
             Req = build_validators_req(1),
             case send_grpc_unary_req(SeedValIP, SeedValGRPCPort, Req, 'validators') of
                 {ok, #gateway_validators_resp_v1_pb{result = []}, _ReqDetails} ->
@@ -462,7 +515,8 @@ connect_validator(ValAddr, ValIP, ValPort) ->
                 ),
                 Error;
             {ok, Connection} = Res ->
-                lager:debug("successfully connected to validator via connection ~p", [Connection]),
+                Animal = ?TO_ANIMAL_NAME(libp2p_crypto:p2p_to_pubkey_bin(ValAddr)),
+                lager:info("successfully connected to validator ~p via connection ~p", [Animal, Connection]),
                 Res
         end
     catch
@@ -485,7 +539,7 @@ connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
             lager:debug("failed to connect to poc stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
+            lager:info("successfully connected poc stream ~p on connection ~p", [Stream, Connection]),
             Res
     end.
 
@@ -498,7 +552,7 @@ connect_stream_config_update(Connection) ->
             lager:debug("failed to connect to config stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug("successfully connected config update stream ~p on connection ~p", [
+            lager:info("successfully connected config update stream ~p on connection ~p", [
                 Stream, Connection
             ]),
             Res
@@ -519,7 +573,7 @@ connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
             lager:debug("failed to connect to region params update stream on connection ~p, reason: ~p", [Connection, _Reason]),
             Error;
         {ok, Stream} = Res ->
-            lager:debug(
+            lager:info(
                 "successfully connected region params update stream ~p on connection ~p",
                 [Stream, Connection]
             ),
@@ -579,13 +633,21 @@ do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts)
             case send_grpc_unary_req(IP, Port, Req, 'send_report') of
                 {ok, _} ->
                     ok;
-                _ ->
-                    ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+                _Error ->
+                    lager:debug("send_grpc_unary_req(~p, ~p, ~p, 'send_report') failed with: ~p",
+                                [IP,Port,Req,_Error]),
+                    retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
             end;
         {error, _Reason} ->
-            ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+            lager:debug("get_uri_for_challenger(~p, ~p) failed with reason: ~p",
+                        [OnionKeyHash, Connection, _Reason]),
+            retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
     end,
     ok.
+
+retry_report(Msg) ->
+    RetryDelay = application:get_env(miner, poc_send_report_retry_delay, ?DEFAULT_GRPC_SEND_REPORT_RETRY_DELAY),
+    erlang:send_after(RetryDelay, ?MODULE, Msg).
 
 -spec fetch_config(
     UpdatedKeys::[string()],
@@ -628,7 +690,7 @@ send_grpc_unary_req(undefined, _Req, _RPC) ->
     {error, no_grpc_connection};
 send_grpc_unary_req(Connection, Req, RPC) ->
     try
-        lager:debug("send unary request: ~p", [Req]),
+        lager:info("send unary request: ~p", [Req]),
         Res = grpc_client_custom:unary(
             Connection,
             Req,
@@ -637,7 +699,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:debug("send unary result: ~p", [Res]),
+        lager:info("send unary result: ~p", [Res]),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -652,7 +714,7 @@ send_grpc_unary_req(Connection, Req, RPC) ->
     RPC :: atom()) -> unary_result().
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
     try
-        lager:debug("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
+        lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
         {ok, Connection} = grpc_client_custom:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
 
         Res = grpc_client_custom:unary(
@@ -663,9 +725,9 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
             gateway_miner_client_pb,
             [{callback_mod, miner_poc_grpc_client_handler}]
         ),
-        lager:debug("New Connection, send unary result: ~p", [Res]),
+        lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
-        _ = grpc_client_custom:stop_connection(Connection),
+        catch grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -748,7 +810,7 @@ process_unary_response(
     {ok, Payload, #{height => Height, signature => Sig}};
 process_unary_response({error, _}) ->
     lager:warning("grpc client error response", []),
-    {error, grpc_request_failed}.
+    {error, req_failed}.
 
 -spec get_uri_for_challenger(
     OnionKeyHash::binary(),
@@ -767,8 +829,8 @@ get_uri_for_challenger(OnionKeyHash, Connection) ->
             {error, Reason}
     end.
 
--spec process_check_target_reqs() -> ok.
-process_check_target_reqs() ->
+-spec process_check_target_reqs(data()) -> ok.
+process_check_target_reqs(_State = #data{self_sig_fun = SelfSigFun}) ->
     {ok, POCTimeOut} = application:get_env(miner, poc_timeout),
     %% convert poc timeout in blocks to equiv in seconds
     %% use to determine when the POC would end
@@ -777,6 +839,7 @@ process_check_target_reqs() ->
     %% we use 80% as we need to give the POC time to run,
     %% no point getting the onion and broadcasting if no time
     %% left for it to complete
+    %% TODO use block time here
     POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
     CurTSInSecs = erlang:system_time(second),
     Reqs = cached_check_target_reqs(),
@@ -796,6 +859,7 @@ process_check_target_reqs() ->
                         BlockHash,
                         NotificationHeight,
                         ChallengerSig,
+                        SelfSigFun,
                         true
                     ),
                     ok;
@@ -840,12 +904,13 @@ delete_cached_check_target_req(Key) ->
     BlockHash :: binary(),
     NotificationHeight :: non_neg_integer(),
     ChallengerSig :: binary(),
+    SelfSigFun :: function(),
     IsRetry :: boolean()
 ) -> ok.
 check_if_target(
-    URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, IsRetry
+    URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+    ChallengerSig, SelfSigFun, IsRetry
 ) ->
-    F = fun() ->
         TargetRes =
             send_check_target_req(
                 URI,
@@ -853,9 +918,10 @@ check_if_target(
                 OnionKeyHash,
                 BlockHash,
                 NotificationHeight,
-                ChallengerSig
+                ChallengerSig,
+                SelfSigFun
             ),
-        lager:debug("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
+        lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
             {ok, Result, _Details} ->
                 %% we got an expected response, purge req from queued cache should it exist
@@ -865,37 +931,41 @@ check_if_target(
                 %% seems the POC key exists but the POC itself may not yet be initialised
                 %% this can happen if the challenging validator is behind our
                 %% notifying validator
-                %% if the challenger is behind the notifier, then add cache the check target req
-                %% it will then be retried periodically
+                %% if the challenger height is behind or equal
+                %% to the notifier, then cache the check target req
+                %% and retry it periodically
                 N = NotificationHeight - ValRespHeight,
-                case (N > 0) andalso (not IsRetry) of
+                case (N >= 0) andalso (not IsRetry) of
                     true ->
-                        CurTSInSecs = erlang:system_time(second),
-                        _ = cache_check_target_req(
-                            OnionKeyHash,
-                            {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                                ChallengerSig, CurTSInSecs}
-                        ),
-                        lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
-                            OnionKeyHash, CurTSInSecs
-                        ]),
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
                         ok;
                     false ->
                         %% eh shouldnt hit here but ok
                         ok
                 end;
             {error, _Reason, _Details} ->
-                %% we got an non queued response, purge req from queued cache should it exist
+                %% we got a non queued response, purge req from queued cache should it exist
+                %% these are valid errors, which should not be retried, like mismatched block hash
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok;
+            {error, req_failed} ->
+                %% the grpc req failed, queue it and try again later
+                case (not IsRetry) of
+                    true ->
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
+                        ok;
+                    false ->
+                        %% eh shouldnt hit here but ok
+                        ok
+                end;
             {error, _Reason} ->
-                %% we got an non queued response, purge req from queued cache should it exist
+                %% got an error we are not sure what about,
+                %% purge req from queued cache should it exist
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok
-        end
-    end,
-    spawn(F),
-    ok.
+        end.
 
 -spec send_check_target_req(
     ChallengerURI :: string(),
@@ -903,7 +973,8 @@ check_if_target(
     OnionKeyHash :: binary(),
     BlockHash :: binary(),
     NotificationHeight :: non_neg_integer(),
-    ChallengerSig :: binary()
+    ChallengerSig :: binary(),
+    SelfSigFun :: function()
 ) -> unary_result().
 send_check_target_req(
     ChallengerURI,
@@ -911,10 +982,10 @@ send_check_target_req(
     OnionKeyHash,
     BlockHash,
     NotificationHeight,
-    ChallengerSig
+    ChallengerSig,
+    SelfSigFun
 ) ->
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-    {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
     %% split the URI into its IP and port parts
     #{host := IP, port := Port, scheme := _Scheme} =
         uri_string:parse(ChallengerURI),
@@ -941,22 +1012,42 @@ handle_check_target_resp(
 ) ->
     ok.
 
+-spec queue_check_target_req(
+    OnionKeyHash :: binary(),
+    ChallengerURI :: string(),
+    PubKeyBin :: binary(),
+    BlockHash :: binary(),
+    NotificationHeight :: non_neg_integer(),
+    ChallengerSig :: binary()
+) -> ok.
+queue_check_target_req(OnionKeyHash, URI, PubKeyBin, BlockHash, NotificationHeight, ChallengerSig) ->
+    CurTSInSecs = erlang:system_time(second),
+    _ = cache_check_target_req(
+        OnionKeyHash,
+        {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+            ChallengerSig, CurTSInSecs}
+    ),
+    lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
+        OnionKeyHash, CurTSInSecs
+    ]),
+    ok.
+
 do_handle_streamed_msg(
     #gateway_resp_v1_pb{
         msg = {poc_challenge_resp, ChallengeNotification},
         height = NotificationHeight,
         signature = ChallengerSig
     } = Msg,
-    State
+    #data{self_sig_fun = SelfSigFun} = State
 ) ->
-    lager:debug("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
+    lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{
         challenger = #routing_address_pb{uri = URI, pub_key = PubKeyBin},
         block_hash = BlockHash,
         onion_key_hash = OnionKeyHash
     } = ChallengeNotification,
     _ = check_if_target(
-        binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, false
+        binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, SelfSigFun, false
     ),
     State;
 do_handle_streamed_msg(
@@ -967,7 +1058,7 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:debug("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
+    lager:info("grpc client received config_update_streamed_resp msg ~p", [_Msg]),
     #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeys} = Payload,
     _ = miner_poc_grpc_client_statem:update_config(UpdatedKeys),
     State;
@@ -979,11 +1070,14 @@ do_handle_streamed_msg(
     } = _Msg,
     State
 ) ->
-    lager:debug("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
-    #gateway_region_params_streamed_resp_v1_pb{region = Region, params = Params} = Payload,
+    lager:info("grpc client received region_params_streamed_resp msg ~p", [_Msg]),
+    #gateway_region_params_streamed_resp_v1_pb{
+        region = Region,
+        params = Params,
+        gain = Gain} = Payload,
     #blockchain_region_params_v1_pb{region_params = RegionParams} = Params,
     miner_lora_light:region_params_update(Region, RegionParams),
-    miner_onion_server_light:region_params_update(Region, RegionParams),
+    miner_onion_server_light:region_params_update(Region, RegionParams, Gain),
     State;
 do_handle_streamed_msg(_Msg, State) ->
     lager:warning("grpc client received unexpected streamed msg ~p", [_Msg]),
@@ -995,9 +1089,9 @@ handle_down_event(
     Data = #data{conn_monitor_ref = Ref, connection = Connection}
 ) ->
     lager:warning("GRPC connection to validator is down, reconnecting.  Reason: ~p", [Reason]),
-    _ = grpc_client_custom:stop_connection(Connection),
+    catch grpc_client_custom:stop_connection(Connection),
     %% if the connection goes down, enter setup state to reconnect
-    {next_state, setup, Data};
+    {next_state, setup, Data#data{connection = undefined}};
 handle_down_event(
     _CurState,
     {'DOWN', Ref, process, _, Reason} = Event,
@@ -1005,30 +1099,35 @@ handle_down_event(
         stream_poc_monitor_ref = Ref,
         connection = Connection,
         self_pub_key_bin = SelfPubKeyBin,
-        self_sig_fun = SelfSigFun
+        self_sig_fun = SelfSigFun,
+        down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("poc stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
     case connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) of
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
-            {keep_state, Data#data{stream_poc_monitor_ref = M, stream_poc_pid = StreamPid}};
+            {keep_state, Data#data{
+                stream_poc_monitor_ref = M,
+                stream_poc_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1}};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
     end;
 handle_down_event(
     _CurState,
     {'DOWN', Ref, process, _, Reason} = Event,
     Data = #data{
         stream_config_update_monitor_ref = Ref,
-        connection = Connection
+        connection = Connection,
+        down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the config_update stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("config_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1036,13 +1135,15 @@ handle_down_event(
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
             {keep_state, Data#data{
-                stream_config_update_monitor_ref = M, stream_config_update_pid = StreamPid
+                stream_config_update_monitor_ref = M,
+                stream_config_update_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1
             }};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
     end;
 handle_down_event(
     _CurState,
@@ -1051,9 +1152,10 @@ handle_down_event(
         stream_region_params_update_monitor_ref = Ref,
         connection = Connection,
         self_pub_key_bin = SelfPubKeyBin,
-        self_sig_fun = SelfSigFun
+        self_sig_fun = SelfSigFun,
+        down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the region_params stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("region_params_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1061,14 +1163,93 @@ handle_down_event(
         {ok, StreamPid} ->
             M = erlang:monitor(process, StreamPid),
             {keep_state, Data#data{
-                stream_region_params_update_monitor_ref = M, stream_region_params_update_pid = StreamPid
+                stream_region_params_update_monitor_ref = M,
+                stream_region_params_update_pid = StreamPid,
+                down_events_in_period = NumDownEvents + 1
             }};
         {error, _} ->
             %% if stream reconnnect fails, replay the orig down msg to trigger another attempt
             %% NOTE: not using transition actions below as want a delay before the msgs get processed again
-            erlang:send_after(?STREAM_RECONNECT_DELAY, self(), Event),
-            {keep_state, Data}
+            erlang:send_after(?RECONNECT_DELAY, self(), Event),
+            {keep_state, Data#data{down_events_in_period = NumDownEvents + 1}}
+    end;
+handle_down_event(_CurState, _Event, Data ) ->
+    %% fallback handler, if we dont recognise it then ignore it
+    %% shouldnt really hit here, but you never know
+    lager:warning("unhandled down event: ~p", [_Event]),
+    {keep_state, Data}.
+
+handle_stability_check(CurState, Data = #data{down_events_in_period = NumDownEventsThisPeriod}) ->
+    case NumDownEventsThisPeriod > ?MAX_DOWN_EVENTS_IN_PERIOD of
+        true ->
+            Data1 = Data#data{down_events_in_period = 0},
+            %% restart the setup state
+            case CurState of
+                setup ->
+                    {repeat_state, Data1};
+                _ ->
+                    {next_state, setup, Data1}
+            end;
+        false ->
+            %% we have been stable this period, so reset the num of down events
+            %% and refire our stability check timer
+            TRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
+            {keep_state, Data#data{down_events_in_period = 0, stability_check_timer = TRef}}
     end.
+
+handle_block_age_check(_CurState, #data{connection = undefined} = Data) ->
+    %% your request for block age cannot be completed at this time; please try again later
+    TRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
+    {keep_state, Data#data{block_age_timer = TRef}};
+handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
+    case send_block_age_req(Connection) of
+        {ok, BlockAge} when BlockAge >= ?MAX_BLOCK_AGE ->
+            %% we're bailing from this validator so reset the down events to start fresh
+            Data1 = Data#data{down_events_in_period = 0},
+            lager:warning("validator block age ~p exceeded maximum allowed; switching validators", [BlockAge]),
+            case CurState of
+                setup -> {repeat_state, Data1};
+                _ -> {next_state, setup, Data1}
+            end;
+        {error, _Reason} ->
+            %% validator, you had one job...
+            Data1 = Data#data{down_events_in_period = 0},
+            lager:warning("validator block age request failed for ~p; switching validators", [_Reason]),
+            case CurState of
+                setup -> {repeat_state, Data1};
+                _ -> {next_state, setup, Data1}
+            end;
+        _ ->
+            %% connected validator seems to be keeping up; once more around the loop
+            TRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
+            {keep_state, Data#data{block_age_timer = TRef}}
+    end.
+
+send_block_age_req(Connection) ->
+    try
+        lager:debug("Send block age unary request", []),
+        case grpc_client_custom:unary(
+            Connection,
+            build_config_req([]),
+            'helium.gateway',
+            config,
+            gateway_miner_client_pb,
+            [{callback_mod, miner_poc_grpc_client_handler}]
+        ) of
+            {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} when is_integer(BlockAge) ->
+                {ok, BlockAge};
+            {error, _} ->
+                lager:warning("grpc client error requesting current block age"),
+                {error, grpc_request_failed}
+        end
+    catch
+        _Class:_Error:_Stack ->
+            lager:warning("send block age unary request failed: ~p, ~p, ~p", [_Class, _Error, _Stack]),
+            {error, req_failed}
+    end.
+
+block_age_timeout() ->
+    ?BLOCK_AGE_TIMEOUT + rand:uniform(?BLOCK_AGE_TIMEOUT).
 
 -ifdef(TEST).
 maybe_override_ip(_IP) ->

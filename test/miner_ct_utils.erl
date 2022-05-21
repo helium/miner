@@ -1164,7 +1164,6 @@ config_node({Miner, {GwApiPort, UDPPort, JSONRPCPort}, ECDH, PubKey, _Addr, SigF
     ct_rpc:call(Miner, application, set_env, [blockchain, max_inbound_connections, TotalMiners*2]),
     ct_rpc:call(Miner, application, set_env, [blockchain, outbound_gossip_connections, TotalMiners]),
     ct_rpc:call(Miner, application, set_env, [blockchain, sync_cooldown_time, 5]),
-    %% ct_rpc:call(Miner, application, set_env, [blockchain, sc_client_handler, miner_test_sc_client_handler]),
     ct_rpc:call(Miner, application, set_env, [blockchain, sc_packet_handler, miner_test_sc_packet_handler]),
     %% set miner configuration
     ct_rpc:call(Miner, application, set_env, [miner, curve, Curve]),

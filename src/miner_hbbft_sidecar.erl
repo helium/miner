@@ -134,7 +134,10 @@ handle_call({submit, Txn}, From,
     lager:debug("got submission of txn: ~s", [blockchain_txn:print(Txn)]),
     Ledger = blockchain:ledger(Chain),
     {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
-    case lists:member(Type, ?InvalidTxns) of
+    %% if challenger vals are enabled dont submit poc_receipt txns
+    ChallType = get_config(?poc_challenger_type, undefined, Ledger),
+    case lists:member(Type, ?InvalidTxns) orelse
+            (ChallType =:= validator andalso Type =:= blockchain_txn_poc_request_v1) of
         true ->
             {reply, {{error, invalid_txn}, Height}, State};
         false ->
@@ -366,3 +369,9 @@ oversized_txn(Txn, Ledger) ->
             _ -> 50*1024*1024
         end,
     byte_size(blockchain_txn:serialize(Txn)) > BlockSizeLimit.
+
+get_config(Var, Default, Ledger) ->
+    case blockchain:config(Var, Ledger) of
+        {ok, V} -> V;
+        _ -> Default
+    end.
