@@ -33,10 +33,11 @@
 %% txns that do not appear naturally
 -define(InvalidTxns, [blockchain_txn_reward_v1, blockchain_txn_reward_v2]).
 
+-define(SUBMITTED_TXNS, submitted_txns).
 -define(VALID_TXNS, valid_txns).
 -define(INVALID_TXNS, invalid_txns).
 -define(TIMEDOUT_TXNS, timedout_txns).
--define(VALIDATION_METRICS, [?VALID_TXNS, ?INVALID_TXNS, ?TIMEDOUT_TXNS]).
+-define(VALIDATION_METRICS, [?SUBMITTED_TXNS, ?VALID_TXNS, ?INVALID_TXNS, ?TIMEDOUT_TXNS]).
 
 -record(validation,
         {
@@ -158,6 +159,7 @@ handle_call({submit, Txn}, From,
                                     Queue1 = Queue ++ [{From, Txn, Height}],
                                     {noreply, State#state{queue = Queue1}};
                                 _ ->
+                                    ok = update_validation_metric(?SUBMITTED_TXNS, Type),
                                     {Attempt, V} = start_validation(Txn, Height, From, Timeout, Chain),
                                     {noreply, State#state{validations = Validations#{Attempt => V}}}
                             end;
@@ -400,8 +402,8 @@ update_validation_metric(ResultType, TxnType) ->
 log_and_reset_validation_metrics() ->
     [
       begin
-          TypeResult = erase(Type),
-          lager:info("~p txns for the current round: ~p", [Type, TypeResult])
+          TypeTxnsMap = erase(Type),
+          lager:info("~p txns for the current round: ~p", [Type, TypeTxnsMap])
       end || Type <- ?VALIDATION_METRICS
     ],
     ok.
