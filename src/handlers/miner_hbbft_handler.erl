@@ -38,7 +38,7 @@
 
          %% For artifact re-signing on var-autoskip:
          swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()},
-         skip_votes = #{} :: #{pos_integer() => {pos_integer(), pos_integer(), binary()}}
+         skip_votes = #{} :: #{ Index :: pos_integer() => { Vote :: pos_integer(), Round :: pos_integer(), Sig :: binary()}}
         }).
 
 -type hbbft_msg() ::
