@@ -43,7 +43,7 @@
 %% See the Readme in the root folder of the repository for a reference to a
 %% more general (tutorial-style) introduction.
 %%
--module(grpc_client).
+-module(grpc_client_custom).
 
 -export([compile/1, compile/2,
          connect/3, connect/4,
