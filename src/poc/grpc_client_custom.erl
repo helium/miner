@@ -43,7 +43,7 @@
 %% See the Readme in the root folder of the repository for a reference to a
 %% more general (tutorial-style) introduction.
 %%
--module(grpc_client_custom).
+-module(grpc_client).
 
 -export([compile/1, compile/2,
          connect/3, connect/4,
@@ -139,7 +139,7 @@
 -spec compile(FileName::string()) -> ok.
 %% @equiv compile(FileName, [])
 compile(FileName) ->
-    grpc_client_custom:compile(FileName, []).
+    grpc_client:compile(FileName, []).
 
 -spec compile(FileName::string(), Options::gpb_compile:opts()) -> ok.
 %% @doc Compile a .proto file to generate client stubs and a module
@@ -199,24 +199,24 @@ new_stream(Connection, Service, Rpc, DecoderModule) ->
 %% @doc Create a new stream to start a new RPC.
 new_stream(Connection, Service, Rpc, DecoderModule, Options) ->
     CBMod = proplists:get_value(callback_mod, Options),
-    grpc_client_stream_custom:new(Connection, Service, Rpc, DecoderModule, Options, CBMod).
+    grpc_client_stream:new(Connection, Service, Rpc, DecoderModule, Options, CBMod).
 
 -spec send(Stream::client_stream(), Msg::any()) -> ok.
 %% @doc Send a message from the client to the server.
 send(Stream, Msg) when is_pid(Stream) ->
-    grpc_client_stream_custom:send(Stream, Msg).
+    grpc_client_stream:send(Stream, Msg).
 
 -spec send_last(Stream::client_stream(), Msg::map()) -> ok.
 %% @doc Send a message to server and mark it as the last message
 %% on the stream. For simple RPC and client-streaming RPCs that
 %% will trigger the response from the server.
 send_last(Stream, Msg) when is_pid(Stream)->
-    grpc_client_stream_custom:send_last(Stream, Msg).
+    grpc_client_stream:send_last(Stream, Msg).
 
 -spec rcv(Stream::client_stream()) -> rcv_response().
 %% @equiv rcv(Stream, infinity)
 rcv(Stream) ->
-    grpc_client_stream_custom:rcv(Stream).
+    grpc_client_stream:rcv(Stream).
 
 -spec rcv(Stream::client_stream(), Timeout::timeout()) -> rcv_response().
 %% @doc Receive a message from the server. This is a blocking
@@ -225,7 +225,7 @@ rcv(Stream) ->
 %%
 %% Returns 'eof' after the last message from the server has been read.
 rcv(Stream, Timeout) ->
-    grpc_client_stream_custom:rcv(Stream, Timeout).
+    grpc_client_stream:rcv(Stream, Timeout).
 
 -spec get(Stream::client_stream()) -> get_response().
 %% @doc Get a message from the stream, if there is one in the queue. If not return
@@ -233,7 +233,7 @@ rcv(Stream, Timeout) ->
 %%
 %% Returns 'eof' after the last message from the server has been read.
 get(Stream) ->
-    grpc_client_stream_custom:get(Stream).
+    grpc_client_stream:get(Stream).
 
 -spec ping(
     Connection::connection(),
@@ -253,7 +253,7 @@ stop_stream(Stream) ->
 %% frame may be sent to the server with the provided Errorcode (it should be
 %% a HTTP/2 error code, see RFC7540).
 stop_stream(Stream, ErrorCode) ->
-    grpc_client_stream_custom:stop(Stream, ErrorCode).
+    grpc_client_stream:stop(Stream, ErrorCode).
 
 -spec stop_connection(Connection::connection()) -> ok.
 %% @doc Stop a connection and clean up.
@@ -275,7 +275,7 @@ unary(Connection, Message, Service, Rpc, Decoder, Options) ->
     try
         {ok, Stream} = new_stream(Connection, Service,
                                   Rpc, Decoder, [{type, unary} | StreamOptions]),
-        Response = grpc_client_stream_custom:call_rpc(Stream, Message, Timeout),
+        Response = grpc_client_stream:call_rpc(Stream, Message, Timeout),
         stop_stream(Stream),
         Response
     catch
