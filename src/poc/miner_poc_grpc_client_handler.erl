@@ -43,20 +43,20 @@ connect(PeerP2P) ->
     connect(PeerP2P, "127.0.0.1", PeerGrpcPort).
 -endif.
 
--spec connect(libp2p_crypto:peer_id(), string(), non_neg_integer()) -> {ok, grpc_client_custom:connection()} | {error, any()}.
+-spec connect(libp2p_crypto:peer_id(), string(), non_neg_integer()) -> {ok, grpc_client:connection()} | {error, any()}.
 connect(PeerP2P, PeerIP, GRPCPort) ->
     try
         lager:debug("connecting over grpc to peer ~p via IP ~p and port ~p", [PeerP2P, PeerIP, GRPCPort]),
-        grpc_client_custom:connect(tcp, PeerIP, GRPCPort)
+        grpc_client:connect(tcp, PeerIP, GRPCPort)
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect over grpc to peer ~p.  Reason ~p Stack ~p", [PeerP2P, _Reason, _Stack]),
         {error, failed_to_connect_to_grpc_peer}
      end.
 
--spec poc_stream(grpc_client_custom:connection(), libp2p_crypto:pubkey_bin(), function()) -> {ok, pid()} | {error, any()}.
+-spec poc_stream(grpc_client:connection(), libp2p_crypto:pubkey_bin(), function()) -> {ok, pid()} | {error, any()}.
 poc_stream(Connection, PubKeyBin, SigFun)->
     try
-        {ok, Stream} = grpc_client_stream_custom:new(
+        {ok, Stream} = grpc_client_stream:new(
             Connection,
             'helium.gateway',
             stream_poc,
@@ -68,17 +68,17 @@ poc_stream(Connection, PubKeyBin, SigFun)->
         Req = #gateway_poc_req_v1_pb{address = PubKeyBin, signature = <<>>},
         ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_poc_req_v1_pb),
         ReqSigned = Req#gateway_poc_req_v1_pb{signature = SigFun(ReqEncoded)},
-        ok = grpc_client_custom:send(Stream, ReqSigned),
+        ok = grpc_client:send(Stream, ReqSigned),
         {ok, Stream}
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect to poc stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
         {error, stream_failed}
      end.
 
--spec config_update_stream(grpc_client_custom:connection()) -> {ok, pid()} | {error, any()}.
+-spec config_update_stream(grpc_client:connection()) -> {ok, pid()} | {error, any()}.
 config_update_stream(Connection)->
     try
-        {ok, Stream} = grpc_client_stream_custom:new(
+        {ok, Stream} = grpc_client_stream:new(
             Connection,
             'helium.gateway',
             config_update,
@@ -87,17 +87,17 @@ config_update_stream(Connection)->
             ?MODULE),
         %% subscribe to config updates
         Req = #gateway_config_update_req_v1_pb{},
-        ok = grpc_client_custom:send(Stream, Req),
+        ok = grpc_client:send(Stream, Req),
         {ok, Stream}
      catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect to config_update stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
         {error, stream_failed}
      end.
 
--spec region_params_update_stream(grpc_client_custom:connection(), libp2p_crypto:pubkey_bin(), function()) -> {ok, pid()} | {error, any()}.
+-spec region_params_update_stream(grpc_client:connection(), libp2p_crypto:pubkey_bin(), function()) -> {ok, pid()} | {error, any()}.
 region_params_update_stream(Connection, PubKeyBin, SigFun)->
     try
-        {ok, Stream} = grpc_client_stream_custom:new(
+        {ok, Stream} = grpc_client_stream:new(
             Connection,
             'helium.gateway',
             region_params_update,
@@ -108,7 +108,7 @@ region_params_update_stream(Connection, PubKeyBin, SigFun)->
         Req = #gateway_region_params_update_req_v1_pb{address = PubKeyBin, signature = <<>>},
         ReqEncoded = gateway_miner_client_pb:encode_msg(Req, gateway_region_params_update_req_v1_pb),
         ReqSigned = Req#gateway_region_params_update_req_v1_pb{signature = SigFun(ReqEncoded)},
-        ok = grpc_client_custom:send(Stream, ReqSigned),
+        ok = grpc_client:send(Stream, ReqSigned),
         {ok, Stream}
     catch _Error:_Reason:_Stack ->
         lager:warning("*** failed to connect to region_params_update stream on connection ~p.  Reason ~p Stack ~p", [Connection, _Reason, _Stack]),
