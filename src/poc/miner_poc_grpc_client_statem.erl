@@ -450,11 +450,7 @@ connected(_EventType, _Msg, Data) ->
 -spec disconnect(Data::data()) -> ok.
 disconnect(_Data = #data{connection = undefined}) ->
     ok;
-disconnect(_Data = #data{connection = Connection,
-    stream_poc_pid = StreamPOCPID,
-    stream_config_update_pid = StreamConfigPID,
-    stream_region_params_update_pid = StreamRegionPID
-    }) ->
+disconnect(_Data = #data{connection = Connection}) ->
     catch grpc_client_custom:stop_connection(Connection),
     ok.
 
