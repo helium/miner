@@ -62,10 +62,10 @@
       response_pending := boolean(),
       state := idle | open | half_closed_local | half_closed_remote | closed,
       encoder := module(),
-      connection := grpc_client:connection(),
+      connection := grpc_client_custom:connection(),
       headers_sent := boolean(),
-      metadata := grpc_client:metadata(),
-      compression := grpc_client:compression_method(),
+      metadata := grpc_client_custom:metadata(),
+      compression := grpc_client_custom:compression_method(),
       buffer := binary(),
       handler_callback := undefined,
       handler_state := undefined,
@@ -74,7 +74,7 @@
 
 -export_type([stream/0]).
 
--spec new(Connection::grpc_client:connection(),
+-spec new(Connection::grpc_client_custom:connection(),
           Service::atom(),
           Rpc::atom(),
           Encoder::module(),
