@@ -127,7 +127,7 @@ start_link(Args) when is_map(Args) ->
 stop() ->
     gen_statem:stop(?MODULE).
 
--spec connection() -> {ok, grpc_client:connection()}.
+-spec connection() -> {ok, grpc_client_custom:connection()}.
 connection() ->
     gen_statem:call(?MODULE, connection, infinity).
 
@@ -455,7 +455,7 @@ disconnect(_Data = #data{connection = Connection,
     stream_config_update_pid = StreamConfigPID,
     stream_region_params_update_pid = StreamRegionPID
     }) ->
-    catch grpc_client:stop_connection(Connection),
+    catch grpc_client_custom:stop_connection(Connection),
     ok.
 
 -spec find_validator() -> {ok, string(), pos_integer(), string()} | {error, any()} .
@@ -504,7 +504,7 @@ find_validator() ->
     ValAddr::string(),
     ValIP::string(),
     ValPort::pos_integer()) ->
-    {error, any()} | {ok, grpc_client:connection()}.
+    {error, any()} | {ok, grpc_client_custom:connection()}.
 connect_validator(ValAddr, ValIP, ValPort) ->
     try
         lager:debug(
@@ -533,7 +533,7 @@ connect_validator(ValAddr, ValIP, ValPort) ->
     end.
 
 -spec connect_stream_poc(
-    Connection::grpc_client:connection(),
+    Connection::grpc_client_custom:connection(),
     SelfPubKeyBin::libp2p_crypto:pubkey_bin(),
     SelfSigFun::function()) ->
         {error, any()} | {ok, pid()}.
@@ -548,7 +548,7 @@ connect_stream_poc(Connection, SelfPubKeyBin, SelfSigFun) ->
     end.
 
 -spec connect_stream_config_update(
-    Connection::grpc_client:connection()) ->
+    Connection::grpc_client_custom:connection()) ->
         {error, any()} | {ok, pid()}.
 connect_stream_config_update(Connection) ->
    case miner_poc_grpc_client_handler:config_update_stream(Connection) of
@@ -563,7 +563,7 @@ connect_stream_config_update(Connection) ->
     end.
 
 -spec connect_stream_region_params_update(
-    Connection::grpc_client:connection(),
+    Connection::grpc_client_custom:connection(),
     SelfPubKeyBin::libp2p_crypto:pubkey_bin(),
     SelfSigFun::function()
 ) -> {error, any()} | {ok, pid()}.
@@ -590,7 +590,7 @@ connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
     OnionKeyHash::binary(),
     SelfPubKeyBin::libp2p_crypto:pubkey_bin(),
     SigFun::function(),
-    Connection::grpc_client:connection(),
+    Connection::grpc_client_custom:connection(),
     RetryAttempts::non_neg_integer()
 ) -> ok.
 send_report(_ReportType, _Report, _OnionKeyHash, _SelfPubKeyBin, _SigFun, _Connection, 0) ->
@@ -626,7 +626,7 @@ send_report(
     ReportType :: receipt | witness,
     Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
     OnionKeyHash ::binary(),
-    Connection :: grpc_client:connection(),
+    Connection :: grpc_client_custom:connection(),
     RetryAttempts :: non_neg_integer()
 ) -> ok.
 do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts) ->
@@ -687,7 +687,7 @@ fetch_config(UpdatedKeys, ValIP, ValGRPCPort) ->
     end.
 
 -spec send_grpc_unary_req(
-    Connection::grpc_client:connection(),
+    Connection::grpc_client_custom:connection(),
     Req::tuple(),
     RPC::atom()) -> unary_result().
 send_grpc_unary_req(undefined, _Req, _RPC) ->
@@ -695,7 +695,7 @@ send_grpc_unary_req(undefined, _Req, _RPC) ->
 send_grpc_unary_req(Connection, Req, RPC) ->
     try
         lager:info("send unary request: ~p", [Req]),
-        Res = grpc_client:unary(
+        Res = grpc_client_custom:unary(
             Connection,
             Req,
             'helium.gateway',
@@ -720,9 +720,9 @@ send_grpc_unary_req(Connection, Req, RPC) ->
 send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
     try
         lager:info("Send unary request via new connection to ip ~p: ~p", [PeerIP, Req]),
-        {ok, Connection} = grpc_client:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
+        {ok, Connection} = grpc_client_custom:connect(tcp, maybe_override_ip(PeerIP), GRPCPort),
 
-        Res = grpc_client:unary(
+        Res = grpc_client_custom:unary(
             Connection,
             Req,
             'helium.gateway',
@@ -733,7 +733,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
-%%        catch grpc_client:stop_connection(Connection),
+%%        catch grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -789,7 +789,7 @@ build_check_target_req(
     ),
     Req#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = SelfSigFun(ReqEncoded)}.
 
--spec process_unary_response(grpc_client:unary_response()) -> unary_result().
+-spec process_unary_response(grpc_client_custom:unary_response()) -> unary_result().
 process_unary_response(
     {ok, #{
         http_status := 200,
@@ -820,7 +820,7 @@ process_unary_response({error, _}) ->
 
 -spec get_uri_for_challenger(
     OnionKeyHash::binary(),
-    Connection::grpc_client:connection()) ->
+    Connection::grpc_client_custom:connection()) ->
     {ok, {string(), pos_integer()}} | {error, any()}.
 get_uri_for_challenger(OnionKeyHash, Connection) ->
     Req = build_poc_challenger_req(OnionKeyHash),
@@ -1091,7 +1091,7 @@ handle_down_event(
     Data = #data{conn_monitor_ref = Ref, connection = Connection}
 ) ->
     lager:warning("GRPC connection to validator is down, reconnecting.  Reason: ~p", [Reason]),
-    catch grpc_client:stop_connection(Connection),
+    catch grpc_client_custom:stop_connection(Connection),
     %% if the connection goes down, enter setup state to reconnect
     {next_state, setup, Data#data{connection = undefined}};
 handle_down_event(
@@ -1230,7 +1230,7 @@ handle_block_age_check(CurState, #data{connection = Connection} = Data) ->
 send_block_age_req(Connection) ->
     try
         lager:debug("Send block age unary request", []),
-        case grpc_client:unary(
+        case grpc_client_custom:unary(
             Connection,
             build_config_req([]),
             'helium.gateway',
