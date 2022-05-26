@@ -39,7 +39,7 @@
 %% @private An a-synchronous client with a queue-like interface.
 %% A gen_server is started for each stream, this keeps track
 %% of the status of the http2 stream and it buffers responses in a queue.
--module(grpc_client_stream_custom).
+-module(grpc_client_stream).
 
 -behaviour(gen_server).
 
@@ -62,10 +62,10 @@
       response_pending := boolean(),
       state := idle | open | half_closed_local | half_closed_remote | closed,
       encoder := module(),
-      connection := grpc_client_custom:connection(),
+      connection := grpc_client:connection(),
       headers_sent := boolean(),
-      metadata := grpc_client_custom:metadata(),
-      compression := grpc_client_custom:compression_method(),
+      metadata := grpc_client:metadata(),
+      compression := grpc_client:compression_method(),
       buffer := binary(),
       handler_callback := undefined,
       handler_state := undefined,
@@ -75,7 +75,7 @@
 
 -export_type([stream/0]).
 
--spec new(Connection::grpc_client_custom:connection(),
+-spec new(Connection::grpc_client:connection(),
           Service::atom(),
           Rpc::atom(),
           Encoder::module(),
