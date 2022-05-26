@@ -89,7 +89,7 @@
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.8.0">>},2},
  {<<"grpc_client">>,
   {git,"https://github.com/helium/grpc_client.git",
-       {ref,"c23efcf99b3983c627f861398e5b38f958ab9b47"}},
+       {ref,"d2872ca93c1aa9bdce07d8389ad5750e04f8550f"}},
   0},
  {<<"grpc_lib">>,
   {git,"https://github.com/Bluehouse-Technology/grpc_lib",
