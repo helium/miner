@@ -17,6 +17,6 @@ uri = "http://3.17.164.253:8080"
 pubkey = "1ZAxCrEsigGVbLUM37Jki6p88kyZ5NVqjVC6oHSbqu49t7bQDym"
 uri = "http://18.191.60.231:8080"
 
-[router.testnet]
+[[routers]]
 pubkey = "1ZLxTAB8Bs7BXySp5HqHhtCos6JtzzV2mfZjofEGT1MQVTKqYQT"
 uri = "http://34.215.110.61:8080"
