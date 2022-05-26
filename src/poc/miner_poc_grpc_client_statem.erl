@@ -733,7 +733,7 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
-        catch grpc_client:stop_connection(Connection),
+%%        catch grpc_client:stop_connection(Connection),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
