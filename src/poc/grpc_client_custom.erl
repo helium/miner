@@ -139,7 +139,7 @@
 -spec compile(FileName::string()) -> ok.
 %% @equiv compile(FileName, [])
 compile(FileName) ->
-    grpc_client:compile(FileName, []).
+    grpc_client_custom:compile(FileName, []).
 
 -spec compile(FileName::string(), Options::gpb_compile:opts()) -> ok.
 %% @doc Compile a .proto file to generate client stubs and a module
