@@ -12,7 +12,7 @@
   ]},
  {blockchain,
   [
-   {seed_nodes, "/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443"},
+   {seed_nodes, "${SEED_NODES:-/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443"}},
    {seed_node_dns, ""},
    {listen_addresses, ["${LISTEN_ADDRESS:-/ip4/0.0.0.0/tcp/2154}"]},
    {honor_quick_sync, false},
@@ -62,6 +62,7 @@
    %% including the params anyway in case someone needs it in this env
    {region_override, 'US915'},
    {gateway_and_mux_enable, false},
+   {default_routers, ["${DEFAULT_ROUTERS:-/p2p/11w77YQLhgUt8HUJrMtntGGr97RyXmot1ofs5Ct2ELTmbFoYsQa}"]},
    {seed_validators, [
        {"1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6", "18.223.171.149", 8080},     %% test-val2
        {"1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL", "3.17.164.253", 8080},       %% test-val3
