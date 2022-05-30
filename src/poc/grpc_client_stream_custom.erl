@@ -69,7 +69,11 @@
       buffer := binary(),
       handler_callback := undefined,
       handler_state := undefined,
-      type := unary | streaming | undefined}.
+      type := unary | streaming | undefined,
+      conn_monitor_ref := reference()
+    }.
+
+-export_type([stream/0]).
 
 -spec new(Connection::grpc_client_custom:connection(),
           Service::atom(),
@@ -121,14 +125,19 @@ call_rpc(Pid, Message, Timeout) ->
 
 %% gen_server implementation
 %% @private
-init({Connection, Service, Rpc, Encoder, Options, HandlerMod}) ->
+init({#{http_connection := ConnPid} = Connection, Service, Rpc, Encoder, Options, HandlerMod}) ->
     try
         StreamType = proplists:get_value(type, Options, undefined),
         lager:info("init stream for RPC ~p and type ~p", [Rpc, StreamType]),
         Stream =  new_stream(Connection, Service, Rpc, Encoder, Options),
         lager:info("init stream success with state ~p, handle_mod: ~p", [Stream, HandlerMod]),
         HandlerState = HandlerMod:init(),
-        {ok, Stream#{handler_state => HandlerState, handler_callback => HandlerMod, type => StreamType}}
+        %% monitor our connection, so we can tear down stream if conn dies
+        Ref = monitor(process, ConnPid),
+        {ok, Stream#{handler_state => HandlerState,
+                     handler_callback => HandlerMod,
+                     type => StreamType,
+                     conn_monitor_ref => Ref}}
     catch
         _Class:_Error:_Stack ->
             lager:warning("failed to create stream, ~p ~p ~p", [_Class, _Error, _Stack]),
@@ -239,6 +248,9 @@ handle_info(timeout, #{response_pending := true,
                        client := Client} = Stream) ->
     gen_server:reply(Client, {error, timeout}),
     {noreply, Stream#{response_pending => false}};
+handle_info({'DOWN', Ref, process, _, _Reason}, #{conn_mon := Ref} = C) ->
+    %% our connection is down, nothing more stream can do other then terminate
+    {stop, connection_down, C};
 handle_info(Msg, #{handler_callback := HandlerCB} = Stream) ->
     NewState =
         case erlang:function_exported(HandlerCB, handle_info, 2) of
@@ -246,8 +258,6 @@ handle_info(Msg, #{handler_callback := HandlerCB} = Stream) ->
             false -> Stream
         end,
     {noreply, NewState}.
-%%handle_info(_InfoMessage, Stream) ->
-%%    {noreply, Stream}.
 
 %% @private
 terminate(_Reason, _State) ->
@@ -355,13 +365,10 @@ info_response(Response, #{response_pending := true,
 info_response(Response, #{queue := Queue, type := unary} = Stream) ->
     NewQueue = queue:in(Response, Queue),
     {noreply, Stream#{queue => NewQueue}};
-%%info_response(Response, #{queue := Queue} = Stream) ->
-%%    NewQueue = queue:in(Response, Queue),
-%%    {noreply, Stream#{queue => NewQueue}}.
-
-info_response(eof = Response, #{type := Type} = Stream) ->
+info_response(eof = Response, #{type := Type, state := closed} = Stream) ->
     lager:info("info_response ~p, stream type: ~p", [Response, Type]),
     {stop, normal, Stream};
+%% pass any unmatched info msg to our handler
 info_response(Response, #{handler_callback := CB, handler_state := CBState} = Stream) ->
     lager:info("info_response ~p, CB: ~p", [Response, CB]),
     NewCBState = CB:handle_msg(Response, CBState),
