@@ -697,7 +697,8 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             'helium.gateway',
             RPC,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ),
         lager:info("send unary result: ~p", [Res]),
         process_unary_response(Res)
@@ -723,7 +724,8 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
             'helium.gateway',
             RPC,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
@@ -1228,7 +1230,8 @@ send_block_age_req(Connection) ->
             'helium.gateway',
             config,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ) of
             {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} when is_integer(BlockAge) ->
                 {ok, BlockAge};

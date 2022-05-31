@@ -119,6 +119,7 @@ save_local_poc_keys(CurHeight, KeyList) ->
                     OnionKeyHash = crypto:hash(sha256, libp2p_crypto:pubkey_to_bin(PubKey)),
                     POCKeyRec = #poc_local_key_data{receive_height = CurHeight,
                         keys = Keys, onion_key_hash = OnionKeyHash},
+                    lager:debug("saving local poc key ~p at height ~p", [OnionKeyHash, CurHeight]),
                     catch write_local_poc_keys(POCKeyRec, DB, CF)
                 end
                 || Keys <- KeyList
@@ -519,6 +520,7 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                     {ok, LastChallenge} = blockchain_ledger_v1:current_height(Ledger),
                     {ok, B} = blockchain_ledger_v1:get_block(LastChallenge, Ledger),
                     Time = blockchain_block:time(B),
+                    BlockHeight = blockchain_block:height(B),
                     Path = blockchain_poc_path_v4:build(TargetPubkeybin, TargetRandState, Ledger, Time, Vars),
                     N = erlang:length(Path),
                     [<<IV:16/integer-unsigned-little, _/binary>> | LayerData] = blockchain_txn_poc_receipts_v2:create_secret_hash(
@@ -544,8 +546,8 @@ initialize_poc(BlockHash, POCStartHeight, Keys, Vars, Ledger, #state{pub_key = C
                         start_height = POCStartHeight
                     },
                     ok = write_local_poc(LocalPOC, State),
-                    lager:info("started poc for challengeraddr ~p, target: ~p, onionhash ~p",
-                        [?TO_ANIMAL_NAME(Challenger), OnionKeyHash]),
+                    lager:info("started poc at blockheight ~p for challengeraddr ~p, onionhash ~p, target: ~p",
+                        [BlockHeight, ?TO_ANIMAL_NAME(Challenger), OnionKeyHash, ?TO_ANIMAL_NAME(TargetPubkeybin)]),
                     ok
             end
     end.
@@ -582,6 +584,7 @@ process_block_pocs(
                         {ok, _} ->
                             spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, Ledger, State) end);
                         _ ->
+                            lager:warning("found a local poc key but public data missing, onionkeyhash: ~p", [OnionKeyHash]),
                             ok
                     end;
                 _ ->
@@ -672,6 +675,8 @@ purge_local_poc_keys(
             case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
+                    lager:debug("GCing local poc key ~p, blockheight: ~p, receive height: ~p",
+                        [Key, BlockHeight, ReceiveHeight]),
                     ok = delete_local_poc_keys(Key, DB, CF);
                 _ ->
                     ok
