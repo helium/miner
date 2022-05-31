@@ -131,6 +131,41 @@ handle_metric_event([blockchain, block, absorb], #{duration := Duration}, #{stag
 handle_metric_event([blockchain, block, height], #{height := Height}, #{time := Time}) ->
     prometheus_gauge:set(?METRICS_BLOCK_HEIGHT, [Time], Height),
     ok;
+handle_metric_event([blockchain, block, unvalidated_absorb], #{duration := Duration}, #{stage := Stage}) ->
+    prometheus_histogram:observe(?METRICS_BLOCK_UNVAL_ABSORB, [Stage], Duration),
+    ok;
+handle_metric_event([blockchain, block, unvalidated_height], #{height := Height}, #{time := Time}) ->
+    prometheus_gauge:set(?METRICS_BLOCK_UNVAL_HEIGHT, [Time], Height),
+    ok;
+handle_metric_event([blockchain, txn, absorb], #{duration := Duration}, #{type := Type}) ->
+    prometheus_histogram:observe(?METRICS_TXN_ABSORB_DURATION, [Type], Duration),
+    ok;
+handle_metric_event([blockchain, txn_mgr, submit], _Measurements, #{type := Type}) ->
+    prometheus_counter:inc(?METRICS_TXN_SUBMIT_COUNT, [Type]),
+    ok;
+handle_metric_event([blockchain, txn_mgr, reject], #{block_span := Span}, #{type := Type}) ->
+    prometheus_counter:inc(?METRICS_TXN_REJECT_COUNT, [Type]),
+    prometheus_gauge:set(?METRICS_TXN_REJECT_SPAN, [Type], Span),
+    ok;
+handle_metric_event([blockchain, txn_mgr, accept], #{block_span := Span}, #{type := Type}) ->
+    prometheus_counter:inc(?METRICS_TXN_ACCEPT_COUNT, [Type]),
+    prometheus_gauge:set(?METRICS_TXN_ACCEPT_SPAN, [Type], Span),
+    ok;
+handle_metric_event([blockchain, txn_mgr, process], #{duration := Duration}, #{stage := Stage}) ->
+    prometheus_histogram:observe(?METRICS_TXN_PROCESS_DURATION, [Stage], Duration),
+    ok;
+handle_metric_event([blockchain, txn_mgr, add_block], #{cache := Cache, block_time := BlockTime, block_age := BlockAge},
+                                                      #{height := Height}) ->
+    prometheus_gauge:set(?METRICS_TXN_CACHE_SIZE, [Height], Cache),
+    prometheus_gauge:set(?METRICS_TXN_BLOCK_TIME, [Height], BlockTime),
+    prometheus_gauge:set(?METRICS_TXN_BLOCK_AGE, [Height], BlockAge),
+    ok;
+handle_metric_event([blockchain, state_channel, open], _Measurements, #{version := Vzn, id := Id}) ->
+    prometheus_gauge:inc(?METRICS_SC_COUNT, [Vzn, Id]),
+    ok;
+handle_metric_event([blockchain, state_channel, close], _Measurements, #{version := Vzn, id := Id}) ->
+    prometheus_gauge:dec(?METRICS_SC_COUNT, [Vzn, Id]),
+    ok;
 handle_metric_event([grpcbox, server, rpc_end], #{server_latency := Latency},
                                                 #{grpc_server_method := Method, grpc_server_status := Status}) ->
     prometheus_gauge:dec(?METRICS_GRPC_SESSIONS, [Method]),
@@ -138,4 +173,14 @@ handle_metric_event([grpcbox, server, rpc_end], #{server_latency := Latency},
     ok;
 handle_metric_event([grpcbox, server, rpc_begin], _Measurements, #{grpc_server_method := Method}) ->
     prometheus_gauge:inc(?METRICS_GRPC_SESSIONS, [Method]),
+    ok;
+handle_metric_event([blockchain, snapshot, generate], #{duration := Duration, size := Size},
+                                                      #{blocks := Blocks, version := Vzn}) ->
+    prometheus_gauge:set(?METRICS_SNAP_GEN_SIZE, [Blocks, Vzn], Size),
+    prometheus_gauge:set(?METRICS_SNAP_GEN_DURATION, [Blocks, Vzn], Duration),
+    ok;
+handle_metric_event([blockchain, snapshot, load], #{duration := Duration, size := Size},
+                                                  #{height := Height, hash := Hash, version := Vzn, source := Source}) ->
+    prometheus_gauge:set(?METRICS_SNAP_LOAD_SIZE, [Height, Hash, Vzn, Source], Size),
+    prometheus_gauge:set(?METRICS_SNAP_LOAD_DURATION, [Height, Hash, Vzn, Source], Duration),
     ok.
