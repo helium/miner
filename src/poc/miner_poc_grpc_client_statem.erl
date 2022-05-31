@@ -59,7 +59,7 @@
 
 %% these are config vars the miner is interested in, if they change we
 %% will want to get their latest values
--define(CONFIG_VARS, ["poc_version", "data_aggregation_version", "poc_timeout"]).
+-define(CONFIG_VARS, ["poc_version", "data_aggregation_version", "poc_timeout", "block_time"]).
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
@@ -832,15 +832,9 @@ get_uri_for_challenger(OnionKeyHash, Connection) ->
 -spec process_check_target_reqs(data()) -> ok.
 process_check_target_reqs(_State = #data{self_sig_fun = SelfSigFun}) ->
     {ok, POCTimeOut} = application:get_env(miner, poc_timeout),
-    %% convert poc timeout in blocks to equiv in seconds
-    %% use to determine when the POC would end
-    %% if the cached request has remained in the cache
-    %% for 80% of the timeout period, then give up on it & remove
-    %% we use 80% as we need to give the POC time to run,
-    %% no point getting the onion and broadcasting if no time
-    %% left for it to complete
-    %% TODO use block time here
-    POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
+    {ok, BlockTime} = application:get_env(miner, block_time),
+    %% blocktime is in millisecs, convert to secs
+    POCTimeOutSecs = (POCTimeOut * (BlockTime / 1000 )),
     CurTSInSecs = erlang:system_time(second),
     Reqs = cached_check_target_reqs(),
     lager:debug("Queued Reqs: ~p",[Reqs]),
