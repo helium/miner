@@ -120,7 +120,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                     blockchain_worker:submit_txn(Txn, fun(Res) -> Self ! {sub, Res} end),
                                     {noreply, State#state{txn_status = waiting}};
                                 false ->
-                                    lager:warning("skipping heartbeat, validator has no public listen address in peerbook:",
+                                    lager:warning("skipping heartbeat, validator has no public listen address in peerbook: ~p",
                                         [ListenAddresses]),
                                     {noreply, State}
                             end;
