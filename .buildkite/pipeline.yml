@@ -9,6 +9,7 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
+  # Validator debian package build
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
     env:
@@ -22,6 +23,7 @@ steps:
     agents:
       queue: "erlang"
 
+  # Validator debian package upload
   - if: build.tag =~ /^validator/
     name: ":cloud: upload validator deb to packagecloud"
     env:
@@ -32,6 +34,7 @@ steps:
     agents:
       queue: "erlang"
 
+  # Validator AMD64 mainnet
   - if: build.tag =~ /^validator/
     name: ":whale: validator AMD64 docker"
     env:
@@ -48,6 +51,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator ARM64 mainnet
   - if: build.tag =~ /^validator/
     name: ":whale: validator ARM64 docker"
     env:
@@ -64,6 +68,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator AMD64 testnet
   - if: build.tag =~ /^testnet_validator/
     name: ":whale: testnet validator AMD64 docker"
     env:
@@ -80,6 +85,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator ARM64 testnet
   - if: build.tag =~ /^testnet_validator/
     name: ":whale: testnet validator ARM64 docker"
     env:
@@ -96,7 +102,42 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/
+  # Validator AMD64 devnet
+  - if: build.tag =~ /^devnet_validator/
+    name: ":whale: devnet validator AMD64 docker"
+    env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "amd64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "validator-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Validator ARM64 devnet
+  - if: build.tag =~ /^devnet_validator/
+    name: ":whale: devnet validator ARM64 docker"
+    env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "arm64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "validator-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    agents:
+      queue: "arm64"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner AMD64 mainnet
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/
     name: ":whale: AMD64 docker"
     env:
       BUILD_TYPE: "miner"
@@ -112,7 +153,8 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/
+  # Miner ARM64 mainnet
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
@@ -156,6 +198,40 @@ steps:
       REGISTRY_NAME: "miner-testnet"
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner ARM64 devnet
+  - if: build.tag !~ /val/ && build.tag =~ /^devnet_/
+    name: ":whale: devnet miner ARM64 docker"
+    agents:
+      queue: "arm64"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "arm64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "miner-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner AMD64 devnet
+  - if: build.tag !~ /val/ && build.tag =~ /^devnet_/
+    name: ":whale: devnet miner AMD64 docker"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "amd64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "miner-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
     agents:
       queue: "erlang"
     commands:
