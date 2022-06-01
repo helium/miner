@@ -99,7 +99,7 @@ region_params() ->
                    SNR :: float(),
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
-                   DataRate :: binary(),
+                   DataRate :: list(),
                    Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
 send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, DataRate, Power, _State) ->
@@ -131,7 +131,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                     SNR :: float(),
                     Frequency :: float(),
                     Channel :: non_neg_integer(),
-                    DataRate :: binary(),
+                    DataRate :: list(),
                     State :: state()) -> ok.
 send_witness(Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, _State) ->
     case miner_lora_light:location_ok() of
