@@ -88,7 +88,7 @@
 %% Maximum block age returned by a connected validator before triggering an instability reconnect
 %% Measured in seconds as this is the unit of time returned by the validator for block_age
 -define(MAX_BLOCK_AGE, 600).
--define(BLOCK_AGE_TIMEOUT, (?MAX_BLOCK_AGE / 2) * 1000).
+-define(BLOCK_AGE_TIMEOUT, ceil(?MAX_BLOCK_AGE / 2) * 1000).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
