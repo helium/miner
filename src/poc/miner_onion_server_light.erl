@@ -286,14 +286,14 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                         ok ->
                                                             lager:info("sending receipt with observed power: ~p with radio power ~p", [EffectiveTxPower, TxPower]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, EffectiveTxPower, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DR, EffectiveTxPower, State);
                                                         {warning, {tx_power_corrected, CorrectedPower}} ->
                                                             %% Corrected power never takes into account antenna gain config in pkt forwarder so we
                                                             %% always add it back here
                                                             lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, with gain ~p; sending receipt with power ~p",
                                                                           [TxPower, CorrectedPower, AssertedGain, CorrectedPower + AssertedGain]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, CorrectedPower + AssertedGain, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DR, CorrectedPower + AssertedGain, State);
                                                         {warning, {unknown, Other}} ->
                                                             %% This should not happen
                                                             lager:warning("What is this? ~p", [Other]),
