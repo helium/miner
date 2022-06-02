@@ -627,7 +627,8 @@ extra_poc_vars() ->
       ?poc_v4_randomness_wt => 0.5,
       ?poc_v4_prob_count_wt => 0.0,
       ?poc_centrality_wt => 0.5,
-      ?poc_max_hop_cells => 2000}.
+      ?poc_max_hop_cells => 2000,
+      ?poc_witness_consideration_limit => 2}.
 
 check_subsequent_path_growth(ReceiptMap) ->
     PathLengths = [ length(blockchain_txn_poc_receipts_v2:path(Txn)) || {_, Txn} <- lists:flatten(maps:values(ReceiptMap)) ],
