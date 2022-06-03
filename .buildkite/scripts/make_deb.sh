@@ -3,14 +3,15 @@
 set -euo pipefail
 
 BUILD_NET="${BUILD_NET:-mainnet}"
+RELEASE_TARGET="${RELEASE_TARGET:-validator}"
+PKG_STEM="${PKG_STEM:-validator}"
 
-
-VERSION=$(echo $VERSION_TAG | sed -e 's,validator,,')
-DIAGNOSTIC=1 ./rebar3 as validator release -n miner -v ${VERSION} || ./rebar3 as validator release -n miner -v ${VERSION}
+VERSION=$(echo $VERSION_TAG | sed -e 's,validator,,' -e's,testnet_validator,,')
+DIAGNOSTIC=1 ./rebar3 as ${RELEASE_TARGET} release -n miner -v ${VERSION} || ./rebar3 as ${RELEASE_TARGET} release -n miner -v ${VERSION}
 
 wget -O /tmp/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
 
-fpm -n validator \
+fpm -n ${PKG_STEM} \
     -v "${VERSION}" \
     -s dir \
     -t deb \
@@ -31,7 +32,7 @@ fpm -n validator \
     --deb-systemd-restart-after-upgrade \
     --deb-user helium \
     --deb-group helium \
-    _build/validator/rel/=/opt \
+    _build/${RELEASE_TARGET}/rel/=/opt \
     /tmp/genesis=/opt/miner/update/genesis
 
 rm -f /tmp/genesis
