@@ -869,17 +869,19 @@ process_check_target_reqs(_State = #data{self_sig_fun = SelfSigFun}) ->
         Reqs
     ).
 
+-type target_request_data() :: {
+    URI :: string(),
+    libp2p_crypto:pubkey_bin(),
+    OnionKeyHash :: binary(),
+    BlockHash :: binary(),
+    NotificationHeight :: non_neg_integer(),
+    ChallengerSig :: binary(),
+    TimestampSec :: integer()
+}.
+
 -spec cache_check_target_req(
-    ID::binary(),
-    ReqData::{
-        string(),
-        libp2p_crypto:pubkey_bin(),
-        binary(),
-        binary(),
-        pos_integer(),
-        function(),
-        integer()
-    }
+    ID :: binary(),
+    ReqData :: target_request_data()
 ) -> true.
 cache_check_target_req(ID, ReqData) ->
     true = ets:insert(?CHECK_TARGET_REQS, {ID, ReqData}).
