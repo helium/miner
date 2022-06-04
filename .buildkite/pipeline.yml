@@ -43,7 +43,6 @@ steps:
       RELEASE_TARGET: "test_val"
       PKG_STEM: "testnet_validator"
     commands:
-      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh"
     key: "testdeb"
     artifact_paths: "*.deb"
