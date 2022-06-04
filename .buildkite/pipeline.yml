@@ -40,9 +40,10 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
-      RELEASE_TARGET: "test_val"
+      RELEASE_TARGET: "test_validator"
       PKG_STEM: "testnet-validator"
     commands:
+      - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh"
     key: "testdeb"
     artifact_paths: "*.deb"
