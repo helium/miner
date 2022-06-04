@@ -41,7 +41,7 @@ steps:
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
       RELEASE_TARGET: "test_val"
-      PKG_STEM: "testnet_validator"
+      PKG_STEM: "testnet-validator"
     commands:
       - ".buildkite/scripts/make_deb.sh"
     key: "testdeb"
@@ -53,7 +53,7 @@ steps:
     name: ":cloud: upload testnet validator deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
-      PKG_STEM: "testnet_validator"
+      PKG_STEM: "testnet-validator"
       REPO: "testnet_validators"
     commands:
       - ".buildkite/scripts/packagecloud_upload.sh"
