@@ -62,6 +62,32 @@ steps:
     agents:
       queue: "erlang"
 
+  - if: build.tag =~ /^devnet_validator/
+    name: ":debian: build devnet validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+      RELEASE_TARGET: "test_validator"
+      PKG_STEM: "devnet-validator"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh"
+    key: "devdeb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_validator/
+    name: ":cloud: upload devnet validator deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+      PKG_STEM: "devnet-validator"
+      REPO: "devnet_validators"
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh"
+    depends_on: "devdeb"
+    agents:
+      queue: "erlang"
 
   # Validator AMD64 mainnet
   - if: build.tag =~ /^validator/
