@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TAG=$(echo $VERSION_TAG | sed -e 's,testnet_validator,,' -e 's/validator//')
+TAG=$(echo $VERSION_TAG | sed -e 's,devnet_validator,,' -e 's,testnet_validator,,' -e 's/validator//')
 
 PKG_STEM="${PKG_STEM:-validator}"
 REPO="${REPO:-validators}"
