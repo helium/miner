@@ -248,7 +248,7 @@ handle_info(timeout, #{response_pending := true,
                        client := Client} = Stream) ->
     gen_server:reply(Client, {error, timeout}),
     {noreply, Stream#{response_pending => false}};
-handle_info({'DOWN', Ref, process, _, _Reason}, #{conn_mon := Ref} = C) ->
+handle_info({'DOWN', Ref, process, _, _Reason}, #{conn_monitor_ref := Ref} = C) ->
     %% our connection is down, nothing more stream can do other then terminate
     {stop, connection_down, C};
 handle_info(Msg, #{handler_callback := HandlerCB} = Stream) ->
