@@ -13,6 +13,30 @@ dep_hash() {
     git show "${MINER}:rebar.lock" | grep -A2 "${DEP}" | sed -e "s/.*\"\(.*\)\".*/\1/" | tr '\n' ' ' | awk '{print $3}'
 }
 
+strip_zeros() {
+    local VZN=$(echo $1 | sed -e 's/0//g')
+
+    if [[ $VZN == "" ]]; then
+        echo "0"
+    else
+        echo $VZN
+    fi
+}
+
+val_tag() {
+    local VAL_VERSION
+    local MAJ
+    local MIN
+    local PATCH
+
+    VAL_VERSION=$(grep -A 1 "%% MMMmmmPPPP" src/miner.erl | grep -o -E '[0-9]+')
+    MAJ=$(echo $VAL_VERSION | awk '{print substr( $0, 1, 3 )}')
+    MIN=$(echo $VAL_VERSION | awk '{print substr( $0, 4, 3 )}')
+    PATCH=$(echo $VAL_VERSION | awk '{print substr( $0, 7, 4 )}')
+
+    echo "validator$(strip_zeros $MAJ).$(strip_zeros $MIN).$(strip_zeros $PATCH)"
+}
+
 declare -r repos="blockchain libp2p sibyl ecc508 relcast dkg hbbft helium_proto"
 declare NAMED_TAG
 
@@ -44,6 +68,11 @@ fi
 MINER_HASH=$1
 
 if [[ ! -z $NAMED_TAG ]]; then
+    VAL_VERSION_TO_TAG=$(val_tag)
+    if [[ ! $VAL_VERSION_TO_TAG == $NAMED_TAG ]]; then
+        echo "tag doesnt match committed version; should be ${VAL_VERSION_TO_TAG} per miner.erl!"
+        exit 1
+    fi
     RELEASE_TAG=$NAMED_TAG
 else
     while git tag -l | grep -q "${TAG_NAME}.${TAG_NUMBER}"; do
