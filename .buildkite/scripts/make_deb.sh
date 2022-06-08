@@ -6,7 +6,7 @@ BUILD_NET="${BUILD_NET:-mainnet}"
 RELEASE_TARGET="${RELEASE_TARGET:-validator}"
 PKG_STEM="${PKG_STEM:-validator}"
 
-VERSION=$(echo $VERSION_TAG | sed -e's,testnet_validator,,' -e 's,validator,,' )
+VERSION=$(echo $VERSION_TAG | sed -e 's,devnet_validator,,' -e's,testnet_validator,,' -e 's,validator,,' )
 
 DIAGNOSTIC=1 ./rebar3 as ${RELEASE_TARGET} release -n miner -v ${VERSION} || ./rebar3 as ${RELEASE_TARGET} release -n miner -v ${VERSION}
 

@@ -12,7 +12,7 @@
   ]},
  {blockchain,
   [
-   {seed_nodes, "${SEED_NODES:-/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443"}},
+   {seed_nodes, "${SEED_NODES:-/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443}"},
    {seed_node_dns, ""},
    {listen_addresses, ["${LISTEN_ADDRESS:-/ip4/0.0.0.0/tcp/2154}"]},
    {honor_quick_sync, false},
