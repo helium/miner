@@ -1,0 +1,40 @@
+# Override values in default.toml that are specific to the devnet
+
+[update]
+# disable update checking inside the miner container
+enabled = false
+channel = "devnet"
+
+[[gateways]]
+# devnet-val2
+pubkey = "1ZKSCVEyfxoL3kim6RpeSZFrCpBNJY7mUMtfjDNVNXau2twL8nL"
+uri = "http://44.192.55.147:8080"
+
+[[gateways]]
+# devnet-val6
+pubkey = "1YLV82eWxwhLt9hw9zJmmDh66KApLXPNsG4bUr4HFMSdvTeo3tR"
+uri = "http://44.202.198.56:8080"
+
+[[gateways]]
+# devnet-val5
+pubkey = "1YdGFKsbnJ2U8b5dP6Tx9eqvdjCyk9iuQuAZxSzAVNEkGZtZ8rt"
+uri = "http://44.199.250.62:8080"
+
+[[gateways]]
+# devnet-val3
+pubkey = "1YiZUsuCwxE7xyxjke1ogehv5WSuYZ9o7uM2ZKvRpytyqb8Be63"
+uri = "http://3.234.250.71:8080"
+
+[[gateways]]
+# devnet-val1
+pubkey = "1ZmYx8qKD8xWEEkWY1qdSuM14C7LQuPzFPjhbDHd3UifZZfKMBC"
+uri = "http://34.200.230.93:8080"
+
+[[gateways]]
+# devnet-val4
+pubkey = "1Zap7LUJSTZwdTSjbETK5LqGahUed2iJi7xude3sJVfPn91sArh"
+uri = "http://44.193.3.235:8080"
+
+[[routers]]
+pubkey = "1ZLxTAB8Bs7BXySp5HqHhtCos6JtzzV2mfZjofEGT1MQVTKqYQT"
+uri = "http://34.215.110.61:8080"
