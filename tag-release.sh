@@ -29,7 +29,7 @@ val_tag() {
     local MIN
     local PATCH
 
-    VAL_VERSION=$(grep -A 1 "%% MMMmmmPPPP" src/miner.erl | grep -o -E '[0-9]+')
+    VAL_VERSION=$(sed -n "/^version() ->$/,/\.$/p" src/miner.erl | grep -o -E '[0-9]{10}')
     MAJ=$(echo $VAL_VERSION | awk '{print substr( $0, 1, 3 )}')
     MIN=$(echo $VAL_VERSION | awk '{print substr( $0, 4, 3 )}')
     PATCH=$(echo $VAL_VERSION | awk '{print substr( $0, 7, 4 )}')
