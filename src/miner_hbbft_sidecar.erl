@@ -183,8 +183,8 @@ handle_call({submit, Txn}, From,
                                             spawn(fun() ->
                                                         %% this will now return {ok, Position, Length}
                                                         %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
-                                                        {ok, _PosInQueue, _QueueLen, Height} = Res = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
-                                                        gen_server:reply(From, Res)
+                                                        {ok, QueuePos, QueueLen} = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
+                                                        gen_server:reply(From, {ok, QueuePos, QueueLen, Height})
                                                   end),
                                             {noreply, State};
                                         Error ->
@@ -256,8 +256,8 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                             ok ->
                                 %% avoid deadlock by not waiting for this.
                                 spawn(fun() ->
-                                            {ok, PosInQueue, QueueLen} = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
-                                            gen_server:reply(From, {ok, PosInQueue, QueueLen, Height})
+                                            {ok, QueuePos, QueueLen} = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
+                                            gen_server:reply(From, {ok, QueuePos, QueueLen, Height})
                                       end),
                                 ok;
                             Error ->
