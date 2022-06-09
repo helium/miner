@@ -13,16 +13,6 @@ dep_hash() {
     git show "${MINER}:rebar.lock" | grep -A2 "${DEP}" | sed -e "s/.*\"\(.*\)\".*/\1/" | tr '\n' ' ' | awk '{print $3}'
 }
 
-strip_zeros() {
-    local VZN=$(echo $1 | sed -e 's/0//g')
-
-    if [[ $VZN == "" ]]; then
-        echo "0"
-    else
-        echo $VZN
-    fi
-}
-
 val_tag() {
     local VAL_VERSION
     local MAJ
@@ -34,7 +24,7 @@ val_tag() {
     MIN=$(echo $VAL_VERSION | awk '{print substr( $0, 4, 3 )}')
     PATCH=$(echo $VAL_VERSION | awk '{print substr( $0, 7, 4 )}')
 
-    echo "validator$(strip_zeros $MAJ).$(strip_zeros $MIN).$(strip_zeros $PATCH)"
+    echo "validator$((10#$MAJ)).$((10#$MIN)).$((10#$PATCH))"
 }
 
 declare -r repos="blockchain libp2p sibyl ecc508 relcast dkg hbbft helium_proto"
