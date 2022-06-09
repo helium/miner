@@ -1,14 +1,4 @@
 steps:
-  - commands:
-      - "make compile"
-      - "make ci"
-    name: ":hammer: build"
-    key: "tests"
-    agents:
-      queue: "erlang"
-    artifact_paths:
-      - "artifacts/*"
-
   - if: build.tag =~ /^seed/
     name: ":debian: build seed deb"
     env:
@@ -33,14 +23,14 @@ steps:
     agents:
       queue: "erlang"
 
-  - if: build.tag =~ /^validator/
-    name: ":debian: build validator deb"
+  - if: build.tag =~ /^devnet_seed/
+    name: ":debian: build seed deb"
     env:
-      VERSION_TAG: $BUILDKITE_TAG
+        VERSION_TAG: $BUILDKITE_TAG
     commands:
       - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh validator"
-    key: "val-deb"
+      - ".buildkite/scripts/make_deb.sh devnet_seed"
+    key: "devnet-seed-deb"
     artifact_paths: "*.deb"
     agents:
       queue: "erlang"
@@ -65,96 +55,14 @@ steps:
     agents:
       queue: "erlang"
 
-  - if: build.tag =~ /^validator/
-    name: ":cloud: upload validator deb to packagecloud"
+  - if: build.tag =~ /^testnet_seed/
+    name: ":cloud: upload devnet seed deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - ".buildkite/scripts/packagecloud_upload.sh validator"
-    depends_on: "val-deb"
+      - ".buildkite/scripts/packagecloud_upload.sh devnet_seed"
+    depends_on: "devnet-seed-deb"
     agents:
       queue: "erlang"
 
-  - if: build.tag =~ /^validator/
-    name: "validator AMD64 docker"
-    env:
-      BUILD_TYPE: "validator"
-      IMAGE_ARCH: "amd64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "validator"
-      VERSION_TAG: $BUILDKITE_TAG
-    agents:
-      queue: "erlang"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag =~ /^validator/
-    name: "validator ARM64 docker"
-    env:
-      BUILD_TYPE: "validator"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "validator"
-      VERSION_TAG: $BUILDKITE_TAG
-    agents:
-      queue: "arm64"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag =~ /^val\d/
-    name: "testnet validator AMD64 docker"
-    env:
-      BUILD_TYPE: "val"
-      IMAGE_ARCH: "amd64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "validator"
-      VERSION_TAG: $BUILDKITE_TAG
-    agents:
-      queue: "erlang"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag =~ /^val\d/
-    name: "testnet validator ARM64 docker"
-    env:
-      BUILD_TYPE: "val"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "validator"
-      VERSION_TAG: $BUILDKITE_TAG
-    agents:
-      queue: "arm64"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/ && build.tag !~ /^testnet_seed/
-    name: ":whale: AMD64 docker"
-    env:
-      BUILD_TYPE: "miner"
-      IMAGE_ARCH: "amd64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "miner"
-      VERSION_TAG: $BUILDKITE_TAG
-    agents:
-      queue: "erlang"
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
-
-  - if: build.tag != null && build.tag !~ /^validator/ && build.tag !~ /^val\d/ && build.tag !~ /^seed/ && build.tag !~ /^testnet_seed/
-    name: ":whale: ARM64 docker"
-    agents:
-      queue: "arm64"
-    env:
-      BUILD_TYPE: "miner"
-      IMAGE_ARCH: "arm64"
-      REGISTRY_HOST: "quay.io"
-      REGISTRY_NAME: "miner"
-      VERSION_TAG: $BUILDKITE_TAG
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_image.sh"
