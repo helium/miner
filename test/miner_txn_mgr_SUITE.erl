@@ -7,6 +7,7 @@
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
+-include_lib("helium_proto/include/blockchain_txn_handler_pb.hrl").
 
 -include("miner_ct_macros.hrl").
 
@@ -24,7 +25,11 @@
          txn_invalid_nonce_test/1,
          txn_dependent_test/1,
          txn_from_future_via_protocol_v1_test/1,
-         txn_from_future_via_protocol_v2_test/1
+         txn_from_future_via_protocol_v2_test/1,
+         txn_from_future_via_protocol_v3_test/1,
+         txn_queue_protocol_v3_test/1,
+         txn_queue_protocol_v2_test/1,
+         txn_queue_protocol_v1_test/1
 
         ]).
 
@@ -36,7 +41,11 @@ all() -> [
 
           %% XXX v1 test is inconsistent. TODO Check if it can be fixed.
           {testcase, txn_from_future_via_protocol_v1_test, [{repeat_until_ok, 5}]},
-          txn_from_future_via_protocol_v2_test
+          txn_from_future_via_protocol_v2_test,
+          txn_from_future_via_protocol_v3_test,
+          txn_queue_protocol_v3_test,
+          txn_queue_protocol_v2_test,
+          txn_queue_protocol_v1_test
          ].
 
 init_per_suite(Config) ->
@@ -58,6 +67,8 @@ init_per_testcase(_TestCase, Config0) ->
     BlockTime =
         case _TestCase of
             txn_dependent_test -> 5000;
+            txn_queue_protocol_v2_test -> 5000;
+            txn_queue_protocol_v1_test -> 5000;
             _ -> ?config(block_time, Config)
         end,
 
@@ -93,7 +104,6 @@ init_per_testcase(_TestCase, Config0) ->
             end_per_testcase(_TestCase, Config),
             erlang:What(Why)
     end.
-
 
 end_per_testcase(_TestCase, Config) ->
     miner_ct_utils:end_per_testcase(_TestCase, Config).
@@ -358,9 +368,482 @@ txn_dependent_test(Config) ->
 
     ok.
 
-txn_from_future_via_protocol_v2_test(Cfg) ->
+txn_queue_protocol_v3_test(Config) ->
+    %% send a bunch of txns via the grpc submit API
+    %% wait for them to appear in the sidecar buffer
+    %% validate each txns position in the buffer
+    %% then force one txn to be dequeued from the buffer
+    %% and revalidate the queue positions of the remaining
+    %% txns
+
+    IgnoredTxns = [],
+    Miners = ?config(miners, Config),
+    ConMiners = ?config(consensus_miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
+    %% run the common elements of the test
+    %% which are shared across all 3 queue
+    %% tests ( one for each of the txn protocols )
+    Config1 = txn_queue_common_test(Config),
+    %% the common test appends a shared dataset
+    %% to the config
+    %% take what we need from it to complete
+    %% the rest of this test
+    CommonDataMap = ?config(common_data, Config1),
+    #{
+        txn1 := SignedTxn1,
+        txn2 := SignedTxn2,
+        txn3 := SignedTxn3,
+        txn4 := SignedTxn4,
+        txn1_key := Txn1Key,
+        txn2_key := Txn2Key,
+        txn3_key := Txn3Key,
+        txn4_key := Txn4Key,
+        txn1_submit_height := Txn1SubmitHeight,
+        txn2_submit_height := Txn2SubmitHeight,
+        txn3_submit_height := Txn3SubmitHeight,
+        txn4_submit_height := Txn4SubmitHeight,
+        con_miner_1 := ConMiner1,
+        miner := Miner,
+        last_height :=  Height
+    } = CommonDataMap,
+    ConMiner1Addr = miner_ct_utils:node2addr(ConMiner1, AddrList),
+
+    %% query the txn mgr txn status API
+    %% this should give us back the same data as the above
+    %% sidecar query
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 3),
+    {ok, Txn1Key, _, Txn1SubmitHeight, [{ConMiner1Addr, _, 1, 4}]} =
+        txn_mgr_query_txn(Txn1Key, Miner),
+    {ok, Txn2Key, _, Txn2SubmitHeight, [{ConMiner1Addr, _, 2, 4}]} =
+        txn_mgr_query_txn(Txn2Key, Miner),
+    {ok, Txn3Key, _, Txn3SubmitHeight, [{ConMiner1Addr, _, 3, 4}]} =
+        txn_mgr_query_txn(Txn3Key, Miner),
+    {ok, Txn4Key, _, Txn4SubmitHeight, [{ConMiner1Addr, _, 4, 4}]} =
+        txn_mgr_query_txn(Txn4Key, Miner),
+
+    %% force one txn in the sidecar buffer to be processed
+    %% and then get the queue pos of the remaining txns
+    %% force the random_n function to return txn1
+    %% when this is processed txns 2 - 4 will all then
+    %% move up the buffer
+    [
+        ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [hbbft_utils, random_n, fun(_, _) -> [blockchain_txn:serialize(SignedTxn1)] end],
+                300
+            )
+    ||
+        Node <- ConMiners
+    ],
+    %% wait for a block to allow txn1 to be dequeued
+    %% and then force random_n to return an empty list again
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 4),
+    [
+        ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [hbbft_utils, random_n, fun(_, _) -> [] end],
+                300
+            )
+    ||
+        Node <- ConMiners
+    ],
+
+    %% await at least 5 blocks
+    %% this gives time for the txn's updated queue data
+    %% to be propogated back to txn mgr cache
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 10),
+
+    %% requery the cg member's sidecar and confirm new buffer queue data
+    {{ok, 1, 3}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn2]),
+    {{ok, 2, 3}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn3]),
+    {{ok, 3, 3}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn4]),
+    {{error, not_found}, _IgnoreHeight}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn1]),
+
+    %% requery the txn list via txn mgr api
+    {ok, Txn2Key, _, Txn2SubmitHeight, [{ConMiner1Addr, _, 1, 3}]} =
+        txn_mgr_query_txn(Txn2Key, Miner),
+    {ok, Txn3Key, _, Txn3SubmitHeight, [{ConMiner1Addr, _, 2, 3}]} =
+        txn_mgr_query_txn(Txn3Key, Miner),
+   {ok, Txn4Key, _, Txn4SubmitHeight, [{ConMiner1Addr, _, 3, 3}]} =
+        txn_mgr_query_txn(Txn4Key, Miner),
+
+    %% confirm txn mgr only contains 3 txns in its cache
+    true = miner_ct_utils:wait_until(
+                                        fun()->
+                                            maps:size(get_cached_txns_with_exclusions(Miner, IgnoredTxns)) == 3
+                                        end, 60, 100),
+
+    ok.
+
+txn_queue_protocol_v2_test(Config) ->
+    %% using v2 of the txn protocol
+    %% send a bunch of txns via the grpc submit API
+    %% wait for them to appear in the sidecar buffer
+    %% validate each txns position in the buffer
+    %% as we are running on a v3 node, sidecar queue data
+    %% will still be available
+    %% however the txn mgr will only receive v2 data
+    %% meaning it will not receive any queue position data
+    %% and those values will default to zero
+
+    Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
+    %% remove the v3 protocol handler,
+    %% force the test to run on v2 protocol
+    lists:foreach(
+                fun(M) ->
+                    Swarm = ct_rpc:call(M, blockchain_swarm, tid, [], 2000),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V3]
+                    )
+                end,
+                Miners
+    ),
+
+    %% run the common elements of the test
+    %% which are shared across all 3 queue
+    %% tests ( one for each of the txn protocols )
+    Config1 = txn_queue_common_test(Config),
+    %% the common test appends a shared dataset
+    %% to the config
+    %% take what we need from it to complete
+    %% the rest of this test
+    CommonDataMap = ?config(common_data, Config1),
+    #{
+        txn1_key := Txn1Key,
+        txn2_key := Txn2Key,
+        txn3_key := Txn3Key,
+        txn4_key := Txn4Key,
+        txn1_submit_height := Txn1SubmitHeight,
+        txn2_submit_height := Txn2SubmitHeight,
+        txn3_submit_height := Txn3SubmitHeight,
+        txn4_submit_height := Txn4SubmitHeight,
+        con_miner_1 := ConMiner1,
+        miner := Miner,
+        last_height :=  Height
+    } = CommonDataMap,
+    ConMiner1Addr = miner_ct_utils:node2addr(ConMiner1, AddrList),
+
+    %% query the txn mgr txn status API
+    %% queue data will not be available and will default to zero
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 3),
+    {ok, Txn1Key, _, Txn1SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn1Key, Miner),
+    {ok, Txn2Key, _, Txn2SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn2Key, Miner),
+    {ok, Txn3Key, _, Txn3SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn3Key, Miner),
+    {ok, Txn4Key, _, Txn4SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn4Key, Miner),
+
+    ok.
+
+txn_queue_protocol_v1_test(Config) ->
+    %% using v1 of the txn protocol
+    %% send a bunch of txns via the grpc submit API
+    %% wait for them to appear in the sidecar buffer
+    %% validate each txns position in the buffer
+    %% as we are running on a v3 node, sidecar queue data
+    %% will still be available
+    %% however the txn mgr will only receive v1 data
+    %% meaning it will not receive any queue position data
+    %% and those values will default to zero
+
+    Miners = ?config(miners, Config),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
+    %% remove the v3 and v2 protocol handlers,
+    %% force the test to run on v1 protocol
+    lists:foreach(
+                fun(M) ->
+                    Swarm = ct_rpc:call(M, blockchain_swarm, tid, [], 2000),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V3]
+                    ),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V2]
+                    )
+                end,
+                Miners
+    ),
+    %% run the common elements of the test
+    %% which are shared across all 3 queue
+    %% tests ( one for each of the txn protocols )
+    Config1 = txn_queue_common_test(Config),
+    %% the common test appends a shared dataset
+    %% to the config
+    %% take what we need from it to complete
+    %% the rest of this test
+    CommonDataMap = ?config(common_data, Config1),
+    #{
+        txn1_key := Txn1Key,
+        txn2_key := Txn2Key,
+        txn3_key := Txn3Key,
+        txn4_key := Txn4Key,
+        txn1_submit_height := Txn1SubmitHeight,
+        txn2_submit_height := Txn2SubmitHeight,
+        txn3_submit_height := Txn3SubmitHeight,
+        txn4_submit_height := Txn4SubmitHeight,
+        con_miner_1 := ConMiner1,
+        miner := Miner,
+        last_height :=  Height
+    } = CommonDataMap,
+    ConMiner1Addr = miner_ct_utils:node2addr(ConMiner1, AddrList),
+
+    %% query the txn mgr txn status API
+    %% queue data will not be available and will default to zero
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 3),
+    {ok, Txn1Key, _, Txn1SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn1Key, Miner),
+    {ok, Txn2Key, _, Txn2SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn2Key, Miner),
+    {ok, Txn3Key, _, Txn3SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn3Key, Miner),
+    {ok, Txn4Key, _, Txn4SubmitHeight, [{ConMiner1Addr, _, 0, 0}]} =
+        txn_mgr_query_txn(Txn4Key, Miner),
+
+    ok.
+
+txn_queue_common_test(Config) ->
+    %% this sets up and runs the elements of the
+    %% txn queue tests which are common
+    %% across all 3 protocol versions
+    %% any data required by the parent
+    %% will be added to the config
+
+    Miners = ?config(miners, Config),
+    NonConMiners = ?config(non_consensus_miners, Config),
+    Miner = hd(NonConMiners),
+    ConMiners = ?config(consensus_miners, Config),
+    ConMiner1 = hd(ConMiners),
+    AddrList = ?config(tagged_miner_addresses, Config),
+
+    Addr = miner_ct_utils:node2addr(Miner, AddrList),
+    ConMiner1Addr = miner_ct_utils:node2addr(ConMiner1, AddrList),
+
+    Chain = ct_rpc:call(Miner, blockchain_worker, blockchain, []),
+    ct:pal("consensus miners ~p", [ConMiners]),
+    ct:pal("non consensus miners ~p", [NonConMiners]),
+    ct:pal("miner in use ~p", [Miner]),
+    ct:pal("consensus miner in use ~p", [ConMiner1]),
+    ct:pal("consensus miner bin in use ~p", [ConMiner1Addr]),
+
+    PayerAddr = Addr,
+    Payee = hd(miner_ct_utils:shuffle(ConMiners)),
+    PayeeAddr = miner_ct_utils:node2addr(Payee, AddrList),
+    {ok, _Pubkey, SigFun, _ECDHFun} = ct_rpc:call(Miner, blockchain_swarm, keys, []),
+    IgnoredTxns = [],
+
+    %% meck out the sidecar random_n function
+    %% make it return an empty list
+    %% simulate an empty buffer
+    %% this should result in the submitted txns
+    %% remaining in the sidecar buffer
+    meck:new(hbbft_utils, [passthrough]),
+    [
+            ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [hbbft_utils, random_n, fun(_, _) -> [] end],
+                3000
+            )
+    ||
+        Node <- ConMiners
+    ],
+
+    %% meck out the signatory_rand_members function
+    %% force it to always return a deterministic list of acceptors
+    %% which in this case will be a single consensus member
+    %% this will result in the txn mgr pushing its cached txns
+    %% to this single CG member
+    %% and thus we can ensure we only need to check the sidecar
+    %% buffer on a single and known CG member
+
+    %% also meck out is_valid for payment txns
+    %% this test is not concerned with validity issues
+    meck:new(blockchain_txn_mgr, [passthrough]),
+    meck:new(blockchain_txn_payment_v1, [passthrough]),
+    meck:new(blockchain_txn, [passthrough]),
+    [
+        begin
+            ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_mgr, signatory_rand_members, fun(_, _, _, _, _) -> {ok, [ConMiner1Addr]} end],
+                3000
+            ),
+            ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_payment_v1, is_valid, fun(_, _) -> ok end],
+                3000
+            ),
+            ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn, absorb, fun(_, _) -> ok end],
+                3000
+            )
+        end
+    ||
+        Node <- Miners
+    ],
+
+    %% get the start height, after all prep
+    {ok, Height} = ct_rpc:call(Miner, blockchain, height, [Chain]),
+
+    %% prep the txns, 1 - 4
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 2),
+    StartNonce = miner_ct_utils:get_nonce(Miner, Addr),
+    ct:pal("start nonce: ~p", [StartNonce]),
+    Txn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+1]),
+    SignedTxn1 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn1, SigFun]),
+    Txn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+2]),
+    SignedTxn2 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn2, SigFun]),
+    Txn3 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+3]),
+    SignedTxn3 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn3, SigFun]),
+    Txn4 = ct_rpc:call(Miner, blockchain_txn_payment_v1, new, [PayerAddr, PayeeAddr, 1000, StartNonce+4]),
+    SignedTxn4 = ct_rpc:call(Miner, blockchain_txn_payment_v1, sign, [Txn4, SigFun]),
+
+
+    %% submit the txns via the txn mgr api
+    %% same API as used by the grpc txn submit
+    %% submit each txn at 1 block intervals
+    %% helps to ensure they get submitted in order to sidecar
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 3),
+    {ok, Txn1Key, Txn1SubmitHeight} = ct_rpc:call(Miner, blockchain_txn_mgr, grpc_submit, [SignedTxn1]),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 4),
+    {ok, Txn2Key, Txn2SubmitHeight} = ct_rpc:call(Miner, blockchain_txn_mgr, grpc_submit, [SignedTxn2]),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 5),
+    {ok, Txn3Key, Txn3SubmitHeight} = ct_rpc:call(Miner, blockchain_txn_mgr, grpc_submit, [SignedTxn3]),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 6),
+    {ok, Txn4Key, Txn4SubmitHeight} = ct_rpc:call(Miner, blockchain_txn_mgr, grpc_submit, [SignedTxn4]),
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 7),
+
+    %% we dont want the txns being submitted multiple times to the same CG member
+    %% so force no new members to be returned as available dialers
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 8),
+    [
+            ok =
+            ct_rpc:call(
+                Node,
+                meck,
+                expect,
+                [blockchain_txn_mgr, signatory_rand_members, fun(_, _, _, _, _) -> {ok, []} end],
+                3000
+            )
+    ||
+        Node <- Miners
+    ],
+
+    %% confirm all txns are in txn mgr cache
+    true = miner_ct_utils:wait_until(
+        fun()->
+            maps:size(get_cached_txns_with_exclusions(Miner, IgnoredTxns)) == 4
+        end, 60, 500),
+
+    %% query the cg member's sidecar and confirm buffer queue data
+    ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 10),
+    {{ok, 1, 4}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn1]),
+    {{ok, 2, 4}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn2]),
+    {{ok, 3, 4}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn3]),
+    {{ok, 4, 4}, _}  = ct_rpc:call(ConMiner1, miner_hbbft_sidecar, handle_txn, [update, SignedTxn4]),
+
+    [
+        {common_data, #{
+            txn1 => SignedTxn1,
+            txn2 => SignedTxn2,
+            txn3 => SignedTxn3,
+            txn4 => SignedTxn4,
+            txn1_key => Txn1Key,
+            txn2_key => Txn2Key,
+            txn3_key => Txn3Key,
+            txn4_key => Txn4Key,
+            txn1_submit_height => Txn1SubmitHeight,
+            txn2_submit_height => Txn2SubmitHeight,
+            txn3_submit_height => Txn3SubmitHeight,
+            txn4_submit_height => Txn4SubmitHeight,
+            con_miner_1 => ConMiner1,
+            miner => Miner,
+            last_height =>  Height + 10
+        }} | Config].
+
+txn_from_future_via_protocol_v3_test(Cfg) ->
+
     txn_from_future_test(
         fun() -> ok end,
+        fun(A, TxnHash) ->
+            %% In V2 mode, with temporal data available, we expect for the
+            %% rejection from the future to be identified as such, and
+            %% deferred:
+            ?assertMatch([_|_], fetch_deferred_rejections(A, TxnHash))
+        end,
+        fun(A, TxnHash) ->
+            %% Finally, we expect the deferred transaction to have been
+            %% dequeued:
+            ?assertMatch([], fetch_deferred_rejections(A, TxnHash))
+        end,
+        fun(A_SubmissionResult) ->
+            %% Expecting ok, not error,
+            %% BECAUSE the reason for B's rejection of T was that
+            %% T is already in B's chain,
+            %% so A is expected to have fired its T submission callback
+            %% during the sync with B,
+            %% after being unlocked, and
+            %% upon receiving a block containing T.
+            %% See calls to purge_block_txns_from_cache/1 within blockchain_txn_mgr.
+            ?assertMatch(ok, A_SubmissionResult)
+        end,
+        Cfg
+    ).
+
+txn_from_future_via_protocol_v2_test(Cfg) ->
+
+    Miners = ?config(consensus_miners, Cfg),
+    DoInit =
+        fun() ->
+            %% Remove V3 handler, force it to use v2
+            lists:foreach(
+                fun(M) ->
+                    Swarm = ct_rpc:call(M, blockchain_swarm, tid, [], 2000),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V3]
+                    )
+                end,
+                Miners
+            )
+        end,
+
+    txn_from_future_test(
+        DoInit,
         fun(A, TxnHash) ->
             %% In V2 mode, with temporal data available, we expect for the
             %% rejection from the future to be identified as such, and
@@ -390,10 +873,16 @@ txn_from_future_via_protocol_v1_test(Cfg) ->
     Miners = ?config(consensus_miners, Cfg),
     DoInit =
         fun() ->
-            %% Remove V2 handlers so only V1 is available:
+            %% Remove V3 and V2 handlers so only V1 is available:
             lists:foreach(
                 fun(M) ->
                     Swarm = ct_rpc:call(M, blockchain_swarm, tid, [], 2000),
+                    ct_rpc:call(
+                        M,
+                        libp2p_swarm,
+                        remove_stream_handler,
+                        [Swarm, ?TX_PROTOCOL_V3]
+                    ),
                     ct_rpc:call(
                         M,
                         libp2p_swarm,
@@ -585,7 +1074,7 @@ txn_submit(Node, Txn) ->
     SubmissionRef.
 
 fetch_deferred_rejections(Node, TxnHash) ->
-    IsMatch = fun({_, _, T, _, _}) -> TxnHash =:= blockchain_txn:hash(T) end,
+    IsMatch = fun({_, _, _, T, _}) -> TxnHash =:= blockchain_txn:hash(T) end,
     Deferred = ct_rpc:call(Node, blockchain_txn_mgr, get_rejections_deferred, []),
     [T || T <- Deferred, IsMatch(T)].
 
@@ -634,3 +1123,14 @@ nonce_updated_for_miner(Addr, ExpectedNonce, ConMiners)->
                           end, ConMiners),
             [true] == lists:usort(HaveNoncesIncremented)
         end, 200, 1000).
+
+txn_mgr_query_txn(TxnKey, Miner) ->
+    ct:pal("txn mgr query, key: ~p, miner: ~p",
+        [TxnKey, Miner]),
+    {ok, pending, TxnMgrData} = ct_rpc:call(Miner, blockchain_txn_mgr, txn_status, [TxnKey]),
+    ct:pal("TxnMgrData: ~p", [TxnMgrData]),
+    #{  key := RespTxnKey,
+        height := RespCurHeight,
+        recv_block_height := RespTxnSubmitHeight,
+        acceptors := RespAcceptors1 } = TxnMgrData,
+    {ok, RespTxnKey, RespCurHeight, RespTxnSubmitHeight, RespAcceptors1}.
