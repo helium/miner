@@ -808,7 +808,13 @@ maybe_init_addr_hash(Ledger, #state{chain = Chain, addr_hash_filter=undefined} =
                             Hash = blockchain_block:hash_block(Block),
                             %% ok, now we can build the filter
                             Gateways = blockchain_ledger_v1:gateway_count(Ledger),
-                            {ok, Bloom} = bloom:new_optimal(Gateways, ?ADDR_HASH_FP_RATE),
+                            %% on new networks, this count is 0 which causes
+                            %% the nif to crash, or at least for the return
+                            %% value to not match the ok tuple
+                            %%
+                            %% so we will take 1000 or the actual gateway
+                            %% count, whichever is larger.
+                            {ok, Bloom} = bloom:new_optimal(max(1000, Gateways), ?ADDR_HASH_FP_RATE),
                             sync_filter(Block, Bloom, Chain),
                             State#state{
                                 addr_hash_filter = #addr_hash_filter{
