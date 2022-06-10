@@ -181,10 +181,10 @@ handle_call({submit, Txn}, From,
                                     case blockchain_txn:absorb(Txn, Chain) of
                                         ok ->
                                             spawn(fun() ->
-                                                        %% this will now return {ok, Position, Length}
-                                                        %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
-                                                        {ok, QueuePos, QueueLen} = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
-                                                        gen_server:reply(From, {ok, QueuePos, QueueLen, Height})
+                                                        %% this will now return {ok, Position, Length} or {error, full}
+                                                        %% which we feed back to the caller using gen_server:reply() on the From
+                                                        Reply = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
+                                                        gen_server:reply(From, {Reply, Height})
                                                   end),
                                             {noreply, State};
                                         Error ->
@@ -199,6 +199,16 @@ handle_call({submit, Txn}, From,
                     end
             end
     end;
+handle_call({query_txn, Txn}, From, #state{chain = Chain, group = Group} = State) ->
+    lager:debug("getting status update request for txn: ~s", [blockchain_txn:print(Txn)]),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    spawn(fun() ->
+              %% Reply may be return {ok, Position, QueueLength} or {error, not_found}
+              Reply = libp2p_group_relcast:handle_command(Group, {query_txn, Txn})
+              gen_server:reply(From, {Reply, Height})
+          end),
+    {noreply, State};
 handle_call({new_round, _Buf, _RemoveTxns}, _From, #state{chain = undefined} = State) ->
     {reply, [], State};
 handle_call({new_round, Buf, RemoveTxns}, _From, #state{chain = Chain} = State) ->

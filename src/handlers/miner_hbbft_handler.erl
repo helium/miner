@@ -246,6 +246,15 @@ handle_command({txn, Txn}, State=#state{hbbft=HBBFT}) ->
                     {reply, {ok, Position, Length}, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
             end
     end;
+handle_command({query_txn, Txn}, State = #state{hbbft = HBBFT}) ->
+    Buf = hbbft:buf(HBBFT),
+    SerTxn = blockchain_txn:serialize(Txn),
+    case current_buffer_position(SerTxn, Buf) of
+        {ok, Position} when is_integer(Position) ->
+            {reply, {ok, Position, length(Buf)}, ignore};
+        {error, not_found} ->
+            {reply, {error, not_found}, ignore}
+    end;
 handle_command(maybe_skip, State = #state{hbbft = HBBFT,
                                           id = MyIndex,
                                           skip_votes = Skips}) ->
@@ -823,6 +832,16 @@ bin_to_msg(<<Bin/binary>>) ->
     catch _:_ ->
         {error, truncated}
     end.
+
+-spec current_buffer_position([Element], Element) ->
+    {ok, pos_integer()} | {error, not_found} when Element :: term()
+current_buffer_position(List, Elem) -> current_buffer_position(List, Elem, 0).
+
+-spec current_buffer_position([Element], Element, non_neg_integer()) ->
+    {ok, pos_integer()} | {error, not_found} when Element :: term()
+current_buffer_position([], _Elem, _Pos) -> {error, not_found};
+current_buffer_position([Elem|Rem], Elem, Pos) -> {ok, Pos + 1};
+current_buffer_position([_Head|Rem], Elem, Pos) -> current_buffer_position(Rem, Elem, Pos + 1).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
