@@ -85,7 +85,7 @@ retry_decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, 
                    SNR :: float(),
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
-                   DataRate :: binary(),
+                   DataRate :: list(),
                    Stream :: undefined | pid(),
                    Power :: non_neg_integer(),
                    State :: state()) -> ok | {error, any()}.
@@ -106,7 +106,7 @@ send_receipt(_Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, 
                    SNR :: float(),
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
-                   DataRate :: binary(),
+                   DataRate :: list(),
                    Stream :: undefined | pid(),
                    Power :: non_neg_integer(),
                    State :: state(),
@@ -179,7 +179,7 @@ send_receipt(Data, OnionCompactKey, Type, Time, RSSI, SNR, Frequency, Channel, D
                     SNR :: float(),
                     Frequency :: float(),
                     Channel :: non_neg_integer(),
-                    DataRate :: binary(),
+                    DataRate :: list(),
                     State :: state()) -> ok.
 send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRate, State) ->
     case miner_lora:location_ok() of
@@ -200,7 +200,7 @@ send_witness(_Data, OnionCompactKey, Time, RSSI, SNR, Frequency, Channel, DataRa
                    SNR :: float(),
                    Frequency :: float(),
                    Channel :: non_neg_integer(),
-                   DataRate :: binary(),
+                   DataRate :: list(),
                    State :: state(),
                    Retry :: non_neg_integer()) -> ok.
 send_witness(_Data, _OnionCompactKey, _Time, _RSSI, _SNR, _Frequency, _Channel, _DataRate, _State, 0) ->
@@ -415,14 +415,14 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                                         ok ->
                                                             lager:info("sending receipt with observed power: ~p with radio power ~p", [EffectiveTxPower, TxPower]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, EffectiveTxPower, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DR, Stream, EffectiveTxPower, State);
                                                         {warning, {tx_power_corrected, CorrectedPower}} ->
                                                             %% Corrected power never takes into account antenna gain config in pkt forwarder so we
                                                             %% always add it back here
                                                             lager:warning("tx_power_corrected! original_power: ~p, corrected_power: ~p, with gain ~p; sending receipt with power ~p",
                                                                           [TxPower, CorrectedPower, AssertedGain, CorrectedPower + AssertedGain]),
                                                             ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
-                                                                                 RSSI, SNR, Frequency, Channel, DataRate, Stream, CorrectedPower + AssertedGain, State);
+                                                                                 RSSI, SNR, Frequency, Channel, DR, Stream, CorrectedPower + AssertedGain, State);
                                                         {warning, {unknown, Other}} ->
                                                             %% This should not happen
                                                             lager:warning("What is this? ~p", [Other]),
@@ -499,7 +499,7 @@ tx_power(Region, #state{chain=Chain, compact_key=CK}) ->
                                [Region, undefined, MaxEIRP/10, EIRP]),
                     Gain = case AssertGain of
                                undefined -> 0;
-                               _ -> AssertGain
+                               _ -> trunc(AssertGain/10)
                            end,
                     {ok, EIRP, EIRP, Gain};
                 AssertGain ->

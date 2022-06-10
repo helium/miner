@@ -50,22 +50,21 @@ init(_Opts) ->
        sig_fun := SigFun
      } = miner_keys:keys(),
 
-    %% downlink packets from state channels go here
-    application:set_env(blockchain, sc_client_handler, miner_lora),
-
     BaseDir = application:get_env(blockchain, base_dir, "data"),
+
     %% Miner Options
 
-    POCOpts = #{
-                base_dir => BaseDir
-               },
-
-    OnionServer =
+    OnionOpts =
         case application:get_env(miner, radio_device, undefined) of
-            {RadioBindIP, RadioBindPort, RadioSendIP, RadioSendPort} ->
+            {RadioBindIP, RadioBindPort0, RadioSendIP, RadioSendPort} ->
+                RadioBindPort =
+                    case application:get_env(miner, gateway_and_mux_enable, false) of
+                        false -> RadioBindPort0;
+                        true -> RadioBindPort0 + 1
+                    end,
                 %% check if we are overriding/forcing the region ( for lora )
                 RegionOverRide = check_for_region_override(),
-                OnionOpts = #{
+                #{
                     radio_udp_bind_ip => RadioBindIP,
                     radio_udp_bind_port => RadioBindPort,
                     radio_udp_send_ip => RadioSendIP,
@@ -73,12 +72,14 @@ init(_Opts) ->
                     ecdh_fun => ECDHFun,
                     sig_fun => SigFun,
                     region_override => RegionOverRide
-                },
-                [?WORKER(miner_onion_server, [OnionOpts]),
-                 ?WORKER(miner_lora, [OnionOpts]),
-                 ?WORKER(miner_poc_statem, [POCOpts])];
+                };
             _ ->
-                []
+                #{
+                  radio_udp_bind_ip => {127, 0, 0, 1},
+                  radio_udp_bind_port => 0,
+                  ecdh_fun => ECDHFun,
+                  sig_fun => SigFun
+                 }
         end,
 
     EbusServer =
@@ -87,17 +88,63 @@ init(_Opts) ->
             _ -> []
         end,
 
-    ValServers =
-        case application:get_env(miner, mode, gateway) of
+    MinerMode = application:get_env(miner, mode, gateway),
+    POCServers =
+        case MinerMode of
             validator ->
-                [?WORKER(miner_val_heartbeat, []),
-                 ?SUP(sibyl_sup, [])];
-            _ -> []
+                %% core and sibyl need to callback to miner_poc_mgr
+                %% and so we need to set an env var to let it know the mod name
+                application:set_env(blockchain, poc_mgr_mod, miner_poc_mgr),
+                application:set_env(sibyl, poc_mgr_mod, miner_poc_mgr),
+                application:set_env(sibyl, poc_report_handler, miner_poc_report_handler),
+                POCOpts = #{base_dir => BaseDir,
+                            cfs => ["default",
+                                    "local_poc_cf",
+                                    "local_poc_keys_cf"
+                                   ]
+                           },
+                [
+                    ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
+                    ?WORKER(miner_poc_mgr, [])
+                ];
+            gateway ->
+                %% running as a gateway
+                %% run both the grpc and libp2p version of the lora & onion modules
+                %% they will work out which is required based on chain vars
+                %% start miner_poc_statem, if the pocs are being run by validators, it will do nothing
+                %% start the grpc start client, if the pocs are NOT being run by validators, it will do nothing
+                POCOpts = #{
+                    base_dir => BaseDir
+                   },
+                {ok, ClientStateMTab} = miner_poc_grpc_client_statem:make_ets_table(),
+                ClientStateMOpts = #{
+                    tab => ClientStateMTab
+                },
+                [
+                    ?WORKER(miner_onion_server_light, [OnionOpts]),
+                    ?WORKER(miner_onion_server, [OnionOpts]),
+                    ?WORKER(miner_lora_light, [OnionOpts]),
+                    ?WORKER(miner_lora, [OnionOpts]),
+                    ?WORKER(miner_poc_grpc_client_statem, [ClientStateMOpts]),
+                    ?WORKER(miner_poc_statem, [POCOpts])
+
+                ]
         end,
 
     {JsonRpcPort, JsonRpcIp} = jsonrpc_server_config(),
+    ValServers =
+        case MinerMode of
+            validator ->
+                [
+                    ?WORKER(miner_val_heartbeat, []),
+                    ?SUP(sibyl_sup, [])
+                ];
+            _ ->
+                []
+        end,
 
     ChildSpecs =
+
         [
          ?WORKER(miner_hbbft_sidecar, []),
          ?WORKER(miner, []),
@@ -106,9 +153,9 @@ init(_Opts) ->
                          {port, JsonRpcPort}]]),
          ?WORKER(miner_poc_denylist, [])
          ] ++
+        POCServers ++
         ValServers ++
-        EbusServer ++
-        OnionServer,
+        EbusServer,
     {ok, {SupFlags, ChildSpecs}}.
 
 

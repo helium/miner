@@ -9,6 +9,10 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
+###
+### SEEDS
+###
+
   - if: build.tag =~ /^seed/
     name: ":debian: build seed deb"
     env:
@@ -17,30 +21,6 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh seed"
     key: "seed-deb"
-    artifact_paths: "*.deb"
-    agents:
-      queue: "erlang"
-
-  - if: build.tag =~ /^testnet_seed/
-    name: ":debian: build testnet seed deb"
-    env:
-        VERSION_TAG: $BUILDKITE_TAG
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh testnet_seed"
-    key: "testnet-seed-deb"
-    artifact_paths: "*.deb"
-    agents:
-      queue: "erlang"
-
-  - if: build.tag =~ /^validator/
-    name: ":debian: build validator deb"
-    env:
-      VERSION_TAG: $BUILDKITE_TAG
-    commands:
-      - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh validator"
-    key: "val-deb"
     artifact_paths: "*.deb"
     agents:
       queue: "erlang"
@@ -56,12 +36,63 @@ steps:
       queue: "erlang"
 
   - if: build.tag =~ /^testnet_seed/
+    name: ":debian: build testnet seed deb"
+    env:
+        VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh testnet_seed"
+    key: "testnet-seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^testnet_seed/
     name: ":cloud: upload testnet seed deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
       - ".buildkite/scripts/packagecloud_upload.sh testnet_seed"
     depends_on: "testnet-seed-deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_seed/
+    name: ":debian: build devnet seed deb"
+    env:
+        VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh devnet_seed"
+    key: "testnet-seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_seed/
+    name: ":cloud: upload devnet seed deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh devnet_seed"
+    depends_on: "testnet-seed-deb"
+    agents:
+      queue: "erlang"
+
+###
+### VALIDATOR DEBIAN PACKAGES
+###
+
+  - if: build.tag =~ /^validator/
+    name: ":debian: build validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "mainnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh validator"
+    key: "val-deb"
+    artifact_paths: "*.deb"
     agents:
       queue: "erlang"
 
@@ -75,6 +106,57 @@ steps:
     agents:
       queue: "erlang"
 
+  - if: build.tag =~ /^testnet_validator/
+    name: ":debian: build testnet validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "testnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh test_validator"
+    key: "testdeb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^testnet_validator/
+    name: ":cloud: upload testnet validator deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh testnet_validator"
+    depends_on: "testdeb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_validator/
+    name: ":debian: build devnet validator deb"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh test_validator devnet_validator"
+    key: "devdeb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_validator/
+    name: ":cloud: upload devnet validator deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh devnet_validator"
+    depends_on: "devdeb"
+    agents:
+      queue: "erlang"
+
+###
+### VALIDATOR DOCKER IMAGES
+###
+
+  # Validator AMD64 mainnet
   - if: build.tag =~ /^validator/
     name: ":whale: validator AMD64 docker"
     env:
@@ -91,6 +173,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator ARM64 mainnet
   - if: build.tag =~ /^validator/
     name: ":whale: validator ARM64 docker"
     env:
@@ -107,6 +190,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator AMD64 testnet
   - if: build.tag =~ /^testnet_validator/
     name: ":whale: testnet validator AMD64 docker"
     env:
@@ -123,6 +207,7 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+  # Validator ARM64 testnet
   - if: build.tag =~ /^testnet_validator/
     name: ":whale: testnet validator ARM64 docker"
     env:
@@ -139,7 +224,46 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /^seed/
+  # Validator AMD64 devnet
+  - if: build.tag =~ /^devnet_validator/
+    name: ":whale: devnet validator AMD64 docker"
+    env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "amd64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "validator-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Validator ARM64 devnet
+  - if: build.tag =~ /^devnet_validator/
+    name: ":whale: devnet validator ARM64 docker"
+    env:
+      BUILD_TYPE: "validator"
+      IMAGE_ARCH: "arm64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "validator-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    agents:
+      queue: "arm64"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+###
+### MINER DOCKER IMAGES
+###
+
+  # Miner AMD64 mainnet
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/ && build.tag !~ /seed/
     name: ":whale: AMD64 docker"
     env:
       BUILD_TYPE: "miner"
@@ -155,7 +279,8 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /^seed/
+  # Miner ARM64 mainnet
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/ && build.tag !~ /seed/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
@@ -199,6 +324,40 @@ steps:
       REGISTRY_NAME: "miner-testnet"
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
+    agents:
+      queue: "erlang"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner ARM64 devnet
+  - if: build.tag !~ /val/ && build.tag !~ /seed/ && build.tag =~ /^devnet_/
+    name: ":whale: devnet miner ARM64 docker"
+    agents:
+      queue: "arm64"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "arm64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "miner-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_image.sh"
+
+  # Miner AMD64 devnet
+  - if: build.tag !~ /val/ && build.tag !~ /seed/ && build.tag =~ /^devnet_/
+    name: ":whale: devnet miner AMD64 docker"
+    env:
+      BUILD_TYPE: "miner"
+      IMAGE_ARCH: "amd64"
+      REGISTRY_HOST: "quay.io"
+      REGISTRY_ORG: "team-helium"
+      REGISTRY_NAME: "miner-devnet"
+      VERSION_TAG: $BUILDKITE_TAG
+      BUILD_NET: "devnet"
     agents:
       queue: "erlang"
     commands:

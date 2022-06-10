@@ -8,12 +8,12 @@ This transaction changes the token distribution in accordance with the values li
 
 | Var                     	| Existing 	| New    	| Rationale                               	|
 |-------------------------	|----------	|--------	|-----------------------------------------	|
-| consensus_percent       	| 0.1      	| 0.06   	| Reduced to accomodate dc_percent        	|
+| consensus_percent       	| 0.1      	| 0.06   	| Reduced to accommodate dc_percent        	|
 | dc_percent              	| 0        	| 0.325  	| Introduced to charge for packet routing 	|
 | poc_challengers_percent 	| 0.15     	| 0.0095 	| Reduced to acocomdate dc_percent        	|
-| poc_challengees_percent 	| 0.35     	| 0.18   	| Reduced to accomodate dc_percent        	|
-| securities_percent      	| 0.35     	| 0.34   	| Reduced to accomodate dc_percent        	|
-| poc_witnesses_percent   	| 0.05     	| 0.0855 	| Increased to accomodate dc_percent      	|
+| poc_challengees_percent 	| 0.35     	| 0.18   	| Reduced to accommodate dc_percent        	|
+| securities_percent      	| 0.35     	| 0.34   	| Reduced to accommodate dc_percent        	|
+| poc_witnesses_percent   	| 0.05     	| 0.0855 	| Increased to accommodate dc_percent      	|
 
 
 ## Version threshold

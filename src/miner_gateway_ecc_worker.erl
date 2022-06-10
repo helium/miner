@@ -25,6 +25,8 @@
 
 -record(state, {
     connection :: grpc_client:connection(),
+    connection_pid :: pid(),
+    connection_monitor :: reference(),
     host = "localhost" :: string(),
     port = 4468 :: integer(),
     transport = tcp :: tcp | ssl
@@ -51,7 +53,7 @@ sign(Binary) ->
     gen_server:call(?MODULE, {sign, Binary}, ?CALL_TIMEOUT).
 
 %% Pass an ecc public key to the rust gateway and return a point on the
-%% eliptic curve as a binary
+%% elliptic curve as a binary
 -spec ecdh(libp2p_crypto:pubkey()) -> {ok, Preseed :: binary()} | {error, term()}.
 ecdh({ecc_compact, _Bin} = PubKey) ->
     gen_server:call(?MODULE, {ecdh, PubKey}, ?CALL_TIMEOUT).
@@ -66,10 +68,17 @@ start_link(Options) when is_list(Options) ->
 
 init([Options]) ->
     Transport = proplists:get_value(transport, Options, tcp),
-    Host = proplists:get_value(host, Options, "localhost"),
-    Port = proplists:get_value(port, Options, 4468),
-    {ok, Connection} = grpc_connect(Transport, Host, Port),
-    {ok, #state{connection = Connection, transport = Transport, host = Host, port = Port}}.
+    Host = proplists:get_value(host, Options, "127.0.0.1"),
+    Port = proplists:get_value(api_port, Options, 4468),
+    {ok, #{http_connection := ConnPid} = Connection} = grpc_connect(Transport, Host, Port),
+    MonRef = erlang:monitor(process, ConnPid),
+    {ok, #state{
+             connection = Connection,
+             connection_pid = ConnPid,
+             connection_monitor = MonRef,
+             transport = Transport,
+             host = Host,
+             port = Port}}.
 
 handle_call(pubkey, _From, State = #state{connection = Connection}) ->
     Reply =
@@ -109,6 +118,12 @@ handle_cast(_Msg, State) ->
     lager:debug("unhandled call ~p", [_Msg]),
     {noreply, State}.
 
+handle_info({'DOWN', OldRef, process, OldPid, Reason}, #state{connection_pid = OldPid, connection_monitor = OldRef} = State) ->
+    lager:warning("gateway ecc grpc client exited; reconnecting. reason: ~p", [Reason]),
+    grpc_disconnect(State#state.connection),
+    {ok, #{http_connection := ConnPid} = Connection} = grpc_connect(State#state.transport, State#state.host, State#state.port),
+    MonRef = erlang:monitor(process, ConnPid),
+    {noreply, State#state{connection = Connection, connection_pid = ConnPid, connection_monitor = MonRef}};
 handle_info(_Msg, State) ->
     lager:debug("unhandled info ~p", [_Msg]),
     {noreply, State}.

@@ -177,7 +177,7 @@ single_payment_test(Config) ->
     %% check balances again - transaction should have cleared
     %% NOTE: Fee is zero
     %% NOTE to self: The old balances of 4000 and 6000 also work here as these are the starting values
-    %%               the assertAsyc will pick these up initialy and assert true
+    %%               the assertAsyc will pick these up initially and assert true
     %%               If we pass in the new expected balances from after the txns clear, these too work
     %%               as the assertAsync will retry N times until it gets returns for these balances
     %%               ( assuming of course the txns do clear )

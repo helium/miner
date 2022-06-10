@@ -34,7 +34,7 @@ handle(_, _, _Req) ->
 
 handle_rpc(Method, Params) ->
     lager:debug("Dispatching method ~p with params: ~p", [Method, Params]),
-    handle_rpc_(Method, format_params(Params)).
+    handle_rpc_(Method, Params).
 
 handle_rpc_(<<"block_", _/binary>> = Method, Params) ->
     miner_jsonrpc_blocks:handle_rpc(Method, Params);
@@ -146,53 +146,11 @@ jsonrpc_error({error, E}) ->
 %% Internal
 %%
 
-%% @doc We want params to be sent in as a map if there
-%% _are_ parameters and as empty list (e.g., `[]') if
-%% the parameter list is empty. We are using empty
-%% _list_ instead of an empty map because Erlang
-%% uses record style matching for maps so an
-%% empty map in a function head does _NOT_ match
-%% an empty map, it matches _any_ map. You have
-%% to use the `map_size/1' function in a guard
-%% to decide if a map is empty in a function head.
-%% With an empty list, we can just literally
-%% match that in the function head and it makes
-%% the intention of the function clearer (in my
-%% opinion anyway)
-%%
-%% So we will figure out the current shape of the
-%% parameter argument (proplist, map, EEP18)
-%% and convert as needed.
-%%
-%% We are doing this _here_ so that the conversion
-%% is centralized and standardized and not copypasta'd
-%% into every single jsonrpc module
-format_params([]) -> [];
-format_params({Params}) -> format_params(kvc:to_proplist(Params));
-format_params(Params) when is_list(Params) ->
-    maps:from_list(Params);
-format_params(Params) when is_map(Params) andalso map_size(Params) == 0 -> [];
-format_params(Params) when is_map(Params) -> Params.
-
-%% Note to future me - this function **MUST** return an EEP18 style term
-%% otherwise ALL requests WILL be always rejected as "invalid request"
-%%
-%% That's an hour I'll never get back. And I already fscking figured it
-%% out once before...
 decode_helper(Bin) ->
-    %% returns proplists but uh, whatever, when in Rome...
-    {jsx:decode(Bin)}.
+    jsx:decode(Bin, [{return_maps, true}]).
 
 encode_helper(Json) ->
-    %% jsonrpc2 emits EEP18 which is god awful and ancient, but rather than
-    %% yak shaving that library to use maps as Crom intended, we will do
-    %% something awful:
-    %%
-    %% You see, EEP18 isn't supported by jsx and it seems stupid to pull in
-    %% a whole new JSON library to handle it, so we will use kvc's
-    %% `to_proplist/1' function to turn EEP18 -> a proplist format that jsx
-    %% _will_ encode
-    jsx:encode(kvc:to_proplist(Json)).
+    jsx:encode(Json).
 
 to_key(X) when is_atom(X) -> atom_to_binary(X, utf8);
 to_key(X) when is_list(X) -> iolist_to_binary(X);
@@ -214,9 +172,9 @@ to_value(X) -> iolist_to_binary(io_lib:format("~p", [X])).
 
 ensure_binary_map(M) ->
     maps:fold(fun(K, V, Acc) ->
-                      BinK = to_key(K),
-                      BinV = to_value(V),
-                      Acc#{BinK => BinV}
+        BinK = to_key(K),
+        BinV = to_value(V),
+        Acc#{BinK => BinV}
               end, #{}, M).
 
 jsonrpc_maybe(undefined) -> <<"undefined">>;

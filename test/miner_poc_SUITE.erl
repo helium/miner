@@ -5,7 +5,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
 -export([
-    all/0
+    groups/0, all/0, init_per_group/2, end_per_group/2
 ]).
 
 -export([
@@ -62,6 +62,15 @@
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
+groups() ->
+  [ {poc_target_v3,
+    [],
+    all()
+  },
+    {poc_target_v4,
+      [],
+      v11_test_cases()
+    }].
 
 %%--------------------------------------------------------------------
 %% @public
@@ -73,19 +82,6 @@ all() ->
     [
      basic_test,
      basic_test_light_gateway,
-     %% poc_dist_v1_test,
-     %% poc_dist_v2_test,
-     %% poc_dist_v4_test,
-     %% poc_dist_v4_partitioned_test,
-     %% poc_dist_v5_test,
-     %% poc_dist_v5_partitioned_test,
-     %% poc_dist_v5_partitioned_lying_test,
-     %% poc_dist_v6_test,
-     %% poc_dist_v6_partitioned_test,
-     %% poc_dist_v6_partitioned_lying_test,
-     %poc_dist_v7_test,
-     %poc_dist_v7_partitioned_test,
-     %poc_dist_v7_partitioned_lying_test,
      poc_dist_v8_test,
      poc_dist_v8_partitioned_test,
      poc_dist_v8_partitioned_lying_test,
@@ -99,6 +95,33 @@ all() ->
      %% uncomment when poc placement enforcement starts.
      %% no_status_v8_test,
      restart_test].
+
+v11_test_cases() ->
+  [
+    basic_test,
+    basic_test_light_gateway,
+    poc_dist_v11_test,
+    poc_dist_v11_cn_test,
+    poc_dist_v11_partitioned_test,
+    poc_dist_v11_partitioned_lying_test,
+    %% uncomment when poc placement enforcement starts.
+    %% no_status_v8_test,
+    restart_test].
+
+init_per_group(poc_target_v3, Config) ->
+  [
+    {poc_targeting_vars, #{}}
+    | Config
+  ];
+init_per_group(poc_target_v4, Config) ->
+  [
+    {poc_targeting_vars, #{h3dex_gc_width => 10,
+                    poc_targeting_version => 4,
+                    poc_target_pool_size => 2,
+                    poc_hexing_type => hex_h3dex,
+                    hip17_interactivity_blocks => 20}}
+    | Config
+  ].
 
 init_per_testcase(basic_test = TestCase, Config) ->
     miner_ct_utils:init_base_dir_config(?MODULE, TestCase, Config);
@@ -137,6 +160,9 @@ end_per_testcase(restart_test, Config) ->
 end_per_testcase(TestCase, Config) ->
     gen_server:stop(miner_fake_radio_backplane),
     miner_ct_utils:end_per_testcase(TestCase, Config).
+
+end_per_group(_, _Config) ->
+  ok.
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -233,23 +259,31 @@ poc_dist_v10_partitioned_lying_test(Config) ->
 
 poc_dist_v11_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_cn_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_cn_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_partitioned_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_partitioned_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 poc_dist_v11_partitioned_lying_test(Config) ->
     CommonPOCVars = common_poc_vars(Config),
+    POCTargetingVars = ?config(poc_targeting_vars, Config),
+    CombinedVars = maps:merge(CommonPOCVars, POCTargetingVars),
     ExtraVars = extra_vars(poc_v11),
-    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CommonPOCVars, ExtraVars)).
+    run_dist_with_params(poc_dist_v11_partitioned_lying_test, Config, maps:merge(CombinedVars, ExtraVars)).
 
 basic_test(Config) ->
     BaseDir = ?config(base_dir, Config),
@@ -368,7 +402,7 @@ basic_test(Config) ->
     timer:sleep(100),
 
     ?assertEqual(receiving, erlang:element(6, erlang:element(2, sys:get_state(Statem)))),
-    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem)))) > 0), % Get reponses
+    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem)))) > 0), % Get responses
 
     % Passing receiving_timeout
     lists:foreach(
@@ -669,7 +703,7 @@ restart_test(Config) ->
 
     ?assertEqual(receiving,  erlang:element(1, sys:get_state(Statem1))),
     ?assertEqual(receiving, erlang:element(6, erlang:element(2, sys:get_state(Statem1)))),
-    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem1)))) > 0), % Get reponses
+    ?assert(maps:size(erlang:element(11, erlang:element(2, sys:get_state(Statem1)))) > 0), % Get responses
 
     % Passing receiving_timeout
     lists:foreach(
@@ -799,7 +833,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                     %% the checks for both poc-v10 and poc-v11 here
                     true = miner_ct_utils:wait_until(
                              fun() ->
-                                     %% Check that we have atleast more than one request
+                                     %% Check that we have at least more than one request
                                      %% If we have only one request, there's no guarantee
                                      %% that the paths would eventually grow
                                      C1 = check_multiple_requests(Miners),
@@ -819,7 +853,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                 V when V > 3 ->
                     true = miner_ct_utils:wait_until(
                              fun() ->
-                                     %% Check that we have atleast more than one request
+                                     %% Check that we have at least more than one request
                                      %% If we have only one request, there's no guarantee
                                      %% that the paths would eventually grow
                                      C1 = check_multiple_requests(Miners),
@@ -839,7 +873,7 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
                     ok;
                 _ ->
                     %% By this point, we have ensured that every miner
-                    %% has a valid request atleast once, we just check
+                    %% has a valid request at least once, we just check
                     %% that we have N (length(Miners)) receipts.
                     ?assert(check_atleast_k_receipts(Miners, length(Miners))),
                     ok
@@ -849,13 +883,28 @@ exec_dist_test(TestCase, Config, VarMap, Status) ->
 
 setup_dist_test(TestCase, Config, VarMap, Status) ->
     Miners = ?config(miners, Config),
-    MinersAndPorts = ?config(ports, Config),
     {_, Locations} = lists:unzip(initialize_chain(Miners, TestCase, Config, VarMap)),
     GenesisBlock = miner_ct_utils:get_genesis_block(Miners, Config),
-    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
+
+    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
+    %% the radio ports used to be fetched from miner lora as part of init_per_testcase
+    %% but the port is only opened now after a chain is up and been consulted to
+    %% determine if validators are running POCs
+    %% So now we have wait until the chain is up and miner lora has opened the port
+    true = miner_ct_utils:wait_for_lora_port(Miners, miner_lora, 30),
+
+    RadioPorts = lists:map(
+        fun(Miner) ->
+            {ok, RandomPort} = ct_rpc:call(Miner, miner_lora, port, []),
+            ct:pal("~p is listening for packet forwarder on ~p", [Miner, RandomPort]),
+            RandomPort
+        end,
+    Miners),
+
+%%    RadioPorts = [ P || {_Miner, {_TP, P, _JRPCP}} <- MinersAndPorts ],
     {ok, _FakeRadioPid} = miner_fake_radio_backplane:start_link(maps:get(?poc_version, VarMap), 45000,
                                                                 lists:zip(RadioPorts, Locations), Status),
-    ok = miner_ct_utils:load_genesis_block(GenesisBlock, Miners, Config),
+
     miner_fake_radio_backplane ! go,
     %% wait till height 10
     ok = miner_ct_utils:wait_for_gte(height, Miners, 10, all, 30),
@@ -1171,7 +1220,8 @@ common_poc_vars(Config) ->
       ?poc_v4_target_prob_score_wt => 0.8,
       ?poc_v4_target_score_curve => 5,
       ?poc_target_hex_parent_res => 5,
-      ?poc_v5_target_prob_randomness_wt => 0.0}.
+      ?poc_v5_target_prob_randomness_wt => 0.0,
+      ?poc_witness_consideration_limit => 20}.
 
 do_common_partition_checks(TestCase, Config, VarMap) ->
     Miners = ?config(miners, Config),
@@ -1185,7 +1235,7 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                              %% There is no path to check, so do both poc-v10 and poc-v11 checks here
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1198,7 +1248,7 @@ do_common_partition_checks(TestCase, Config, VarMap) ->
                          _ ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1328,7 +1378,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
                          V when V > 10 ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1337,7 +1387,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
                          _ ->
                              %% Check that every miner has issued a challenge
                              C1 = check_all_miners_can_challenge(Miners),
-                             %% Check that we have atleast more than one request
+                             %% Check that we have at least more than one request
                              %% If we have only one request, there's no guarantee
                              %% that the paths would eventually grow
                              C2 = check_multiple_requests(Miners),
@@ -1364,7 +1414,7 @@ do_common_partition_lying_checks(TestCase, Config, VarMap) ->
 
 extra_vars(poc_v11) ->
     POCVars = maps:merge(extra_vars(poc_v10), miner_poc_test_utils:poc_v11_vars()),
-    RewardVars = #{reward_version => 5, rewards_txn_version => 2},
+    RewardVars = #{reward_version => 5, rewards_txn_version => 2, poc_witness_consideration_limit => 20},
     maps:merge(POCVars, RewardVars);
 extra_vars(poc_v10) ->
     maps:merge(extra_poc_vars(),

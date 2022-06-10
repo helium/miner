@@ -21,6 +21,7 @@ data
 \#*
 src/pb
 .repos/
+*.deb
 
 # make build output for external deps
 external/
@@ -29,9 +30,8 @@ external/
 src/grpc/
 
 # gateway-rs generated files
-gateway_key.bin
 default.toml
 helium_gateway
 
-# semtech-udp generated files
+# gwmp-mux generated files
 gwmp-mux

@@ -34,9 +34,12 @@
   [
    {pipeline_depth, 125}
   ]},
+ {sibyl,
+  [
+   {grpc_port, ${GRPC_PORT:-8080}}
+  ]},
  {miner,
   [
-   {denylist_keys, undefined},
    {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
    {mode, validator},
    {rocksdb_cache_size, 32},
@@ -45,10 +48,39 @@
    {use_ebus, false},
    {radio_device, undefined},
    %% dont perform regionalised checks in dev envs
-   %% we only realy need the params below if this file is changed to specify a radio device
+   %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'},
-   {gateway_and_mux_enable, false}
+   {region_override, 'US915'}
+  ]},
+ {grpcbox,
+  [
+   {servers, [#{grpc_opts =>
+                    #{
+                      service_protos => [gateway_pb],
+                      services => #{'helium.gateway' => helium_gateway_service}
+                     },
+
+                transport_opts => #{ssl => false},
+
+                listen_opts =>
+                    #{
+                      port => ${GRPC_PORT:-8080},
+                      ip => {0, 0, 0, 0}
+                     },
+
+                pool_opts => #{size => 100},
+
+                server_opts =>
+                    #{
+                      header_table_size => 4096,
+                      enable_push => 1,
+                      max_concurrent_streams => unlimited,
+                      initial_window_size => 65535,
+                      max_frame_size => 16384,
+                      max_header_list_size => unlimited
+                     }
+               }
+             ]}
   ]}
 ].

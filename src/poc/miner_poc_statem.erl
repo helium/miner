@@ -126,7 +126,7 @@ init(Args) ->
     Address = blockchain_swarm:pubkey_bin(),
     Blockchain = blockchain_worker:blockchain(),
     BaseDir = maps:get(base_dir, Args, undefined),
-    %% this should really only be overriden for testing
+    %% this should really only be overridden for testing
     Delay = maps:get(delay, Args, undefined),
     lager:info("init with ~p", [Args]),
     case load_data(BaseDir) of
@@ -232,7 +232,7 @@ requesting(EventType, EventContent, Data) ->
 %%
 %% mining: in mining state we handle blockchain_event of type 'add block'
 %% for each block added we inspect the txn list included in the block
-%% if our POC request is contained in that list then we run the targetting/challenging
+%% if our POC request is contained in that list then we run the targeting/challenging
 %% and transition to receiving state
 %% if we dont see our POC request txn having been mined within the Mining Timeout period ( 5 blocks )
 %% then we give up on the request and transition back to requesting state
@@ -254,7 +254,7 @@ mining(info, {blockchain_event, {add_block, BlockHash, _, PinnedLedger}},
             %% intentionally fast-challenging them before they have the block
             %% Is this timer necessary ??
             timer:sleep(?BLOCK_PROPOGATION_TIME),
-            %% NOTE: if we crash out whilst handling targetting, effectively the POC is abandoned
+            %% NOTE: if we crash out whilst handling targeting, effectively the POC is abandoned
             %% as when this statem is restarted, it will init in mining state but the block with the request txns
             %% will already have passed, as such we will then hit the MiningTimeout and transition to requesting state
             handle_targeting(<<Secret/binary, BlockHash/binary, Challenger/binary>>, Height, PinnedLedger,
@@ -503,7 +503,13 @@ handle_targeting(Entropy, Height, Ledger, Data) ->
                     self() ! {challenge, Entropy, TargetPubkeyBin, ignored, Height, Ledger, Vars},
                     handle_challenging({Entropy, ignored}, TargetPubkeyBin, ignored, Height, Ledger, Vars, Data#data{challengees=[]});
                 {ok, V} ->
-                    {ok, {TargetPubkeyBin, TargetRandState}} = blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars),
+                    {ok, {TargetPubkeyBin, TargetRandState}} =
+                        case blockchain:config(?poc_targeting_version, Ledger) of
+                            {ok, 4} ->
+                                blockchain_poc_target_v4:target(ChallengerAddr, Entropy, Ledger, Vars);
+                            _ ->
+                                blockchain_poc_target_v3:target(ChallengerAddr, Entropy, Ledger, Vars)
+                        end,
                     lager:info("poc_v~p challenger: ~p, challenger_loc: ~p", [V, libp2p_crypto:bin_to_b58(ChallengerAddr), ChallengerLoc]),
                     lager:info("poc_v~p target found ~p, challenging, target_rand_state: ~p", [V, libp2p_crypto:bin_to_b58(TargetPubkeyBin), TargetRandState]),
                     %% NOTE: We pass in the TargetRandState along with the entropy here
@@ -854,34 +860,39 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
                 POCInterval0
         end,
     try
-        case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
-            {ok, GwInfo} ->
-                GwMode = blockchain_ledger_gateway_v2:mode(GwInfo),
-                case blockchain_ledger_gateway_v2:is_valid_capability(GwMode, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
-                    true ->
-                        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
-                        Height = blockchain_block:height(Block),
-                        ChallengeOK =
-                            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                                undefined ->
-                                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                                    true;
-                                LastChallenge ->
-                                    case (Height - LastChallenge) > POCInterval of
-                                        true -> 1 == rand:uniform(max(10, POCInterval div 10));
-                                        false -> false
-                                    end
-                            end,
-                        LocationOK = true,
-                        LocationOK = miner_lora:location_ok(),
-                        ChallengeOK andalso LocationOK;
-                    _ ->
-                        %% the GW is not allowed to send POC challenges
-                        false
-                end;
-            %% mostly this is going to be unasserted full nodes
+        case blockchain:config(?poc_challenger_type, Ledger) of
+            {ok, validator} ->
+                false;
             _ ->
-                false
+                case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+                    {ok, GwInfo} ->
+                        GwMode = blockchain_ledger_gateway_v2:mode(GwInfo),
+                        case blockchain_ledger_gateway_v2:is_valid_capability(GwMode, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                            true ->
+                                {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+                                Height = blockchain_block:height(Block),
+                                ChallengeOK =
+                                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                                        undefined ->
+                                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                                            true;
+                                        LastChallenge ->
+                                            case (Height - LastChallenge) > POCInterval of
+                                                true -> 1 == rand:uniform(max(10, POCInterval div 10));
+                                                false -> false
+                                            end
+                                    end,
+                                LocationOK = true,
+                                LocationOK = miner_lora:location_ok(),
+                                ChallengeOK andalso LocationOK;
+                            _ ->
+                                %% the GW is not allowed to send POC challenges
+                                false
+                        end;
+                    %% mostly this is going to be unasserted full nodes
+                    _ ->
+                        false
+                end
         end
     catch Class:Err:Stack ->
             lager:warning("error determining if request allowed: ~p:~p ~p",
@@ -1017,7 +1028,6 @@ send_onion(P2P, Onion, Retry) ->
             timer:sleep(timer:seconds(10)),
             send_onion(P2P, Onion, Retry-1)
     end.
-
 %% ------------------------------------------------------------------
 %% EUNIT Tests
 %% ------------------------------------------------------------------

@@ -1,9 +1,2 @@
-## semtech listening address override
-listen = "127.0.0.1:1682"
-
 ## api listening port override
 api = 4468
-
-[update]
-# disable update checking inside the miner container
-enabled = false

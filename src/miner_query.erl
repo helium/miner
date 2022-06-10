@@ -13,7 +13,9 @@
          txns/2, txns/3,
          blocks/2,
          lookup_txns_by_hash/2,
-         lookup_txns_by_type/2]).
+         lookup_txns_by_type/2,
+         lookup_txns_by_onionhash/2
+]).
 
 poc_analyze(_Start, _End) ->
     ok.
@@ -21,12 +23,26 @@ poc_analyze(_Start, _End) ->
 txns(Type, Start, End) when is_atom(Type) ->
     txns([Type], Start, End);
 txns(Types, Start, End) ->
-    Txns = txns(Start, End),
-    lists:filter(fun(T) -> lists:member(blockchain_txn:type(T), Types) end, Txns).
+    Chain = blockchain_worker:blockchain(),
+    fold_blocks(fun(B, Acc) ->
+                        Txns = blockchain_block:transactions(B),
+                        Txns1 =
+                            lists:filter(fun(T) ->
+                                                 lists:member(blockchain_txn:type(T), Types)
+                                         end, Txns),
+                        lists:append(Txns1, Acc)
+                end,
+                Start, End, Chain,
+                []).
 
 txns(Start, End) ->
-    Blocks = blocks(Start, End),
-    lists:flatten(lists:map(fun blockchain_block:transactions/1, Blocks)).
+    Chain = blockchain_worker:blockchain(),
+    fold_blocks(fun(B, Acc) ->
+                        Txns = blockchain_block:transactions(B),
+                        lists:append(Txns, Acc)
+                end,
+                Start, End, Chain,
+                []).
 
 blocks(Start, End) ->
     Chain = blockchain_worker:blockchain(),
@@ -36,23 +52,65 @@ blocks(Start, End) ->
      end
      || N <- lists:seq(Start, End)].
 
+fold_blocks(_Fun, End, End, _Chain, Acc) ->
+    Acc;
+fold_blocks(Fun, Start, End, Chain, Acc) ->
+    {ok, B} = blockchain:get_block(Start, Chain),
+    fold_blocks(Fun, Start + 1, End, Chain, Fun(B, Acc)).
+
+%% slightly different collection semantics, tags by height
 lookup_txns_by_type(LastXBlocks, TxnType) ->
     C = blockchain_worker:blockchain(),
     {ok, Current} = blockchain:height(C),
-    Range = lists:seq(Current - LastXBlocks, Current),
-    Blocks = [{I, element(2, blockchain:get_block(I, C))} || I <- Range],
-    Txns = lists:map(fun({I, B}) -> Ts = blockchain_block:transactions(B), {I, Ts}  end, Blocks),
-    X = lists:map(fun({I, Ts}) -> {I, lists:filter(fun(T) ->
-                                                           blockchain_txn:type(T) == TxnType
-                                                   end, Ts)}  end, Txns),
-    lists:filter(fun({_I, List}) -> length(List) /= 0  end, X).
+    lists:reverse(
+      fold_blocks(
+        fun(B, Acc) ->
+                I = blockchain_block:height(B),
+                case lists:filter(fun(T) ->
+                                          blockchain_txn:type(T) == TxnType
+                                  end, blockchain_block:transactions(B)) of
+                    [] -> Acc;
+                    R -> [{I, R} | Acc]
+                end
+        end,
+        Current - LastXBlocks, Current, C,
+        [])).
 
 lookup_txns_by_hash(LastXBlocks, TxnHash) ->
     C = blockchain_worker:blockchain(),
     {ok, Current} = blockchain:height(C),
-    Range = lists:seq(Current - LastXBlocks, Current),
-    Blocks = [{I, element(2, blockchain:get_block(I, C))} || I <- Range],
-    Txns = lists:map(fun({I, B}) -> Ts = blockchain_block:transactions(B), {I, Ts}  end, Blocks),
-    X = lists:map(fun({I, Ts}) -> {I, lists:filter(fun(T) -> blockchain_txn:hash(T) == TxnHash
-                                                   end, Ts)}  end, Txns),
-    lists:filter(fun({_I, List}) -> length(List) /= 0  end, X).
+    lists:reverse(
+      fold_blocks(
+        fun(B, Acc) ->
+                I = blockchain_block:height(B),
+                case lists:filter(fun(T) ->
+                                          blockchain_txn:hash(T) == TxnHash
+                                  end, blockchain_block:transactions(B)) of
+                    [] -> Acc;
+                    R -> [{I, R} | Acc]
+                end
+        end,
+        Current - LastXBlocks, Current, C,
+        [])).
+
+lookup_txns_by_onionhash(LastXBlocks, OnionHash) ->
+    C = blockchain_worker:blockchain(),
+    {ok, Current} = blockchain:height(C),
+    lists:reverse(
+      fold_blocks(
+        fun(B, Acc) ->
+                I = blockchain_block:height(B),
+                case lists:filter(fun(T) ->
+                        case blockchain_txn:type(T) == 'blockchain_txn_poc_receipts_v2' of
+                            true ->
+                                blockchain_txn_poc_receipts_v2:onion_key_hash(T) == OnionHash;
+                            _ ->
+                                false
+                        end
+                    end, blockchain_block:transactions(B)) of
+                    [] -> Acc;
+                    R -> [{I, R} | Acc]
+                end
+        end,
+        Current - LastXBlocks, Current, C,
+        [])).

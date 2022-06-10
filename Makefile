@@ -11,8 +11,8 @@ endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
 
-GATEWAY_RS_VSN ?= main
-SEMTECH_UDP_VSN ?= master
+GATEWAY_RS_VSN ?= "v1.0.0-alpha.27"
+GWMP_MUX_VSN ?= "v0.9.4"
 
 all: compile
 
@@ -20,7 +20,9 @@ deps:
 	$(REBAR) get-deps
 
 compile:
+	$(REBAR) get-deps
 	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 	$(MAKE) external_svcs
 	$(REBAR) compile
 
@@ -71,7 +73,9 @@ devrelease:
 
 grpc:
 	@echo "generating miner grpc services"
+	$(REBAR) get-deps
 	REBAR_CONFIG="config/grpc_client_gen_local.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
 $(GRPC_SERVICE_DIR):
 	@echo "miner grpc service directory $(directory) does not exist"
@@ -85,23 +89,24 @@ clean_grpc:
 external_svcs:
 	@echo "cloning external dependency projects"
 	@echo "--- gateway-rs ---"
-	$(call clone_project,gateway-rs,$(GATEWAY_RS_VSN))
+	@git clone --quiet https://github.com/helium/gateway-rs ./external/gateway-rs 2>/dev/null || true
+	@(cd external/gateway-rs && git fetch && git checkout $(GATEWAY_RS_VSN) 2>/dev/null)
 	@(cd ./external/gateway-rs && cargo build --release)
 	$(call install_rust_bin,gateway-rs,helium_gateway,gateway_rs)
 	@cp ./external/gateway-rs/config/default.toml ./priv/gateway_rs/default.toml
 
-	@echo "--- semtech-udp ---"
-	$(call clone_project,semtech-udp,$(SEMTECH_UDP_VSN))
-	@(cd ./external/semtech-udp && cargo build --release --features client\,server --example gwmp-mux)
-	$(call install_rust_bin,semtech-udp,examples/gwmp-mux,semtech_udp)
+	@echo "--- gwmp-mux ---"
+	$(call clone_project,gwmp-mux,$(GWMP_MUX_VSN))
+	@(cd ./external/gwmp-mux && cargo build --release)
+	$(call install_rust_bin,gwmp-mux,gwmp-mux,gwmp_mux)
 
 clean_external_svcs:
 	@echo "removing external dependency project files"
 	$(call remove,./external/gateway-rs)
 	$(call remove,./priv/gateway_rs/helium_gateway)
 	$(call remove,./priv/gateway_rs/default.toml)
-	$(call remove,./external/semtech-udp)
-	$(call remove,./priv/semtech_udp/gwmp-mux)
+	$(call remove,./external/gwmp-mux)
+	$(call remove,./priv/gwmp_mux/gwmp-mux)
 
 define clone_project
 	@git clone --quiet --depth 1 --branch $(2) https://github.com/helium/$(1) ./external/$(1) 2>/dev/null || true

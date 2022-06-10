@@ -103,10 +103,10 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
                             lager:info("already have version ~p", [Version]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when NewVersion < Version->
-                            lager:notice("denylist version has regressed from ~s to ~s, ignoring", [Version, NewVersion]),
+                            lager:notice("denylist version has regressed from ~p to ~p, ignoring", [Version, NewVersion]),
                             {noreply, schedule_check(State#state{etag=proplists:get_value("etag", Headers)})};
                         NewVersion when NewVersion > Version ->
-                            lager:info("new denylist version appeared: ~s have ~s", [NewVersion, Version]),
+                            lager:info("new denylist version appeared: ~p have ~p", [NewVersion, Version]),
                             case maps:get(<<"assets">>, Json, undefined) of
                                 undefined ->
                                     lager:notice("no zipball_url for release ~p", [NewVersion]),

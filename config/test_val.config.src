@@ -3,7 +3,7 @@
  "config/sys.config",
  {lager,
   [
-   {log_root, "log"},
+   {log_root, "${LOG_ROOT:-log}"},
    {handlers,
     [
      {lager_file_backend, [{file, "console.log"}, {size, 52428800}, {level, info}]},
@@ -12,9 +12,9 @@
   ]},
  {blockchain,
   [
-   {seed_nodes, "/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443"},
+   {seed_nodes, "${SEED_NODES:-/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443}"},
    {seed_node_dns, ""},
-   {listen_addresses, ["/ip4/0.0.0.0/tcp/2154"]},
+   {listen_addresses, ["${LISTEN_ADDRESS:-/ip4/0.0.0.0/tcp/2154}"]},
    {honor_quick_sync, false},
    {quick_sync_mode, assumed_valid},
    {key, undefined},
@@ -25,7 +25,7 @@
    {snapshot_memory_limit, 300},
    {relay_limit, 100},
    {blocks_to_protect_from_gc, 100000},
-   {base_dir, "data"}
+   {base_dir, "${BASE_DIR:-data}"}
   ]},
  {libp2p,
   [
@@ -36,6 +36,10 @@
   [
    {pipeline_depth, 125}
   ]},
+ {sibyl,
+  [
+   {grpc_port, ${GRPC_PORT:-8080}}
+  ]},
  {miner,
   [
    {denylist_keys, undefined},
@@ -44,14 +48,56 @@
    {network, testnet},
    {rocksdb_cache_size, 32},
    {rocksdb_write_buffer_size, 32},
+   {jsonrpc_ip, {${JSONRPC_IP:-127,0,0,1}}},
+   {jsonrpc_port, ${JSONRPC_PORT:-4467}},
+   {sidecar_parallelism_limit, ${SIDECAR_PARALLELISM_LIMIT:-3}},
+   {hotfix_dir, "${HOTFIX_DIR:-/opt/miner/hotfix}"},
+   {update_dir, "${UPDATE_DIR:-/opt/miner/update}"},
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
    %% dont perform regionalised checks in dev envs
-   %% we only realy need the params below if this file is changed to specify a radio device
+   %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
    {region_override, 'US915'},
-   {gateway_and_mux_enable, false}
+   {gateway_and_mux_enable, false},
+   {default_routers, ["${DEFAULT_ROUTERS:-/p2p/11w77YQLhgUt8HUJrMtntGGr97RyXmot1ofs5Ct2ELTmbFoYsQa}"]},
+   {seed_validators, [
+       {"1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6", "18.223.171.149", 8080},     %% test-val2
+       {"1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL", "3.17.164.253", 8080},       %% test-val3
+       {"1ZAxCrEsigGVbLUM37Jki6p88kyZ5NVqjVC6oHSbqu49t7bQDym", "18.191.60.231", 8080}       %% test-val6
+       ]
+   }
+  ]},
+ {grpcbox,
+  [
+   {servers, [#{grpc_opts =>
+                    #{
+                      service_protos => [gateway_pb],
+                      services => #{'helium.gateway' => helium_gateway_service}
+                     },
+
+                transport_opts => #{ssl => false},
+
+                listen_opts =>
+                    #{
+                      port => ${GRPC_PORT:-8080},
+                      ip => {0, 0, 0, 0}
+                     },
+
+                pool_opts => #{size => 100},
+
+                server_opts =>
+                    #{
+                      header_table_size => 4096,
+                      enable_push => 1,
+                      max_concurrent_streams => unlimited,
+                      initial_window_size => 65535,
+                      max_frame_size => 16384,
+                      max_header_list_size => unlimited
+                     }
+               }
+             ]}
   ]}
 ].

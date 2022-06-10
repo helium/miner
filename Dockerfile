@@ -29,6 +29,7 @@ ENV CC=gcc CXX=g++ CFLAGS="-U__sun__" \
 # Add and compile the dependencies to cache
 COPY ./rebar* ./Makefile ./
 COPY ./config/grpc_client_gen_local.config ./config/
+COPY ./config/grpc_client_gen.config ./config/
 
 RUN ./rebar3 compile
 
@@ -46,6 +47,7 @@ ARG TAR_PATH=_build/$REBAR_BUILD_TARGET/rel/*/*.tar.gz
 # Now add our code
 COPY . .
 
+RUN cat ./priv/gateway_rs/${BUILD_NET}.settings >> ./priv/gateway_rs/settings.toml
 RUN ./rebar3 as ${REBAR_BUILD_TARGET} tar -n miner -v ${VERSION}
 
 RUN mkdir -p /opt/docker/update

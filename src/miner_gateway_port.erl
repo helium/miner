@@ -20,28 +20,29 @@
     keypair,
     transport=tcp,
     host="localhost",
-    port=4468,
+    port,
     monitor,
     os_pid,
-    tcp_port
+    tcp_port=4468,
+    udp_port
 }).
 
 -define(CONNECT_RETRY_WAIT, 100).
-
--dialyzer({nowarn_function, verify_grpc_connect/3}).
+-define(CONNECT_ATTEMPTS, 5).
 
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
 
 init([Options]) ->
     Keypair = proplists:get_value(keypair, Options),
-    TcpPort = proplists:get_value(port, Options, 4468),
-    Host = proplists:get_value(host, Options, "localhost"),
+    TcpPort = proplists:get_value(api_port, Options, 4468),
+    UdpPort = proplists:get_value(radio_port, Options, 1682),
+    Host = proplists:get_value(host, Options, "127.0.0.1"),
     Transport = proplists:get_value(transport, Options, tcp),
 
     process_flag(trap_exit, true),
 
-    State = open_gateway_port(Keypair, Transport, Host, TcpPort),
+    State = open_gateway_port(Keypair, Transport, Host, UdpPort, TcpPort),
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
@@ -55,7 +56,12 @@ handle_cast(_Msg, State) ->
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
     lager:warning("gateway-rs process ~p exited with status ~p, restarting", [Port, Status]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(State#state.keypair, State#state.transport, State#state.host, State#state.tcp_port),
+    NewState = open_gateway_port(
+                   State#state.keypair,
+                   State#state.transport,
+                   State#state.host,
+                   State#state.udp_port,
+                   State#state.tcp_port),
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info({Port, {data, LogMsg}}, #state{port = Port} = State) ->
@@ -65,7 +71,12 @@ handle_info({Port, {data, LogMsg}}, #state{port = Port} = State) ->
 handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref} = State) ->
     lager:warning("gateway-rs port ~p down with reason ~p, restarting", [Port, Reason]),
     ok = cleanup_port(State),
-    NewState = open_gateway_port(State#state.keypair, State#state.transport, State#state.host, State#state.tcp_port),
+    NewState = open_gateway_port(
+                   State#state.keypair,
+                   State#state.transport,
+                   State#state.host,
+                   State#state.udp_port,
+                   State#state.tcp_port),
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info(_Msg, State) ->
@@ -75,9 +86,11 @@ handle_info(_Msg, State) ->
 terminate(_, State) ->
     ok = cleanup_port(State).
 
-open_gateway_port(KeyPair, Transport, Host, TcpPort) ->
-    Args = ["-c", gateway_config_dir(), "server"],
-    GatewayEnv0 = [{"GW_API", erlang:integer_to_list(TcpPort)}, {"GW_KEYPAIR", KeyPair}],
+open_gateway_port(KeyPair, Transport, Host, UdpPort, TcpPort) ->
+    Args = ["-c", gateway_config_dir(), "--stdin", "server"],
+    GatewayEnv0 = [{"GW_API", erlang:integer_to_list(TcpPort)},
+                   {"GW_KEYPAIR", KeyPair},
+                   {"GW_LISTEN", lists:flatten(io_lib:format("~s:~p", [Host, UdpPort]))}],
     GatewayEnv =
         case application:get_env(miner, gateway_env) of
             undefined ->
@@ -96,7 +109,7 @@ open_gateway_port(KeyPair, Transport, Host, TcpPort) ->
     Ref = erlang:monitor(port, Port),
     {os_pid, OSPid} = erlang:port_info(Port, os_pid),
 
-    ok = verify_grpc_connect(Transport, Host, TcpPort),
+    ok = verify_grpc_connect(Transport, Host, TcpPort, ?CONNECT_ATTEMPTS),
 
     #state{
         keypair = KeyPair,
@@ -105,7 +118,8 @@ open_gateway_port(KeyPair, Transport, Host, TcpPort) ->
         os_pid = OSPid,
         transport = Transport,
         host = Host,
-        tcp_port = TcpPort
+        tcp_port = TcpPort,
+        udp_port = UdpPort
     }.
 
 cleanup_port(#state{port = Port} = State) ->
@@ -137,7 +151,10 @@ dispatch_port_logs(Line) ->
         _ -> lager:debug("unhandled info ~p", [Line])
     end.
 
-verify_grpc_connect(Transport, Host, TcpPort) ->
+verify_grpc_connect(_Transport, _Host, _TcpPort, 0) ->
+    lager:error("~s failed to connect to gateway ~s://~s:~p", [?MODULE, _Transport, _Host, _TcpPort]),
+    {error, retries_exceeded};
+verify_grpc_connect(Transport, Host, TcpPort, Tries) ->
     case grpc_client:connect(Transport, Host, TcpPort) of
         {ok, Connection} ->
             lager:debug("~s connected to gateway grpc ~s://~s:~p", [?MODULE, Transport, Host, TcpPort]),
@@ -146,5 +163,5 @@ verify_grpc_connect(Transport, Host, TcpPort) ->
         _ ->
             lager:warning("~s grpc connection to gateway failed; retrying...", [?MODULE]),
             timer:sleep(?CONNECT_RETRY_WAIT),
-            verify_grpc_connect(Transport, Host, TcpPort)
+            verify_grpc_connect(Transport, Host, TcpPort, Tries - 1)
     end.
