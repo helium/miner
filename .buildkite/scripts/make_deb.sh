@@ -2,14 +2,14 @@
 
 set -euo pipefail
 
-if [[ ! -n "$BUILD_NET" ]]; then
+if [[ "$BUILD_NET" != "" ]]; then
     wget -O /tmp/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
     PKG_GENESIS="/tmp/genesis=/opt/miner/update/genesis"
 else
-    PKG_GENESIS="#"
+    PKG_GENESIS=""
 fi
 
-TAG=$(echo $VERSION_TAG | sed -e s/$1// )
+VERSION=$(echo $VERSION_TAG | sed -e s/$1// )
 DEBNAME=$( echo $1 | sed -e s/_/-/ )
 
 DIAGNOSTIC=1 ./rebar3 as $1 release -n miner -v ${VERSION} || ./rebar3 as $1 release -n miner -v ${VERSION}
@@ -36,6 +36,6 @@ fpm -n ${DEBNAME} \
     --deb-user helium \
     --deb-group helium \
     _build/$1/rel/=/opt \
-    ${PACKAGE_GENESIS}
+    ${PKG_GENESIS}
 
 rm -f /tmp/genesis

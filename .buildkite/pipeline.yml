@@ -17,6 +17,11 @@ steps:
     name: ":debian: build seed deb"
     env:
         VERSION_TAG: $BUILDKITE_TAG
+        # This is empty on purpose
+        #
+        # The debian script requires this env variable to be defined, but we don't
+        # want it to have a value for seed builds
+        BUILD_NET: ""
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh seed"
@@ -39,6 +44,7 @@ steps:
     name: ":debian: build testnet seed deb"
     env:
         VERSION_TAG: $BUILDKITE_TAG
+        BUILD_NET: ""
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh testnet_seed"
@@ -61,6 +67,7 @@ steps:
     name: ":debian: build devnet seed deb"
     env:
         VERSION_TAG: $BUILDKITE_TAG
+        BUILD_NET: ""
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh devnet_seed"
