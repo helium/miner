@@ -9,29 +9,107 @@ steps:
     artifact_paths:
       - "artifacts/*"
 
-  # Validator debian package build
+###
+### SEEDS
+###
+
+  - if: build.tag =~ /^seed/
+    name: ":debian: build seed deb"
+    env:
+        VERSION_TAG: $BUILDKITE_TAG
+        # This is empty on purpose
+        #
+        # The debian script requires this env variable to be defined, but we don't
+        # want it to have a value for seed builds
+        BUILD_NET: ""
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh seed"
+    key: "seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^seed/
+    name: ":cloud: upload seed deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh seed"
+    depends_on: "seed-deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^testnet_seed/
+    name: ":debian: build testnet seed deb"
+    env:
+        VERSION_TAG: $BUILDKITE_TAG
+        BUILD_NET: ""
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh testnet_seed"
+    key: "testnet-seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^testnet_seed/
+    name: ":cloud: upload testnet seed deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh testnet_seed"
+    depends_on: "testnet-seed-deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_seed/
+    name: ":debian: build devnet seed deb"
+    env:
+        VERSION_TAG: $BUILDKITE_TAG
+        BUILD_NET: ""
+    commands:
+      - "git tag $BUILDKITE_TAG"
+      - ".buildkite/scripts/make_deb.sh devnet_seed"
+    key: "dev-seed-deb"
+    artifact_paths: "*.deb"
+    agents:
+      queue: "erlang"
+
+  - if: build.tag =~ /^devnet_seed/
+    name: ":cloud: upload devnet seed deb to packagecloud"
+    env:
+      VERSION_TAG: $BUILDKITE_TAG
+    commands:
+      - ".buildkite/scripts/packagecloud_upload.sh devnet_seed"
+    depends_on: "dev-seed-deb"
+    agents:
+      queue: "erlang"
+
+###
+### VALIDATOR DEBIAN PACKAGES
+###
+
   - if: build.tag =~ /^validator/
     name: ":debian: build validator deb"
     env:
       VERSION_TAG: $BUILDKITE_TAG
-      RELEASE_TARGET: "validator"
+      BUILD_NET: "mainnet"
     commands:
       - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh"
-    key: "deb"
+      - ".buildkite/scripts/make_deb.sh validator"
+    key: "val-deb"
     artifact_paths: "*.deb"
-    # depends_on: "tests"  # can't do this right now with the test status as it is.
     agents:
       queue: "erlang"
 
-  # Validator debian package upload
   - if: build.tag =~ /^validator/
     name: ":cloud: upload validator deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
-      - ".buildkite/scripts/packagecloud_upload.sh"
-    depends_on: "deb"
+      - ".buildkite/scripts/packagecloud_upload.sh validator"
+    depends_on: "val-deb"
     agents:
       queue: "erlang"
 
@@ -40,11 +118,9 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "testnet"
-      RELEASE_TARGET: "test_validator"
-      PKG_STEM: "testnet-validator"
     commands:
       - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh"
+      - ".buildkite/scripts/make_deb.sh test_validator"
     key: "testdeb"
     artifact_paths: "*.deb"
     agents:
@@ -54,10 +130,8 @@ steps:
     name: ":cloud: upload testnet validator deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
-      PKG_STEM: "testnet-validator"
-      REPO: "testnet_validators"
     commands:
-      - ".buildkite/scripts/packagecloud_upload.sh"
+      - ".buildkite/scripts/packagecloud_upload.sh testnet_validator"
     depends_on: "testdeb"
     agents:
       queue: "erlang"
@@ -67,11 +141,9 @@ steps:
     env:
       VERSION_TAG: $BUILDKITE_TAG
       BUILD_NET: "devnet"
-      RELEASE_TARGET: "test_validator"
-      PKG_STEM: "devnet-validator"
     commands:
       - "git tag $BUILDKITE_TAG"
-      - ".buildkite/scripts/make_deb.sh"
+      - ".buildkite/scripts/make_deb.sh test_validator devnet_validator"
     key: "devdeb"
     artifact_paths: "*.deb"
     agents:
@@ -81,13 +153,15 @@ steps:
     name: ":cloud: upload devnet validator deb to packagecloud"
     env:
       VERSION_TAG: $BUILDKITE_TAG
-      PKG_STEM: "devnet-validator"
-      REPO: "devnet_validators"
     commands:
-      - ".buildkite/scripts/packagecloud_upload.sh"
+      - ".buildkite/scripts/packagecloud_upload.sh devnet_validator"
     depends_on: "devdeb"
     agents:
       queue: "erlang"
+
+###
+### VALIDATOR DOCKER IMAGES
+###
 
   # Validator AMD64 mainnet
   - if: build.tag =~ /^validator/
@@ -191,8 +265,12 @@ steps:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_image.sh"
 
+###
+### MINER DOCKER IMAGES
+###
+
   # Miner AMD64 mainnet
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/ && build.tag !~ /seed/
     name: ":whale: AMD64 docker"
     env:
       BUILD_TYPE: "miner"
@@ -209,7 +287,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner ARM64 mainnet
-  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/
+  - if: build.tag != null && build.tag !~ /val/ && build.tag !~ /testnet/ && build.tag !~ /devnet/ && build.tag !~ /seed/
     name: ":whale: ARM64 docker"
     agents:
       queue: "arm64"
@@ -226,7 +304,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner ARM64 testnet
-  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
+  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/ && build.tag !~ /^seed/
     name: ":whale: testnet miner ARM64 docker"
     agents:
       queue: "arm64"
@@ -243,7 +321,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner AMD64 testnet
-  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/
+  - if: build.tag !~ /val/ && build.tag =~ /^testnet_/ && build.tag !~ /^seed/
     name: ":whale: testnet miner AMD64 docker"
     env:
       BUILD_TYPE: "miner"
@@ -260,7 +338,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner ARM64 devnet
-  - if: build.tag !~ /val/ && build.tag =~ /^devnet_/
+  - if: build.tag !~ /val/ && build.tag !~ /seed/ && build.tag =~ /^devnet_/
     name: ":whale: devnet miner ARM64 docker"
     agents:
       queue: "arm64"
@@ -277,7 +355,7 @@ steps:
       - ".buildkite/scripts/make_image.sh"
 
   # Miner AMD64 devnet
-  - if: build.tag !~ /val/ && build.tag =~ /^devnet_/
+  - if: build.tag !~ /val/ && build.tag !~ /seed/ && build.tag =~ /^devnet_/
     name: ":whale: devnet miner AMD64 docker"
     env:
       BUILD_TYPE: "miner"

@@ -25,7 +25,7 @@
   1},
  {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},2},
  {<<"cuttlefish">>,
-  {git,"https://github.com/helium/cuttlefish.git",
+  {git,"https://github.com/helium/cuttlefish",
        {ref,"8672838e8f4ef61602aee6e4ff97ec9be54031dc"}},
   2},
  {<<"dep_http2_client">>,
