@@ -71,7 +71,7 @@ steps:
     commands:
       - "git tag $BUILDKITE_TAG"
       - ".buildkite/scripts/make_deb.sh devnet_seed"
-    key: "testnet-seed-deb"
+    key: "dev-seed-deb"
     artifact_paths: "*.deb"
     agents:
       queue: "erlang"
@@ -82,7 +82,7 @@ steps:
       VERSION_TAG: $BUILDKITE_TAG
     commands:
       - ".buildkite/scripts/packagecloud_upload.sh devnet_seed"
-    depends_on: "testnet-seed-deb"
+    depends_on: "dev-seed-deb"
     agents:
       queue: "erlang"
 
