@@ -1,0 +1,21 @@
+#!/bin/sh
+if [ -t 0 ] ; then
+    CLIQUE_COLUMNS=$(stty size 2>/dev/null | cut -d ' ' -f 2)
+    export CLIQUE_COLUMNS
+fi
+
+export RELX_RPC_TIMEOUT=${RELX_RPC_TIMEOUT:-900}
+
+j=1
+l=$#
+buf="[[\"denylist\","
+while [ $j -le $l ]; do
+    buf="$buf\"$1\","
+    j=$(( j + 1 ))
+    shift
+done
+
+buf="${buf%?}]]"
+
+relx_nodetool rpc blockchain_console command "$buf"
+exit $?
