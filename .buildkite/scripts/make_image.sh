@@ -17,7 +17,7 @@ ERLANG_IMAGE_SOURCE="erlang"
 
 BUILD_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
 
-RUN_IMAGE="alpine:3.15"
+RUN_IMAGE="alpine:3.16"
 
 if [[ "$IMAGE_ARCH" == "arm64" ]]; then
     BUILD_IMAGE="arm64v8/$BUILD_IMAGE"
