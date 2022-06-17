@@ -105,7 +105,6 @@ init(_Opts) ->
                            },
                 [
                     ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
-                    ?WORKER(miner_poc_statem, [POCOpts]),
                     ?WORKER(miner_poc_mgr, [])
                 ];
             gateway ->

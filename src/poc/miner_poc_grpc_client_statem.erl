@@ -8,6 +8,7 @@
 -include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -58,7 +59,7 @@
 
 %% these are config vars the miner is interested in, if they change we
 %% will want to get their latest values
--define(CONFIG_VARS, ["poc_version", "data_aggregation_version", "poc_timeout"]).
+-define(CONFIG_VARS, ["poc_version", "data_aggregation_version", "poc_timeout", "block_time"]).
 
 %% delay between validator reconnects attempts
 -define(VALIDATOR_RECONNECT_DELAY, 5000).
@@ -84,10 +85,10 @@
 %% max number of stream down events  within the STREAM_STABILITY_CHECK_TIMEOUT period
 %% after which we will select a new validator
 -define(MAX_DOWN_EVENTS_IN_PERIOD, (?STREAM_STABILITY_CHECK_TIMEOUT / ?RECONNECT_DELAY) - 2).
--define(BLOCK_AGE_TIMEOUT, 450000).
 %% Maximum block age returned by a connected validator before triggering an instability reconnect
 %% Measured in seconds as this is the unit of time returned by the validator for block_age
--define(MAX_BLOCK_AGE, 900).
+-define(MAX_BLOCK_AGE, 600).
+-define(BLOCK_AGE_TIMEOUT, ceil(?MAX_BLOCK_AGE / 2) * 1000).
 %% ets table name for check target reqs cache
 -define(CHECK_TARGET_REQS, check_target_reqs).
 -type data() :: #data{}.
@@ -192,11 +193,16 @@ setup(enter, _OldState, Data) ->
     %% connection to a durable validators
     %% thus ensure all streams are disconnected
     ok = disconnect(Data),
-    erlang:send_after(1000, self(), active_check),
+    catch erlang:cancel_timer(Data#data.stability_check_timer),
+    catch erlang:cancel_timer(Data#data.block_age_timer),
+    erlang:send_after(5000, self(), active_check),
     {keep_state, Data#data{
         val_public_ip = undefined,
         val_grpc_port = undefined,
-        val_p2p_addr = undefined
+        val_p2p_addr = undefined,
+        connection = undefined,
+        connection_pid = undefined,
+        conn_monitor_ref = undefined
     }};
 setup(info, active_check, Data) ->
     %% env var `enable_grpc_client` will have a value of true
@@ -245,8 +251,6 @@ setup(
             M = erlang:monitor(process, ConnectionPid),
             %% once we have a validator connection established
             %% fire a timer to check how stable the streams are behaving
-            catch erlang:cancel_timer(Data#data.stability_check_timer),
-            catch erlang:cancel_timer(Data#data.block_age_timer),
             SCTRef = erlang:send_after(?STREAM_STABILITY_CHECK_TIMEOUT, self(), stability_check),
             BACTRef = erlang:send_after(block_age_timeout(), self(), block_age_check),
             {keep_state,
@@ -350,7 +354,7 @@ setup(info, {'DOWN', _Ref, process, _, _Reason} = Event, Data) ->
     erlang:send_after(?RECONNECT_DELAY, self(), {delayed_down_event, Event}),
     {keep_state, Data};
 setup(info, {delayed_down_event, Event}, Data) ->
-    handle_down_event(connected, Event, Data);
+    handle_down_event(setup, Event, Data);
 setup(info, stability_check, Data) ->
     handle_stability_check(setup, Data);
 setup(info, block_age_check, Data) ->
@@ -426,7 +430,7 @@ connected(info, {delayed_down_event, Event}, Data) ->
     handle_down_event(connected, Event, Data);
 connected(info, process_queued_check_target_reqs, Data) ->
     lager:debug("processing queued check_target_reqs", []),
-    _ = process_check_target_reqs(),
+    _ = process_check_target_reqs(Data),
     Ref = erlang:send_after(?CHECK_TARGET_REQ_DELAY, self(), process_queued_check_target_reqs),
     {keep_state, Data#data{check_target_req_timer = Ref}};
 connected(info, stability_check, Data) ->
@@ -511,7 +515,8 @@ connect_validator(ValAddr, ValIP, ValPort) ->
                 ),
                 Error;
             {ok, Connection} = Res ->
-                lager:info("successfully connected to validator via connection ~p", [Connection]),
+                Animal = ?TO_ANIMAL_NAME(libp2p_crypto:p2p_to_pubkey_bin(ValAddr)),
+                lager:info("successfully connected to validator ~p via connection ~p", [Animal, Connection]),
                 Res
         end
     catch
@@ -692,7 +697,8 @@ send_grpc_unary_req(Connection, Req, RPC) ->
             'helium.gateway',
             RPC,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ),
         lager:info("send unary result: ~p", [Res]),
         process_unary_response(Res)
@@ -718,11 +724,12 @@ send_grpc_unary_req(PeerIP, GRPCPort, Req, RPC) ->
             'helium.gateway',
             RPC,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ),
         lager:info("New Connection, send unary result: ~p", [Res]),
         %% we dont need the connection to hang around, so close it out
-        _ = grpc_client_custom:stop_connection(Connection),
+        catch grpc_client_custom:stop_connection(Connection),
         process_unary_response(Res)
     catch
         _Class:_Error:_Stack ->
@@ -805,7 +812,7 @@ process_unary_response(
     {ok, Payload, #{height => Height, signature => Sig}};
 process_unary_response({error, _}) ->
     lager:warning("grpc client error response", []),
-    {error, grpc_request_failed}.
+    {error, req_failed}.
 
 -spec get_uri_for_challenger(
     OnionKeyHash::binary(),
@@ -824,17 +831,12 @@ get_uri_for_challenger(OnionKeyHash, Connection) ->
             {error, Reason}
     end.
 
--spec process_check_target_reqs() -> ok.
-process_check_target_reqs() ->
+-spec process_check_target_reqs(data()) -> ok.
+process_check_target_reqs(_State = #data{self_sig_fun = SelfSigFun}) ->
     {ok, POCTimeOut} = application:get_env(miner, poc_timeout),
-    %% convert poc timeout in blocks to equiv in seconds
-    %% use to determine when the POC would end
-    %% if the cached request has remained in the cache
-    %% for 80% of the timeout period, then give up on it & remove
-    %% we use 80% as we need to give the POC time to run,
-    %% no point getting the onion and broadcasting if no time
-    %% left for it to complete
-    POCTimeOutSecs = (POCTimeOut * 0.8 * 60),
+    {ok, BlockTime} = application:get_env(miner, block_time),
+    %% blocktime is in millisecs, convert to secs
+    POCTimeOutSecs = (POCTimeOut * (BlockTime / 1000 )),
     CurTSInSecs = erlang:system_time(second),
     Reqs = cached_check_target_reqs(),
     lager:debug("Queued Reqs: ~p",[Reqs]),
@@ -853,6 +855,7 @@ process_check_target_reqs() ->
                         BlockHash,
                         NotificationHeight,
                         ChallengerSig,
+                        SelfSigFun,
                         true
                     ),
                     ok;
@@ -866,17 +869,19 @@ process_check_target_reqs() ->
         Reqs
     ).
 
+-type target_request_data() :: {
+    URI :: string(),
+    libp2p_crypto:pubkey_bin(),
+    OnionKeyHash :: binary(),
+    BlockHash :: binary(),
+    NotificationHeight :: non_neg_integer(),
+    ChallengerSig :: binary(),
+    TimestampSec :: integer()
+}.
+
 -spec cache_check_target_req(
-    ID::binary(),
-    ReqData::{
-        string(),
-        libp2p_crypto:pubkey_bin(),
-        binary(),
-        binary(),
-        pos_integer(),
-        function(),
-        integer()
-    }
+    ID :: binary(),
+    ReqData :: target_request_data()
 ) -> true.
 cache_check_target_req(ID, ReqData) ->
     true = ets:insert(?CHECK_TARGET_REQS, {ID, ReqData}).
@@ -897,12 +902,13 @@ delete_cached_check_target_req(Key) ->
     BlockHash :: binary(),
     NotificationHeight :: non_neg_integer(),
     ChallengerSig :: binary(),
+    SelfSigFun :: function(),
     IsRetry :: boolean()
 ) -> ok.
 check_if_target(
-    URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, IsRetry
+    URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+    ChallengerSig, SelfSigFun, IsRetry
 ) ->
-    F = fun() ->
         TargetRes =
             send_check_target_req(
                 URI,
@@ -910,7 +916,8 @@ check_if_target(
                 OnionKeyHash,
                 BlockHash,
                 NotificationHeight,
-                ChallengerSig
+                ChallengerSig,
+                SelfSigFun
             ),
         lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
@@ -928,32 +935,35 @@ check_if_target(
                 N = NotificationHeight - ValRespHeight,
                 case (N >= 0) andalso (not IsRetry) of
                     true ->
-                        CurTSInSecs = erlang:system_time(second),
-                        _ = cache_check_target_req(
-                            OnionKeyHash,
-                            {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
-                                ChallengerSig, CurTSInSecs}
-                        ),
-                        lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
-                            OnionKeyHash, CurTSInSecs
-                        ]),
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
                         ok;
                     false ->
                         %% eh shouldnt hit here but ok
                         ok
                 end;
             {error, _Reason, _Details} ->
-                %% we got an non queued response, purge req from queued cache should it exist
+                %% we got a non queued response, purge req from queued cache should it exist
+                %% these are valid errors, which should not be retried, like mismatched block hash
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok;
+            {error, req_failed} ->
+                %% the grpc req failed, queue it and try again later
+                case (not IsRetry) of
+                    true ->
+                        ok = queue_check_target_req(OnionKeyHash, URI, PubKeyBin,
+                            BlockHash, NotificationHeight, ChallengerSig),
+                        ok;
+                    false ->
+                        %% eh shouldnt hit here but ok
+                        ok
+                end;
             {error, _Reason} ->
-                %% we got an non queued response, purge req from queued cache should it exist
+                %% got an error we are not sure what about,
+                %% purge req from queued cache should it exist
                 _ = delete_cached_check_target_req(OnionKeyHash),
                 ok
-        end
-    end,
-    spawn(F),
-    ok.
+        end.
 
 -spec send_check_target_req(
     ChallengerURI :: string(),
@@ -961,7 +971,8 @@ check_if_target(
     OnionKeyHash :: binary(),
     BlockHash :: binary(),
     NotificationHeight :: non_neg_integer(),
-    ChallengerSig :: binary()
+    ChallengerSig :: binary(),
+    SelfSigFun :: function()
 ) -> unary_result().
 send_check_target_req(
     ChallengerURI,
@@ -969,10 +980,10 @@ send_check_target_req(
     OnionKeyHash,
     BlockHash,
     NotificationHeight,
-    ChallengerSig
+    ChallengerSig,
+    SelfSigFun
 ) ->
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
-    {ok, _, SelfSigFun, _} = blockchain_swarm:keys(),
     %% split the URI into its IP and port parts
     #{host := IP, port := Port, scheme := _Scheme} =
         uri_string:parse(ChallengerURI),
@@ -999,13 +1010,33 @@ handle_check_target_resp(
 ) ->
     ok.
 
+-spec queue_check_target_req(
+    OnionKeyHash :: binary(),
+    ChallengerURI :: string(),
+    PubKeyBin :: binary(),
+    BlockHash :: binary(),
+    NotificationHeight :: non_neg_integer(),
+    ChallengerSig :: binary()
+) -> ok.
+queue_check_target_req(OnionKeyHash, URI, PubKeyBin, BlockHash, NotificationHeight, ChallengerSig) ->
+    CurTSInSecs = erlang:system_time(second),
+    _ = cache_check_target_req(
+        OnionKeyHash,
+        {URI, PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight,
+            ChallengerSig, CurTSInSecs}
+    ),
+    lager:debug("queuing check target request for onionkeyhash ~p with ts ~p", [
+        OnionKeyHash, CurTSInSecs
+    ]),
+    ok.
+
 do_handle_streamed_msg(
     #gateway_resp_v1_pb{
         msg = {poc_challenge_resp, ChallengeNotification},
         height = NotificationHeight,
         signature = ChallengerSig
     } = Msg,
-    State
+    #data{self_sig_fun = SelfSigFun} = State
 ) ->
     lager:info("grpc client received gateway_poc_challenge_notification_resp_v1 msg ~p", [Msg]),
     #gateway_poc_challenge_notification_resp_v1_pb{
@@ -1014,7 +1045,7 @@ do_handle_streamed_msg(
         onion_key_hash = OnionKeyHash
     } = ChallengeNotification,
     _ = check_if_target(
-        binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, false
+        binary_to_list(URI), PubKeyBin, OnionKeyHash, BlockHash, NotificationHeight, ChallengerSig, SelfSigFun, false
     ),
     State;
 do_handle_streamed_msg(
@@ -1056,9 +1087,9 @@ handle_down_event(
     Data = #data{conn_monitor_ref = Ref, connection = Connection}
 ) ->
     lager:warning("GRPC connection to validator is down, reconnecting.  Reason: ~p", [Reason]),
-    _ = grpc_client_custom:stop_connection(Connection),
+    catch grpc_client_custom:stop_connection(Connection),
     %% if the connection goes down, enter setup state to reconnect
-    {next_state, setup, Data};
+    {next_state, setup, Data#data{connection = undefined}};
 handle_down_event(
     _CurState,
     {'DOWN', Ref, process, _, Reason} = Event,
@@ -1069,7 +1100,7 @@ handle_down_event(
         self_sig_fun = SelfSigFun,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the poc stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("poc stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1094,7 +1125,7 @@ handle_down_event(
         connection = Connection,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the config_update stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("config_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1122,7 +1153,7 @@ handle_down_event(
         self_sig_fun = SelfSigFun,
         down_events_in_period = NumDownEvents
     }
-) ->
+) when Connection /= undefined ->
     %% the region_params stream is meant to be long lived, we always want it up as long as we have a grpc connection
     %% so if it goes down start it back up again
     lager:warning("region_params_update stream to validator is down, reconnecting.  Reason: ~p", [Reason]),
@@ -1201,7 +1232,8 @@ send_block_age_req(Connection) ->
             'helium.gateway',
             config,
             gateway_miner_client_pb,
-            [{callback_mod, miner_poc_grpc_client_handler}]
+            [{callback_mod, miner_poc_grpc_client_handler},
+             {timeout, 10000}]
         ) of
             {ok, #{http_status := 200, result := #gateway_resp_v1_pb{block_age = BlockAge}}} when is_integer(BlockAge) ->
                 {ok, BlockAge};

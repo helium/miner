@@ -12,7 +12,7 @@
   ]},
  {blockchain,
   [
-   {seed_nodes, "/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443"},
+   {seed_nodes, "${SEED_NODES:-/ip4/54.244.119.55/tcp/2154,/ip4/3.22.146.211/tcp/443}"},
    {seed_node_dns, ""},
    {listen_addresses, ["/ip4/0.0.0.0/tcp/2154"]},
    {honor_quick_sync, false},
@@ -51,6 +51,7 @@
    %% these two now disable all the poc stuff
    {use_ebus, false},
    {radio_device, undefined},
+   {default_routers, ["${DEFAULT_ROUTERS:-/p2p/11w77YQLhgUt8HUJrMtntGGr97RyXmot1ofs5Ct2ELTmbFoYsQa}"]},
    %% dont perform regionalised checks in dev envs
    %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started

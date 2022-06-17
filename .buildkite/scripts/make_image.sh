@@ -17,7 +17,7 @@ ERLANG_IMAGE_SOURCE="erlang"
 
 BUILD_IMAGE="${ERLANG_IMAGE_SOURCE}:${ERLANG_IMAGE}"
 
-RUN_IMAGE="alpine:3.15"
+RUN_IMAGE="alpine:3.16"
 
 if [[ "$IMAGE_ARCH" == "arm64" ]]; then
     BUILD_IMAGE="arm64v8/$BUILD_IMAGE"
@@ -46,6 +46,12 @@ case "${BUILD_TYPE}-$BUILD_NET" in
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
+    "validator-devnet")
+        echo "Doing a devnet validator image build for ${IMAGE_ARCH}"
+        DOCKER_BUILD_ARGS="--build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
+        BASE_DOCKER_NAME="validator"
+        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
+        ;;
     "miner-mainnet")
         echo "Doing a miner image build for ${IMAGE_ARCH}"
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg REBAR_BUILD_TARGET=docker $DOCKER_BUILD_ARGS"
@@ -57,7 +63,14 @@ case "${BUILD_TYPE}-$BUILD_NET" in
         DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg REBAR_BUILD_TARGET=docker_testminer $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME=$(basename $(pwd))
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
-        ;;    *)
+        ;;
+    "miner-devnet")
+        echo "Doing a devnet miner image build for ${IMAGE_ARCH}"
+        DOCKER_BUILD_ARGS="--build-arg EXTRA_BUILD_APK_PACKAGES=apk-tools --build-arg EXTRA_RUNNER_APK_PACKAGES=apk-tools --build-arg REBAR_BUILD_TARGET=docker_testminer $DOCKER_BUILD_ARGS"
+        BASE_DOCKER_NAME=$(basename $(pwd))
+        DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
+        ;;
+    *)
         echo "I don't know how to build ${BUILD_TYPE}-$BUILD_NET"
         exit 1
         ;;
@@ -102,7 +115,7 @@ docker build $DOCKER_BUILD_ARGS -t "helium:${DOCKER_NAME}" .
 docker tag "helium:$DOCKER_NAME" "$FULL_REGISTRY_NAME:$DOCKER_NAME"
 docker push "$FULL_REGISTRY_NAME:$DOCKER_NAME"
 
-if [[ "$BUILD_NET" == "testnet" ]]; then
+if [[ "$BUILD_NET" =~ (testnet|devnet) ]]; then
     LATEST_TAG="latest-$IMAGE_ARCH"
     docker tag "$FULL_REGISTRY_NAME:$DOCKER_NAME" "$FULL_REGISTRY_NAME:$LATEST_TAG"
     docker push "$FULL_REGISTRY_NAME:$LATEST_TAG"
