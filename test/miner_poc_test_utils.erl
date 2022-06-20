@@ -91,7 +91,7 @@ region_params_as923_1() ->
     Params = make_params(?REGION_PARAMS_AS923_1),
     blockchain_region_params_v1:serialize(blockchain_region_params_v1:new(Params)).
 
-region_params_as923_1B() ->
+region_params_as923_1b() ->
     Params = make_params(?REGION_PARAMS_AS923_1B),
     blockchain_region_params_v1:serialize(blockchain_region_params_v1:new(Params)).
 
