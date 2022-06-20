@@ -30,6 +30,7 @@
 -type region() ::
     'AS923'
     | 'AS923_1'
+    | 'AS923_1B'
     | 'AS923_2'
     | 'AS923_3'
     | 'AS923_4'
@@ -42,6 +43,7 @@
     | 'KR920'
     | 'US915'
     | 'region_as923_1'
+    | 'region_as923_1b'
     | 'region_as923_2'
     | 'region_as923_3'
     | 'region_as923_4'
@@ -72,6 +74,7 @@ model(Region) ->
     case Region of
         'AS923' -> ?COMMON_DUTY;
         'AS923_1' -> ?COMMON_DUTY;
+        'AS923_1B' -> ?COMMON_DUTY;
         'AS923_2' -> ?COMMON_DUTY;
         'AS923_3' -> ?COMMON_DUTY;
         'AS923_4' -> ?COMMON_DUTY;
@@ -87,6 +90,7 @@ model(Region) ->
         %% NOTE: Starting with poc-v11 the Regions are tagged
         %% And we don't support region_cn779
         'region_as923_1' -> ?COMMON_DUTY;
+        'region_as923_1b' -> ?COMMON_DUTY;
         'region_as923_2' -> ?COMMON_DUTY;
         'region_as923_3' -> ?COMMON_DUTY;
         'region_as923_4' -> ?COMMON_DUTY;

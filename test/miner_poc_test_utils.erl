@@ -37,6 +37,7 @@ poc_v11_vars() ->
            region_eu868_params => region_params_eu868(),
            region_au915_params => region_params_au915(),
            region_as923_1_params => region_params_as923_1(),
+           region_as923_1b_params => region_params_as923_1b(),
            region_as923_2_params => region_params_as923_2(),
            region_as923_3_params => region_params_as923_3(),
            region_as923_4_params => region_params_as923_4(),
@@ -51,6 +52,7 @@ poc_v11_vars() ->
 region_urls() ->
     [
         {region_as923_1, ?region_as923_1_url},
+        {region_as923_1b, ?region_as923_1b_url},
         {region_as923_2, ?region_as923_2_url},
         {region_as923_3, ?region_as923_3_url},
         {region_as923_4, ?region_as923_4_url},
@@ -87,6 +89,10 @@ region_params_au915() ->
 
 region_params_as923_1() ->
     Params = make_params(?REGION_PARAMS_AS923_1),
+    blockchain_region_params_v1:serialize(blockchain_region_params_v1:new(Params)).
+
+region_params_as923_1b() ->
+    Params = make_params(?REGION_PARAMS_AS923_1B),
     blockchain_region_params_v1:serialize(blockchain_region_params_v1:new(Params)).
 
 region_params_as923_2() ->

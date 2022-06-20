@@ -5,6 +5,10 @@
     "https://github.com/helium/lorawan-h3/blob/main/serialized/AS923-1.res7.h3idx?raw=true"
 ).
 
+-define(region_as923_1b_url,
+    "https://github.com/helium/lorawan-h3/blob/main/serialized/AS923-1B.res7.h3idx?raw=true"
+).
+
 -define(region_as923_2_url,
     "https://github.com/helium/lorawan-h3/blob/main/serialized/AS923-2.res7.h3idx?raw=true"
 ).
@@ -293,6 +297,65 @@
     ],
     [
         {<<"channel_frequency">>, 922000000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ]
+]).
+
+-define(REGION_PARAMS_AS923_1B, [
+    [
+        {<<"channel_frequency">>, 922000000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 922200000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 922400000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 922600000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 922800000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 923000000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 923200000},
+        {<<"bandwidth">>, 125000},
+        {<<"max_eirp">>, 160},
+        {<<"spreading">>,
+         [{25, 'SF12'}, {25, 'SF11'}, {25, 'SF10'}, {67, 'SF9'}, {139, 'SF8'}, {256, 'SF7'}]}
+    ],
+    [
+        {<<"channel_frequency">>, 923400000},
         {<<"bandwidth">>, 125000},
         {<<"max_eirp">>, 160},
         {<<"spreading">>,
