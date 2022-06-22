@@ -66,11 +66,15 @@ denylist_status_usage() ->
     ].
 
 denylist_status(["denylist", "status"], [], []) ->
+    %% miner_poc_denylist:get_version/0 will throw an error if configuration missing yet return {ok, 0} if 
+    %% configuration set but denylist is not loaded for another reason.
     Text = try miner_poc_denylist:get_version() of 
-        {ok, Version} -> 
-            clique_status:text(io_lib:format("Denylist version ~p loaded", [Version]))
+        {ok, Version} when Version =/= 0 -> 
+            clique_status:text(io_lib:format("Denylist version ~p loaded", [Version]));
+        {ok, 0} -> 
+            clique_status:text("No denylist loaded. List still loading or error encountered. Try again or check application config.")
     catch _:_ ->
-        clique_status:text(io_lib:format("No denylist loaded",[]))
+        clique_status:text("No denylist loaded. Missing or invalid denylist values in application config.")
     end,
     [Text];
 denylist_status([], [], []) ->
@@ -94,13 +98,23 @@ denylist_check_usage() ->
     ].
 
 denylist_check(["denylist", "check", Address], [], []) ->
-    Result =
-        try miner_poc_denylist:check(libp2p_crypto:b58_to_bin(Address)) of
-            R -> R
-        catch _:_ ->
-            invalid_address
-        end,
-    Text = clique_status:text(io_lib:format("~p", [Result])),
-    [Text];
+    %% miner_poc_denylist:check/1 will return false if no list loaded
+    %% so first check if a denylist is loaded using get_version/0
+    DenylistLoaded = try miner_poc_denylist:get_version() of 
+        {ok, Version} when Version =/= 0 -> true;
+        _ -> false
+    catch _:_ -> false
+    end,
+    %% if denylist loaded, check if address is on list
+    case DenylistLoaded of
+        true ->
+            try miner_poc_denylist:check(libp2p_crypto:b58_to_bin(Address)) of
+                Result -> 
+                    [clique_status:text(io_lib:format("~p", [Result]))]
+            catch _:_ ->
+                [clique_status:text("Invalid address")]
+            end;
+        false -> [clique_status:text("No denylist loaded")]
+    end;
 denylist_check([], [], []) ->
     usage.
