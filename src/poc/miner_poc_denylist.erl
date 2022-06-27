@@ -65,7 +65,7 @@ init([Type, URL, Keys]) ->
                             case file:read_file(DenyFile) of
                                 {ok, <<Version:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>>} when Version == 1 ->
                                     %% check signature is still valid against our key
-                                    case lists:any(fun(Key) -> catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) end, Keys) of
+                                    case lists:any(fun(Key) -> verify_signature(Key, Rest, Signature) end, Keys) of
                                         true ->
                                             <<Serial:32/integer-unsigned-little, FilterBin/binary>> = Rest,
                                             case xorf:from_bin({exor, 32}, FilterBin) of
@@ -125,7 +125,7 @@ handle_info(check, #state{type=github_release, url=URL, keys=Keys, version=Versi
                                                     case AssetBin of
                                                         <<AssetVersion:8/integer, SignatureLen:16/integer-unsigned-little, Signature:SignatureLen/binary, Rest/binary>> = Bin when AssetVersion == 1 ->
                                                             %% check signature is still valid against our key
-                                                            case lists:any(fun(Key) -> catch libp2p_crypto:verify(Rest, Signature, libp2p_crypto:b58_to_pubkey(Key)) end, Keys) of
+                                                            case lists:any(fun(Key) -> verify_signature(Key, Rest, Signature) end, Keys) of
                                                                 true ->
                                                                     case Rest of
                                                                         <<NewVersion:32/integer-unsigned-little, FilterBin/binary>> ->
@@ -196,7 +196,11 @@ handle_call(Msg, _From, State) ->
     lager:info("unhandled call msg ~p", [Msg]),
     {reply, ok, State}.
 
-
+verify_signature(Key, Binary, Signature) ->
+    case catch libp2p_crypto:verify(Binary, Signature, libp2p_crypto:b58_to_pubkey(Key)) of
+        true -> true;
+        _ -> false
+    end.
 
 schedule_check(State) ->
     schedule_check(State, timer:hours(6)).
