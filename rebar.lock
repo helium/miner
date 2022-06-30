@@ -30,7 +30,7 @@
   2},
  {<<"dep_http2_client">>,
   {git,"https://github.com/helium/http2_client.git",
-       {ref,"45163af5399cede1c1210ea665a4532d1a67eca3"}},
+       {ref,"0bbf8dae1bd809ea16583da7efe4c7670727fe52"}},
   1},
  {<<"dkg">>,
   {git,"https://github.com/helium/erlang-dkg.git",
