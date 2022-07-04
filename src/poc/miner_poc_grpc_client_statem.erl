@@ -6,8 +6,10 @@
 
 
 -include("src/grpc/autogen/client/gateway_miner_client_pb.hrl").
+
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
+-include_lib("helium_proto/include/blockchain_poc_core_v1_pb.hrl").
 -include_lib("blockchain/include/blockchain_utils.hrl").
 
 %% ------------------------------------------------------------------
@@ -101,7 +103,9 @@
     connected/3
 ]).
 
--type unary_result() :: {error, any(), map()} | {error, any()} | {ok, any(), map()} | {ok, map()}.
+-type unary_result() :: {error, any(),  miner_util:attestation()} |
+                        {error, any()} | {ok, any(),  miner_util:attestation()} |
+                        {ok,  miner_util:attestation()}.
 %% ------------------------------------------------------------------
 %% API Definitions
 %% ------------------------------------------------------------------
@@ -397,15 +401,22 @@ connected(
         "send_report ~p with onionkeyhash ~p: ~p",
         [ReportType, OnionKeyHash, Report]
     ),
-    ok = send_report(
-        ReportType,
-        Report,
-        OnionKeyHash,
-        SelfPubKeyBin,
-        SelfSigFun,
-        Connection,
-        RetryAttempts
-    ),
+    %% ask our durable val for grpc connection details of the challenger
+    case get_uri_for_challenger(OnionKeyHash, Connection) of
+        {ok, {IP, Port, Attestation}} ->
+            send_report(
+                ReportType,
+                Report,
+                OnionKeyHash,
+                SelfPubKeyBin,
+                SelfSigFun,
+                IP,
+                Port,
+                Attestation,
+                RetryAttempts);
+        {error, _Reason} ->
+            ?MODULE:send_report(ReportType, Report, OnionKeyHash, RetryAttempts - 1)
+    end,
     {keep_state, Data};
 connected(
     cast,
@@ -465,13 +476,13 @@ find_validator() ->
                 end,
             Req = build_validators_req(1),
             case send_grpc_unary_req(SeedValIP, SeedValGRPCPort, Req, 'validators') of
-                {ok, #gateway_validators_resp_v1_pb{result = []}, _ReqDetails} ->
+                {ok, #gateway_validators_resp_v1_pb{result = []}, _Attestation} ->
                     %% no routes, retry in a bit
                     lager:warning("failed to find any validator routing from seed validator ~p", [
                         SeedValIP
                     ]),
                     {error, no_validators};
-                {ok, #gateway_validators_resp_v1_pb{result = Routing}, _ReqDetails} ->
+                {ok, #gateway_validators_resp_v1_pb{result = Routing}, _Attestation} ->
                     %% resp will contain the payload 'gateway_validators_resp_v1_pb'
                     [
                         #routing_address_pb{
@@ -487,9 +498,12 @@ find_validator() ->
                     } =
                         uri_string:parse(binary_to_list(DurableValURI)),
                     {ok, DurableValIP, DurableValGRPCPort, DurableValP2PAddr};
-                {error, _} = Error ->
-                    lager:warning("request to validator failed: ~p", [Error]),
-                    {error, Error}
+                {error, Reason, _Attestation} ->
+                    lager:warning("request to validator failed: ~p", [Reason]),
+                    {error, Reason};
+                {error, Reason} ->
+                    lager:warning("request to validator failed: ~p", [Reason]),
+                    {error, Reason}
             end;
         _ ->
             lager:warning("failed to find seed validators", []),
@@ -586,64 +600,55 @@ connect_stream_region_params_update(Connection, SelfPubKeyBin, SelfSigFun) ->
     OnionKeyHash::binary(),
     SelfPubKeyBin::libp2p_crypto:pubkey_bin(),
     SigFun::function(),
-    Connection::grpc_client_custom:connection(),
+    IP::string(),
+    Port::pos_integer(),
+    Attestation::miner_util:attestation(),
     RetryAttempts::non_neg_integer()
 ) -> ok.
-send_report(_ReportType, _Report, _OnionKeyHash, _SelfPubKeyBin, _SigFun, _Connection, 0) ->
+send_report(_ReportType, _Report, _OnionKeyHash, _SelfPubKeyBin, _SigFun, _ChallengerIP, _ChallengerPort, _Attestation, 0) ->
     lager:warning("failed to submit report.  OnionKeyHash: ~p, Report: ~p", [_OnionKeyHash, _Report]),
     ok;
 send_report(
-    receipt = ReportType, Report, OnionKeyHash, _SelfPubKeyBin, SigFun, Connection, RetryAttempts
+    receipt = ReportType, Report, OnionKeyHash, SelfPubKeyBin, SigFun, ChallengerIP, ChallengerPort, Attestation, RetryAttempts
 ) ->
+    %% a receipt will already contain attestation data, so dont use the data provided here
     EncodedReceipt = gateway_miner_client_pb:encode_msg(
-        Report#blockchain_poc_receipt_v1_pb{signature = <<>>}, blockchain_poc_receipt_v1_pb
-    ),
+        Report#blockchain_poc_receipt_v1_pb{signature = <<>>}, blockchain_poc_receipt_v1_pb),
     SignedReceipt = Report#blockchain_poc_receipt_v1_pb{signature = SigFun(EncodedReceipt)},
+    lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, SignedReceipt]),
     Req = #gateway_poc_report_req_v1_pb{
         onion_key_hash = OnionKeyHash,
-        msg = {ReportType, SignedReceipt}
-    },
-    do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts);
+        msg = {ReportType, SignedReceipt}},
+    case send_grpc_unary_req(ChallengerIP, ChallengerPort, Req, 'send_report') of
+        {ok, _Attestation} ->
+            ok;
+        _Error ->
+            lager:debug("send_grpc_unary_req(~p, ~p, ~p, 'send_report') failed with: ~p",
+                                [ChallengerIP,ChallengerPort,Req,_Error]),
+            retry_report({send_report, ReportType, Report, OnionKeyHash, SelfPubKeyBin, SigFun, ChallengerIP, ChallengerPort, Attestation, RetryAttempts - 1})
+    end;
 send_report(
-    witness = ReportType, Report, OnionKeyHash, _SelfPubKeyBin, SigFun, Connection, RetryAttempts
+    witness = ReportType, Report0, OnionKeyHash, SelfPubKeyBin, SigFun, ChallengerIP, ChallengerPort, Attestation, RetryAttempts
 ) ->
+    %% a witness report will not have any attestation data at this point
+    %% so include the data provided here ( received from request to get challenger )
+    Report = Report0#blockchain_poc_witness_v1_pb{attestation = Attestation},
     EncodedWitness = gateway_miner_client_pb:encode_msg(
-        Report#blockchain_poc_witness_v1_pb{signature = <<>>}, blockchain_poc_witness_v1_pb
-    ),
+        Report#blockchain_poc_witness_v1_pb{
+            signature = <<>>}, blockchain_poc_witness_v1_pb),
     SignedWitness = Report#blockchain_poc_witness_v1_pb{signature = SigFun(EncodedWitness)},
+    lager:info("send_report ~p with onionkeyhash ~p: ~p", [ReportType, OnionKeyHash, SignedWitness]),
     Req = #gateway_poc_report_req_v1_pb{
         onion_key_hash = OnionKeyHash,
-        msg = {ReportType, SignedWitness}
-    },
-    do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts).
-
--spec do_send_report(
-    Req :: #gateway_poc_report_req_v1_pb{},
-    ReportType :: receipt | witness,
-    Report :: #blockchain_poc_receipt_v1_pb{} | #blockchain_poc_witness_v1_pb{},
-    OnionKeyHash ::binary(),
-    Connection :: grpc_client_custom:connection(),
-    RetryAttempts :: non_neg_integer()
-) -> ok.
-do_send_report(Req, ReportType, Report, OnionKeyHash, Connection, RetryAttempts) ->
-    %% ask validator for public uri of the challenger of this POC
-    case get_uri_for_challenger(OnionKeyHash, Connection) of
-        {ok, {IP, Port}} ->
-            %% send the report to our challenger
-            case send_grpc_unary_req(IP, Port, Req, 'send_report') of
-                {ok, _} ->
-                    ok;
-                _Error ->
-                    lager:debug("send_grpc_unary_req(~p, ~p, ~p, 'send_report') failed with: ~p",
-                                [IP,Port,Req,_Error]),
-                    retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
-            end;
-        {error, _Reason} ->
-            lager:debug("get_uri_for_challenger(~p, ~p) failed with reason: ~p",
-                        [OnionKeyHash, Connection, _Reason]),
-            retry_report({send_report, ReportType, Report, OnionKeyHash, RetryAttempts - 1})
-    end,
-    ok.
+        msg = {ReportType, SignedWitness}},
+    case send_grpc_unary_req(ChallengerIP, ChallengerPort, Req, 'send_report') of
+        {ok, _Attestation} ->
+            ok;
+        _Error ->
+            lager:debug("send_grpc_unary_req(~p, ~p, ~p, 'send_report') failed with: ~p",
+                                [ChallengerIP,ChallengerPort,Req,_Error]),
+            retry_report({send_report, ReportType, Report0, OnionKeyHash, SelfPubKeyBin, SigFun, ChallengerIP, ChallengerPort, Attestation, RetryAttempts - 1})
+    end.
 
 retry_report(Msg) ->
     RetryDelay = application:get_env(miner, poc_send_report_retry_delay, ?DEFAULT_GRPC_SEND_REPORT_RETRY_DELAY),
@@ -675,7 +680,7 @@ fetch_config(UpdatedKeys, ValIP, ValGRPCPort) ->
                      || #blockchain_var_v1_pb{} = Var <- Vars
                     ],
                     ok;
-                {error, Reason, _Details} ->
+                {error, Reason, _Attestation} ->
                     {error, Reason};
                 {error, Reason} ->
                     {error, Reason}
@@ -790,26 +795,25 @@ process_unary_response(
     {ok, #{
         http_status := 200,
         result := #gateway_resp_v1_pb{
-            msg = {success_resp, _Payload}, height = Height, signature = Sig
-        }
+            msg = {success_resp, _Payload}} = Res
     }}
 ) ->
-    {ok, #{height => Height, signature => Sig}};
+    {ok, miner_util:make_attestation(Res)};
 process_unary_response(
     {ok, #{
         http_status := 200,
-        result := #gateway_resp_v1_pb{msg = {error_resp, Details}, height = Height, signature = Sig}
+        result := #gateway_resp_v1_pb{msg = {error_resp, Details}} = Res
     }}
 ) ->
     #gateway_error_resp_pb{error = ErrorReason} = Details,
-    {error, ErrorReason, #{height => Height, signature => Sig}};
+    {error, ErrorReason, miner_util:make_attestation(Res)};
 process_unary_response(
     {ok, #{
         http_status := 200,
-        result := #gateway_resp_v1_pb{msg = {_RespType, Payload}, height = Height, signature = Sig}
+        result := #gateway_resp_v1_pb{msg = {_RespType, Payload}} = Res
     }}
 ) ->
-    {ok, Payload, #{height => Height, signature => Sig}};
+    {ok, Payload, miner_util:make_attestation(Res)};
 process_unary_response({error, _}) ->
     lager:warning("grpc client error response", []),
     {error, req_failed}.
@@ -821,11 +825,11 @@ process_unary_response({error, _}) ->
 get_uri_for_challenger(OnionKeyHash, Connection) ->
     Req = build_poc_challenger_req(OnionKeyHash),
     case send_grpc_unary_req(Connection, Req, 'poc_key_to_public_uri') of
-        {ok, #gateway_public_routing_data_resp_v1_pb{public_uri = URIData}, _Req2Details} ->
+        {ok, #gateway_public_routing_data_resp_v1_pb{public_uri = URIData}, Attestation} ->
             #routing_address_pb{uri = URI, pub_key = _PubKey} = URIData,
             #{host := IP, port := Port} = uri_string:parse(binary_to_list(URI)),
-            {ok, {IP, Port}};
-        {error, Reason, _Details} ->
+            {ok, {IP, Port, Attestation}};
+        {error, Reason, _Attestation} ->
             {error, Reason};
         {error, Reason} ->
             {error, Reason}
@@ -921,11 +925,11 @@ check_if_target(
             ),
         lager:info("check target result for key ~p: ~p, Retry: ~p", [OnionKeyHash, TargetRes, IsRetry]),
         case TargetRes of
-            {ok, Result, _Details} ->
+            {ok, Result, Attestation} ->
                 %% we got an expected response, purge req from queued cache should it exist
                 _ = delete_cached_check_target_req(OnionKeyHash),
-                handle_check_target_resp(Result);
-            {error, <<"queued_poc">>, _Details = #{height := ValRespHeight}} ->
+                handle_check_target_resp(Result, Attestation);
+            {error, <<"queued_poc">>, #attestation_pb{height = ValRespHeight} = _Attestation} ->
                 %% seems the POC key exists but the POC itself may not yet be initialised
                 %% this can happen if the challenging validator is behind our
                 %% notifying validator
@@ -942,7 +946,7 @@ check_if_target(
                         %% eh shouldnt hit here but ok
                         ok
                 end;
-            {error, _Reason, _Details} ->
+            {error, _Reason, _Attestation} ->
                 %% we got a non queued response, purge req from queued cache should it exist
                 %% these are valid errors, which should not be retried, like mismatched block hash
                 _ = delete_cached_check_target_req(OnionKeyHash),
@@ -1000,13 +1004,15 @@ send_check_target_req(
     ),
     send_grpc_unary_req(TargetIP, Port, Req, 'check_challenge_target').
 
--spec handle_check_target_resp(#gateway_poc_check_challenge_target_resp_v1_pb{}) -> ok.
+-spec handle_check_target_resp(#gateway_poc_check_challenge_target_resp_v1_pb{}, miner_util:attestation()) -> ok.
 handle_check_target_resp(
-    #gateway_poc_check_challenge_target_resp_v1_pb{target = true, onion = Onion} = _ChallengeResp
+    #gateway_poc_check_challenge_target_resp_v1_pb{target = true, onion = Onion} = _ChallengeResp,
+    Attestation
 ) ->
-    ok = miner_onion_server_light:decrypt_p2p(Onion);
+    ok = miner_onion_server_light:decrypt_p2p(Onion, Attestation);
 handle_check_target_resp(
-    #gateway_poc_check_challenge_target_resp_v1_pb{target = false} = _ChallengeResp
+    #gateway_poc_check_challenge_target_resp_v1_pb{target = false} = _ChallengeResp,
+    _Attestation
 ) ->
     ok.
 
