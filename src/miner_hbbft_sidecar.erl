@@ -11,7 +11,8 @@
          submit/1,
          set_group/1,
          new_round/2,
-         prefilter_round/2
+         prefilter_round/2,
+         handle_txn/2
         ]).
 
 %% gen_server callbacks
@@ -85,6 +86,11 @@ new_round(Buf, BinTxns) ->
 prefilter_round(Buf, Txns) ->
     gen_server:call(?SERVER, {prefilter_round, Buf, Txns}, infinity).
 
+handle_txn(submit = RequestType, Txn) ->
+    gen_server:call(?SERVER, {submit, Txn}, infinity);
+handle_txn(update = RequestType, Txn) ->
+    gen_server:call(?SERVER, {query_txn, Txn}, infinity).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -111,15 +117,20 @@ handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
         {P1, P2} when is_pid(P1) andalso is_pid(P2)  ->
             ok;
         {undefined, P} when is_pid(P) ->
+            ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V3,
+                {libp2p_framed_stream, server,
+                    [blockchain_txn_handler, ?TX_PROTOCOL_V3, self(),
+                        fun(ReqType, Txn) -> ?MODULE:handle_txn(ReqType, Txn) end]}),
             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2,
                                                  {libp2p_framed_stream, server,
                                                   [blockchain_txn_handler, ?TX_PROTOCOL_V2, self(),
-                                                   fun(T) -> ?MODULE:submit(T) end]}),
+                                                   fun(submit, T) -> ?MODULE:submit(T); (_, T) -> {error, req_not_supported} end]}),
             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V1,
                                                  {libp2p_framed_stream, server,
                                                   [blockchain_txn_handler, ?TX_PROTOCOL_V1, self(),
-                                                   fun(T) -> ?MODULE:submit(T) end]});
+                                                   fun(submit, T) -> ?MODULE:submit(T); (_, T) -> {error, req_not_supported} end]});
         {P, undefined} when is_pid(P) ->
+            libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V3),
             libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2),
             libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V1)
     end,
@@ -169,11 +180,12 @@ handle_call({submit, Txn}, From,
                                     case blockchain_txn:absorb(Txn, Chain) of
                                         ok ->
                                             spawn(fun() ->
-                                                      %% this will now return {ok, Position, Length}
-                                                      %% or {error, full} which we could feed back to the caller using gen_server:reply() on the From
-                                                      catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
+                                                        %% this will now return {ok, Position, Length} or {error, full}
+                                                        %% which we feed back to the caller using gen_server:reply() on the From
+                                                        Reply = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
+                                                        gen_server:reply(From, {Reply, Height})
                                                   end),
-                                            {reply, {ok, Height}, State};
+                                            {noreply, State};
                                         Error ->
                                             lager:warning("speculative absorb failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
                                             {reply, {Error, Height}, State}
@@ -186,6 +198,16 @@ handle_call({submit, Txn}, From,
                     end
             end
     end;
+handle_call({query_txn, Txn}, From, #state{chain = Chain, group = Group} = State) ->
+    lager:debug("getting status update request for txn: ~s", [blockchain_txn:print(Txn)]),
+    Ledger = blockchain:ledger(Chain),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    spawn(fun() ->
+              %% Reply may be return {ok, Position, QueueLength} or {error, not_found}
+              Reply = libp2p_group_relcast:handle_command(Group, {query_txn, Txn}),
+              gen_server:reply(From, {Reply, Height})
+          end),
+    {noreply, State};
 handle_call({new_round, _Buf, _RemoveTxns}, _From, #state{chain = undefined} = State) ->
     {reply, [], State};
 handle_call({new_round, Buf, RemoveTxns}, _From, #state{chain = Chain} = State) ->
@@ -236,7 +258,6 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
             {noreply, State};
         #validation{from = From, pid = Pid, txn = Txn, monitor = MRef} ->
             Type = blockchain_txn:type(Txn),
-            Result =
                 case Res of
                     ok ->
                         ok = update_validation_metric(?VALID_TXNS, Type),
@@ -244,7 +265,8 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                             ok ->
                                 %% avoid deadlock by not waiting for this.
                                 spawn(fun() ->
-                                              catch libp2p_group_relcast:handle_command(Group, {txn, Txn})
+                                            Reply = libp2p_group_relcast:handle_command(Group, {txn, Txn}),
+                                            gen_server:reply(From, {Reply, Height})
                                       end),
                                 ok;
                             Error ->
@@ -256,15 +278,16 @@ handle_info({Ref, {Res, Height}}, #state{validations = Validations, chain = Chai
                         write_txn("timed out", Height, Txn),
                         ok = update_validation_metric(?TIMEDOUT_TXNS, Type),
                         lager:warning("validation timed out for ~s", [blockchain_txn:print(Txn)]),
-                        Error;
-                    {error, Error} ->
+                        gen_server:reply(From, {Error, Height}),
+                        ok;
+                    {error, _Reason} = Error ->
                         write_txn("failed", Height, Txn),
                         ok = update_validation_metric(?INVALID_TXNS, Type),
                         lager:warning("is_valid failed for ~s, error: ~p", [blockchain_txn:print(Txn), Error]),
-                        Error
+                        gen_server:reply(From, {Error, Height}),
+                        ok
                 end,
             erlang:demonitor(MRef, [flush]),
-            gen_server:reply(From, {Result, Height}),
             Validations1 = maps:remove(Ref, Validations),
             {noreply, maybe_start_validation(State#state{validations = Validations1})}
     end;
