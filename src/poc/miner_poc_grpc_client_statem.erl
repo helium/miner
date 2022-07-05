@@ -456,6 +456,19 @@ disconnect(_Data = #data{connection = Connection}) ->
 
 -spec find_validator() -> {ok, string(), pos_integer(), string()} | {error, any()} .
 find_validator() ->
+   FindValMod = application:get_env(miner, find_validator_module, ?MODULE),
+   FindValFunc = application:get_env(miner, find_validator_func, find_validator_),
+   FindValMod:FindValFunc().
+
+-spec test_find_validator() -> {ok, string(), pos_integer(), string()} | {error, any()} .
+test_find_validator() ->
+   ValIP = application:get_env(miner, find_validator_ip, ""),
+   ValPort = application:get_env(miner, find_validator_port, 8080),
+   ValP2P = application:get_env(miner, find_validator_p2p, ""),
+   {ok, ValIP, ValPort, ValP2P}.
+
+-spec find_validator_() -> {ok, string(), pos_integer(), string()} | {error, any()} .
+find_validator_() ->
     case application:get_env(miner, seed_validators) of
         {ok, SeedValidators} ->
             {_SeedP2PAddr, SeedValIP, SeedValGRPCPort} =
