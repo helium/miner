@@ -33,6 +33,7 @@ fpm -n ${PKG_STEM} \
     --deb-systemd-restart-after-upgrade \
     --deb-user helium \
     --deb-group helium \
+    --config-files _build/${RELEASE_TARGET}/rel/${RELEASE_TARGET}/etc/node.config \
     _build/${RELEASE_TARGET}/rel/=/opt \
     /tmp/genesis=/opt/miner/update/genesis
 
