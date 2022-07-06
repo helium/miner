@@ -456,9 +456,8 @@ disconnect(_Data = #data{connection = Connection}) ->
 
 -spec find_validator() -> {ok, string(), pos_integer(), string()} | {error, any()} .
 find_validator() ->
-   FindValMod = application:get_env(miner, find_validator_module, ?MODULE),
-   FindValFunc = application:get_env(miner, find_validator_func, find_validator_),
-   FindValMod:FindValFunc().
+   FindValFunc = application:get_env(miner, find_validator_func, fun find_validator_/0),
+   FindValFunc().
 
 -spec test_find_validator() -> {ok, string(), pos_integer(), string()} | {error, any()} .
 test_find_validator() ->
