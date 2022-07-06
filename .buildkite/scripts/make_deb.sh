@@ -12,6 +12,14 @@ DIAGNOSTIC=1 ./rebar3 as ${RELEASE_TARGET} release -n miner -v ${VERSION} || ./r
 
 wget -O /tmp/genesis https://snapshots.helium.wtf/genesis.${BUILD_NET}
 
+if [ ! -d /opt/miner/etc ]; then
+    mkdir -p /opt/miner/etc
+fi
+
+if [ ! -f /opt/miner/etc/node.config ]; then
+    touch /opt/miner/etc/node.config
+fi
+
 fpm -n ${PKG_STEM} \
     -v "${VERSION}" \
     -s dir \
@@ -33,7 +41,7 @@ fpm -n ${PKG_STEM} \
     --deb-systemd-restart-after-upgrade \
     --deb-user helium \
     --deb-group helium \
-    --config-files _build/${RELEASE_TARGET}/rel/${RELEASE_TARGET}/etc/node.config \
+    --config-files /opt/miner/etc/node.config \
     _build/${RELEASE_TARGET}/rel/=/opt \
     /tmp/genesis=/opt/miner/update/genesis
 
