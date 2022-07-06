@@ -186,7 +186,8 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
             _ ->
                 false
         end,
-    lager:info("*** check target result for key ~p: ~p", [OnionKeyHash, Res]),
+    lager:info("*** check target result for gateway ~p and key ~p: ~p",
+        [?TO_ANIMAL_NAME(Challengee), OnionKeyHash, Res]),
     Res.
 
 -spec report(
@@ -309,7 +310,6 @@ handle_info(
             {ok, V}  -> V;
             _ -> undefined
         end,
-    lager:debug("received poc keys event, poc_challenge_type is ~p", [CurPOCChallengerType]),
     State1 = maybe_init_addr_hash(Ledger, State),
     ok = process_block_pocs(CurPOCChallengerType, BlockHeight, BlockHash, BlockPOCs, Ledger, State1),
     {noreply, State1};
