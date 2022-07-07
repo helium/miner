@@ -425,14 +425,13 @@ serialize(State) ->
     lists:foldl(fun({K = hbbft, _}, M) ->
                         M#{K => SerializedHBBFT};
                    ({K = sk, _}, M) ->
-                        M#{K => term_to_binary(SerializedSK,  [compressed])};
+                        M#{K => SerializedSK};
                    ({chain, _}, M) ->
                         M;
                    ({skip_votes, _}, M) ->
                         M;
                    ({K, V}, M)->
-                        VB = term_to_binary(V, [compressed]),
-                        M#{K => VB}
+                        M#{K => V}
                 end,
                 #{},
                 lists:zip(Fields, StateList)).
@@ -445,7 +444,7 @@ deserialize(BinState) when is_binary(BinState) ->
     State#state{hbbft=HBBFT, sk=SK};
 deserialize(#{sk := SKSer,
               hbbft := HBBFTSer} = StateMap) ->
-    SK = tc_key_share:deserialize(binary_to_term(SKSer)),
+    SK = tc_key_share:deserialize(SKSer),
     HBBFT = hbbft:deserialize(HBBFTSer, SK),
     Fields = record_info(fields, state),
     Bundef = term_to_binary(undefined, [compressed]),
@@ -463,7 +462,7 @@ deserialize(#{sk := SKSer,
                   case StateMap of
                       #{K := V} when V /= undefined andalso
                                      V /= Bundef ->
-                          binary_to_term(V);
+                          V;
                       _ when K == sig_phase ->
                           sig;
                       _ when K == seen ->

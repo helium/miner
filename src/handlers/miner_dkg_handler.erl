@@ -312,8 +312,7 @@ serialize(State) ->
            sent_conf => SentConf,
            height => Height,
            delay => Delay},
-    M = maps:map(fun(_K, Term) -> t2b(Term) end, M0),
-    maps:merge(PreSer, M).
+    maps:merge(PreSer, M0).
 
 %% to make dialyzer happy till I fix the relcast typing
 deserialize(_Bin) when is_binary(_Bin) ->
@@ -322,7 +321,7 @@ deserialize(MapState0) when is_map(MapState0) ->
     MapState = maps:map(fun(_K, undefined) ->
                                 undefined;
                            (_K, B) ->
-                                binary_to_term(B)
+                                B
                         end, MapState0),
     #{n := N,
       f := F,
