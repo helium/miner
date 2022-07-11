@@ -356,7 +356,7 @@ handle_cast({election_done, _Artifact, Signatures, Members, PrivKey, Height, Del
             %% add this to the buffer of the local chain
             %% catch is because there might not be a sidecar running if
             %% we are currently not in the group
-            catch miner_hbbft_sidecar:submit(Txn),
+            spawn(fun() -> catch miner_hbbft_sidecar:submit(Txn) end),
             %% send it to the txn mgr
             ok = blockchain_txn_mgr:submit(
                    Txn,
