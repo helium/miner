@@ -814,7 +814,7 @@ process_skips(Proposed, SenderRound, Signature, F, Address, Sender, Votes) ->
             Votes1 = Votes#{Sender => {Proposed, SenderRound, Signature}},
             PropVotes = maps:fold(fun(SigSender, {Vote, _OwnRound, Sig}, Acc) when Vote =:= Proposed ->
                                           [{SigSender, Sig}|Acc];
-                                     (_Sender, {_OtherVote, _OwnRound}, Acc) ->
+                                     (_Sender, {_OtherVote, _OwnRound, _Sig}, Acc) ->
                                           Acc
                                   end,
                                   [],
