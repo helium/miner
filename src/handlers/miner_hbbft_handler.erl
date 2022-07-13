@@ -38,7 +38,7 @@
 
          %% For artifact re-signing on var-autoskip:
          swarm_keys :: {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()},
-         skip_votes = #{} :: #{pos_integer() => pos_integer()}
+         skip_votes = #{} :: #{ Index :: pos_integer() => { Vote :: pos_integer(), Round :: pos_integer(), Sig :: binary()}}
         }).
 
 -type hbbft_msg() ::
@@ -259,9 +259,9 @@ handle_command(maybe_skip, State = #state{hbbft = HBBFT,
                                           skip_votes = Skips}) ->
     MyRound = hbbft:round(HBBFT),
     %% put in a fake local vote here for the case where we have no skips
-    ProposedRound = median_not_taken(maps:merge(#{MyIndex => {0, MyRound}}, Skips)),
+    ProposedRound = median_not_taken(maps:merge(#{MyIndex => {0, MyRound, <<>>}}, Skips)),
     lager:info("voting for round ~p", [ProposedRound]),
-    {reply, ok, [{multicast, term_to_binary({proposed_skip, ProposedRound, MyRound})}], State};
+    {reply, ok, [{multicast, term_to_binary(sign_skip({proposed_skip, ProposedRound, MyRound}, State))}], State};
 handle_command(UnknownCommand, _State) ->
     lager:warning("Unknown command: ~p", [UnknownCommand]),
     {reply, ignored, ignore}.
@@ -271,7 +271,7 @@ handle_command(UnknownCommand, _State) ->
     RelcastMsg ::
           {multicast, binary()}
         | {unicast, pos_integer(), binary()}.
-handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Skips}=S0) ->
+handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Skips, f=F}=S0) ->
     CurRound = hbbft:round(HBBFT),
     case bin_to_msg(BinMsgIn) of
         %% Multiple sigs
@@ -290,14 +290,14 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
         {ok, {signature, _, Addr, Sig}} ->
             handle_sigs({received, [{Addr, Sig}]}, S0);
 
-        {ok, {proposed_skip, ProposedRound, IndexRound}} when ProposedRound =/= CurRound ->
-            lager:info("proposed skip to round ~p", [ProposedRound]),
-            case process_skips(ProposedRound, IndexRound, S0#state.f, Index, Skips) of
-                {skip, Skips1} ->
-                    lager:info("skipping"),
+        {ok, {proposed_skip, ProposedRound, IndexRound, Signature}} when ProposedRound =/= CurRound ->
+            lager:info("saw proposal to skip to round ~p from ~p", [ProposedRound, Index]),
+            case process_skips(ProposedRound, IndexRound, Signature, S0#state.f, lists:nth(Index, S0#state.members), Index, Skips) of
+                {skip, Skips1, SkipSigs} ->
+                    lager:info("skipping to ~p", [ProposedRound]),
                     %% ask for some time
                     miner:reset_late_block_timer(),
-                    SkipGossip = {multicast, t2b({proposed_skip, ProposedRound, CurRound})},
+                    SkipGossip = {multicast, t2b({skip, ProposedRound, SkipSigs})},
                     %% skip but don't discard votes until we get a clean round
                     {HBBFT1, ToSend1} =
                         case hbbft:next_round(HBBFT, ProposedRound, []) of
@@ -325,6 +325,40 @@ handle_message(<<BinMsgIn/binary>>, Index, #state{hbbft = HBBFT, skip_votes = Sk
         {ok, {proposed_skip, ProposedRound, IndexRound}} ->
             Skips1 = Skips#{Index => {ProposedRound, IndexRound}},
             {S0#state{skip_votes = Skips1}, []};
+        {ok, {skip, Round, Sigs}} when Round > CurRound ->
+            %% this is a message containing proof there were enough skip votes for this round
+            %% check we got enough skip messages and they're all valid
+            case length(Sigs) >= (2 * F) + 1 andalso
+                 lists:all(fun({SigIndex, Sig}) ->
+                                   libp2p_crypto:verify(t2b({proposed_skip, Round}), Sig, libp2p_crypto:bin_to_pubkey(lists:nth(SigIndex, S0#state.members)))
+                           end, Sigs) of
+                true ->
+                    lager:info("skipping to ~p", [Round]),
+                    {HBBFT1, ToSend1} =
+                        case hbbft:next_round(HBBFT, Round, []) of
+                            {H1, ok} ->
+                                {H1, []};
+                            {H1, {send, NextMsgs}} ->
+                                {H1, NextMsgs}
+                        end,
+                    {HBBFT2, ToSend2} =
+                        case hbbft:start_on_demand(HBBFT1) of
+                            {H2, already_started} ->
+                                {H2, []};
+                            {H2, {send, Msgs}} ->
+                                {H2, Msgs}
+                        end,
+                    ToSend = fixup_msgs(ToSend1 ++ ToSend2),
+                    %% we retain the skip votes here because we may not succeed and we want the
+                    %% algorithm to converge more quickly in that case
+                    {(state_reset(HBBFT2, S0))#state{skip_votes = S0#state.skip_votes},
+                     [ new_epoch | ToSend]};
+                false ->
+                    lager:warning("invalid skip gossip"),
+                    ignore
+            end;
+        {ok, {skip, _Round, _Sigs}} ->
+            ignore;
         %% Other
         {ok, MsgIn} ->
             handle_msg_hbbft(MsgIn, Index, S0);
@@ -774,27 +808,33 @@ b58(<<Bin/binary>>) ->
     libp2p_crypto:bin_to_b58(Bin).
 
 %% do nothing if we've advanced
-process_skips(Proposed, SenderRound, F, Sender, Votes) ->
-    Votes1 = Votes#{Sender => {Proposed, SenderRound}},
-    PropVotes = maps:fold(fun(_Sender, {Vote, _OwnRound}, Acc) when Vote =:= Proposed ->
-                                  Acc + 1;
-                             (_Sender, {_OtherVote, _OwnRound}, Acc) ->
-                                  Acc
-                          end,
-                          0,
-                          Votes1),
-    %% equal here because we only want to go once, at the point of saturation
-    case PropVotes == (2 * F) + 1 of
-        true -> {skip, Votes1};
-        false -> {wait, Votes1}
+process_skips(Proposed, SenderRound, Signature, F, Address, Sender, Votes) ->
+    case libp2p_crypto:verify(t2b({proposed_skip, Proposed}), Signature, libp2p_crypto:bin_to_pubkey(Address)) of
+        true ->
+            Votes1 = Votes#{Sender => {Proposed, SenderRound, Signature}},
+            PropVotes = maps:fold(fun(SigSender, {Vote, _OwnRound, Sig}, Acc) when Vote =:= Proposed ->
+                                          [{SigSender, Sig}|Acc];
+                                     (_Sender, {_OtherVote, _OwnRound, _Sig}, Acc) ->
+                                          Acc
+                                  end,
+                                  [],
+                                  Votes1),
+            %% equal here because we only want to go once, at the point of saturation
+            case length(PropVotes) == (2 * F) + 1 of
+                true -> {skip, Votes1, PropVotes};
+                false -> {wait, Votes1}
+            end;
+        _ ->
+            lager:info("saw invalid skip signature"),
+            {wait, Votes}
     end.
 
 %% the idea here is to take a clean round that's higher than the median, which should be relatively
 %% hard to manipulate by cheating
--spec median_not_taken(#{pos_integer() => {pos_integer(), pos_integer()}}) ->
+-spec median_not_taken(#{pos_integer() => {pos_integer(), pos_integer(), binary()}}) ->
                               pos_integer().
 median_not_taken(Map) ->
-    {_Votes, Rounds} = lists:unzip(maps:values(Map)),
+    {_Votes, Rounds, _Sigs} = lists:unzip3(maps:values(Map)),
     lager:info("rounds ~p", [lists:sort(Rounds)]),
     Median = miner_util:median(Rounds),
     search_lowest(Median, lists:sort(Rounds)).
@@ -841,6 +881,9 @@ current_buffer_position(List, Elem) -> current_buffer_position(List, Elem, 0).
 current_buffer_position([], _Elem, _Pos) -> {error, not_found};
 current_buffer_position([Elem|_Rem], Elem, Pos) -> {ok, Pos + 1};
 current_buffer_position([_Head|Rem], Elem, Pos) -> current_buffer_position(Rem, Elem, Pos + 1).
+
+sign_skip({proposed_skip, ProposedRound, MyRound}, #state{swarm_keys={_Key, SigFun}}) ->
+    {proposed_skip, ProposedRound, MyRound, SigFun(t2b({proposed_skip, ProposedRound}))}.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
