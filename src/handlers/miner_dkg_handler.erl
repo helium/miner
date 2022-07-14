@@ -285,7 +285,6 @@ serialize(State) ->
            height = Height,
            delay = Delay} = State,
     SerializedDKG = dkg_hybriddkg:serialize(DKG0),
-    PreSer = #{},
     PrivKey =
         case PrivKey0 of
             undefined ->
@@ -293,37 +292,30 @@ serialize(State) ->
             Other ->
                 tc_key_share:serialize(Other)
         end,
-    M0 = #{dkg => SerializedDKG,
-           privkey => PrivKey,
-           n => N,
-           f => F,
-           t => T,
-           id => ID,
-           members => Members,
-           artifact => Artifact,
-           signatures => Sigs,
-           signatures_required => SigsRequired,
-           sigmod => SigMod,
-           sigfun => SigFun,
-           donemod => DoneMod,
-           donefun => DoneFun,
-           done_called => DoneCalled,
-           done_acked => DoneAcked,
-           sent_conf => SentConf,
-           height => Height,
-           delay => Delay},
-    M = maps:map(fun(_K, Term) -> t2b(Term) end, M0),
-    maps:merge(PreSer, M).
+    #{dkg => SerializedDKG,
+      privkey => PrivKey,
+      n => N,
+      f => F,
+      t => T,
+      id => ID,
+      members => Members,
+      artifact => Artifact,
+      signatures => Sigs,
+      signatures_required => SigsRequired,
+      sigmod => SigMod,
+      sigfun => SigFun,
+      donemod => DoneMod,
+      donefun => DoneFun,
+      done_called => DoneCalled,
+      done_acked => DoneAcked,
+      sent_conf => SentConf,
+      height => Height,
+      delay => Delay}.
 
 %% to make dialyzer happy till I fix the relcast typing
 deserialize(_Bin) when is_binary(_Bin) ->
     {error, format_deprecated};
-deserialize(MapState0) when is_map(MapState0) ->
-    MapState = maps:map(fun(_K, undefined) ->
-                                undefined;
-                           (_K, B) ->
-                                binary_to_term(B)
-                        end, MapState0),
+deserialize(MapState) when is_map(MapState) ->
     #{n := N,
       f := F,
       t := T,
