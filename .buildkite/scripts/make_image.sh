@@ -36,19 +36,19 @@ FULL_REGISTRY_NAME="$REGISTRY_HOST/$REGISTRY_ORG/$REGISTRY_NAME"
 case "${BUILD_TYPE}-$BUILD_NET" in
     "validator-mainnet")
         echo "Doing a mainnet validator image build for $IMAGE_ARCH"
-        DOCKER_BUILD_ARGS="--build-arg REBAR_BUILD_TARGET=docker_val $DOCKER_BUILD_ARGS"
+        DOCKER_BUILD_ARGS="-f Dockerfile-ubuntu --build-arg REBAR_BUILD_TARGET=docker_val $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     "validator-testnet")
         echo "Doing a testnet validator image build for ${IMAGE_ARCH}"
-        DOCKER_BUILD_ARGS="--build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
+        DOCKER_BUILD_ARGS="-f Dockerfile-ubuntu --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
     "validator-devnet")
         echo "Doing a devnet validator image build for ${IMAGE_ARCH}"
-        DOCKER_BUILD_ARGS="--build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
+        DOCKER_BUILD_ARGS="-f Dockerfile-ubuntu --build-arg REBAR_BUILD_TARGET=docker_testval $DOCKER_BUILD_ARGS"
         BASE_DOCKER_NAME="validator"
         DOCKER_NAME="${BASE_DOCKER_NAME}-${IMAGE_ARCH}_${VERSION}"
         ;;
