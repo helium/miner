@@ -86,9 +86,9 @@ new_round(Buf, BinTxns) ->
 prefilter_round(Buf, Txns) ->
     gen_server:call(?SERVER, {prefilter_round, Buf, Txns}, infinity).
 
-handle_txn(submit = RequestType, Txn) ->
+handle_txn(submit = _RequestType, Txn) ->
     gen_server:call(?SERVER, {submit, Txn}, infinity);
-handle_txn(update = RequestType, Txn) ->
+handle_txn(update = _RequestType, Txn) ->
     gen_server:call(?SERVER, {query_txn, Txn}, infinity).
 
 %%%===================================================================
@@ -124,11 +124,11 @@ handle_call({set_group, Group}, _From, #state{group = OldGroup} = State) ->
             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2,
                                                  {libp2p_framed_stream, server,
                                                   [blockchain_txn_handler, ?TX_PROTOCOL_V2, self(),
-                                                   fun(submit, T) -> ?MODULE:submit(T); (_, T) -> {error, req_not_supported} end]}),
+                                                   fun(submit, T) -> ?MODULE:submit(T); (_, _T) -> {error, req_not_supported} end]}),
             ok = libp2p_swarm:add_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V1,
                                                  {libp2p_framed_stream, server,
                                                   [blockchain_txn_handler, ?TX_PROTOCOL_V1, self(),
-                                                   fun(submit, T) -> ?MODULE:submit(T); (_, T) -> {error, req_not_supported} end]});
+                                                   fun(submit, T) -> ?MODULE:submit(T); (_, _T) -> {error, req_not_supported} end]});
         {P, undefined} when is_pid(P) ->
             libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V3),
             libp2p_swarm:remove_stream_handler(blockchain_swarm:tid(), ?TX_PROTOCOL_V2),
