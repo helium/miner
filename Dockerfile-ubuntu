@@ -29,6 +29,7 @@ RUN apt update \
        libtool \
        lz4 \
        libprotobuf-dev \
+       pax-utils \
        wget \
        ${EXTRA_BUILD_APT_PACKAGES} 
 
