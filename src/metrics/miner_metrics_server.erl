@@ -29,7 +29,7 @@
 }.
 -type metrics() :: [metric()].
 
--type reporter_opts() :: [
+-type exporter_opts() :: [
     {callback, module()} |
     {callback_args, map()} |
     {port, integer()}
@@ -37,8 +37,8 @@
 
 -record(state, {
     metrics :: metrics(),
-    reporter_opts :: reporter_opts(),
-    reporter_pid :: pid() | undefined
+    exporter_opts :: exporter_opts(),
+    exporter_pid :: pid() | undefined
 }).
 
 handle_metric(Event, Measurements, Metadata, _Config) ->
@@ -56,15 +56,15 @@ init(_Args) ->
             ok = setup_metrics(Metrics),
 
             ElliOpts = [
-                {callback, miner_metrics_reporter},
+                {callback, miner_metrics_exporter},
                 {callback_args, #{}},
                 {port, application:get_env(miner, metrics_port, 9090)}
             ],
-            {ok, ReporterPid} = elli:start_link(ElliOpts),
+            {ok, ExporterPid} = elli:start_link(ElliOpts),
             {ok, #state{
                         metrics = Metrics,
-                        reporter_opts = ElliOpts,
-                        reporter_pid = ReporterPid}}
+                        exporter_opts = ElliOpts,
+                        exporter_pid = ExporterPid}}
     end.
 
 handle_call(_Msg, _From, State) ->
@@ -74,10 +74,10 @@ handle_call(_Msg, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'EXIT', ReporterPid, Reason}, #state{reporter_pid=ReporterPid} = State) ->
-    lager:warning("Metrics reporter exited with reason ~p, restarting", [Reason]),
-    {ok, NewReporter} = elli:start_link(State#state.reporter_opts),
-    {noreply, State#state{reporter_pid = NewReporter}};
+handle_info({'EXIT', ExporterPid, Reason}, #state{exporter_pid=ExporterPid} = State) ->
+    lager:warning("Metrics exporter exited with reason ~p, restarting", [Reason]),
+    {ok, NewExporter} = elli:start_link(State#state.exporter_opts),
+    {noreply, State#state{exporter_pid = NewExporter}};
 handle_info(_Msg, State) ->
     lager:debug("Received unknown info msg: ~p", [_Msg]),
     {noreply, State}.
@@ -85,10 +85,10 @@ handle_info(_Msg, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-terminate(Reason, #state{metrics = Metrics, reporter_pid = Reporter}) ->
-    true = erlang:exit(Reporter, Reason),
+terminate(Reason, #state{metrics = Metrics, exporter_pid = Exporter}) ->
+    true = erlang:exit(Exporter, Reason),
     lists:foreach(
-        fun({Metric, _, Module, _, _}) ->
+        fun({Metric, Module, _, _}) ->
             lager:info("De-registering metric ~p as ~p", [Metric, Module]),
             Module:deregister(Metric)
         end,
@@ -145,11 +145,17 @@ handle_metric_event([blockchain, txn_mgr, submit], _Measurements, #{type := Type
     ok;
 handle_metric_event([blockchain, txn_mgr, reject], #{block_span := Span}, #{type := Type}) ->
     prometheus_counter:inc(?METRICS_TXN_REJECT_COUNT, [Type]),
-    prometheus_gauge:set(?METRICS_TXN_REJECT_SPAN, [Type], Span),
+    prometheus_gauge:set(?METRICS_TXN_BLOCK_SPAN, [], Span),
     ok;
-handle_metric_event([blockchain, txn_mgr, accept], #{block_span := Span}, #{type := Type}) ->
+handle_metric_event([blockchain, txn_mgr, accept], #{block_span := Span, queue_len := QLen}, #{type := Type}) ->
     prometheus_counter:inc(?METRICS_TXN_ACCEPT_COUNT, [Type]),
-    prometheus_gauge:set(?METRICS_TXN_ACCEPT_SPAN, [Type], Span),
+    prometheus_gauge:set(?METRICS_TXN_BLOCK_SPAN, [], Span),
+    prometheus_gauge:set(?METRICS_TXN_QUEUE, [], QLen),
+    ok;
+handle_metric_event([blockchain, txn_mgr, update], #{block_span := Span, queue_len := QLen}, #{type := Type}) ->
+    prometheus_counter:inc(?METRICS_TXN_UPDATE_COUNT, [Type]),
+    prometheus_gauge:set(?METRICS_TXN_BLOCK_SPAN, [], Span),
+    prometheus_gauge:set(?METRICS_TXN_QUEUE, [], QLen),
     ok;
 handle_metric_event([blockchain, txn_mgr, process], #{duration := Duration}, #{stage := Stage}) ->
     prometheus_histogram:observe(?METRICS_TXN_PROCESS_DURATION, [Stage], Duration),

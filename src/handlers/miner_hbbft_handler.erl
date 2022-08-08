@@ -79,7 +79,7 @@ metadata(Version, Meta, Chain) ->
                                         Infos = blockchain_ledger_snapshot_v1:get_infos(Chain),
                                         case blockchain_ledger_snapshot_v1:snapshot(Ledger, Blocks, Infos) of
                                             {ok, Snapshot} ->
-                                                {ok, {_SnapHeight, SnapHash, SnapSize}} = blockchain:add_snapshot(Snapshot, Chain),
+                                                {ok, {_SnapHeight, SnapHash, _SnapSize}} = blockchain:add_snapshot(Snapshot, Chain),
                                                 lager:info("snapshot hash is ~p", [SnapHash]),
                                                 maps:put(snapshot_hash, SnapHash, ChainMeta0);
                                             _Err ->

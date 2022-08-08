@@ -1,4 +1,4 @@
--module(miner_metrics_reporter).
+-module(miner_metrics_exporter).
 
 -behaviour(elli_handler).
 

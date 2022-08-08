@@ -5,11 +5,12 @@
 -define(METRICS_BLOCK_HEIGHT, "blockchain_block_height").
 -define(METRICS_BLOCK_UNVAL_HEIGHT, "blockchain_block_unval_height").
 -define(METRICS_TXN_ABSORB_DURATION, "blockchain_txn_absorb_duration").
+-define(METRICS_TXN_BLOCK_SPAN, "blockchain_txn_mgr_block_span").
+-define(METRICS_TXN_QUEUE, "blockchain_txn_mgr_queue").
 -define(METRICS_TXN_SUBMIT_COUNT, "blockchain_txn_mgr_submited_count").
 -define(METRICS_TXN_REJECT_COUNT, "blockchain_txn_mgr_rejected_count").
--define(METRICS_TXN_REJECT_SPAN, "blockchain_txn_mgr_rejected_span").
 -define(METRICS_TXN_ACCEPT_COUNT, "blockchain_txn_mgr_accepted_count").
--define(METRICS_TXN_ACCEPT_SPAN, "blockchain_txn_mgr_accepted_span").
+-define(METRICS_TXN_UPDATE_COUNT, "blockchain_txn_mgr_updated_count").
 -define(METRICS_TXN_PROCESS_DURATION, "blockchain_txn_mgr_process_duration").
 -define(METRICS_TXN_CACHE_SIZE, "blockchain_txn_mgr_cache_size").
 -define(METRICS_TXN_BLOCK_TIME, "blockchain_txn_mgr_block_time").
@@ -38,14 +39,16 @@
           [blockchain, txn_mgr, submit],
           [blockchain, txn_mgr, reject],
           [blockchain, txn_mgr, accept],
+          [blockchain, txn_mgr, update],
           [blockchain, txn_mgr, process],
           [blockchain, txn_mgr, add_block] ],
         [ {?METRICS_TXN_ABSORB_DURATION, prometheus_histogram, [stage], "Txn absorb duration"},
+          {?METRICS_TXN_BLOCK_SPAN, prometheus_gauge, [], "Block span of transactions"},
+          {?METRICS_TXN_QUEUE, prometheus_gauge, [], "Txn manager submission queue length"},
           {?METRICS_TXN_SUBMIT_COUNT, prometheus_counter, [type], "Count of submitted transactions"},
           {?METRICS_TXN_REJECT_COUNT, prometheus_counter, [type], "Count of rejected transactions"},
-          {?METRICS_TXN_REJECT_SPAN, prometheus_gauge, [type], "Block span of transactions on final rejection"},
           {?METRICS_TXN_ACCEPT_COUNT, prometheus_counter, [type], "Count of accepted transactions"},
-          {?METRICS_TXN_ACCEPT_SPAN, prometheus_gauge, [type], "Block span of transactions on acceptance"},
+          {?METRICS_TXN_UPDATE_COUNT, prometheus_counter, [type], "Count of updated transactions"},
           {?METRICS_TXN_PROCESS_DURATION, prometheus_histogram, [stage], "Transaction manager cache process duration"},
           {?METRICS_TXN_CACHE_SIZE, prometheus_gauge, [height], "Transaction manager buffer size"},
           {?METRICS_TXN_BLOCK_TIME, prometheus_gauge, [height], "Block time observed from the transaction mgr"},
