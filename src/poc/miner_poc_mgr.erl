@@ -137,10 +137,10 @@ active_pocs() ->
     OnionKeyHash :: binary()
 ) -> false | {true, binary()} | {error, any()}.
 check_target(Challengee, BlockHash, OnionKeyHash) ->
-    LocalPOC = e2qc:cache(
-                local_pocs,
+    PoCCache = persistent_term:get(poc_cache),
+    LocalPOC = cream:cache(
+                PoCCache,
                 OnionKeyHash,
-                30,
                 fun() -> ?MODULE:local_poc(OnionKeyHash) end
     ),
     Res =
@@ -164,13 +164,13 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 %% clients should retry after a period of time
                                 {error, <<"queued_poc">>};
                             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 {true, Onion};
                             {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 false;
                             {ok, #local_poc{block_hash = _OtherBlockHash, target = _Target}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
