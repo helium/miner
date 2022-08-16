@@ -79,7 +79,7 @@ init(_Opts) ->
             lager:info("grpc gateway, not loading chain"),
             application:set_env(blockchain, autoload, false),
             application:set_env(blockchain, outbound_gossip_connections, 0),
-            application:get_env(blockchain, seednode_connections, 0),
+            application:set_env(blockchain, seednode_connections, 0),
             application:set_env(blockchain, max_inbound_connections, 0),
             ok;
         _ ->
