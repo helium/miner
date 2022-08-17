@@ -842,7 +842,11 @@ packet_rssi(Packet, UseRSSIS) ->
                 false ->
                     %% Just use RSSIC.
                     fun (Obj) ->
-                        maps:get(<<"rssic">>, Obj, undefined)
+                        SNR = maps:get(<<"lsnr">>, Obj, 0),
+                        case SNR < 0 of
+                            true -> SNR + maps:get(<<"rssic">>, Obj, undefined);
+                            _ -> maps:get(<<"rssic">>, Obj, undefined)
+                        end
                     end
             end,
             BestRSSISelector =
