@@ -44,6 +44,8 @@ handle_rpc_(<<"account_", _/binary>> = Method, Params) ->
     miner_jsonrpc_accounts:handle_rpc(Method, Params);
 handle_rpc_(<<"info_", _/binary>> = Method, Params) ->
     miner_jsonrpc_info:handle_rpc(Method, Params);
+handle_rpc_(<<"denylist_", _/binary>> = Method, Params) ->
+    miner_jsonrpc_denylist:handle_rpc(Method, Params);
 handle_rpc_(<<"dkg_", _/binary>> = Method, Params) ->
     miner_jsonrpc_dkg:handle_rpc(Method, Params);
 handle_rpc_(<<"hbbft_", _/binary>> = Method, Params) ->
