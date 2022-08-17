@@ -667,11 +667,13 @@ purge_local_poc_keys(
             _ -> ?POC_TIMEOUT
         end,
     {ok, POCEphemeralKeyTimeout} = blockchain:config(?poc_validator_ephemeral_key_timeout, Ledger),
+    {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
+    {ok, HBGracePeriod} = blockchain:config(?validator_liveness_grace_period, Ledger),
     %% iterate over the cached POC keys, delete any which are beyond the lifespan of when the active POC would have ended
     CachedPOCKeys = local_poc_keys(State),
     lists:foreach(
         fun([#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}]) ->
-            case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout) of
+            case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout + HBInterval + HBGracePeriod) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     lager:debug("GCing local poc key ~p, blockheight: ~p, receive height: ~p",
