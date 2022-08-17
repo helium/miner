@@ -686,6 +686,7 @@ select_transactions(Chain, Txns, {ElectionEpoch0, EpochStart0}, BlockHeightCurr,
                          _       -> blockchain_txn_rewards_v1
                      end,
                 {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
+                blockchain_hex:destroy_memoization(),
                 lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
                 RewardsTxn = RewardsMod:new(Start, End, Rewards),
                 %% To cut down on the size of group txn blocks, which we'll

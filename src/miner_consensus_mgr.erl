@@ -528,6 +528,7 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                         {ok, NewConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.chain)),
                                         {ok, OldLedger} = blockchain:ledger_at(BlockHeight - 1, State#state.chain),
                                         {ok, OldConsensusAddrs} = blockchain_ledger_v1:consensus_members(OldLedger),
+                                        blockchain_ledger_v1:delete_context(OldLedger),
                                         Swarm = blockchain_swarm:swarm(),
                                         lists:foreach(
                                           fun(Member) ->
@@ -789,6 +790,7 @@ initiate_election(Hash, Height, #state{delay = Delay} = State) ->
 
     lager:info("hash ~p height ~p delay ~p", [Hash, Height, Delay]),
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
+    blockchain_ledger_v1:delete_context(Ledger),
     Artifact = term_to_binary(ConsensusAddrs),
 
     {_, State1} = do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
@@ -805,6 +807,7 @@ restart_election(#state{delay = Delay,
     {ok, Curve} = blockchain:config(?dkg_curve, Ledger),
 
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
+    blockchain_ledger_v1:delete_context(Ledger),
     case length(ConsensusAddrs) == N of
         true ->
             Artifact = term_to_binary(ConsensusAddrs),
@@ -868,7 +871,7 @@ restart_dkg(Height, Delay, State) ->
     ConsensusAddrs = blockchain_election:new_group(Ledger, Hash, N, Delay),
     Artifact = term_to_binary(ConsensusAddrs),
 
-    case do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
+    Res = case do_dkg(ConsensusAddrs, Artifact, {?MODULE, sign_artifact},
                 election_done, N, Curve,
                 false, % do not create this if it doesn't exist
                 #state{initial_height = Height,  % blank state woo
@@ -887,7 +890,9 @@ restart_dkg(Height, Delay, State) ->
                                      active_group = HBBFTGroup, ag_monitor = Ref}};
                 {error, _} -> no_dkg
             end
-    end.
+    end,
+    blockchain_ledger_v1:delete_context(Ledger),
+    Res.
 
 %%% restore dkg is what is called when the node restarts, it needs to return a whole state,
 %%% potentially with consensus group
@@ -1023,6 +1028,7 @@ start_hbbft(DKG, Height, Delay, Chain, Retries) ->
     {ok, Ledger} = blockchain:ledger_at(Height + Delay, Chain),
     {ok, BatchSize} = blockchain:config(?batch_size, Ledger),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
+    blockchain_ledger_v1:delete_context(Ledger),
     F = ((N - 1) div 3),
     case libp2p_group_relcast:handle_command(DKG, get_info) of
         {ok, PrivKey, Members} ->
