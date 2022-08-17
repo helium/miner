@@ -15,6 +15,7 @@
          metadata_fun/0,
          random_val_predicate/1,
          random_miner_predicate/1,
+         random_non_miner_predicate/1,
          true_predicate/1,
          has_valid_local_capability/2,
          hbbft_perf/0,
@@ -143,6 +144,10 @@ random_val_predicate(Peer) ->
 random_miner_predicate(Peer) ->
     not libp2p_peer:is_stale(Peer, timer:minutes(360)) andalso
         maps:get(<<"release_info">>, libp2p_peer:signed_metadata(Peer), undefined) /= undefined.
+
+random_non_miner_predicate(Peer) ->
+    not libp2p_peer:is_stale(Peer, timer:minutes(360)) andalso
+        maps:get(<<"release_info">>, libp2p_peer:signed_metadata(Peer), undefined) == undefined.
 
 true_predicate(_Peer) ->
     true.
