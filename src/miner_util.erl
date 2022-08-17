@@ -147,7 +147,7 @@ random_miner_predicate(Peer) ->
 
 random_non_miner_predicate(Peer) ->
     not libp2p_peer:is_stale(Peer, timer:minutes(360)) andalso
-        maps:get(<<"release_info">>, libp2p_peer:signed_metadata(Peer), undefined) == undefined.
+        maps:get(<<"node_type">>, libp2p_peer:signed_metadata(Peer), undefined) /= <<"gateway">>.
 
 true_predicate(_Peer) ->
     true.
