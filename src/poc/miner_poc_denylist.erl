@@ -18,8 +18,10 @@ start_link() ->
     case application:get_env(miner, denylist_keys, undefined) of
         DenyKeys = [H|_] when is_list(H) ->
             case application:get_env(miner, denylist_url, undefined) of
-                undefined ->
+                "none" ->
                     ignore;
+                undefined ->
+                    gen_server:start_link({local, ?MODULE}, ?MODULE, [github_release, "https://api.github.com/repos/helium/denylist/releases/latest", DenyKeys], []);
                 DenyURL ->
                     Type = application:get_env(miner, denylist_type, github_release),
                     gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, DenyURL, DenyKeys], [])
