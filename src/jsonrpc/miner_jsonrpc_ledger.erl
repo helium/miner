@@ -12,20 +12,22 @@
 
 handle_rpc(<<"ledger_balance">>, []) ->
     %% get all
+    Ledger = get_ledger(),
     Entries = maps:filter(
         fun(K, _V) ->
             is_binary(K)
         end,
-        blockchain_ledger_v1:entries(get_ledger())
+        blockchain_ledger_v1:entries(Ledger)
     ),
-    [format_ledger_balance(A, E) || {A, E} <- maps:to_list(Entries)];
+    [format_ledger_balance(A, E, Ledger) || {A, E} <- maps:to_list(Entries)];
 handle_rpc(<<"ledger_balance">>, #{<<"address">> := Address}) ->
     %% get for address
+    Ledger = get_ledger(),
     try
         BinAddr = ?B58_TO_BIN(Address),
-        case blockchain_ledger_v1:find_entry(BinAddr, get_ledger()) of
+        case blockchain_ledger_v1:find_entry(BinAddr, Ledger) of
             {error, not_found} -> ?jsonrpc_error({not_found, Address});
-            {ok, Entry} -> format_ledger_balance(BinAddr, Entry)
+            {ok, Entry} -> format_ledger_balance(BinAddr, Entry, Ledger)
         end
     catch
         _:_ -> ?jsonrpc_error({invalid_params, Address})
@@ -166,12 +168,21 @@ get_ledger() ->
             blockchain:ledger(Chain)
     end.
 
-format_ledger_balance(Addr, Entry) ->
-    #{
-        <<"address">> => ?BIN_TO_B58(Addr),
-        <<"nonce">> => blockchain_ledger_entry_v1:nonce(Entry),
-        <<"balance">> => blockchain_ledger_entry_v1:balance(Entry)
-    }.
+format_ledger_balance(Addr, Entry, Ledger) ->
+    case blockchain_ledger_v1:config(token_version, Ledger) of
+        {ok, N} when N >=2 -> 
+            #{
+                <<"address">> => ?BIN_TO_B58(Addr),
+                <<"nonce">> => blockchain_ledger_entry_v2:nonce(Entry),
+                <<"balance">> => blockchain_ledger_entry_v2:balance(Entry)
+            };
+        _ ->
+            #{
+                <<"address">> => ?BIN_TO_B58(Addr),
+                <<"nonce">> => blockchain_ledger_entry_v1:nonce(Entry),
+                <<"balance">> => blockchain_ledger_entry_v1:balance(Entry)
+            }
+    end.
 
 format_ledger_gateway_entry(Addr, GW, Height, Verbose) ->
     GWAddr = ?BIN_TO_B58(Addr),
