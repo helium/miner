@@ -6,7 +6,6 @@
 
 -behavior(clique_handler).
 
-
 -export([register_cli/0]).
 
 -export([get_info/0]).

@@ -137,10 +137,10 @@ active_pocs() ->
     OnionKeyHash :: binary()
 ) -> false | {true, binary()} | {error, any()}.
 check_target(Challengee, BlockHash, OnionKeyHash) ->
-    LocalPOC = e2qc:cache(
-                local_pocs,
+    PoCCache = persistent_term:get(poc_cache),
+    LocalPOC = cream:cache(
+                PoCCache,
                 OnionKeyHash,
-                30,
                 fun() -> ?MODULE:local_poc(OnionKeyHash) end
     ),
     Res =
@@ -164,13 +164,13 @@ check_target(Challengee, BlockHash, OnionKeyHash) ->
                                 %% clients should retry after a period of time
                                 {error, <<"queued_poc">>};
                             {ok, #local_poc{block_hash = BlockHash, target = Challengee, onion = Onion}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 {true, Onion};
                             {ok, #local_poc{block_hash = BlockHash, target = _OtherTarget}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 false;
                             {ok, #local_poc{block_hash = _OtherBlockHash, target = _Target}} ->
-                                e2qc:evict(local_pocs, OnionKeyHash),
+                                cream:evict(PoCCache, OnionKeyHash),
                                 {error, <<"mismatched_block_hash">>}
                         end;
                     _ ->
@@ -667,11 +667,13 @@ purge_local_poc_keys(
             _ -> ?POC_TIMEOUT
         end,
     {ok, POCEphemeralKeyTimeout} = blockchain:config(?poc_validator_ephemeral_key_timeout, Ledger),
+    {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
+    {ok, HBGracePeriod} = blockchain:config(?validator_liveness_grace_period, Ledger),
     %% iterate over the cached POC keys, delete any which are beyond the lifespan of when the active POC would have ended
     CachedPOCKeys = local_poc_keys(State),
     lists:foreach(
         fun([#poc_local_key_data{receive_height = ReceiveHeight, onion_key_hash = Key}]) ->
-            case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout) of
+            case BlockHeight > (ReceiveHeight + POCEphemeralKeyTimeout + POCTimeout + HBInterval + HBGracePeriod) of
                 true ->
                     %% the lifespan of any POC for this key has passed, we can GC
                     lager:debug("GCing local poc key ~p, blockheight: ~p, receive height: ~p",

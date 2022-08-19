@@ -27,7 +27,7 @@
   ]},
  {libp2p,
   [
-   {random_peer_pred, fun miner_util:true_predicate/1},
+   {random_peer_pred, fun miner_util:random_non_miner_predicate/1},
    {nat_map, #{ {"${NAT_INTERNAL_IP}", "${NAT_INTERNAL_PORT}"} => {"${NAT_EXTERNAL_IP}", "${NAT_EXTERNAL_PORT}"}}},
    {max_tcp_connections, 2048}
   ]

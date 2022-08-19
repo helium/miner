@@ -9,6 +9,7 @@
                       ,miner_cli_genesis
                       ,miner_cli_info
                       ,miner_cli_dkg
+                      ,miner_cli_denylist
                      ]).
 
 -export([register_cli/0]).

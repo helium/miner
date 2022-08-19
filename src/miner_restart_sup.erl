@@ -103,6 +103,8 @@ init(_Opts) ->
                                     "local_poc_keys_cf"
                                    ]
                            },
+                {ok, PoCCache} = cream:new(1000),
+                persistent_term:put(poc_cache, PoCCache),
                 [
                     ?WORKER(miner_poc_mgr_db_owner, [POCOpts]),
                     ?WORKER(miner_poc_mgr, [])

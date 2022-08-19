@@ -77,7 +77,17 @@ init(_Opts) ->
     case {MinerMode, GatewaysRunChain} of
         {gateway, false} ->
             lager:info("grpc gateway, not loading chain"),
-            application:set_env(blockchain, autoload, false);
+            application:set_env(blockchain, autoload, false),
+            case application:get_env(miner, gateway_and_mux_enable) of
+                {ok, true} ->
+                    %% non muxing hotspots still need p2p
+                    application:set_env(blockchain, outbound_gossip_connections, 0),
+                    application:set_env(blockchain, seednode_connections, 0),
+                    application:set_env(blockchain, max_inbound_connections, 0),
+                    ok;
+                _ ->
+                    ok
+            end;
         _ ->
             ok
     end,
