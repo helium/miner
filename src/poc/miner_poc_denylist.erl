@@ -26,8 +26,10 @@ start_link() ->
                     Type = application:get_env(miner, denylist_type, github_release),
                     gen_server:start_link({local, ?MODULE}, ?MODULE, [Type, DenyURL, DenyKeys], [])
             end;
-        undefined ->
+        "none" ->
             ignore;
+        undefined ->
+            gen_server:start_link({local, ?MODULE}, ?MODULE, [github_release, "https://api.github.com/repos/helium/denylist/releases/latest", []], []);
         Other ->
             lager:warning("unhandled denylist_keys format ~p", [Other]),
             ignore
