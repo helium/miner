@@ -370,18 +370,62 @@ export_ledger(MasterKeyB58, OutputFile) ->
             Proof = blockchain_txn_vars_v1:create_proof(PrivKey, VarTxn0),
             VarTxn = blockchain_txn_vars_v1:key_proof(VarTxn0, Proof),
 
+            AcctVers =
+                case maps:find(token_version, Vars0) of
+                    {ok, 2} -> 2;
+                    _ -> 1
+                end,
+
             %% get all accounts and generate a blockchain_txn_coinbase_v1 for each
             %% accounts without a balance are excluded
             Accounts = blockchain_ledger_v1:snapshot_accounts(Ledger),
             NewAccountTxns =
-                lists:foldl(
-                    fun({Address, Entry}, Acc) ->
-                        case blockchain_ledger_entry_v1:balance(Entry) of
-                            0 -> Acc;
-                            undefined -> Acc;
-                            Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
-                        end
-                    end, [], Accounts),
+                case AcctVers of
+                    1 ->
+                        lists:foldl(
+                          fun({Address, Entry}, Acc) ->
+                                  case blockchain_ledger_entry_v1:balance(Entry) of
+                                      0 -> Acc;
+                                      undefined -> Acc;
+                                      Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
+                                  end
+                          end, [], Accounts);
+                    2 ->
+                        lists:foldl(
+                          fun({Address, Entry}, Acc) ->
+                                  case blockchain_ledger_entry_v2:balance(hnt, Entry) of
+                                      0 -> Acc;
+                                      undefined -> Acc;
+                                      Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
+                                  end
+                          end, [], Accounts)
+                end,
+
+            %% get all security accounts and generate a blockchain_txn_security_coinbase_v1 for each
+            SecurityAccounts = blockchain_ledger_v1:snapshot_security_accounts(Ledger),
+            NewSecurityAccountTxns =
+                case AcctVers of
+                    1 ->
+                        lists:foldl(
+                          fun({Address, Entry}, Acc) ->
+                                  case blockchain_ledger_security_entry_v1:balance(Entry) of
+                                      0 -> Acc;
+                                      undefined -> Acc;
+                                      Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
+                                  end
+                          end, [], SecurityAccounts);
+                    2 ->
+                        lists:foldl(
+                          fun({Address, Entry}, Acc) ->
+                                  case blockchain_ledger_entry_v2:balance(hst, Entry) of
+                                      0 -> Acc;
+                                      undefined -> Acc;
+                                      Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
+                                  end
+                                %% vvv-- note we're using accounts from above here as v2 has both
+                                %% in one
+                          end, [], Accounts)
+                end,
 
             %% get all dc accounts and generate a blockchain_txn_dc_coinbase_v1 for each
             %% accounts without a balance are excluded
@@ -395,18 +439,6 @@ export_ledger(MasterKeyB58, OutputFile) ->
                             Balance -> [blockchain_txn_dc_coinbase_v1:new(Address, Balance) | Acc]
                         end
                     end, [], DCAccounts),
-
-            %% get all security accounts and generate a blockchain_txn_security_coinbase_v1 for each
-            SecurityAccounts = blockchain_ledger_v1:snapshot_security_accounts(Ledger),
-            NewSecurityAccountTxns =
-                lists:foldl(
-                    fun({Address, Entry}, Acc) ->
-                        case blockchain_ledger_security_entry_v1:balance(Entry) of
-                            0 -> Acc;
-                            undefined -> Acc;
-                            Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
-                        end
-                    end, [], SecurityAccounts),
 
             %% iterate over validators and generate a gen txn for each
             ValFun =
