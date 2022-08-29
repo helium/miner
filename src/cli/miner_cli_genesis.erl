@@ -371,7 +371,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
             VarTxn = blockchain_txn_vars_v1:key_proof(VarTxn0, Proof),
 
             AcctVers =
-                case maps:find(token_version, Vars0) of
+                case blockchain_utils:get_var(token_version, Ledger) of
                     {ok, 2} -> 2;
                     _ -> 1
                 end,
@@ -393,7 +393,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
                     2 ->
                         lists:foldl(
                           fun({Address, Entry}, Acc) ->
-                                  case blockchain_ledger_entry_v2:balance(hnt, Entry) of
+                                  case blockchain_ledger_entry_v2:balance(Entry, hnt) of
                                       0 -> Acc;
                                       undefined -> Acc;
                                       Balance -> [blockchain_txn_coinbase_v1:new(Address, Balance) | Acc]
@@ -417,7 +417,7 @@ export_ledger(MasterKeyB58, OutputFile) ->
                     2 ->
                         lists:foldl(
                           fun({Address, Entry}, Acc) ->
-                                  case blockchain_ledger_entry_v2:balance(hst, Entry) of
+                                  case blockchain_ledger_entry_v2:balance(Entry, hst) of
                                       0 -> Acc;
                                       undefined -> Acc;
                                       Balance -> [blockchain_txn_security_coinbase_v1:new(Address, Balance) | Acc]
