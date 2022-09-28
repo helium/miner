@@ -223,8 +223,12 @@ generate_ephemeral_keys(NumKeys) ->
         {[], []}, lists:seq(1, NumKeys)).
 
 reactivated_gws(Ledger)->
-    case blockchain_ledger_v1:config(?poc_activity_filter_enabled, Ledger) of
-        {ok, true} ->
+    case
+        {blockchain_ledger_v1:config(?poc_challenger_type, Ledger),
+            blockchain_ledger_v1:config(?poc_activity_filter_enabled, Ledger)} of
+        {{ok, oracle}, _} ->
+            [];
+        {_, {ok, true}} ->
             ReactivatedGWs = sibyl_poc_mgr:cached_reactivated_gws(),
             %% HBs limit the size of this list, so truncate if necessary
             %% and remove from the cache those included
