@@ -18,6 +18,7 @@
 -define(LOCAL_POC_DB_CF, {?MODULE, local_poc_db_cf_handle}).
 -define(LOCAL_POC_KEYS_DB_CF, {?MODULE, local_poc_keys_db_cf_handle}).
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 %% lifespan of a POC, after which we will
 %% submit the receipts txn and delete the local poc data
 -define(POC_TIMEOUT, 4).
@@ -207,7 +208,7 @@ local_poc(OnionKeyHash) ->
             case rocksdb:get(DB, CF, OnionKeyHash, []) of
                 {ok, Bin} ->
                     [POC] = erlang:binary_to_term(Bin),
-                    {ok, POC};
+                    {ok, upgrade_responses(POC)};
                 not_found ->
                     {error, not_found};
                 Error ->
@@ -930,6 +931,14 @@ update_addr_hash(Bloom, Element) ->
             end
     end.
 
+upgrade_responses(#local_poc{responses=Responses}=POC) ->
+    NewResponses = maps:map(fun(_Key, Value) when element(1, Value) == blockchain_poc_receipt_v1_pb ->
+                     blockchain_poc_receipt_v1:maybe_upgrade(Value);
+                (_Key, Value) when element(1, Value) == blockchain_poc_witness_v1_pb ->
+                     blockchain_poc_witness_v1:maybe_upgrade(Value)
+             end, Responses),
+    POC#local_poc{responses=NewResponses}.
+
 %% ------------------------------------------------------------------
 %% DB functions
 %% ------------------------------------------------------------------
@@ -941,7 +950,7 @@ local_pocs(Itr, {error, invalid_iterator}, Acc) ->
     catch rocksdb:iterator_close(Itr),
     Acc;
 local_pocs(Itr, {ok, _, LocalPOCBin}, Acc) ->
-    local_pocs(Itr, rocksdb:iterator_move(Itr, next), [binary_to_term(LocalPOCBin)|Acc]).
+    local_pocs(Itr, rocksdb:iterator_move(Itr, next), [upgrade_responses(binary_to_term(LocalPOCBin))|Acc]).
 
 local_poc_keys(#state{db=DB, local_poc_keys_cf=CF}) ->
     {ok, Itr} = rocksdb:iterator(DB, CF, []),
@@ -977,3 +986,31 @@ write_local_poc_keys(LocalPOCKey = #poc_local_key_data{onion_key_hash = OnionKey
 delete_local_poc_keys(OnionKeyHash, DB, CF) ->
     rocksdb:delete(DB, CF, OnionKeyHash, []).
 
+-ifdef(TEST).
+
+upgrade_responses_test() ->
+    Responses = #{<<"a">> => {blockchain_poc_receipt_v1_pb,<<"r">>,10,10,<<"data">>,p2p,<<>>,
+                              1.2,915.2,2,<<"dr">>,<<>>,0},
+                  <<"b">> => {blockchain_poc_witness_v1_pb,<<"w1">>,10,10,<<"ph">>,<<>>,1.2,
+                              915.2,2,<<"dr">>},
+                  <<"c">> => {blockchain_poc_witness_v1_pb,<<"w2">>,10,10,<<"ph">>,<<>>,1.2,
+                              915.2,2,<<"dr">>}},
+    Upgraded = upgrade_responses(#local_poc{responses=Responses}),
+    lists:all(fun(E) when element(1, E) == blockchain_poc_receipt_v1_pb ->
+                      blockchain_poc_receipt_v1:print(E),
+                      true;
+                 (E) when element(1, E) == blockchain_poc_witness_v1_pb ->
+                      blockchain_poc_witness_v1:print(E),
+                      true
+              end, maps:values(Upgraded#local_poc.responses)),
+
+    ?assertError(function_clause, lists:all(fun(E) when element(1, E) == blockchain_poc_receipt_v1_pb ->
+                      blockchain_poc_receipt_v1:print(E),
+                      true;
+                 (E) when element(1, E) == blockchain_poc_witness_v1_pb ->
+                      blockchain_poc_witness_v1:print(E),
+                      true
+              end, maps:values(Responses))),
+    ok.
+
+-endif.
