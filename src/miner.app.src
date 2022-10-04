@@ -36,7 +36,17 @@
     grpc_client
    ]},
   {included_applications, [blockchain, sibyl]},
-  {env,[]},
+  {env,
+   [
+    {miner,
+     [
+      {denylist_keys, ["1SbEYKju337P6aYsRd9DT2k4qgK5ZK62kXbSvnJgqeaxK3hqQrYURZjL"]},
+      {denylist_type, github_release},
+      {denylist_url, "https://api.github.com/repos/helium/denylist/releases/latest"}
+     ]
+    }
+   ]
+  },
   {modules, []},
 
   {maintainers, ["Helium"]},
