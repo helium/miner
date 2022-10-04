@@ -46,7 +46,7 @@ check(PubkeyBin) ->
             false
     end.
 
--spec get_version() -> pos_integer().
+-spec get_version() -> {ok, non_neg_integer()}.
 get_version() ->
     gen_server:call(?MODULE, get_version).
 
