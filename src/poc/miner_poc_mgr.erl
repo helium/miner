@@ -937,7 +937,8 @@ upgrade_responses(#local_poc{responses=Responses}=POC) ->
                                     lists:map(fun({Key, Witness}) ->
                                                       {Key, blockchain_poc_witness_v1:maybe_upgrade(Witness)}
                                               end, Value);
-                               (_Key, Value) when element(1, Value) == blockchain_poc_receipt_v1_pb ->
+                               (_Key, {Peer, Value}) when element(1, Value) == blockchain_poc_receipt_v1_pb ->
+                               {Peer, blockchain_poc_receipt_v1:maybe_upgrade(Value)}
                                     blockchain_poc_receipt_v1:maybe_upgrade(Value)
                             end, Responses),
     POC#local_poc{responses=NewResponses}.
