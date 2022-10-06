@@ -69,7 +69,7 @@
     target :: libp2p_crypto:pubkey_bin(),
     onion :: binary() | undefined,
     secret :: binary() | undefined,
-    responses = #{},
+    responses = #{} :: #{binary() => [{binary(), blockchain_poc_witness_v1:witness()}] | blockchain_poc_receipt_v1:poc_receipt()},
     challengees = [] :: [libp2p_crypto:pubkey_bin()],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     start_height :: non_neg_integer()
@@ -932,11 +932,14 @@ update_addr_hash(Bloom, Element) ->
     end.
 
 upgrade_responses(#local_poc{responses=Responses}=POC) ->
-    NewResponses = maps:map(fun(_Key, Value) when element(1, Value) == blockchain_poc_receipt_v1_pb ->
-                     blockchain_poc_receipt_v1:maybe_upgrade(Value);
-                (_Key, Value) when element(1, Value) == blockchain_poc_witness_v1_pb ->
-                     blockchain_poc_witness_v1:maybe_upgrade(Value)
-             end, Responses),
+    NewResponses = maps:map(fun(_Key, Value) when is_list(Value) ->
+                                    %% witnesses are stored in a key/value list
+                                    lists:map(fun({Key, Witness}) ->
+                                                      {Key, blockchain_poc_witness_v1:maybe_upgrade(Witness)}
+                                              end, Value);
+                               (_Key, Value) when element(1, Value) == blockchain_poc_receipt_v1_pb ->
+                                    blockchain_poc_receipt_v1:maybe_upgrade(Value)
+                            end, Responses),
     POC#local_poc{responses=NewResponses}.
 
 %% ------------------------------------------------------------------
@@ -989,28 +992,25 @@ delete_local_poc_keys(OnionKeyHash, DB, CF) ->
 -ifdef(TEST).
 
 upgrade_responses_test() ->
-    Responses = #{<<"a">> => {blockchain_poc_receipt_v1_pb,<<"r">>,10,10,<<"data">>,p2p,<<>>,
+    Responses = #{<<"challengee">> => {blockchain_poc_receipt_v1_pb,<<"r">>,10,10,<<"data">>,p2p,<<>>,
                               1.2,915.2,2,<<"dr">>,<<>>,0},
-                  <<"b">> => {blockchain_poc_witness_v1_pb,<<"w1">>,10,10,<<"ph">>,<<>>,1.2,
-                              915.2,2,<<"dr">>},
-                  <<"c">> => {blockchain_poc_witness_v1_pb,<<"w2">>,10,10,<<"ph">>,<<>>,1.2,
+                  <<"packethash">> => [{<<"2">>, {blockchain_poc_witness_v1_pb,<<"w1">>,10,10,<<"ph">>,<<>>,1.2,
                               915.2,2,<<"dr">>}},
+                               %% the following should not need upgrading
+                              {<<"3">>, {blockchain_poc_witness_v1_pb,<<"w2">>,10,10,<<"ph">>,<<>>,1.2,
+                              915.2,2,<<"dr">>, 1.0}}]},
     Upgraded = upgrade_responses(#local_poc{responses=Responses}),
-    lists:all(fun(E) when element(1, E) == blockchain_poc_receipt_v1_pb ->
-                      blockchain_poc_receipt_v1:print(E),
-                      true;
-                 (E) when element(1, E) == blockchain_poc_witness_v1_pb ->
+    lists:all(fun(E) when element(1, E) == blockchain_poc_witness_v1_pb ->
                       blockchain_poc_witness_v1:print(E),
                       true
-              end, maps:values(Upgraded#local_poc.responses)),
+              end, element(2, lists:unzip(lists:flatten(maps:get(<<"packethash">>, Upgraded#local_poc.responses))))),
+    blockchain_poc_receipt_v1:print(maps:get(<<"challengee">>, Upgraded#local_poc.responses)),
 
-    ?assertError(function_clause, lists:all(fun(E) when element(1, E) == blockchain_poc_receipt_v1_pb ->
-                      blockchain_poc_receipt_v1:print(E),
-                      true;
-                 (E) when element(1, E) == blockchain_poc_witness_v1_pb ->
+    ?assertError(function_clause, lists:all(fun(E) when element(1, E) == blockchain_poc_witness_v1_pb ->
                       blockchain_poc_witness_v1:print(E),
                       true
-              end, maps:values(Responses))),
+              end, element(2, lists:unzip(lists:flatten(maps:get(<<"packethash">>, Responses)))))),
+    ?assertError(function_clause, blockchain_poc_receipt_v1:print(maps:get(<<"challengee">>, Responses))),
     ok.
 
 -endif.
