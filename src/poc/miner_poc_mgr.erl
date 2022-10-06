@@ -69,7 +69,7 @@
     target :: libp2p_crypto:pubkey_bin(),
     onion :: binary() | undefined,
     secret :: binary() | undefined,
-    responses = #{} :: #{binary() => [{binary(), blockchain_poc_witness_v1:witness()}] | blockchain_poc_receipt_v1:poc_receipt()},
+    responses = #{} :: #{binary() => [{binary(), blockchain_poc_witness_v1:witness()}] | {binary(), blockchain_poc_receipt_v1:poc_receipt()}},
     challengees = [] :: [libp2p_crypto:pubkey_bin()],
     packet_hashes = [] :: [{libp2p_crypto:pubkey_bin(), binary()}],
     start_height :: non_neg_integer()
