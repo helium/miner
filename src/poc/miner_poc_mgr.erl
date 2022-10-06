@@ -931,6 +931,8 @@ update_addr_hash(Bloom, Element) ->
             end
     end.
 
+upgrade_responses(POCs) when is_list(POCs) ->
+    [ upgrade_responses(POC) || POC <- POCs ];
 upgrade_responses(#local_poc{responses=Responses}=POC) ->
     NewResponses = maps:map(fun(_Key, Value) when is_list(Value) ->
                                     %% witnesses are stored in a key/value list
