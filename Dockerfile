@@ -59,7 +59,7 @@ FROM ${RUNNER_IMAGE} as runner
 ARG VERSION
 ARG EXTRA_RUNNER_APK_PACKAGES
 
-RUN apk add --no-cache --update ncurses dbus libsodium libstdc++ \
+RUN apk add --no-cache --update ncurses dbus libsodium libstdc++ curl \
                                 ${EXTRA_RUNNER_APK_PACKAGES}
 
 RUN ulimit -n 64000
