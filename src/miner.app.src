@@ -38,6 +38,7 @@
   {included_applications, [blockchain, sibyl]},
   {env,
    [
+    %% This section provides a default denylist configuration. Load custom denylist configuration by overriding values in sys.config.src
     {miner,
      [
       {denylist_keys, ["1SbEYKju337P6aYsRd9DT2k4qgK5ZK62kXbSvnJgqeaxK3hqQrYURZjL"]},
