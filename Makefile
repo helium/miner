@@ -10,7 +10,7 @@ else
 endif
 
 GRPC_SERVICES_DIR=src/grpc/autogen
-GATEWAY_RS_VSN ?= "8621e395134b56929d048e4ad2838bac14eddb5e"
+GATEWAY_RS_VSN ?= "ce88fabae7cba9244ce263dd0ca74a2b9c94f084"
 GWMP_MUX_VSN ?= "v0.9.6"
 
 all: compile
