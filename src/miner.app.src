@@ -29,6 +29,8 @@
     kvc,
     longfi,
     elli,
+    telemetry,
+    prometheus,
     jsonrpc2,
     xorf,
     http2_client,

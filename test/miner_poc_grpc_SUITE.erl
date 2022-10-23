@@ -416,7 +416,6 @@ common_poc_vars(Config) ->
       ?poc_v5_target_prob_randomness_wt => 0.0}.
 
 do_common_partition_checks(_TestCase, Config, VarMap) ->
-    Validators = ?config(validators, Config),
     %% Print scores before we begin the test
     InitialScores = gateway_scores(Config),
     ct:pal("InitialScores: ~p", [InitialScores]),

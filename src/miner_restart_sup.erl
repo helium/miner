@@ -153,7 +153,8 @@ init(_Opts) ->
          ?WORKER(elli, [[{callback, miner_jsonrpc_handler},
                          {ip, JsonRpcIp},
                          {port, JsonRpcPort}]]),
-         ?WORKER(miner_poc_denylist, [])
+         ?WORKER(miner_poc_denylist, []),
+         ?WORKER(miner_metrics_server, [])
          ] ++
         POCServers ++
         ValServers ++

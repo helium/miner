@@ -63,6 +63,8 @@
    {region_override, 'US915'},
    {gateway_and_mux_enable, false},
    {default_routers, ["${DEFAULT_ROUTERS:-/p2p/11w77YQLhgUt8HUJrMtntGGr97RyXmot1ofs5Ct2ELTmbFoYsQa}"]},
+   {metrics, [block_metrics, txn_metrics, grpc_metrics, snapshot_metrics]},
+   {metrics_port, ${METRICS_PORT:-9090}},
    {seed_validators, [
        {"1ZPNnNd9k5qiQXXigKifQpCPiy5HTbszQDSyLM56ywk7ihNRvt6", "18.223.171.149", 8080},     %% test-val2
        {"1ZYe21WzqJGkWjXvyEt2c8ALSrufPfjzqfQP2SGy61UJd2h9EbL", "3.17.164.253", 8080},       %% test-val3
@@ -75,7 +77,8 @@
    {servers, [#{grpc_opts =>
                     #{
                       service_protos => [gateway_pb],
-                      services => #{'helium.gateway' => helium_gateway_service}
+                      services => #{'helium.gateway' => helium_gateway_service},
+                      stats_handler => grpcbox_telemetry_stats_handler
                      },
 
                 transport_opts => #{ssl => false},
