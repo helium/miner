@@ -1,2 +1,8 @@
 ## api listening port override
 api = 4468
+
+[poc]
+entropy_uri = "https://entropy.helium.io/entropy"
+ingest_uri = "http://mainnet-pociot.helium.io:9080"
+beacon_interval = 600
+ingest_token = "dev"
