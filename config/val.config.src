@@ -58,7 +58,7 @@
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
    {region_override, 'US915'},
-   %% max expodential backoff to apply to grpc reconnect
+   %% max exponential backoff to apply to grpc reconnect
    {max_backoff, 128}
   ]},
  {grpcbox,
