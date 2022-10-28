@@ -54,7 +54,8 @@
     check_target_req_timer,
     down_events_in_period = 0,
     stability_check_timer,
-    block_age_timer
+    block_age_timer,
+    last_backoff = 1
 }).
 
 %% these are config vars the miner is interested in, if they change we
@@ -204,17 +205,28 @@ setup(enter, _OldState, Data) ->
         connection_pid = undefined,
         conn_monitor_ref = undefined
     }};
-setup(info, active_check, Data) ->
+setup(info, active_check, #data{ last_backoff = LastBackoff} = Data) ->
     %% env var `enable_grpc_client` will have a value of true
     %% if validator challenges are enabled
     %% set from miner lora light
     case application:get_env(miner, enable_grpc_client, false) of
         true ->
-            erlang:send_after(?VALIDATOR_RECONNECT_DELAY, self(), find_validator);
+            %% increment backoff counter with a lil bit of jitter
+            %% we will do this each time we hit this state
+            %% which we will keep on doing if the client
+            %% cannot connect to a selected val
+            %% the backoff value is used as a multiplier on the
+            %% default reconnect delay applied before entering the 'find validator' state
+            %% if we successfully connect to a val, backoff will be reset to 1
+            %% the backoff is defaulted to a multiple of 128, which gives us 640 secs or approx 10 mins
+            erlang:send_after(?VALIDATOR_RECONNECT_DELAY * LastBackoff, self(), find_validator),
+            MaxBackOff = application:get_env(miner, max_backoff, 128),
+            {keep_state, Data#data{last_backoff = backoff:rand_increment(LastBackoff, MaxBackOff)}};
         false ->
-            erlang:send_after(?ACTIVE_CHECK_DELAY, self(), active_check)
-    end,
-    {keep_state, Data};
+            erlang:send_after(?ACTIVE_CHECK_DELAY, self(), active_check),
+            {keep_state, Data}
+    end;
+
 setup(info, find_validator, Data) ->
     %% ask a random seed validator for the address of a 'proper' validator
     %% we will then use this as our default durable validator
@@ -260,7 +272,8 @@ setup(
                     conn_monitor_ref = M,
                     stability_check_timer = SCTRef,
                     block_age_timer = BACTRef,
-                    down_events_in_period = 0
+                    down_events_in_period = 0,
+                    last_backoff = 1
                 },
                 [{next_event, info, fetch_config}]};
         {error, _} ->

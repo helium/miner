@@ -82,6 +82,11 @@
                       header_table_size => 4096,
                       enable_push => 1,
                       max_concurrent_streams => unlimited,
+                      max_connections => 4000,                   %% the max connections permitted, after which connections will be refused
+                      accept_rate => 100,                        %% the rate limit for for all incoming connections
+                      accept_rate_interval => per_second,        %% the rate limit period for all incoming connections
+                      accept_rate_by_ip => 40,                   %% the rate limit for any one source ip
+                      accept_rate_by_ip_interval => per_minute,  %% the rate limit period for any one source ip
                       initial_window_size => 65535,
                       max_frame_size => 16384,
                       max_header_list_size => unlimited
