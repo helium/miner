@@ -57,9 +57,7 @@
    %% we only really need the params below if this file is changed to specify a radio device
    %% as without one miner_lora is not started
    %% including the params anyway in case someone needs it in this env
-   {region_override, 'US915'},
-   %% max exponential backoff to apply to grpc reconnect
-   {max_backoff, 128}
+   {region_override, 'US915'}
   ]},
  {grpcbox,
   [
@@ -84,7 +82,7 @@
                       header_table_size => 4096,
                       enable_push => 1,
                       max_concurrent_streams => unlimited,
-                      max_connections => 2500,                   %% the max connections permitted, after which connections will be refused
+                      max_connections => 4000,                   %% the max connections permitted, after which connections will be refused
                       accept_rate => 100,                        %% the rate limit for for all incoming connections
                       accept_rate_interval => per_second,        %% the rate limit period for all incoming connections
                       accept_rate_by_ip => 40,                   %% the rate limit for any one source ip
