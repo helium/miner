@@ -12,6 +12,7 @@
     block_age/0,
     relcast_info/1,
     relcast_queue/1,
+    hbbft_artifact/0,
     hbbft_status/0,
     hbbft_skip/0,
     create_block/3,
@@ -241,6 +242,21 @@ hbbft_status() ->
                     Result
             after timer:seconds(60) ->
                       {error, timeout}
+            end
+    end.
+
+-spec hbbft_artifact() -> {ok, undefined} | {ok, binary()} | not_running | {error, timeout}.
+hbbft_artifact() ->
+   case gen_server:call(?MODULE, consensus_group, 60000) of
+        undefined -> not_running;
+        Pid ->
+            Ref = make_ref(),
+            ok = libp2p_group_relcast:handle_input(Pid, {get_artifact, Ref, self()}),
+            receive
+                {Ref, Result} ->
+                  {ok, Result}
+            after timer:seconds(60) ->
+                     {error, timeout}
             end
     end.
 
