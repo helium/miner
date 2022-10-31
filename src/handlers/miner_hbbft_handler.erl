@@ -129,7 +129,7 @@ handle_command(start_acs, State) ->
             {reply, ok, ignore};
         {NewHBBFT, {send, Msgs}} ->
             ?mark(start_acs_new),
-            lager:notice("Started HBBFT round because of a block timeout"),
+            lager:notice("NextRound (~p) starting due to block timeout", [hbbft:round(NewHBBFT)]),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
 handle_command(get_buf, State) ->
@@ -192,9 +192,11 @@ handle_command(
             Ledger = blockchain:ledger(Chain),
             Version = md_version(Ledger),
             Seen = blockchain_utils:map_to_bitvector(S#state.seen),
+            TargetBlockTime = miner:calculate_next_block_time(Chain, true),
             HBBFT2 = hbbft:set_stamp_fun(?MODULE, metadata, [Version,
                                                              #{seen => Seen,
-                                                               bba_completion => S#state.bba},
+                                                               bba_completion => S#state.bba,
+                                                               target_block_time => TargetBlockTime},
                                                              Chain], HBBFT1),
             case hbbft:next_round(HBBFT2, NextRound, []) of
                 {HBBFT3, ok} ->
