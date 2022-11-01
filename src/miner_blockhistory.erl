@@ -9,7 +9,7 @@
     last_retrieved_time=0
 }).
 
--define(HISTORICAL_TIME_FETCH_INTERVAL, 300).
+-define(HISTORICAL_TIME_FETCH_INTERVAL, 3600).
 
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3]).
 
