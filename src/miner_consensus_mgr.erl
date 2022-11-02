@@ -67,7 +67,6 @@ txn_buf() ->
         Res -> Res
     end.
 
-
 -spec consensus_pos() -> integer() | undefined.
 consensus_pos() ->
     gen_server:call(?MODULE, consensus_pos).

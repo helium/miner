@@ -19,6 +19,7 @@ register_all_usage() ->
                  [
                   hbbft_usage(),
                   hbbft_status_usage(),
+                  hbbft_artifact_usage(),
                   hbbft_skip_usage(),
                   hbbft_queue_usage(),
                   hbbft_group_usage(),
@@ -31,6 +32,7 @@ register_all_cmds() ->
                   end,
                  [
                   hbbft_cmd(),
+                  hbbft_artifact_cmd(),
                   hbbft_status_cmd(),
                   hbbft_skip_cmd(),
                   hbbft_queue_cmd(),
@@ -45,6 +47,7 @@ hbbft_usage() ->
     [["hbbft"],
      ["miner hbbft commands\n\n",
       "  hbbft status           - Display hbbft status.\n"
+      "  hbbft artifact <file>  - Write hbbft block artifact to file.\n"
       "  hbbft queue            - Display hbbft message queue.\n"
       "  hbbft skip             - Skip current hbbft round.\n"
       "  hbbft group            - Display current hbbft group.\n"
@@ -78,6 +81,30 @@ hbbft_status(["hbbft", "status"], [], []) ->
     Text = clique_status:text(io_lib:format("~p", [miner:hbbft_status()])),
     [Text];
 hbbft_status([], [], []) ->
+    usage.
+
+hbbft_artifact_cmd() ->
+    [
+     [["hbbft", "artifact", '*'], [], [], fun hbbft_artifact/3]
+    ].
+
+hbbft_artifact_usage() ->
+    [["hbbft", "artifact"],
+     ["hbbft artifact <filename>\n\n",
+      "  Write block artifact for the current consensus group to filename\n\n"
+     ]
+    ].
+
+hbbft_artifact(["hbbft", "artifact", Filename], [], []) ->
+    Response = case miner:hbbft_artifact() of
+                   not_running -> not_in_consensus;
+                   {error, timeout} -> timeout;
+                   {ok, undefined} -> artifact_undefined;
+                   {ok, R} -> file:write_file(Filename, R)
+               end,
+    Text = clique_status:text(io_lib:format("~p", [Response])),
+    [Text];
+hbbft_artifact([], [], []) ->
     usage.
 
 

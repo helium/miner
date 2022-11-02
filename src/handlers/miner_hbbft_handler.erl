@@ -132,6 +132,9 @@ handle_command(start_acs, State) ->
             lager:notice("Started HBBFT round because of a block timeout"),
             {reply, ok, fixup_msgs(Msgs), State#state{hbbft=NewHBBFT}}
     end;
+handle_command({get_artifact, Ref, Worker}, State) ->
+    Worker ! {Ref, State#state.artifact},
+    {reply, ok, ignore};
 handle_command(get_buf, State) ->
     {reply, {ok, hbbft:buf(State#state.hbbft)}, ignore};
 handle_command({set_buf, Buf}, State) ->
