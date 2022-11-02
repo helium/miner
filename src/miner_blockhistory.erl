@@ -20,7 +20,7 @@ start_link() ->
     URL = string:concat(BaseURL, "/blocks/"),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [URL], []).
 
--spec get_history() -> {non_neg_integer(), non_neg_integer()} | undefined.
+-spec get_history() -> {ok, {non_neg_integer(), non_neg_integer()}} | undefined.
 get_history() ->
     gen_server:call(?MODULE, get_history).
 
