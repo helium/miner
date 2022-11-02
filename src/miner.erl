@@ -766,7 +766,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
 
     StartHeight0 = application:get_env(miner, stabilization_period, 0),
     StartHeight = max(1, Height - StartHeight0),
-    {ActualStartHeight, StartBlockTime} =
+    {ActualStartHeight0, StartBlockTime0} =
         case Height > StartHeight of
             true ->
                 case blockchain:find_first_block_after(StartHeight, Chain) of
@@ -777,6 +777,27 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
                 end;
             false ->
                 {0, undefined}
+        end,
+    {ActualStartHeight, StartBlockTime} = case ActualStartHeight0 =< (StartHeight + 1) of
+        true ->
+            % enough history
+            {ActualStartHeight0, StartBlockTime0};
+        false ->
+            % not enough history, try to augment with other sources
+            case miner_blockhistory:get_history() of
+            	{ok, {AugmentedHeight, AugmentedTime}} ->
+                    case AugmentedTime > StartBlockTime0 of
+                        true ->
+                            % Historical blocktime is newer than our own, this can't be right
+                            {ActualStartHeight0, StartBlockTime0};
+                        false ->
+                            % Historical blocktime is older than our own, probably right
+                            {AugmentedHeight, AugmentedTime}
+                        end;
+                _ ->
+                    % we don't have an augmented source, use our own history anyway
+                    {ActualStartHeight0, StartBlockTime0}
+            end
         end,
     AvgBlockTime = case StartBlockTime of
                        undefined ->

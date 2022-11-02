@@ -139,7 +139,8 @@ init(_Opts) ->
             validator ->
                 [
                     ?WORKER(miner_val_heartbeat, []),
-                    ?SUP(sibyl_sup, [])
+                    ?SUP(sibyl_sup, []),
+                    ?WORKER(miner_blockhistory, [])
                 ];
             _ ->
                 []
