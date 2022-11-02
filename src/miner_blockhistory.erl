@@ -38,7 +38,7 @@ handle_info(check, #state{url=URL}=State) ->
             Ledger = blockchain:ledger(Chain),
             case blockchain_ledger_v1:current_height(Ledger) of
                 {ok, CurrentHeight} ->
-                    StabilizationPeriod = application:get_env(miner, stabilization_period, 50000),
+                    StabilizationPeriod = application:get_env(miner, stabilization_period, 0),
                     HistoryHeight = max(1, CurrentHeight - StabilizationPeriod),
                     HeightURL = string:concat(URL, integer_to_list(HistoryHeight)),
                     case httpc:request(get, {HeightURL, [{"user-agent", "ValidatorHistoricalHeight/0.0.1"}] }, [], [{body_format, binary}]) of
