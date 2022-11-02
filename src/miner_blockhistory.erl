@@ -27,7 +27,7 @@ get_history() ->
 %% gen_server callbacks
 
 init([URL]) ->
-    {ok, schedule_check(#state{url=URL}), 15}.
+    {ok, schedule_check(#state{url=URL}, 15)}.
 
 handle_info(check, #state{url=URL}=State) ->
     case blockchain_worker:blockchain() of
