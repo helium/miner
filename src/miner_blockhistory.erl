@@ -33,7 +33,7 @@ handle_info(check, #state{url=URL}=State) ->
     case blockchain_worker:blockchain() of
         undefined ->
             lager:info("No chain, retry soon"),
-            {ok, schedule_check(State, 15)};
+            {ok, schedule_check(State, timer:seconds(15))};
         Chain ->
             Ledger = blockchain:ledger(Chain),
             case blockchain_ledger_v1:current_height(Ledger) of
