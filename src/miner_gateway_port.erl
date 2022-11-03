@@ -29,6 +29,8 @@
 
 -define(CONNECT_RETRY_WAIT, 100).
 -define(CONNECT_ATTEMPTS, 5).
+-define(HEALTHCHECK_INTERVAL, 600000).
+-define(HEALTHCHECK_TIMEOUT, 2000).
 
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
@@ -42,6 +44,7 @@ init([Options]) ->
 
     process_flag(trap_exit, true),
 
+    erlang:send_after(?HEALTHCHECK_INTERVAL, self(), gw_healthcheck),
     State = open_gateway_port(Keypair, Transport, Host, UdpPort, TcpPort),
     {ok, State}.
 
@@ -79,6 +82,25 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
                    State#state.tcp_port),
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
+handle_info(gw_healthcheck, State) ->
+    Me = self(),
+    Healthcheck = fun() -> Output = os:cmd(gateway_bin() ++ " -c " ++ gateway_config_dir() ++ " info"), Me ! Output end,
+    Checker = spawn(Healthcheck),
+    receive
+        Response ->
+            case string:str(Response, "gateway") of
+                Pos when Pos > 0 ->
+                    erlang:send_after(?HEALTHCHECK_INTERVAL, Me, gw_healthcheck),
+                    {noreply, State};
+                _ ->
+                    erlang:exit(Checker, kill),
+                    {stop, gw_nonresponsive, State}
+            end
+    after
+        ?HEALTHCHECK_TIMEOUT ->
+            erlang:exit(Checker, kill),
+            {stop, gw_nonresponsive, State}
+    end;
 handle_info(_Msg, State) ->
     lager:debug("unhandled info ~p", [_Msg]),
     {noreply, State}.
