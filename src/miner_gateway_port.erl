@@ -83,22 +83,12 @@ handle_info({'DOWN', Ref, port, _Pid, Reason}, #state{port = Port, monitor = Ref
     ok = miner_gateway_ecc_worker:reconnect(),
     {noreply, NewState};
 handle_info(gw_healthcheck, State) ->
-    Me = self(),
-    Healthcheck = fun() -> Output = os:cmd(gateway_bin() ++ " -c " ++ gateway_config_dir() ++ " info"), Me ! Output end,
-    Checker = spawn(Healthcheck),
-    receive
-        Response ->
-            case string:str(Response, "gateway") of
-                Pos when Pos > 0 ->
-                    erlang:send_after(?HEALTHCHECK_INTERVAL, Me, gw_healthcheck),
-                    {noreply, State};
-                _ ->
-                    erlang:exit(Checker, kill),
-                    {stop, gw_nonresponsive, State}
-            end
-    after
-        ?HEALTHCHECK_TIMEOUT ->
-            erlang:exit(Checker, kill),
+    case healthcheck_cmd() of
+        {0, _Output} ->
+            erlang:send_after(?HEALTHCHECK_INTERVAL, self(), gw_healthcheck),
+            {noreply, State};
+        {_Exit, Reason} ->
+            lager:error("embedded helium_gateway healthcheck failed with reason: ~p", [Reason]),
             {stop, gw_nonresponsive, State}
     end;
 handle_info(_Msg, State) ->
@@ -152,6 +142,29 @@ cleanup_port(#state{port = Port} = State) ->
     end,
     os:cmd(io_lib:format("kill -9 ~p", [State#state.os_pid])),
     ok.
+
+-spec healthcheck_cmd() -> {non_neg_integer(), iolist() | timeout}.
+healthcheck_cmd() ->
+    Command = gateway_bin() ++ " -c " ++ gateway_config_dir() ++ " info",
+    PortOpts = [stream, exit_status, use_stdio, stderr_to_stdout, in, eof],
+    PortId = erlang:open_port({spawn, Command}, PortOpts),
+    healthcheck_cmd_collect(PortId, []).
+
+healthcheck_cmd_collect(PortId, Data) ->
+    receive
+        {PortId, {data, D}} ->
+            healthcheck_cmd_collect(PortId, [D | Data]);
+        {PortId, eof} ->
+            erlang:port_close(PortId),
+            receive
+                {PortId, {exit_status, ExitCode}} ->
+                    {ExitCode, lists:reverse(Data)}
+            end
+    after
+        ?HEALTHCHECK_TIMEOUT ->
+            erlang:port_close(PortId),
+            {1, timeout}
+    end.
 
 gateway_config_dir() ->
     code:priv_dir(miner) ++ "/gateway_rs/".
