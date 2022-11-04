@@ -12,7 +12,7 @@ ARG EXTRA_BUILD_APK_PACKAGES
 RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
     dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 \
-    openssl-dev pkgconfig protoc sed tar wget \
+    openssl-dev pkgconfig protoc protobuf sed tar wget \
     ${EXTRA_BUILD_APK_PACKAGES}
 
 # Install Rust toolchain
