@@ -266,7 +266,7 @@ decrypt(Type, IV, OnionCompactKey, Tag, CipherText, RSSI, SNR, Frequency, Channe
                                     erlang:spawn(fun() -> ?MODULE:send_receipt(Data, OnionCompactKey, Type, os:system_time(nanosecond),
                                                                                RSSI, SNR, Frequency, Channel, DataRate, TxPower, State) end);
                                 _ ->
-                                    case blockchain_region_params_v1:get_spreading(RegionParams, erlang:byte_size(Packet)) of
+                                    case get_spreading(Region, RegionParams, erlang:byte_size(Packet)) of
                                         {error, Why} ->
                                             lager:error("unable to get spreading, reason: ~p", [Why]),
                                             ok;
@@ -388,6 +388,43 @@ spreading(_, L) when L < 139 ->
     "SF8BW125";
 spreading(_, _) ->
     "SF7BW125".
+
+%%
+%% Provide an override of on-chain parameters for the time being.
+%%
+%% This sequence of functions is designed to TEMPORARILY OVERRIDE
+%% the AS923 region parameters on-chain, just for the purposes
+%% of PoC.
+%%
+-spec as923_spreading(Len :: pos_integer()) -> atom().
+as923_spreading(L) when L < 25 ->
+    'SFTBD';
+as923_spreading(L) when L < 65 ->
+    'SFTBD';
+as923_spreading(L) when L < 67 ->
+    'SFTBD';
+as923_spreading(L) when L < 129 ->
+    'SFTBD';
+as923_spreading(L) when L < 238 ->
+    'SFTBD';
+as923_spreading(_) ->
+    'SFTBD'.
+
+-spec get_spreading(RegionName :: atom(), RegionParams :: blockchain_region_param_v1:region_param_v1(), Size :: pos_integer()) -> {ok, atom()} | {error, any()}.
+get_spreading('AS923', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading('AS923_1', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading('AS923_1B', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading('AS923_2', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading('AS923_3', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading('AS923_4', _RegionParams, Size) ->
+    {ok, as923_spreading(Size)};
+get_spreading(_RegionName, RegionParams, Size) ->
+    blockchain_region_params_v1:get_spreading(RegionParams, Size).
 
 -ifdef(EQC).
 -spec try_decrypt(binary(), binary(), binary(), binary(), function()) -> {ok, binary(), binary()} | {error, any()}.
