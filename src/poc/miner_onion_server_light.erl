@@ -397,22 +397,16 @@ spreading(_, _) ->
 %% of PoC.
 %%
 -spec as923_spreading(Len :: pos_integer()) -> atom().
-as923_spreading(L) when L < 25 ->
-    'SFTBD';
-as923_spreading(L) when L < 65 ->
-    'SFTBD';
-as923_spreading(L) when L < 67 ->
-    'SFTBD';
-as923_spreading(L) when L < 129 ->
-    'SFTBD';
-as923_spreading(L) when L < 238 ->
-    'SFTBD';
+as923_spreading(L) when L =< 59 ->
+    'SF12';
+as923_spreading(L) when L =< 124 ->
+    'SF9';
+as923_spreading(L) when L =< 251 ->
+    'SF8';
 as923_spreading(_) ->
-    'SFTBD'.
+    'SF7'.
 
 -spec get_spreading(RegionName :: atom(), RegionParams :: blockchain_region_param_v1:region_param_v1(), Size :: pos_integer()) -> {ok, atom()} | {error, any()}.
-get_spreading('AS923', _RegionParams, Size) ->
-    {ok, as923_spreading(Size)};
 get_spreading('AS923_1', _RegionParams, Size) ->
     {ok, as923_spreading(Size)};
 get_spreading('AS923_1B', _RegionParams, Size) ->
