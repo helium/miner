@@ -30,27 +30,53 @@
 -type region() ::
     'AS923'
     | 'AS923_1'
+    | 'AS923_1A'
     | 'AS923_1B'
+    | 'AS923_1C'
+    | 'AS923_1D'
+    | 'AS923_1E'
+    | 'AS923_1F'
     | 'AS923_2'
     | 'AS923_3'
     | 'AS923_4'
     | 'AU915'
+    | 'AU915_SB1'
+    | 'AU915_SB2'
     | 'CN470'
     | 'CN779'
     | 'EU433'
     | 'EU868'
+    | 'EU868_A'
+    | 'EU868_B'
+    | 'EU868_C'
+    | 'EU868_D'
+    | 'EU868_E'
+    | 'EU868_F'
     | 'IN865'
     | 'KR920'
     | 'US915'
     | 'region_as923_1'
+    | 'region_as923_1a'
     | 'region_as923_1b'
+    | 'region_as923_1c'
+    | 'region_as923_1d'
+    | 'region_as923_1e'
+    | 'region_as923_1f'
     | 'region_as923_2'
     | 'region_as923_3'
     | 'region_as923_4'
     | 'region_au915'
+    | 'region_au915_sb1'
+    | 'region_au915_sb2'
     | 'region_cn470'
     | 'region_eu433'
     | 'region_eu868'
+    | 'region_eu868_a'
+    | 'region_eu868_b'
+    | 'region_eu868_c'
+    | 'region_eu868_d'
+    | 'region_eu868_e'
+    | 'region_eu868_f'
     | 'region_in865'
     | 'region_kr920'
     | 'region_ru864'
@@ -74,15 +100,28 @@ model(Region) ->
     case Region of
         'AS923' -> ?COMMON_DUTY;
         'AS923_1' -> ?COMMON_DUTY;
+        'AS923_1A' -> ?COMMON_DUTY;
         'AS923_1B' -> ?COMMON_DUTY;
+        'AS923_1C' -> ?COMMON_DUTY;
+        'AS923_1D' -> ?COMMON_DUTY;
+        'AS923_1E' -> ?COMMON_DUTY;
+        'AS923_1F' -> ?COMMON_DUTY;
         'AS923_2' -> ?COMMON_DUTY;
         'AS923_3' -> ?COMMON_DUTY;
         'AS923_4' -> ?COMMON_DUTY;
         'AU915' -> ?COMMON_DUTY;
+        'AU915_SB1' -> ?COMMON_DUTY;
+        'AU915_SB2' -> ?COMMON_DUTY;
         'CN470' -> ?COMMON_DUTY;
         'CN779' -> ?COMMON_DUTY;
         'EU433' -> ?COMMON_DUTY;
         'EU868' -> ?COMMON_DUTY;
+        'EU868_A' -> ?COMMON_DUTY;
+        'EU868_B' -> ?COMMON_DUTY;
+        'EU868_C' -> ?COMMON_DUTY;
+        'EU868_D' -> ?COMMON_DUTY;
+        'EU868_E' -> ?COMMON_DUTY;
+        'EU868_F' -> ?COMMON_DUTY;
         'IN865' -> ?COMMON_DUTY;
         'KR920' -> ?COMMON_DUTY;
         'US915' -> ?US_DWELL_TIME;
@@ -90,14 +129,27 @@ model(Region) ->
         %% NOTE: Starting with poc-v11 the Regions are tagged
         %% And we don't support region_cn779
         'region_as923_1' -> ?COMMON_DUTY;
+        'region_as923_1a' -> ?COMMON_DUTY;
         'region_as923_1b' -> ?COMMON_DUTY;
+        'region_as923_1c' -> ?COMMON_DUTY;
+        'region_as923_1e' -> ?COMMON_DUTY;
+        'region_as923_1e' -> ?COMMON_DUTY;
+        'region_as923_1f' -> ?COMMON_DUTY;
         'region_as923_2' -> ?COMMON_DUTY;
         'region_as923_3' -> ?COMMON_DUTY;
         'region_as923_4' -> ?COMMON_DUTY;
         'region_au915'   -> ?COMMON_DUTY;
+        'region_au915_sb1'   -> ?COMMON_DUTY;
+        'region_au915_sb2'   -> ?COMMON_DUTY;
         'region_cn470'   -> ?COMMON_DUTY;
         'region_eu433'   -> ?COMMON_DUTY;
         'region_eu868'   -> ?COMMON_DUTY;
+        'region_eu868_a'   -> ?COMMON_DUTY;
+        'region_eu868_b'   -> ?COMMON_DUTY;
+        'region_eu868_c'   -> ?COMMON_DUTY;
+        'region_eu868_d'   -> ?COMMON_DUTY;
+        'region_eu868_e'   -> ?COMMON_DUTY;
+        'region_eu868_f'   -> ?COMMON_DUTY;
         'region_in865'   -> ?COMMON_DUTY;
         'region_kr920'   -> ?COMMON_DUTY;
         'region_us915'   -> ?US_DWELL_TIME;
