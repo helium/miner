@@ -86,6 +86,7 @@ RUN apt update \
        libncurses6 \
        libsodium23 \
        libstdc++6 \
+       curl \
        ${EXTRA_RUNNER_APT_PACKAGES} \
     && rm -rf /var/lib/apt/lists \
     && ln -sf /opt/miner/releases/${VERSION} /config
