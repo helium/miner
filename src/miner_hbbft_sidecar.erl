@@ -98,6 +98,7 @@ handle_txn(update = _RequestType, Txn) ->
 init([]) ->
     init(#state{});
 init(State) ->
+    put('__speculative_absorb', true),
     case blockchain_worker:blockchain() of
         undefined ->
             erlang:send_after(500, self(), chain_check),
