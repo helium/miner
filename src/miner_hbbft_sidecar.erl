@@ -98,6 +98,7 @@ handle_txn(update = _RequestType, Txn) ->
 init([]) ->
     init(#state{});
 init(State) ->
+    %% flag this process as doing speculative absorbs
     put('__speculative_absorb', true),
     case blockchain_worker:blockchain() of
         undefined ->
