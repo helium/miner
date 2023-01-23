@@ -716,7 +716,14 @@ select_transactions(Chain, Txns, {ElectionEpoch0, EpochStart0}, BlockHeightCurr,
                      ),
                 {Epoch, BlockHeightNext, Transactions, InvalidTransactions};
             _ ->
-                {ElectionEpoch0, EpochStart0, ValidTransactions, InvalidTransactions}
+            %% try to isolate the var txn in its own block
+            case {blockchain:config(?isolate_var_txns, Ledger), lists:filter(fun(T) -> blockchain_txn:type(T) == blockchain_txn_vars_v1 end, ValidTransactions)} of
+                {{ok, true}, [VarTxn|_]} ->
+                    %% take the first var txn found as the only txn in a block
+                    {ElectionEpoch0, EpochStart0, [VarTxn], InvalidTransactions};
+                _ ->
+                    {ElectionEpoch0, EpochStart0, ValidTransactions, InvalidTransactions}
+            end
         end.
 
 -spec txn_is_rewards(blockchain_txn:txn()) -> boolean().
