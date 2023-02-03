@@ -88,8 +88,16 @@ handle_info(gw_healthcheck, State) ->
             erlang:send_after(?HEALTHCHECK_INTERVAL, self(), gw_healthcheck),
             {noreply, State};
         {_Exit, Reason} ->
+            ok = cleanup_port(State),
             lager:error("embedded helium_gateway healthcheck failed with reason: ~p", [Reason]),
-            {stop, gw_nonresponsive, State}
+            NewState = open_gateway_port(
+                         State#state.keypair,
+                         State#state.transport,
+                         State#state.host,
+                         State#state.udp_port,
+                         State#state.tcp_port),
+            ok = miner_gateway_ecc_worker:reconnect(),
+            {noreply, NewState}
     end;
 handle_info(_Msg, State) ->
     lager:debug("unhandled info ~p", [_Msg]),
@@ -163,7 +171,13 @@ healthcheck_cmd_collect(PortId, Data) ->
     after
         ?HEALTHCHECK_TIMEOUT ->
             erlang:port_close(PortId),
-            {1, timeout}
+            receive
+                {PortId, {exit_status, ExitCode}} ->
+                    {ExitCode, lists:reverse(Data)}
+            after
+                0 ->
+                    {1, timeout}
+            end
     end.
 
 gateway_config_dir() ->
