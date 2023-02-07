@@ -5,6 +5,8 @@
 %%%-------------------------------------------------------------------
 -module(miner_gateway_ecc_worker).
 
+-include_lib("public_key/include/public_key.hrl").
+
 -behaviour(gen_server).
 
 -export([
@@ -29,7 +31,8 @@
     connection_monitor :: reference(),
     host = "localhost" :: string(),
     port = 4468 :: integer(),
-    transport = tcp :: tcp | ssl
+    transport = tcp :: tcp | ssl,
+    key = libp2p_crypto:generate_keys(ecc_compact)
 }).
 
 -define(CONNECT_RETRY_WAIT, 100).
@@ -91,18 +94,31 @@ handle_call(pubkey, _From, State = #state{connection = Connection}) ->
     {reply, {ok, Reply}, State};
 handle_call({sign, Binary}, _From, State = #state{connection = Connection}) ->
     Reply =
-        case rpc(Connection, #{data => Binary}, sign, ?MAX_RETRIES) of
-            {ok, #{signature := Signature}} -> Signature;
-            Error -> Error
+        case application:get_env(miner, stub_miner_ecc, true) of
+            true ->
+                #state{key = #{secret := Secret}} = State,
+                public_key:sign(Binary, sha256, Secret);
+            _ ->
+                case rpc(Connection, #{data => Binary}, sign, ?MAX_RETRIES) of
+                    {ok, #{signature := Signature}} -> Signature;
+                    Error -> Error
+                end
         end,
     {reply, {ok, Reply}, State};
 handle_call({ecdh, PubKey}, _From, State = #state{connection = Connection}) ->
     Reply =
-        case
-            rpc(Connection, #{address => libp2p_crypto:pubkey_to_bin(PubKey)}, ecdh, ?MAX_RETRIES)
-        of
-            {ok, #{secret := Secret}} -> Secret;
-            Error -> Error
+        case application:get_env(miner, stub_miner_ecc, true) of
+            true ->
+                #state{key = #{secret := Secret}} = State,
+                {ecc_compact, {PK, {namedCurve, ?secp256r1}}} = PubKey,
+                public_key:compute_key(PK, Secret);
+            _ ->
+                case
+                    rpc(Connection, #{address => libp2p_crypto:pubkey_to_bin(PubKey)}, ecdh, ?MAX_RETRIES)
+                of
+                    {ok, #{secret := Secret}} -> Secret;
+                    Error -> Error
+                end
         end,
     {reply, {ok, Reply}, State};
 handle_call(_Msg, _From, State) ->
