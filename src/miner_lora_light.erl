@@ -206,7 +206,7 @@ handle_info(init, State = #state{radio_udp_bind_ip = UDPIP, radio_udp_bind_port 
     application:set_env(blockchain, sc_client_handler, miner_lora_light), %% downlink packets from state channels go here
     application:set_env(miner, lora_mod, miner_lora_light),
     application:set_env(miner, onion_server_mod, miner_onion_server_light),
-    application:set_env(miner, enable_grpc_client, true),
+    application:set_env(miner, enable_grpc_client, false),
     {ok, Socket, MirrorSocket} = open_socket(UDPIP, UDPPort),
     erlang:send_after(500, self(), reg_domain_timeout),
     {noreply, State#state{socket=Socket, mirror_socket = {MirrorSocket, undefined}}};
