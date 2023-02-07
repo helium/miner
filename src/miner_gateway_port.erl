@@ -30,7 +30,7 @@
 -define(CONNECT_RETRY_WAIT, 100).
 -define(CONNECT_ATTEMPTS, 5).
 -define(HEALTHCHECK_INTERVAL, 600000).
--define(HEALTHCHECK_TIMEOUT, 4000).
+-define(HEALTHCHECK_TIMEOUT, 60000).
 
 start_link(Options) when is_list(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []).
