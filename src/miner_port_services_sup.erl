@@ -92,10 +92,17 @@ init(_Opts) ->
                 {client_ports, [UdpListenPort + 1, UdpListenPort + 2]}
             ],
 
+            ECCModule = case application:get_env(miner, stub_miner_ecc, true) of
+                            false ->
+                                miner_gateway_ecc_worker;
+                            true ->
+                                miner_gateway_stub_ecc_worker
+                        end,
+
             ChildSpecs =
                 [
                     ?WORKER(miner_gateway_port, [GatewayPortOpts]),
-                    ?WORKER(miner_gateway_ecc_worker, [GatewayECCWorkerOpts]),
+                    ?WORKER(ECCModule, [GatewayECCWorkerOpts]),
                     ?WORKER(miner_mux_port, [MuxOpts])
                 ],
 
