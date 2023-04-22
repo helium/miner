@@ -345,6 +345,8 @@ version() ->
 %% ------------------------------------------------------------------
 
 init(_Args) ->
+    %% flag this process as doing speculative absorbs in select_transactions
+    put('__speculative_absorb', true),
     Mode = application:get_env(miner, mode),
     lager:info("STARTING UP MINER with mode ~p", [Mode]),
     ok = blockchain_event:add_handler(self()),
