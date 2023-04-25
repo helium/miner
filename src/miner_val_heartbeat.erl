@@ -26,8 +26,10 @@
 
 -ifdef(TEST).
 -define(BYPASS_IP_CHECK,true).
+-define(BYPASS_GRPC_CHECK,true).
 -else.
 -define(BYPASS_IP_CHECK,false).
+-define(BYPASS_GRPC_CHECK,false).
 -endif.
 
 
@@ -105,7 +107,15 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                                     %% key proposals for this heartbeat
                                     %% hashes of the public keys are included in the HB
                                     %% public and private keys are cached locally
-                                    {EmpKeys, EmpKeyHashes} = generate_poc_keys(Ledger),
+                                    %% but only do this if there are gRPC clients which indicates
+                                    %% that this validator is configured to receive poc receipts
+                                    {EmpKeys, EmpKeyHashes} = case ?BYPASS_GRPC_CHECK orelse length(sibyl_bus:get_members(<<"activity_check_notification">>)) > 0 of
+                                        true ->
+                                            generate_poc_keys(Ledger);
+                                        _ ->
+                                            lager:info("No GRPC , excluding PoC ephemeral keys from heartbeat; open grpc port"),
+                                            {[],[]}
+                                        end,
                                     lager:debug("HB poc ephemeral keys ~p", [EmpKeys]),
                                     ok = miner_poc_mgr:save_local_poc_keys(Height, EmpKeys),
                                     %% include any inactive GWs which have since come active
