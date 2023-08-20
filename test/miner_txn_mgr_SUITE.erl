@@ -457,7 +457,7 @@ txn_queue_protocol_v3_test(Config) ->
 
     %% await at least 5 blocks
     %% this gives time for the txn's updated queue data
-    %% to be propogated back to txn mgr cache
+    %% to be propagated back to txn mgr cache
     ok = miner_ct_utils:wait_for_gte(height_exactly, Miners, Height + 10),
 
     %% requery the cg member's sidecar and confirm new buffer queue data
