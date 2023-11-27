@@ -178,12 +178,12 @@ einfo() ->
 init(_Args) ->
     lager:info("Starting consensus_mgr", []),
     ok = blockchain_event:add_handler(self()),
-    erlang:send_after(timer:seconds(1), self(), monitor_miner),
     case  blockchain_worker:blockchain() of
         undefined ->
             erlang:send_after(timer:seconds(1), self(), chain_check),
             {ok, #state{}};
         Chain ->
+            erlang:send_after(timer:seconds(1), self(), monitor_miner),
             {ok, #state{chain = Chain}, 0}
     end.
 
@@ -580,6 +580,7 @@ handle_info({blockchain_event, {integrate_genesis_block, _Hash}}, State = #state
     %% check if we're in the consensus group
     self() ! timeout,
     Chain = blockchain_worker:blockchain(),
+    erlang:send_after(timer:seconds(1), self(), monitor_miner),
     {noreply, State#state{chain=Chain}};
 %% we had a chain to start with, so check restore state
 handle_info(timeout, State) ->

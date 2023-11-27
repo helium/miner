@@ -774,7 +774,27 @@ common_enough_or_default(Threshold, Xs, Default) ->
         [{_, _}|_]                     -> Default % Not common-enough.
     end.
 
-set_next_block_timer(State=#state{blockchain=Chain}) ->
+-spec set_next_block_timer(#state{}) -> #state{}.
+set_next_block_timer(#state{blockchain=Chain}=S0) ->
+    {NextBlockTime, S1} =
+        case Chain of
+            undefined ->
+                {0, S0};
+            _ ->
+                NextBlockTime0 = next_block_time(Chain),
+                Timer =
+                    erlang:send_after(NextBlockTime0 * 1000, self(), block_timeout),
+                {NextBlockTime0, S0#state{block_timer=Timer}}
+        end,
+    %% now figure out the late block timer
+    erlang:cancel_timer(S1#state.late_block_timer),
+    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
+    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
+
+    S1#state{late_block_timer = LateTimer}.
+
+-spec next_block_time(blockchain:blockchain()) -> non_neg_integer().
+next_block_time(Chain) ->
     Now = erlang:system_time(seconds),
     {ok, BlockTime0} = blockchain:config(?block_time, blockchain:ledger(Chain)),
     {ok, #block_info_v2{time=LastBlockTime, height=Height}} = blockchain:head_block_info(Chain),
@@ -839,14 +859,7 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
         end,
     NextBlockTime = max(0, (LastBlockTimestamp + BlockTime + BlockTimeDeviation) - Now),
     lager:info("Next block after ~p is in ~p seconds", [LastBlockTimestamp, NextBlockTime]),
-    Timer = erlang:send_after(NextBlockTime * 1000, self(), block_timeout),
-
-    %% now figure out the late block timer
-    erlang:cancel_timer(State#state.late_block_timer),
-    LateBlockTimeout = application:get_env(miner, late_block_timeout_seconds, 120),
-    LateTimer = erlang:send_after((LateBlockTimeout + NextBlockTime) * 1000, self(), late_block_timeout),
-
-    State#state{block_timer=Timer, late_block_timer = LateTimer}.
+    NextBlockTime.
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
