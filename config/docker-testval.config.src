@@ -44,6 +44,8 @@
    {denylist_keys, undefined},
    {jsonrpc_ip, {0,0,0,0}}, %% bind jsonrpc to host when in docker container
    {mode, validator},
+   {telemetry, ${SEND_TELEMETRY:-false}},
+   {telemetry_url, "${TELEMETRY_URL:-https://telemetry.helium.io}"},
    {stabilization_period, 8000},
    {network, testnet},
    {rocksdb_cache_size, 32},

@@ -46,6 +46,8 @@
    {mode, validator},
    {stabilization_period, 8000},
    {network, testnet},
+   {telemetry, ${SEND_TELEMETRY:-false}},
+   {telemetry_url, "${TELEMETRY_URL:-https://telemetry.helium.io}"},
    {rocksdb_cache_size, 32},
    {rocksdb_write_buffer_size, 32},
    {jsonrpc_ip, {${JSONRPC_IP:-127,0,0,1}}},
