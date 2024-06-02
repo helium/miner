@@ -21,6 +21,7 @@
    {snapshot_memory_limit, 4096},
    {key, undefined},
    {relay_limit, 100},
+   {enable_nat, false},
    {blocks_to_protect_from_gc, 100000},
    {base_dir, "${BASE_DIR:-data}"},
    {disable_prewarm, ${DISABLE_PREWARM:-false}}
