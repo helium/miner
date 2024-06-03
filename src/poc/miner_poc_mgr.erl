@@ -581,8 +581,15 @@ process_block_pocs(
                         maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))),
                     %% confirm the POC exists on the ledger, if not then drop the POC
                     case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
-                        {ok, _} ->
-                            spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, Ledger, State) end);
+                        {ok, PubPoC} ->
+                            PoCBlockHash = blockchain_ledger_poc_v3:block_hash(PubPoC),
+                            case BlockHash =:= PoCBlockHash of
+                                true ->
+                                    spawn(fun() -> initialize_poc(BlockHash, BlockHeight, Keys, Vars, Ledger, State) end);
+                                false ->
+                                    lager:warning("found a local poc key but mismatched blockhash: ~p ~p", [BlockHash, PoCBlockHash]),
+                                    ok
+                            end;
                         _ ->
                             lager:warning("found a local poc key but public data missing, onionkeyhash: ~p", [OnionKeyHash]),
                             ok
